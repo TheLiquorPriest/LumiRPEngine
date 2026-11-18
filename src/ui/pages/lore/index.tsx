@@ -96,7 +96,7 @@ export function LoreView(props: LoreViewProps) {
   const rows = index.items.filter((row) => loreMatches(row, props.query));
   return (
     <div class="lre-stack rpe-page" data-page="lore">
-      <PageHeader title="Lore" subtitle="His books and the world's own lore, as RPE understands them." />
+      <PageHeader title="Lore" subtitle="Your books and the world's own lore, as RPE understands them." />
       {props.top}
       <Section title="Indexing" id="indexing">
         {props.statusProblem === null ? null : (

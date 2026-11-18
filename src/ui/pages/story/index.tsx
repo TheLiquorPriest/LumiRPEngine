@@ -243,7 +243,7 @@ export function StoryView(props: StoryViewProps) {
             </Section>
             <ListSection {...props} part="thread" id="threads" title="Threads" none="None recorded." />
             <ListSection {...props} part="arc" id="arcs" title="Arcs" none="None recorded." />
-            <ListSection {...props} part="player" id="player" title="The player, as the Author reads them" none="None recorded." />
+            <ListSection {...props} part="player" id="player" title="You, as the Author reads you" none="None recorded." />
             <ListSection {...props} part="canon" id="canon" title="Canon" none="None recorded." />
             <ListSection {...props} part="retcon" id="retcons" title="Retcons" none="None recorded." />
             <ListSection {...props} part="record" id="records" title="The Author's records" none="None recorded." />

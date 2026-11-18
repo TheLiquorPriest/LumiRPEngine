@@ -63,7 +63,7 @@ function Facts(props: { items: readonly PlaceFactRow[]; onTurn(turn: string): vo
 const BASE_WORDS = (base: PlaceBase): string => {
   if (base.text === null) return "No words stand for the place yet.";
   if (base.world) return `These are the world's own words for it${base.revision === null ? "" : `, at revision ${base.revision}`}; no base was written.`;
-  return `Written ${base.by === null ? "" : `by ${base.by} `}${base.turn === null ? "as his own change after the newest reply" : "in a turn"}.`;
+  return `Written ${base.by === null ? "" : `by ${base.by} `}${base.turn === null ? "as your own change after the newest reply" : "in a turn"}.`;
 };
 
 function BasePart(props: { chat: string; record: PlaceRecord; onChanged(): void }) {
@@ -82,7 +82,7 @@ function BasePart(props: { chat: string; record: PlaceRecord; onChanged(): void 
       () => {
         setBusy(false);
         setDraft(null);
-        setSaid("Saved as his own change, after the chat's newest reply: swiping that reply keeps it, and he can undo it from the review card.");
+        setSaid("Saved as your own change, after the chat's newest reply: swiping that reply keeps it, and you can undo it from the review card.");
         props.onChanged();
       },
       (error: unknown) => {
@@ -104,7 +104,7 @@ function BasePart(props: { chat: string; record: PlaceRecord; onChanged(): void 
           <textarea class="lre-input rpe-editor" value={text} spellcheck={false} onInput={(e) => setDraft((e.currentTarget as HTMLTextAreaElement).value)} aria-label="The place's base" />
           <div class="lre-inline rpe-wrap">
             <Button busy={busy} disabled={draft === null || draft.trim() === "" || draft.trim() === (record.base.text ?? "").trim()} onClick={save}>
-              Write it as his base
+              Write it as your base
             </Button>
           </div>
         </>

@@ -28,7 +28,7 @@ const WHY_WORDS: Readonly<Record<NonNullable<RuleView["why"]>, string>> = {
 const JUDGE_WORDS: Readonly<Record<NonNullable<RuleView["judge"]>, string>> = {
   part: "the judging model's part is missing or switched off",
   yes: "it names no yes: answer",
-  connection: "the connection that judges is none of his",
+  connection: "the connection that judges is none of yours",
 };
 
 /** Why a rule is not in force, in words; null for one that is. */

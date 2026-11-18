@@ -27,10 +27,10 @@ describe("the Quests page", () => {
     const tree = expand(h(JournalView, { journal, loading: false, problem: null }));
     const shown = textOf(tree);
     expect(shown).toContain("The bell");
-    expect(shown).toContain("Only its name and the stages named are shown to him.");
+    expect(shown).toContain("Only its name and the stages named are shown to you.");
     expect(shown).not.toContain("Ring it.");
     expect(elements(tree).filter((e) => e.props["data-journal-quest"] !== undefined)).toHaveLength(1);
     const none = textOf(expand(h(JournalView, { journal: { ...journal, quests: [], open: 0 }, loading: false, problem: null })));
-    expect(none).toContain("His journal holds no quest yet.");
+    expect(none).toContain("Your journal holds no quest yet.");
   });
 });

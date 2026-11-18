@@ -150,7 +150,7 @@ function factLines(facts: DoneEnoughShown): { id: keyof DoneEnoughShown; title: 
         story.known
           ? [
               `${counted(story.premise, "premise")}, ${counted(story.chapters, "chapter")}, ${counted(story.scenes, "scene")}, ${counted(story.beats, "beat")}`,
-              `${counted(story.threads, "thread")} (${num(story.openThreads)} open), ${counted(story.arcs, "arc")}, ${counted(story.player, "reading of the player", "readings of the player")}`,
+              `${counted(story.threads, "thread")} (${num(story.openThreads)} open), ${counted(story.arcs, "arc")}, ${counted(story.player, "reading of you", "readings of you")}`,
               `${num(story.principalsWithArc)} of ${counted(story.principals, "principal")} with an arc`,
             ]
           : [],

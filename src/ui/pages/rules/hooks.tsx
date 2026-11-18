@@ -119,7 +119,7 @@ export function HooksList(props: { rows: readonly HookRow[]; broken: readonly Tr
   const rows = sortedHooks(props.rows);
   return (
     <Section id="hooks" title="Hooks">
-      <p class="rpe-meta">A hook is a command of his that runs at a moment of a turn. The server's command line switches a hook's command on; no page can.</p>
+      <p class="rpe-meta">A hook is a command of yours that runs at a moment of a turn. The server's command line switches a hook's command on; no page can.</p>
       {props.problem === null ? null : (
         <Banner tone="neg" icon="alert" title="The hooks could not be read">
           <span>{props.problem}</span>
@@ -278,7 +278,7 @@ export function HookOpen(props: { chat: string | null; row: HookRow; onChanged()
       </div>
       <Section id="text" title="Its hooks file">
         <p class="rpe-meta">
-          {file.path}: {hook.off ? "" : "every hook this file names is in the text below. "}A hook is edited here like a rule and saved as his at a level.
+          {file.path}: {hook.off ? "" : "every hook this file names is in the text below. "}A hook is edited here like a rule and saved as yours at a level.
         </p>
         {text.problem === null ? null : <p class="rpe-line">{text.problem}</p>}
         {text.value === null ? (

@@ -18,7 +18,7 @@ const STATE_WORDS: Readonly<Record<JobState, string>> = {
   queued: "is waiting to start",
   held: "is held back",
   running: "is mapping",
-  asking: "is asking him something",
+  asking: "is asking you something",
   done: "has ended: the map below is what it learned",
   failed: "failed; RPE's log, on Runtime, says why",
   cancelled: "was cancelled",
@@ -77,7 +77,7 @@ export function MapAgain(props: { chat: string; onLearned(): void }) {
       )}
       {job === null ? null : (
         <p class="rpe-line" data-map-job>
-          His own job {job.id} {STATE_WORDS[job.state]}.{" "}
+          Your own job {job.id} {STATE_WORDS[job.state]}.{" "}
           <Button size="sm" variant="ghost" onClick={() => app.go({ page: "live", chat })}>
             Watch its run on Live
           </Button>

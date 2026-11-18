@@ -21,7 +21,7 @@ import { CARRY_MODES, CARRY_WORDS } from "./carry";
 const REASON_WORDS: Readonly<Record<NonNullable<CompactionShown["reason"]>, string>> = {
   "would-not-fit": "the next call would not fit the window",
   refused: "the provider refused a call as too long",
-  asked: "he asked for it",
+  asked: "you asked for it",
   fold: "records past their share were folded",
 };
 
@@ -29,7 +29,7 @@ const REASON_WORDS: Readonly<Record<NonNullable<CompactionShown["reason"]>, stri
 export function parentWords(session: SessionShown): string {
   const parent = session.parent;
   if (parent === undefined) return "";
-  if ("owner" in parent) return "started by him";
+  if ("owner" in parent) return "started by you";
   return `started by ${parent.agent}${parent.turn === undefined ? "" : ` in turn ${parent.turn}`}`;
 }
 

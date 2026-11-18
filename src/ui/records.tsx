@@ -20,7 +20,7 @@ export interface WriteShown {
 
 /** Where a write was made: its turn, that turn's reply on the path, who made it, and whether a migration carried it. */
 export function writeWords(w: Omit<WriteShown, "wrote">): string {
-  const at = w.turn === null ? "his own change, of no turn" : w.message === null ? `turn ${w.turn}, on no path` : `turn ${w.turn}, message ${w.message}`;
+  const at = w.turn === null ? "your own change, of no turn" : w.message === null ? `turn ${w.turn}, on no path` : `turn ${w.turn}, message ${w.message}`;
   return [at, w.by === null ? null : `by ${w.by}`, w.imported ? "carried by the migration" : null].filter((part) => part !== null).join(" · ");
 }
 

@@ -112,7 +112,7 @@ export function SessionsView(props: SessionsViewProps) {
               {groups.others.map((g) => (
                 <details key={g.turn ?? "none"} class="lre-disclosure" data-under={g.turn ?? "none"}>
                   <summary>
-                    <span class="lre-disclosure-label">{g.turn === null ? "Started by him, or by no turn" : "Started in a turn"} · {counted(g.sessions.length, "session")}</span>
+                    <span class="lre-disclosure-label">{g.turn === null ? "Started by you, or by no turn" : "Started in a turn"} · {counted(g.sessions.length, "session")}</span>
                   </summary>
                   <ul class="lre-list">
                     {g.sessions.map((s) => (

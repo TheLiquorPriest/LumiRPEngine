@@ -9,7 +9,7 @@ export const SOURCE_WORDS: Readonly<Record<FactSource, string>> = {
   author: "by the Author",
   gm: "by the GM",
   character: "by a character",
-  player: "by the player",
+  player: "by you",
   import: "imported",
   default: "a default",
   invented: "invented",

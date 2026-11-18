@@ -9,13 +9,13 @@ import { useRead } from "../../reading";
 import { KIND_WORDS, StageList } from "./journal";
 
 /** How the quest's own visibility reads. */
-export const VISIBILITY_WORDS: Readonly<Record<NonNullable<QuestRecordRow["visibility"]>, string>> = { public: "known to the player", known_by: "known only by those it names", secret: "a secret" };
+export const VISIBILITY_WORDS: Readonly<Record<NonNullable<QuestRecordRow["visibility"]>, string>> = { public: "known to you", known_by: "known only by those it names", secret: "a secret" };
 
 /** What the Author set the player to be shown of it, in words. */
 export function shownWords(shown: QuestRecordRow["shown"], visibility: QuestRecordRow["visibility"]): string {
-  if (shown === "all") return "the whole quest is shown to the player";
-  if (shown === "none") return "nothing of it is shown to the player";
-  if (Array.isArray(shown)) return shown.length === 0 ? "no stage is shown to the player" : `only these stages are shown to the player: ${shown.join(", ")}`;
+  if (shown === "all") return "the whole quest is shown to you";
+  if (shown === "none") return "nothing of it is shown to you";
+  if (Array.isArray(shown)) return shown.length === 0 ? "no stage is shown to you" : `only these stages are shown to you: ${shown.join(", ")}`;
   return visibility === null ? "as the quest's own visibility says (none was given)" : `as the quest's own visibility says: ${VISIBILITY_WORDS[visibility]}`;
 }
 

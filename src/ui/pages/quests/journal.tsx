@@ -52,7 +52,7 @@ function JournalQuest(props: { quest: JournalQuestRow }) {
           {quest.rewards === null ? null : <Row k="What it may give" v={quest.rewards} />}
         </div>
       ) : (
-        <p class="lre-muted rpe-meta" data-stages-only>Only its name and the stages named are shown to him.</p>
+        <p class="lre-muted rpe-meta" data-stages-only>Only its name and the stages named are shown to you.</p>
       )}
       {quest.stages.length === 0 ? null : <StageList stages={quest.stages} />}
     </li>
@@ -62,7 +62,7 @@ function JournalQuest(props: { quest: JournalQuestRow }) {
 export function JournalView(props: { journal: Journal | null; loading: boolean; problem: string | null }) {
   const { journal } = props;
   return (
-    <Section id="journal" title="What he sees in his journal">
+    <Section id="journal" title="What you see in your journal">
       {props.problem === null ? null : (
         <Banner tone="neg" icon="alert" title="The journal could not be read">
           <span>{props.problem}</span>
@@ -71,10 +71,10 @@ export function JournalView(props: { journal: Journal | null; loading: boolean; 
       {journal === null ? (
         props.loading ? <p class="lre-muted rpe-line">Reading the journal…</p> : null
       ) : journal.quests.length === 0 ? (
-        <p class="lre-muted rpe-line" data-journal-none>His journal holds no quest yet.</p>
+        <p class="lre-muted rpe-line" data-journal-none>Your journal holds no quest yet.</p>
       ) : (
         <>
-          <p class="rpe-meta" data-journal-open>{counted(journal.open, "quest")} open in it. A quest set to show him nothing is not here, and not counted.</p>
+          <p class="rpe-meta" data-journal-open>{counted(journal.open, "quest")} open in it. A quest set to show you nothing is not here, and not counted.</p>
           <ul class="rpe-plain lre-stack" data-journal>
             {journal.quests.map((quest) => (
               <JournalQuest key={quest.id} quest={quest} />

@@ -13,7 +13,7 @@ export const PART_WORDS: Readonly<Record<StoryPartName, string>> = {
   beat: "Beat",
   thread: "Thread",
   arc: "Arc",
-  player: "Player",
+  player: "Reading of you",
   future: "Future",
   canon: "Canon",
   retcon: "Retcon",

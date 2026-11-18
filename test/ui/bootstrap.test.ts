@@ -26,7 +26,7 @@ describe("the bootstrap on a chat's page", () => {
     expect(fact(tree, "history")).toBe("The history the window leaves outnot knownIts records could not be read; RPE's log says what failed.");
     expect(fact(tree, "cast")).toBe("The cast3 characters, 2 castNot cast: Tobin Reede");
     expect(fact(tree, "story")).toContain("1 premise, 1 chapter, 2 scenes, 5 beats");
-    expect(fact(tree, "story")).toContain("2 threads (1 open), 0 arcs, 1 reading of the player");
+    expect(fact(tree, "story")).toContain("2 threads (1 open), 0 arcs, 1 reading of you");
     expect(fact(tree, "story")).toContain("0 of 1 principal with an arc");
     expect(fact(tree, "horizon")).toContain("The horizon2 entries, 1 naming a place or thing of the world; story time kept");
     expect(fact(tree, "horizon")).toContain("The place: recorded; 0 established, 1 assumed, 0 proposed, 2 with no standing");

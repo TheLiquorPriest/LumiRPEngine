@@ -14,7 +14,7 @@ export const section: TurnSection = {
           <li key={change.id} class="lre-stack">
             <ChangeLine change={change} lane={lane} why={why.map((w) => UNSETTLED_WORDS[w])} />
             {about.length === 0 ? null : <p class="rpe-meta">It is about {about.join(", ")}.</p>}
-            {of === null ? <p class="rpe-meta">Placed after the turn, as his own change.</p> : of === turn.id ? null : <p class="rpe-meta">Of turn {of}.</p>}
+            {of === null ? <p class="rpe-meta">Placed after the turn, as your own change.</p> : of === turn.id ? null : <p class="rpe-meta">Of turn {of}.</p>}
           </li>
         ))}
       </ul>

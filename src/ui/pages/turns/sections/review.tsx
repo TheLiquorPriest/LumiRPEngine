@@ -9,9 +9,9 @@ const LANE_WORDS: Readonly<Record<string, string>> = { story: "The story's chang
 
 /** Where a question stands, in words, with his answer once given. */
 export function questionWords(q: CardQuestion): string {
-  if (q.state === "waiting") return "waits for his word";
+  if (q.state === "waiting") return "waits for your word";
   if (q.state === "taken_down") return "was taken down when the turn stopped";
-  return q.answer === null ? "was answered" : q.answer.go ? "went ahead on his word" : `did not go ahead${q.answer.reason === undefined ? "" : `: ${q.answer.reason}`}`;
+  return q.answer === null ? "was answered" : q.answer.go ? "went ahead on your word" : `did not go ahead${q.answer.reason === undefined ? "" : `: ${q.answer.reason}`}`;
 }
 
 function CardChangeLine(props: { change: CardChange; busy: string | null; onUndo(change: string): void }) {

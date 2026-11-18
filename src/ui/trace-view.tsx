@@ -56,7 +56,7 @@ const REPLY_ERROR_WORDS: Readonly<Record<ReplyError["code"], string>> = {
   failed: "The harness failed.",
   "no-definition": "No agent definition in force for the chat defines the turn's lead.",
   "no-tags": "The connection's replies are marked by tags, and no reply contract in force names them.",
-  hook: "A hook of the player's stopped the reply.",
+  hook: "A hook of yours stopped the reply.",
 };
 
 /** Why a reply failed, in words; null where the status beside it already says all of it. */

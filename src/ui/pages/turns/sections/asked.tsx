@@ -33,7 +33,7 @@ export const section: TurnSection = {
         )}
         {again && !separated ? (
           <p class="rpe-meta" data-feedback-unseparated>
-            No feedback was told apart for this attempt. If he typed any in Lumiverse's own dialog, it stands inside his last line of the prompt as Lumiverse put it.
+            No feedback was told apart for this attempt. If you typed any in Lumiverse's own dialog, it stands inside your last line of the prompt as Lumiverse put it.
           </p>
         ) : null}
       </div>
