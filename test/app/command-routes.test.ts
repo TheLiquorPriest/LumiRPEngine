@@ -32,7 +32,7 @@ describe("the command line's routes", () => {
   /** Every route of the command line, each with a body it takes. */
   const asks: { method: string; path: string; body?: unknown }[] = [
     { method: "POST", path: COMMAND_PATHS.keys, body: { kind: "provider" } },
-    { method: "POST", path: COMMAND_PATHS.takenKeys, body: { hash: "a".repeat(64) } },
+    { method: "POST", path: COMMAND_PATHS.takenKeys, body: { hash: "a".repeat(64), models: ["rpe"] } },
     { method: "PUT", path: switchPath("format"), body: { state: "on" } },
     { method: "PUT", path: COMMAND_PATHS.lumiverse, body: { set: { connection: "conn-1" } } },
     { method: "GET", path: COMMAND_PATHS.status },
@@ -75,7 +75,7 @@ describe("the command line's routes", () => {
     const own = `rpe_${"b".repeat(64)}`;
     expect(await (await onSocket("POST", COMMAND_PATHS.keys, { kind: "provider", key: own })).json()).toMatchObject({ key: own });
     // The provider key of today's connection, taken by its hash, is the one key: no new one is asked for, though the install may hand over a key of its own for a connection of its own.
-    expect((await onSocket("POST", COMMAND_PATHS.takenKeys, { hash: "c".repeat(64) })).status).toBe(204);
+    expect((await onSocket("POST", COMMAND_PATHS.takenKeys, { hash: "c".repeat(64), models: ["rpe"] })).status).toBe(204);
     expect(await app.auth.holds("provider", own)).toBe(false);
     const refused = await onSocket("POST", COMMAND_PATHS.keys, { kind: "provider" });
     expect(refused.status).toBe(400);

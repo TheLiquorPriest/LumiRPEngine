@@ -22,11 +22,16 @@ import { IFACE_SETTINGS } from "../../src/iface";
 import { LORE_SETTINGS } from "../../src/lore";
 import { STORE_SETTINGS } from "../../src/store";
 import { STORY_SETTINGS } from "../../src/story";
+import { PLACES_SETTINGS } from "../../src/places/settings";
+import { QUESTS_SETTINGS } from "../../src/quests/settings";
 import { MIGRATE_SETTINGS } from "../../src/migrate/setting-list";
 import { TREE_SETTINGS } from "../../src/tree";
 import { NO_SESSION, TURN_SETTINGS } from "../../src/turn";
 import { BOOTSTRAP_FACTS, BOOTSTRAP_SETTINGS } from "../../src/turn/bootstrap";
 import { JOB_SETTINGS } from "../../src/build/jobs/limits";
+import { PREVIOUS_BRANCH_SETTING } from "../../src/migrate/going-back";
+import { WORLD_SETTINGS } from "../../src/worlds/limits";
+import { WEB_SETTING_DEFS } from "../../src/turn/web";
 import { CHAT, openTurnBed, USER, type TurnBed } from "../turn/bed";
 import { makeBed, type Bed } from "./helpers";
 
@@ -41,13 +46,16 @@ const OWN: Readonly<Record<string, { file: string; settings: readonly Setting[] 
   iface: { file: "iface/area.ts", settings: IFACE_SETTINGS },
   migrate: { file: "migrate/area.ts", settings: MIGRATE_SETTINGS },
   tree: { file: "tree/area.ts", settings: TREE_SETTINGS },
-  turn: { file: "turn/area.ts", settings: [...harnessSettings(), ...TURN_SETTINGS] },
+  turn: { file: "turn/area.ts", settings: [...harnessSettings(), ...TURN_SETTINGS, ...Object.values(WEB_SETTING_DEFS)] },
   bootstrap: { file: "turn/bootstrap/area.ts", settings: BOOTSTRAP_SETTINGS },
   cast: { file: "cast/area.ts", settings: CAST_SETTINGS },
-  story: { file: "story/area.ts", settings: STORY_SETTINGS },
+  story: { file: "story/area.ts", settings: [...STORY_SETTINGS, ...PLACES_SETTINGS, ...QUESTS_SETTINGS] },
   build: { file: "build/area.ts", settings: JOB_SETTINGS },
   play: { file: "play/area.ts", settings: [] },
   lumiverse: { file: "adapter/lumiverse/area.ts", settings: LUMIVERSE_SETTINGS },
+  agents: { file: "agents/area.ts", settings: [] },
+  worlds: { file: "worlds/area.ts", settings: WORLD_SETTINGS },
+  "going-back": { file: "migrate/engine-book.ts", settings: [PREVIOUS_BRANCH_SETTING] },
 };
 
 /** Lumiverse's network refused, as the API generator composes: an area that reached for it while it mounted would stop here. */
@@ -91,7 +99,7 @@ describe("each area registers from a file of its own", () => {
     const app = await bed.open({ areas: composition.areas.map(noting) });
 
     // Every area is one of RPE's own, and each is registered from its own folder's `area.ts`.
-    expect(composition.areas.map((a) => a.name).sort()).toEqual(Object.keys(OWN).sort());
+    expect(composition.areas.map((a) => a.name).sort()).toEqual([...Object.keys(OWN), "history-lines"].sort());
     const compositionSource = readFileSync(COMPOSE, "utf8");
     for (const [name, { file }] of Object.entries(OWN)) {
       expect({ name, file, exists: existsSync(join(SRC, file)) }).toEqual({ name, file, exists: true });
@@ -164,6 +172,9 @@ function namedTimes(source: string): Record<string, number> {
     build: times(/\bbuildArea\(/g),
     play: times(/\bplayArea\(/g),
     lumiverse: times(/\bdoorArea\(/g) + times(/\bdoor\.area\b/g) - 1,
+    agents: times(/\bagentsArea\(/g),
+    worlds: times(/\bworldsArea\(/g),
+    "going-back": times(/\bgoingBackArea\(/g),
   };
 }
 
