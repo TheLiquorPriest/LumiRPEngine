@@ -78,7 +78,7 @@ describe("the world service", () => {
     const second = await service.commit(USER, id, { base: first.revision, source: "build", note: "swapped" });
     const page = await service.revisions(USER, id, { limit: 2 });
     expect(page.items.map((r) => [r.note, r.changed])).toEqual([["swapped", 2], ["a lamplighter", 1]]);
-    expect(page.items[0]).toMatchObject({ revision: second.revision, head: true, source: "build", chats: [] });
+    expect(page.items[0]).toMatchObject({ revision: second.revision, before: first.revision, head: true, source: "build", chats: [] });
     const rest = await service.revisions(USER, id, { limit: 2, after: page.next ?? "" });
     expect(rest.items.map((r) => [r.revision, r.changed])).toEqual([[made.revision, null]]);
     expect(rest.next).toBeNull();
