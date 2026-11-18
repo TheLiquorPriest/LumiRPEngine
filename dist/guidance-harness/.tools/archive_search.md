@@ -6,4 +6,4 @@ arguments:
   limit: The most things to give.
   ref: The ref of something found, to read it in full instead of searching.
 ---
-Searches what the system keeps besides the chat and the lore - databanks, the chat application's memory, summaries. Each thing found comes with its ref, its title and the words around the match.
+Searches what the system keeps besides the chat and the lore - this chat's earlier sessions (the store `sessions`), databanks, the chat application's memory, summaries. Each thing found comes with its ref, its title and the words around the match.

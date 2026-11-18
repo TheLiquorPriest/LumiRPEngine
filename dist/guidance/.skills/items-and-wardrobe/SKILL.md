@@ -21,7 +21,7 @@ All through `world_apply`:
 - **`wear`:** put on or taken off; a weapon readied, holstered, sheathed or slung.
 - **`store`:** put into a bag, a drawer, a car, a room; or put back where it is kept.
 - **`place`:** set down on a surface or a square, picked up from one.
-- **`spawn`:** a thing that was not in the world before. `ALL-AGENTS.md` says what a source is; for a thing that is invented, the consent rule applies.
+- **`spawn`:** a thing that was not in the world before. A thing nothing recorded goes by is `spawn`ed first, with its source, earlier in the same call, and then named. `ALL-AGENTS.md` says what a source is; for a thing that is invented, the consent rule applies.
 
 A thing used up (a potion drunk, arrows shot, a candle burned) is one operation that says how much is left.
 
@@ -45,4 +45,4 @@ A thing's condition (broken, worn, mended), its names and description, standing 
 
 ## What a tool tells you
 
-A tool applies what you give it and reports what does not add up: a thing given by someone who does not hold it, a thing in two places, a container inside itself. Read the report, and put it in your answer to the Author.
+A tool applies what you give it and reports what does not add up: a thing given by someone who does not hold it, a thing in two places, a container inside itself. `SIMULATION.md` says what to do with a report.

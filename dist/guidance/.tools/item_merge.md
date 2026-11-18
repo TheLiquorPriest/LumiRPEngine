@@ -1,6 +1,5 @@
 ---
 description: item_merge as the model is told it - what the tool does, and what each of its arguments is.
-family: things
 arguments:
   keep: "The record that stays."
   drop: "The record that goes: the same thing recorded twice."

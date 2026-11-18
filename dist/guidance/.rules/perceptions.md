@@ -11,13 +11,13 @@ A character's whole inner life is built from what it perceives. Its memories, it
 - Every principal and every supporting character who was on stage for a moment gets a perception of that moment. Extras do not.
 - A character who was present and noticed nothing still gets one, saying so.
 - The player's character is perceived like anyone else on stage, as it acts, unless you have a reason to keep it from someone.
-- The player's character gets no perception of its own, with one exception. When it learns a secret the lore marks, record that with `perceive`, naming the mark, so that the secret is no longer kept from the player.
+- The player's character gets no perception of its own, unless the briefing says it has a mind of its own: then it gets one as a principal does, and its own agent takes it in. Either way, when it learns a secret the lore marks, record that with `perceive`, naming the secret by its id, so that the secret is no longer kept from the player.
 
 ## What goes in one
 
 - **What reached their senses** from where they stood and what they were attending to. Not the omniscient account: what they could see, hear, or be told. Where the place has a map, check it: a wall between them and the event means they heard it and did not see it.
 - **What they missed,** stated plainly, so that nobody later assumes they got it.
-- **What they now know,** as short statements. If what they learned is a secret the lore marks, name the mark, so that it is theirs from now on.
+- **What they now know,** as short statements. If what they learned is a secret the lore marks, name the secret by its id, so that it is theirs from now on.
 - **How they got it:** first hand, or told, and by whom.
 
 You write what reached them. You do not write what they make of it. Their own agent does that, in their own voice.
@@ -25,10 +25,10 @@ You write what reached them. You do not write what they make of it. Their own ag
 ## When
 
 - A character acting in a sandbox needs its perception before it acts. Write it then.
-- On a turn you settle yourself, write them in the same call as the reply, right after it.
+- On a turn no character acts in a sandbox, write them right after the reply, with the calls that settle the turn.
 - If the reply as it went out differs from what the sandbox produced, correct the perceptions before anyone forms memories from them.
-- For a principal who acted, let its agent take in its perceptions now, in the session it acted in. For one who was only present, that can wait for the scene's end or the next time it acts.
-- When a principal sleeps, or days pass for it, ask its agent to let the time settle.
+- For a principal who acted, keep its agent past the reply (`delegate` with `keep`) and have it take in its perceptions right after the reply, in the session it acted in. For one who was only present, memory work runs when the scene ends or when it next acts, whichever comes first: at the scene's end, as a job; if it acts first, its perceptions are given to it in full at the start of that run.
+- When a principal sleeps, or days pass for it, ask its agent to dream (`dream`), so that what it lived goes into its long-term memory.
 
 ## Long input
 
@@ -36,4 +36,4 @@ When the player covers hours in one message, write perceptions per moment, in or
 
 ## If one is missing
 
-If you are told that characters were on stage in an earlier turn and have nothing recorded for it, those are owed like this turn's. A character who is about to act through its own agent needs them first: write them before you delegate to it. On a turn you settle yourself, the reply does not wait for them: write them right after it, with this turn's.
+If you are told that characters were on stage in an earlier turn and have nothing recorded for it, those are owed like this turn's. Write each before that character acts. A character acts when it does anything in the story, through its own agent or voiced in your reply.

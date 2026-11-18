@@ -1,6 +1,5 @@
 ---
 description: gm_classify as the model is told it - what the tool does, and what each of its arguments is.
-family: people
 arguments:
   entity: "The person or thing."
   class: "Its classes, whole: each of the world's facets with the list of its values."

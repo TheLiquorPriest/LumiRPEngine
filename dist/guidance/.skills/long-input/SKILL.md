@@ -8,7 +8,7 @@ description: How to split a long stretch of time written in one message into mom
 
 ## Splitting
 
-A new moment begins when the place changes, when who is present changes, when a meaningful stretch of time passes, or when something is attempted whose outcome matters.
+A new moment begins when the place changes, when who is present changes, when a stretch of time passes that someone would live through (an hour on the road, a night's sleep), or when something is attempted whose outcome matters.
 
 Write the moments down in order in `scratch/scene.md`. For each: where, when, who is there, and what the player's character does or intends.
 
@@ -24,7 +24,7 @@ Keep to what the message contains. Do not add moments the player did not write. 
 
 Play the moments in order. What one moment changes is true for the next.
 
-A moment that hinges on nothing can be settled in a line. A moment where others act, or where something is contested, is run like any other; the skill `sandbox` says how.
+A moment that hinges on nothing can be told and recorded in a line. A moment where others act, or where something is contested, is run like any other; the skill `sandbox` says how.
 
 ## What you end with
 

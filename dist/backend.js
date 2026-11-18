@@ -1,4 +1,602 @@
 // @bun
+// src/shared/json.ts
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+var UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+// src/ext/generations.ts
+var str = (v) => typeof v === "string" && v !== "" ? v : null;
+var num = (v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0 ? v : null;
+function factsOf(payload) {
+  if (!isRecord(payload))
+    return null;
+  const id = str(payload.generationId);
+  const chat = str(payload.chatId);
+  const type = str(payload.generationType);
+  if (id === null || chat === null || type === null)
+    return null;
+  return {
+    chat,
+    facts: {
+      id,
+      type,
+      target: { message: str(payload.targetMessageId), swipe: num(payload.targetSwipeId) },
+      speaker: { id: str(payload.characterId), name: str(payload.characterName) },
+      model: str(payload.model)
+    }
+  };
+}
+
+class Generations {
+  announced = new Map;
+  held = new Map;
+  started(payload, user) {
+    const read = factsOf(payload);
+    if (read === null || user === undefined)
+      return;
+    const key = `${user}\x00${read.chat}`;
+    this.announced.set(key, read.facts);
+    this.held.delete(key);
+  }
+  over(payload, user) {
+    if (!isRecord(payload) || user === undefined)
+      return;
+    const chat = str(payload.chatId);
+    const id = str(payload.generationId);
+    if (chat === null || id === null)
+      return;
+    const key = `${user}\x00${chat}`;
+    if (this.announced.get(key)?.id === id)
+      this.announced.delete(key);
+    if (this.held.get(key)?.generation === id)
+      this.held.delete(key);
+  }
+  pending(user, chat) {
+    return this.announced.get(`${user}\x00${chat}`) ?? null;
+  }
+  hold(user, chat, generation, handoff) {
+    this.held.set(`${user}\x00${chat}`, { generation, handoff });
+  }
+  take(user, chat, type) {
+    const key = `${user}\x00${chat}`;
+    const facts = this.announced.get(key);
+    if (facts === undefined || facts.type !== type)
+      return null;
+    this.announced.delete(key);
+    return facts;
+  }
+  handoffFor(user, chat, generation) {
+    const key = `${user}\x00${chat}`;
+    const h = this.held.get(key);
+    if (h === undefined || h.generation !== generation)
+      return null;
+    this.held.delete(key);
+    return h.handoff;
+  }
+}
+
+// src/ext/permissions.ts
+var NEEDS = [
+  { permission: "interceptor", why: "to leave history beyond your window out of a reply's prompt, and to mark the replies RPE plays" },
+  { permission: "generation_parameters", why: "to carry that mark to RPE with the reply's request; without it RPE's replies are stopped" },
+  { permission: "generation", why: "to hear when a reply starts, and to keep lore secrets out of prompts" },
+  { permission: "cors_proxy", why: "to reach RPE on this machine, for the questions before each reply and for pages that cannot reach RPE themselves" },
+  { permission: "ui_panels", why: "to open RPE's heads-up display and its panels in your chat" }
+];
+function missing(granted) {
+  const have = new Set(granted);
+  return NEEDS.filter((n) => !have.has(n.permission));
+}
+
+// src/adapter/lumiverse/pipe-wire.ts
+var USER_HEADER = "x-rpe-user";
+var START_PATH = "/api/v1/ext/start";
+var LIVE_PATH = "/api/v1/ext/live";
+var CONFIRM_PATH = "/api/v1/ext/confirm";
+var STOPPED_PATH = "/api/v1/ext/stopped";
+var ARRIVED_PATH = "/api/v1/ext/arrived";
+var REGISTRATION_FILE = "rpe/registration.json";
+var RPE_MARK_KEY = "rpe";
+var RPE_MARK = Object.freeze({ v: 1 });
+function rpeMarked(metadata) {
+  return isRecord(metadata) && isRecord(metadata[RPE_MARK_KEY]);
+}
+var str2 = (v) => typeof v === "string" && v !== "";
+var count = (v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+function headersOf(v) {
+  if (v === undefined)
+    return {};
+  if (!isRecord(v))
+    return null;
+  const out = {};
+  for (const [k, value] of Object.entries(v)) {
+    if (typeof value !== "string")
+      return null;
+    out[k.toLowerCase()] = value;
+  }
+  return out;
+}
+function readRegistration(v) {
+  if (!isRecord(v) || v.v !== 1 || !str2(v.base) || !str2(v.key) || !Array.isArray(v.connections) || !v.connections.every(str2) || !str2(v.relay) || typeof v.build !== "string")
+    return null;
+  if (!isRecord(v.values) || !count(v.values.questionMs) || !count(v.values.logChars) || v.values.whoseMs !== undefined && !count(v.values.whoseMs))
+    return null;
+  const { questionMs, logChars, whoseMs } = v.values;
+  return { v: 1, base: v.base, key: v.key, connections: [...v.connections], relay: v.relay, build: v.build, values: { questionMs, logChars, ...whoseMs !== undefined ? { whoseMs } : {} } };
+}
+function readConfirmed(v) {
+  return isRecord(v) && v.rpe === "confirmed" && str2(v.user) && str2(v.relay) ? { rpe: "confirmed", user: v.user, relay: v.relay } : null;
+}
+function readFromRpe(v) {
+  if (!isRecord(v))
+    return null;
+  if (v.rpe === "register") {
+    const registration = readRegistration(v.registration);
+    return registration === null ? null : { rpe: "register", registration };
+  }
+  if (v.rpe === "live") {
+    const part = partOf(v.part);
+    if (!str2(v.key) || !str2(v.page) || !count(v.seq) || typeof v.data !== "string" || part === null)
+      return null;
+    return { rpe: "live", key: v.key, page: v.page, seq: v.seq, data: v.data, ...part !== undefined ? { part } : {} };
+  }
+  return null;
+}
+function partOf(v) {
+  if (v === undefined)
+    return;
+  if (!isRecord(v))
+    return null;
+  const { index, count: total } = v;
+  return count(index) && count(total) && index < total ? { index, count: total } : null;
+}
+function readFromPage(v) {
+  if (!isRecord(v))
+    return null;
+  switch (v.rpe) {
+    case "start":
+      return { rpe: "start" };
+    case "request": {
+      const headers = headersOf(v.headers);
+      if (!str2(v.id) || !str2(v.method) || !str2(v.path) || headers === null || v.body !== undefined && typeof v.body !== "string")
+        return null;
+      return { rpe: "request", id: v.id, method: v.method.toUpperCase(), path: v.path, headers, ...typeof v.body === "string" ? { body: v.body } : {} };
+    }
+    case "follow":
+    case "unfollow":
+      return str2(v.chat) ? { rpe: v.rpe, chat: v.chat } : null;
+    case "drawer":
+      return str2(v.id) ? { rpe: "drawer", id: v.id } : null;
+    default:
+      return null;
+  }
+}
+function readStartFacts(v) {
+  if (!isRecord(v) || !str2(v.token) || !count(v.expiresInMs) || !Array.isArray(v.addresses) || !v.addresses.every(str2) || typeof v.build !== "string")
+    return null;
+  if (!isRecord(v.road) || !count(v.road.requestMs) || !count(v.road.renewMs) || !isRecord(v.pageSettings))
+    return null;
+  const pageSettings = {};
+  for (const [key, value] of Object.entries(v.pageSettings))
+    if (typeof value === "number")
+      pageSettings[key] = value;
+  return { token: v.token, expiresInMs: v.expiresInMs, addresses: [...v.addresses], build: v.build, road: { requestMs: v.road.requestMs, renewMs: v.road.renewMs }, pageSettings };
+}
+function onLoopback(base) {
+  let url;
+  try {
+    url = new URL(base);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:")
+    return false;
+  if (url.username !== "" || url.password !== "" || url.pathname !== "/" || /[?#]/.test(base))
+    return false;
+  const host = url.hostname;
+  return host === "localhost" || host === "[::1]" || /^127(?:\.\d{1,3}){3}$/.test(host);
+}
+
+// src/ext/pipe.ts
+var PAGE_HEADERS = ["authorization", "content-type", "accept", "if-none-match"];
+var ANSWER_HEADERS = ["content-type", "etag", "cache-control"];
+var words = (error) => error instanceof Error ? error.message : String(error);
+var JAVASCRIPT_PATH = /\.(?:js|mjs|cjs|es)(?:[;/\\]|$)/i;
+var TOO_LARGE = /CORS proxy response (too large|exceeded)/;
+function startPipe(deps) {
+  const { spindle: spindle2 } = deps;
+  const pages = new Map;
+  const seen = (user, page) => {
+    const set = pages.get(user) ?? new Set;
+    set.add(page);
+    pages.set(user, set);
+  };
+  const toPage = (user, page, message) => spindle2.sendToFrontend(message, user, { frontendSessionId: page });
+  const toRpe = async (user, message) => {
+    const r = await deps.registrations.of(user).catch(() => null);
+    if (r !== null)
+      spindle2.sendToFrontend(message, user, { frontendSessionId: r.relay });
+  };
+  const call = async (road, path, body) => {
+    const res = await spindle2.cors(`${road.base}${path}`, { method: "POST", headers: { "content-type": "application/json", ...road.headers }, body: JSON.stringify(body) });
+    let parsed = null;
+    try {
+      parsed = JSON.parse(res.body ?? "");
+    } catch {}
+    return { status: res.status, body: parsed };
+  };
+  const refusedWords = "RPE does not belong to your Lumiverse user, or it has not connected to Lumiverse yet.";
+  async function start(user, page) {
+    seen(user, page);
+    const road = await deps.registrations.road(user);
+    if (road === null)
+      return toPage(user, page, { rpe: "start", facts: null, error: refusedWords, missing: deps.missing() });
+    try {
+      const answer = await call(road, START_PATH, {});
+      const facts = answer.status === 200 ? readStartFacts(answer.body) : null;
+      const error = facts !== null ? undefined : isRecord(answer.body) && typeof answer.body.error === "string" ? answer.body.error : `RPE answered ${answer.status}.`;
+      toPage(user, page, { rpe: "start", facts, ...error !== undefined ? { error } : {}, missing: deps.missing() });
+    } catch (error) {
+      toPage(user, page, { rpe: "start", facts: null, error: `RPE was not reached through Lumiverse: ${words(error)}`, missing: deps.missing() });
+    }
+  }
+  async function request(user, page, req) {
+    const answer = (status, body, headers2 = { "content-type": "application/json" }) => toPage(user, page, { rpe: "response", id: req.id, status, headers: headers2, body });
+    const road = await deps.registrations.road(user);
+    if (road === null)
+      return answer(403, JSON.stringify({ error: refusedWords }));
+    let url;
+    try {
+      url = new URL(req.path, road.base);
+    } catch {
+      return answer(400, JSON.stringify({ error: "That is not a path of RPE's API." }));
+    }
+    if (url.origin !== new URL(road.base).origin || !url.pathname.startsWith("/api/v1/") || url.pathname.startsWith("/api/v1/ext/"))
+      return answer(400, JSON.stringify({ error: "That is not a path of RPE's API." }));
+    let decoded = url.pathname;
+    try {
+      decoded = decodeURIComponent(url.pathname);
+    } catch {}
+    if (JAVASCRIPT_PATH.test(decoded))
+      return answer(400, JSON.stringify({ error: "Lumiverse's proxy does not carry a path that names a JavaScript file; ask RPE directly." }));
+    const headers = {};
+    for (const name of PAGE_HEADERS)
+      if (req.headers[name] !== undefined)
+        headers[name] = req.headers[name];
+    try {
+      const res = await spindle2.cors(url.toString(), { method: req.method, headers, ...req.body !== undefined ? { body: req.body } : {} });
+      const back = {};
+      for (const [k, v] of Object.entries(res.headers ?? {}))
+        if (ANSWER_HEADERS.includes(k.toLowerCase()))
+          back[k.toLowerCase()] = v;
+      answer(res.status, res.body ?? "", back);
+    } catch (error) {
+      if (TOO_LARGE.test(words(error)))
+        return answer(413, JSON.stringify({ error: `RPE's answer is larger than Lumiverse's proxy carries (${words(error)}).` }));
+      answer(502, JSON.stringify({ error: `RPE was not reached through Lumiverse: ${words(error)}` }));
+    }
+  }
+  async function follow(user, page, chat, on) {
+    seen(user, page);
+    const road = await deps.registrations.road(user);
+    if (road === null)
+      return toPage(user, page, { rpe: "following", chat, error: refusedWords });
+    try {
+      const answer = await call(road, LIVE_PATH, { page, chat, follow: on });
+      toPage(user, page, { rpe: "following", chat, ...answer.status === 200 ? {} : { error: isRecord(answer.body) && typeof answer.body.error === "string" ? answer.body.error : `RPE answered ${answer.status}.` } });
+    } catch (error) {
+      toPage(user, page, { rpe: "following", chat, error: `RPE was not reached through Lumiverse: ${words(error)}` });
+    }
+  }
+  async function drawer(user, page, id) {
+    try {
+      await spindle2.ui.closeDrawer({ userId: user });
+      toPage(user, page, { rpe: "drawer", id, closed: true });
+    } catch (error) {
+      deps.log(`Lumiverse's drawer was not closed for a page: ${words(error)}`);
+      toPage(user, page, { rpe: "drawer", id, closed: false });
+    }
+  }
+  const offMessage = spindle2.onFrontendMessage((payload, user, session) => {
+    const fromRpe = readFromRpe(payload);
+    if (fromRpe !== null) {
+      (async () => {
+        if (fromRpe.rpe === "register") {
+          if (session === undefined)
+            return;
+          const refused = session !== fromRpe.registration.relay ? "it came from another socket than the one it names as RPE's." : await deps.registrations.keep(user, fromRpe.registration);
+          if (refused !== null) {
+            deps.log(`a registration for user ${user} was refused: ${refused}`);
+            spindle2.sendToFrontend({ rpe: "refused", why: refused, missing: deps.missing() }, user, { frontendSessionId: session });
+            deps.refused(user);
+            return;
+          }
+          await toRpe(user, { rpe: "registered", missing: deps.missing(), build: deps.build });
+          deps.registered(user);
+          const record = untold.get(user);
+          if (record !== undefined)
+            tell(user, record);
+          if (deps.statedHash !== null && !arrivedTold.has(user)) {
+            arrivedTold.add(user);
+            arrived(user, deps.statedHash);
+          }
+          return;
+        }
+        const r = await deps.registrations.of(user);
+        if (r === null || r.key !== fromRpe.key)
+          return;
+        const { rpe: _rpe, key: _key, page, ...frame } = fromRpe;
+        toPage(user, page, { rpe: "live", ...frame });
+      })().catch((error) => deps.log(`a message from RPE was not handled: ${words(error)}`));
+      return;
+    }
+    const fromPage = readFromPage(payload);
+    if (fromPage === null || session === undefined)
+      return;
+    const work = fromPage.rpe === "start" ? start(user, session) : fromPage.rpe === "request" ? request(user, session, fromPage) : fromPage.rpe === "drawer" ? drawer(user, session, fromPage.id) : follow(user, session, fromPage.chat, fromPage.rpe === "follow");
+    work.catch((error) => deps.log(`a page's message was not handled: ${words(error)}`));
+  });
+  const offClosed = spindle2.on("FRONTEND_SESSION_CLOSED", (payload, user) => {
+    if (user === undefined || !isRecord(payload) || typeof payload.frontendSessionId !== "string")
+      return;
+    const page = payload.frontendSessionId;
+    if (pages.get(user)?.delete(page) !== true)
+      return;
+    (async () => {
+      const road = await deps.registrations.road(user);
+      if (road !== null)
+        await call(road, LIVE_PATH, { page, gone: true });
+    })().catch((error) => deps.log(`RPE was not told a page closed: ${words(error)}`));
+  });
+  const arrivedTold = new Set;
+  const arrived = (user, hash) => {
+    (async () => {
+      const road = await deps.registrations.road(user);
+      if (road === null)
+        return;
+      const answer = await call(road, ARRIVED_PATH, { hash });
+      const said = isRecord(answer.body) && typeof answer.body.words === "string" ? answer.body.words : `RPE answered ${answer.status}.`;
+      deps.log(`RPE was told the app file this extension carries${isRecord(answer.body) && answer.body.taken === true ? ", and took it" : ""}: ${said}`);
+    })().catch((error) => {
+      arrivedTold.delete(user);
+      deps.log(`RPE was not told the app file this extension carries: ${words(error)}`);
+    });
+  };
+  const untold = new Map;
+  const tell = (user, record) => {
+    (async () => {
+      const road = await deps.registrations.road(user);
+      if (road === null) {
+        untold.set(user, record);
+        return;
+      }
+      const answer = await call(road, STOPPED_PATH, record);
+      if (answer.status !== 200)
+        throw new Error(`RPE answered ${answer.status}`);
+      if (untold.get(user) === record)
+        untold.delete(user);
+    })().catch((error) => {
+      untold.set(user, record);
+      deps.log(`RPE was not told of the generation stopped in chat ${record.chat}: ${words(error)}`);
+    });
+  };
+  return {
+    permissions() {
+      const missing2 = deps.missing();
+      for (const user of deps.registrations.users()) {
+        toRpe(user, { rpe: "permissions", missing: missing2 });
+        for (const page of pages.get(user) ?? [])
+          toPage(user, page, { rpe: "permissions", missing: missing2 });
+      }
+    },
+    stopped(user, record) {
+      deps.log(`generation ${record.generation ?? "(not announced)"} of chat ${record.chat} on connection ${record.connection} was stopped: the extension could not tell whether it is RPE's. The registration's read: ${record.registration}. The connection's record: ${record.mark}.`);
+      tell(user, record);
+    },
+    stop() {
+      offMessage();
+      offClosed();
+    }
+  };
+}
+
+// src/adapter/lumiverse/wire.ts
+var TAG_FIELD = "rpe_turn";
+var QUESTION_PATH = "/api/v1/ext/question";
+function textHash(text) {
+  return new Bun.CryptoHasher("sha256").update(text).digest("hex").slice(0, 32);
+}
+function replyKindOf(type) {
+  if (type === "normal")
+    return "new";
+  return type === "swipe" || type === "regenerate" || type === "continue" || type === "impersonate" ? type : null;
+}
+function historyCut(items, keep) {
+  if (keep === null)
+    return [];
+  let first = items.length;
+  for (let i = 0;i < items.length; i++) {
+    const item = items[i];
+    if (item !== undefined && item.history && item.index !== null && item.index >= keep.index) {
+      first = i;
+      break;
+    }
+  }
+  const out = [];
+  for (let i = 0;i < first; i++)
+    if (items[i]?.history === true)
+      out.push(i);
+  return out;
+}
+function str3(v) {
+  return typeof v === "string";
+}
+function int(v) {
+  return typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+}
+function strOrNull(v) {
+  return v === null || typeof v === "string";
+}
+function ids(v) {
+  return Array.isArray(v) && v.every(str3);
+}
+function keepPoint(v) {
+  if (v === null)
+    return null;
+  return isRecord(v) && str3(v.id) && int(v.index) ? { id: v.id, index: v.index } : undefined;
+}
+function verdictOf(v) {
+  if (!isRecord(v) || !ids(v.disabled) || !ids(v.enabled) || !Array.isArray(v.mutated))
+    return;
+  const mutated = [];
+  for (const m of v.mutated) {
+    if (!isRecord(m) || !str3(m.id) || !str3(m.content))
+      return;
+    mutated.push({ id: m.id, content: m.content });
+  }
+  return { disabled: [...v.disabled], enabled: [...v.enabled], mutated };
+}
+function readAnswer(value) {
+  if (!isRecord(value) || value.v !== 1)
+    return null;
+  const secrecy = value.secrecy === null ? null : verdictOf(value.secrecy);
+  if (secrecy === undefined)
+    return null;
+  let cut;
+  if (value.cut === null)
+    cut = null;
+  else if (isRecord(value.cut)) {
+    const keep = keepPoint(value.cut.keep);
+    if (keep === undefined)
+      return null;
+    cut = { keep };
+  } else
+    return null;
+  const start = isRecord(value.start) && typeof value.start.known === "boolean" && strOrNull(value.start.turn) ? { known: value.start.known, turn: value.start.turn } : null;
+  return { v: 1, secrecy, cut, start };
+}
+
+// src/ext/prompt.ts
+class Stop extends Error {
+}
+var str4 = (v) => typeof v === "string" && v !== "" ? v : null;
+function contextOf(raw) {
+  if (!isRecord(raw))
+    return null;
+  const user = str4(raw.userId);
+  const chat = str4(raw.chatId);
+  if (user === null || chat === null)
+    return null;
+  return {
+    user,
+    chat,
+    type: str4(raw.generationType),
+    dryRun: raw.dryRun === true || raw.isDryRun === true,
+    connection: str4(raw.connectionId),
+    preset: str4(raw.presetId),
+    persona: str4(raw.personaId)
+  };
+}
+function textOfContent(content) {
+  if (typeof content === "string")
+    return { text: content, media: 0 };
+  if (!Array.isArray(content))
+    return { text: "", media: 0 };
+  const texts = [];
+  let media = 0;
+  for (const part of content) {
+    if (isRecord(part) && part.type === "text" && typeof part.text === "string")
+      texts.push(part.text);
+    else
+      media++;
+  }
+  return { text: texts.join(""), parts: texts.map((t) => t.length), media };
+}
+function continuedTarget(messages, noted) {
+  if (noted === null || noted.text === "")
+    return null;
+  for (let i = messages.length - 1;i >= 0; i--) {
+    const m = messages[i];
+    if (m.role !== "assistant" || m.__isChatHistory === true)
+      continue;
+    return textOfContent(m.content).text.startsWith(noted.text) ? noted.id : null;
+  }
+  return null;
+}
+function listedMessage(m) {
+  const role = m.role === "system" || m.role === "assistant" ? m.role : "user";
+  const { text, parts, media } = textOfContent(m.content);
+  return {
+    role,
+    length: text.length,
+    hash: textHash(text),
+    ...text.trim().length === 0 ? { blank: true } : {},
+    ...m.__isChatHistory === true ? { history: true } : {},
+    ...m.__isChatHistory === true && typeof m.sourceMessageId === "string" && typeof m.sourceIndexInChat === "number" ? { source: { id: m.sourceMessageId, index: m.sourceIndexInChat } } : {},
+    ...m.__isWorldInfoEntry === true ? { lore: true } : {},
+    ...m.__isChatHistory === true && m.__cortexHistorySummary === true ? { summary: true } : {},
+    ...m.partial === true ? { partial: true } : {},
+    ...parts !== undefined ? { parts } : {},
+    ...media > 0 ? { media } : {}
+  };
+}
+function promptInterceptor(deps) {
+  return async (messages, context) => {
+    let ours = false;
+    try {
+      const ctx = contextOf(context);
+      if (ctx === null || ctx.dryRun || ctx.connection === null)
+        return messages;
+      const kind = replyKindOf(ctx.type);
+      if (kind === null || ctx.type === null)
+        return messages;
+      const whose = await deps.whose(ctx.connection, ctx.user);
+      if ("unknown" in whose) {
+        deps.stopped(ctx.user, { at: Date.now(), chat: ctx.chat, generation: deps.generations.pending(ctx.user, ctx.chat)?.id ?? null, connection: ctx.connection, registration: whose.unknown.registration, mark: whose.unknown.mark });
+        throw new Stop("RPE stopped this reply: its extension could not tell whether this chat is one RPE plays, because neither RPE's registration nor this connection's record in Lumiverse could be read. Send it again; RPE's log says what failed.");
+      }
+      ours = whose.rpe;
+      if (!ours)
+        return messages;
+      if (!deps.granted("generation_parameters"))
+        throw new Stop("RPE stopped this reply rather than send it without RPE: its extension may not add to a reply's request. Grant RPE's extension the \u201Cgeneration_parameters\u201D permission in Lumiverse.");
+      const generation = deps.generations.take(ctx.user, ctx.chat, ctx.type);
+      if (generation === null)
+        throw new Stop("RPE stopped this reply: its extension could not pair this prompt with a generation it heard begin, as when Lumiverse started the extension again while the generation was under way. Send it again.");
+      const handoff = deps.generations.handoffFor(ctx.user, ctx.chat, generation.id);
+      const cut = handoff?.cut ?? null;
+      const left = new Set(cut === null ? [] : historyCut(messages.map((m) => ({ history: m.__isChatHistory === true, index: typeof m.sourceIndexInChat === "number" ? m.sourceIndexInChat : null })), cut.keep));
+      const kept = left.size === 0 ? messages : messages.filter((_, i) => !left.has(i));
+      const tag = {
+        v: 1,
+        user: ctx.user,
+        chat: ctx.chat,
+        generation: generation.id,
+        kind,
+        target: kind === "continue" ? { message: continuedTarget(messages, handoff?.continued ?? null), swipe: generation.target.swipe } : generation.target,
+        speaker: generation.speaker,
+        connection: ctx.connection,
+        preset: ctx.preset,
+        persona: ctx.persona,
+        cut: cut === null ? { answered: false } : { answered: true, keep: cut.keep, removed: left.size },
+        secrecy: handoff?.secrecy ?? { by: "extension", why: "no question was asked for this prompt" },
+        question: handoff?.question ?? null,
+        messages: kept.map(listedMessage)
+      };
+      return { messages: kept, parameters: { [TAG_FIELD]: tag } };
+    } catch (error) {
+      if (error instanceof Stop)
+        throw error;
+      if (!ours) {
+        deps.log(`a prompt not on RPE's connection went on untouched after the extension failed: ${error instanceof Error ? error.message : String(error)}`);
+        return messages;
+      }
+      throw new Error(`RPE stopped this reply before it was sent, because its extension failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+}
+
 // src/shared/hash.ts
 var C1 = 597399067;
 var C2 = 2869860233;
@@ -190,76 +788,11 @@ function hashParts(...parts) {
   return s;
 }
 
-// src/shared/json.ts
-function isRecord(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-var UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
-
 // src/shared/ledger.ts
 var LEDGER_NAMESPACE = "lumi_rp_engine";
 
 // src/shared/steps.ts
 var RETIRED_SIGNALS = new Map([["classifier", "typed_input"]]);
-var PROSE_VARS = ["world", "pov", "place", "clock", "scene", "present", "facts", "outcome", "beats", "brief", "user", "reply", "recent", "gear", "money", "property", "positions", "knowledge"];
-var MIND_VARS = ["character", "world", "pov", "place", "clock"];
-var STEP_VARS = {
-  interpret: { phase: "before the reply", vars: ["world", "pov"], note: "None on a Decision connection." },
-  "npc.choose": { phase: "before the reply", vars: [] },
-  judge: { phase: "before the reply", vars: [] },
-  "puzzle.answer": { phase: "before the reply", vars: [] },
-  brief: { phase: "before the reply", vars: PROSE_VARS },
-  outline: { phase: "before the reply", vars: [...PROSE_VARS, "sections"] },
-  extract: { phase: "after the reply", vars: [...PROSE_VARS, "usual"] },
-  choices: { phase: "after the reply", vars: [...PROSE_VARS, "usual"] },
-  mind: { phase: "with the minds", vars: MIND_VARS },
-  memory: { phase: "with the minds", vars: MIND_VARS },
-  consolidate: { phase: "with the minds", vars: MIND_VARS },
-  knowledge: { phase: "with the minds", vars: MIND_VARS, note: "A scene's call thinks for no one: character is empty." },
-  skip: { phase: "as a time skip starts", vars: MIND_VARS, note: "The beats think for no one: character is empty." },
-  skip_plan: { phase: "as a time skip starts", vars: ["world", "pov", "place", "clock"] }
-};
-var PROSE_PROMPTS = {
-  brief: [
-    "You brief a roleplay narrator before their next reply in {{world}}, so they can write it without guessing at anything. From the facts given only, in one paragraph, say:",
-    "where and when the scene is (the place, the time of day) and what it is like now; who is present and what each of them is doing; what the player just did and exactly how it turned out, with the results, rolls and amounts as the Outcome gives them; anything that changed hands, moved or was spent, and between whom; how much time passes; and what is pressing or about to happen.",
-    "Name people and places as the facts do. State only what the facts establish: invent nothing, decide nothing they leave open, and never say what {{pov}} doesn't know."
-  ].join(`
-`),
-  outline: [
-    "You outline a roleplay narrator's next reply in {{world}}, beat by beat, so the narrator can write it without inferring anything. Expand the engine's beats into a complete outline, in order, consistent with the facts and the Outcome. Account for everything the reply must cover:",
-    "- every beat, in the order it happens;",
-    "- who does and says what, in substance (no dialogue lines);",
-    "- what is decided and why, as the Outcome states it;",
-    "- every result with its numbers: rolls, amounts, prices;",
-    "- each item that changes hands, from whom to whom;",
-    "- each place reached and each move, by name;",
-    "- how much time passes;",
-    "- what each person knows or doesn't. Where the facts leave something unknown to {{pov}}, or someone keeps a thing to themselves, add a beat saying it stays unsaid.",
-    `Write each beat as one full sentence that names its people and places (never a bare "he" or "there"). Decide nothing the facts don't settle and add no events of your own; point only at the sections the narrator has this turn.`
-  ].join(`
-`),
-  choices: "Suggest three short, distinct things {{pov}} could do next, given the narrator's reply and the facts: each something the scene as written makes possible right now, with the people present and the things {{pov}} has. Each under twelve words, first person, as the player would type it, naming who or what it involves."
-};
-var ADDED_BEFORE = {
-  interpret: [
-    "The task: map the player's typed input to the engine actions it takes, in order.",
-    "The world and the player character.",
-    "The scene, the places nearby and the recent messages.",
-    "The action catalog: every action your character can take here, with its details.",
-    "The rules for reading it: ids and amounts, several actions in one message, time passing after them, routine changes.",
-    "The answer format."
-  ].join(`
-`),
-  extract: [
-    "The task: propose the changes the reply's prose says actually happened.",
-    "The world, and the change types switched on.",
-    "The rules: nothing considered, refused or hypothetical; world ids; amounts as written; the strict rule for each change type.",
-    "Where the reply leaves your character, and the usual routines of the people with them.",
-    "The answer format."
-  ].join(`
-`)
-};
 var STEP_OUTPUTS = {
   interpret: ["decision", "text"],
   "npc.choose": ["decision", "text"],
@@ -310,22 +843,22 @@ function bookLoreFieldsOf(extensions) {
   const raw = isRecord(ns) ? ns.lore : undefined;
   if (!isRecord(raw))
     return null;
-  const ids = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "string" && x !== "") : undefined;
+  const ids2 = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "string" && x !== "") : undefined;
   const out = {};
   if (raw.secret !== undefined)
     out.secret = raw.secret !== false;
   if (typeof raw.gate === "string")
     out.gate = raw.gate;
-  const audience = ids(raw.audience)?.filter((p) => LORE_AUDIENCE.includes(p));
+  const audience = ids2(raw.audience)?.filter((p) => LORE_AUDIENCE.includes(p));
   if (audience)
     out.audience = audience;
-  const links = ids(raw.links);
+  const links = ids2(raw.links);
   if (links)
     out.links = links;
-  const aliases = ids(raw.aliases);
+  const aliases = ids2(raw.aliases);
   if (aliases)
     out.aliases = aliases;
-  const holders = ids(raw.holders);
+  const holders = ids2(raw.holders);
   if (holders)
     out.holders = holders;
   if (raw.visibility === "public" || raw.visibility === "known_by")
@@ -565,11 +1098,11 @@ function nameMatcher(world, state) {
     const byId = [...named.keys()].filter((id) => id.toLowerCase() === n);
     if (byId.length === 1)
       return byId;
-    const ids = [...named.entries()];
-    const whole = ids.filter(([, names]) => names.includes(n)).map(([id]) => id);
+    const ids2 = [...named.entries()];
+    const whole = ids2.filter(([, names]) => names.includes(n)).map(([id]) => id);
     if (whole.length > 0 || n.includes(" "))
       return whole;
-    return ids.filter(([, names]) => names.some((name) => name.split(" ").includes(n))).map(([id]) => id);
+    return ids2.filter(([, names]) => names.some((name) => name.split(" ").includes(n))).map(([id]) => id);
   };
 }
 function resolveMarkNames(world, state, mark) {
@@ -590,7 +1123,7 @@ function resolveMarkNames(world, state, mark) {
   return { knownTo: resolve(mark.knownTo), keptFrom: mark.keptFrom === "everyone" ? "everyone" : resolve(mark.keptFrom), unresolved };
 }
 
-// src/backend/lore-secrets.ts
+// src/secrecy/lore-secrets.ts
 function textOf(content) {
   const text = content.replace(/\s+/g, " ").trim();
   return text === "" ? "" : hashParts("lre-lore-text-v1", text);
@@ -622,21 +1155,21 @@ function worldFields(entry) {
   const knownBy = visibility !== undefined && visibility !== "public";
   if (!secret && !knownBy)
     return null;
-  const ids = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "string" && x !== "") : [];
+  const ids2 = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "string" && x !== "") : [];
   const out = {};
   if (secret) {
     out.secret = true;
     out.gate = typeof entry.gate === "string" ? entry.gate : "";
   }
-  const audience = ids(entry.audience).filter((p) => LORE_AUDIENCE.includes(p));
+  const audience = ids2(entry.audience).filter((p) => LORE_AUDIENCE.includes(p));
   if (audience.length > 0)
     out.audience = audience;
-  const holders = ids(entry.holders);
+  const holders = ids2(entry.holders);
   if (holders.length > 0)
     out.holders = holders;
   if (knownBy) {
     out.visibility = "known_by";
-    out.links = visibility === "known_by" ? ids(entry.links) : [];
+    out.links = visibility === "known_by" ? ids2(entry.links) : [];
   }
   return out;
 }
@@ -764,7 +1297,20 @@ function bookSecrecy(e, texts) {
   return parts.length === 0 ? null : stricter(parts);
 }
 
-// src/ext/fail-closed.ts
+// src/adapter/lumiverse/candidate.ts
+function questionEntryOf(e) {
+  const own = e.extensions[LEDGER_NAMESPACE];
+  const telling = hasSecretMarks(e.content) || unreadableMarks(e.content).length > 0 || isRecord(own);
+  return {
+    id: e.id,
+    book: e.bookId,
+    disabled: e.disabled,
+    key: textOf(e.content),
+    ...telling ? { content: e.content, comment: e.comment, ...isRecord(own) ? { extensions: { [LEDGER_NAMESPACE]: own } } : {} } : {}
+  };
+}
+
+// src/secrecy/blind.ts
 function usersOwn(entries) {
   return entries.filter((e) => !engineWroteEntry(e.extensions));
 }
@@ -783,567 +1329,21 @@ function blind(entries) {
   return out;
 }
 
-class KeptOut {
-  most;
-  byChat = new Map;
-  constructor(most) {
-    this.most = most;
-  }
-  heard(user, chat, answer) {
-    const key = `${user}\x00${chat}`;
-    const before = this.byChat.get(key);
-    const keep = answer.cut === null ? before?.keep ?? null : answer.cut.keep;
-    const off = answer.secrecy === null ? before?.off ?? new Set : new Set(answer.secrecy.disabled);
-    this.byChat.delete(key);
-    this.byChat.set(key, { off, keep });
-    for (const oldest of this.byChat.keys()) {
-      if (this.byChat.size <= this.most)
-        break;
-      this.byChat.delete(oldest);
-    }
-  }
-  of(user, chat) {
-    return this.byChat.get(`${user}\x00${chat}`)?.off ?? new Set;
-  }
-  cutOf(user, chat) {
-    return this.byChat.get(`${user}\x00${chat}`)?.keep ?? null;
-  }
-}
-function failClosed(entries, keptOut) {
+// src/ext/fail-closed.ts
+function failClosed(entries) {
   const verdict = blind(usersOwn(entries));
-  const out = { disabled: [...verdict.disabled], enabled: [...verdict.enabled], mutated: [...verdict.mutated ?? []] };
-  for (const e of entries)
-    if (keptOut.has(e.id) && !out.disabled.includes(e.id))
-      out.disabled.push(e.id);
-  return out;
-}
-
-// src/ext/generations.ts
-var str = (v) => typeof v === "string" && v !== "" ? v : null;
-var num = (v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0 ? v : null;
-function factsOf(payload) {
-  if (!isRecord(payload))
-    return null;
-  const id = str(payload.generationId);
-  const chat = str(payload.chatId);
-  const type = str(payload.generationType);
-  if (id === null || chat === null || type === null)
-    return null;
-  return {
-    chat,
-    facts: {
-      id,
-      type,
-      target: { message: str(payload.targetMessageId), swipe: num(payload.targetSwipeId) },
-      speaker: { id: str(payload.characterId), name: str(payload.characterName) },
-      model: str(payload.model)
-    }
-  };
-}
-
-class Generations {
-  most;
-  announced = new Map;
-  held = new Map;
-  constructor(most) {
-    this.most = most;
-  }
-  bound(map, key, value) {
-    map.delete(key);
-    map.set(key, value);
-    for (const oldest of map.keys()) {
-      if (map.size <= this.most)
-        break;
-      map.delete(oldest);
-    }
-  }
-  started(payload, user) {
-    const read = factsOf(payload);
-    if (read === null || user === undefined)
-      return;
-    const key = `${user}\x00${read.chat}`;
-    this.bound(this.announced, key, { facts: read.facts, taken: false });
-    this.held.delete(key);
-  }
-  over(payload, user) {
-    if (!isRecord(payload) || user === undefined)
-      return;
-    const chat = str(payload.chatId);
-    const id = str(payload.generationId);
-    if (chat === null || id === null)
-      return;
-    const key = `${user}\x00${chat}`;
-    if (this.announced.get(key)?.facts.id === id)
-      this.announced.delete(key);
-    if (this.held.get(key)?.generation === id)
-      this.held.delete(key);
-  }
-  pending(user, chat) {
-    const a = this.announced.get(`${user}\x00${chat}`);
-    return a !== undefined && !a.taken ? a.facts : null;
-  }
-  hold(user, chat, generation, cut) {
-    this.bound(this.held, `${user}\x00${chat}`, { generation, cut });
-  }
-  take(user, chat, type, named) {
-    const a = this.announced.get(`${user}\x00${chat}`);
-    if (named !== null) {
-      if (a !== undefined && a.facts.id === named) {
-        a.taken = true;
-        return a.facts;
-      }
-      return { id: named, type, target: { message: null, swipe: null }, speaker: { id: null, name: null }, model: null };
-    }
-    if (a === undefined || a.taken || a.facts.type !== type)
-      return null;
-    a.taken = true;
-    return a.facts;
-  }
-  cutFor(user, chat, generation) {
-    const key = `${user}\x00${chat}`;
-    const h = this.held.get(key);
-    if (h === undefined || h.generation !== generation)
-      return null;
-    this.held.delete(key);
-    return h.cut;
-  }
-}
-
-// src/ext/permissions.ts
-var NEEDS = [
-  { permission: "interceptor", why: "to leave history beyond your window out of a reply's prompt, and to mark the replies RPE plays" },
-  { permission: "generation_parameters", why: "to carry that mark to RPE with the reply's request; without it RPE's replies are stopped" },
-  { permission: "generation", why: "to hear when a reply starts, and to keep lore secrets out of prompts" },
-  { permission: "cors_proxy", why: "to reach RPE on this machine, for the questions before each reply and for pages that cannot reach RPE themselves" },
-  { permission: "ui_panels", why: "to show RPE's panel" }
-];
-function missing(granted) {
-  const have = new Set(granted);
-  return NEEDS.filter((n) => !have.has(n.permission));
-}
-
-// src/adapter/lumiverse/pipe-wire.ts
-var USER_HEADER = "x-rpe-user";
-var START_PATH = "/api/v1/ext/start";
-var LIVE_PATH = "/api/v1/ext/live";
-var CONFIRM_PATH = "/api/v1/ext/confirm";
-var REGISTRATION_FILE = "rpe/registration.json";
-var str2 = (v) => typeof v === "string" && v !== "";
-var count = (v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
-function headersOf(v) {
-  if (v === undefined)
-    return {};
-  if (!isRecord(v))
-    return null;
-  const out = {};
-  for (const [k, value] of Object.entries(v)) {
-    if (typeof value !== "string")
-      return null;
-    out[k.toLowerCase()] = value;
-  }
-  return out;
-}
-function readRegistration(v) {
-  if (!isRecord(v) || v.v !== 1 || !str2(v.base) || !str2(v.key) || !(v.connection === null || str2(v.connection)) || !str2(v.relay) || typeof v.build !== "string")
-    return null;
-  return { v: 1, base: v.base, key: v.key, connection: v.connection, relay: v.relay, build: v.build };
-}
-function readConfirmed(v) {
-  return isRecord(v) && v.rpe === "confirmed" && str2(v.user) && str2(v.relay) ? { rpe: "confirmed", user: v.user, relay: v.relay } : null;
-}
-function readFromRpe(v) {
-  if (!isRecord(v))
-    return null;
-  if (v.rpe === "register") {
-    const registration = readRegistration(v.registration);
-    return registration === null ? null : { rpe: "register", registration };
-  }
-  if (v.rpe === "live") {
-    const part = partOf(v.part);
-    if (!str2(v.key) || !str2(v.page) || !count(v.seq) || typeof v.data !== "string" || part === null)
-      return null;
-    return { rpe: "live", key: v.key, page: v.page, seq: v.seq, data: v.data, ...part !== undefined ? { part } : {} };
-  }
-  return null;
-}
-function partOf(v) {
-  if (v === undefined)
-    return;
-  if (!isRecord(v))
-    return null;
-  const { index, count: total } = v;
-  return count(index) && count(total) && index < total ? { index, count: total } : null;
-}
-function readFromPage(v) {
-  if (!isRecord(v))
-    return null;
-  switch (v.rpe) {
-    case "start":
-      return { rpe: "start" };
-    case "request": {
-      const headers = headersOf(v.headers);
-      if (!str2(v.id) || !str2(v.method) || !str2(v.path) || headers === null || v.body !== undefined && typeof v.body !== "string")
-        return null;
-      return { rpe: "request", id: v.id, method: v.method.toUpperCase(), path: v.path, headers, ...typeof v.body === "string" ? { body: v.body } : {} };
-    }
-    case "follow":
-    case "unfollow":
-      return str2(v.chat) ? { rpe: v.rpe, chat: v.chat } : null;
-    default:
-      return null;
-  }
-}
-function readStartFacts(v) {
-  if (!isRecord(v) || !str2(v.token) || typeof v.expiresAt !== "number" || !count(v.expiresInMs) || !Array.isArray(v.addresses) || !v.addresses.every(str2) || typeof v.build !== "string")
-    return null;
-  return { token: v.token, expiresAt: v.expiresAt, expiresInMs: v.expiresInMs, addresses: [...v.addresses], build: v.build };
-}
-function onLoopback(base) {
-  let url;
-  try {
-    url = new URL(base);
-  } catch {
-    return false;
-  }
-  if (url.protocol !== "http:" && url.protocol !== "https:")
-    return false;
-  if (url.username !== "" || url.password !== "" || url.pathname !== "/" || /[?#]/.test(base))
-    return false;
-  const host = url.hostname;
-  return host === "localhost" || host === "[::1]" || /^127(?:\.\d{1,3}){3}$/.test(host);
-}
-
-// src/ext/pipe.ts
-var PAGE_HEADERS = ["authorization", "content-type", "accept", "if-none-match"];
-var ANSWER_HEADERS = ["content-type", "etag", "cache-control"];
-var words = (error) => error instanceof Error ? error.message : String(error);
-function startPipe(deps) {
-  const { spindle: spindle2 } = deps;
-  const pages = new Map;
-  const seen = (user, page) => {
-    const set = pages.get(user) ?? new Set;
-    set.add(page);
-    pages.set(user, set);
-  };
-  const toPage = (user, page, message) => spindle2.sendToFrontend(message, user, { frontendSessionId: page });
-  const toRpe = async (user, message) => {
-    const r = await deps.registrations.of(user);
-    if (r !== null)
-      spindle2.sendToFrontend(message, user, { frontendSessionId: r.relay });
-  };
-  const call = async (road, path, body) => {
-    const res = await spindle2.cors(`${road.base}${path}`, { method: "POST", headers: { "content-type": "application/json", ...road.headers }, body: JSON.stringify(body) });
-    let parsed = null;
-    try {
-      parsed = JSON.parse(res.body ?? "");
-    } catch {}
-    return { status: res.status, body: parsed };
-  };
-  const refusedWords = "RPE does not belong to your Lumiverse user, or it has not connected to Lumiverse yet.";
-  async function start(user, page) {
-    seen(user, page);
-    const road = await deps.registrations.road(user);
-    if (road === null)
-      return toPage(user, page, { rpe: "start", facts: null, error: refusedWords, missing: deps.missing() });
-    try {
-      const answer = await call(road, START_PATH, {});
-      const facts = answer.status === 200 ? readStartFacts(answer.body) : null;
-      const error = facts !== null ? undefined : isRecord(answer.body) && typeof answer.body.error === "string" ? answer.body.error : `RPE answered ${answer.status}.`;
-      toPage(user, page, { rpe: "start", facts, ...error !== undefined ? { error } : {}, missing: deps.missing() });
-    } catch (error) {
-      toPage(user, page, { rpe: "start", facts: null, error: `RPE was not reached through Lumiverse: ${words(error)}`, missing: deps.missing() });
-    }
-  }
-  async function request(user, page, req) {
-    const answer = (status, body, headers2 = { "content-type": "application/json" }) => toPage(user, page, { rpe: "response", id: req.id, status, headers: headers2, body });
-    const road = await deps.registrations.road(user);
-    if (road === null)
-      return answer(403, JSON.stringify({ error: refusedWords }));
-    let url;
-    try {
-      url = new URL(req.path, road.base);
-    } catch {
-      return answer(400, JSON.stringify({ error: "That is not a path of RPE's API." }));
-    }
-    if (url.origin !== new URL(road.base).origin || !url.pathname.startsWith("/api/v1/") || url.pathname.startsWith("/api/v1/ext/"))
-      return answer(400, JSON.stringify({ error: "That is not a path of RPE's API." }));
-    const headers = {};
-    for (const name of PAGE_HEADERS)
-      if (req.headers[name] !== undefined)
-        headers[name] = req.headers[name];
-    try {
-      const res = await spindle2.cors(url.toString(), { method: req.method, headers, ...req.body !== undefined ? { body: req.body } : {} });
-      const back = {};
-      for (const [k, v] of Object.entries(res.headers ?? {}))
-        if (ANSWER_HEADERS.includes(k.toLowerCase()))
-          back[k.toLowerCase()] = v;
-      answer(res.status, res.body ?? "", back);
-    } catch (error) {
-      answer(502, JSON.stringify({ error: `RPE was not reached through Lumiverse: ${words(error)}` }));
-    }
-  }
-  async function follow(user, page, chat, on) {
-    seen(user, page);
-    const road = await deps.registrations.road(user);
-    if (road === null)
-      return toPage(user, page, { rpe: "following", chat, error: refusedWords });
-    try {
-      const answer = await call(road, LIVE_PATH, { page, chat, follow: on });
-      toPage(user, page, { rpe: "following", chat, ...answer.status === 200 ? {} : { error: isRecord(answer.body) && typeof answer.body.error === "string" ? answer.body.error : `RPE answered ${answer.status}.` } });
-    } catch (error) {
-      toPage(user, page, { rpe: "following", chat, error: `RPE was not reached through Lumiverse: ${words(error)}` });
-    }
-  }
-  const offMessage = spindle2.onFrontendMessage((payload, user, session) => {
-    const fromRpe = readFromRpe(payload);
-    if (fromRpe !== null) {
-      (async () => {
-        if (fromRpe.rpe === "register") {
-          if (session === undefined)
-            return;
-          const refused = session !== fromRpe.registration.relay ? "it came from another socket than the one it names as RPE's." : await deps.registrations.keep(user, fromRpe.registration);
-          if (refused !== null) {
-            deps.log(`a registration for user ${user} was refused: ${refused}`);
-            spindle2.sendToFrontend({ rpe: "refused", why: refused, missing: deps.missing() }, user, { frontendSessionId: session });
-            deps.refused(user);
-            return;
-          }
-          await toRpe(user, { rpe: "registered", missing: deps.missing(), build: deps.build });
-          deps.registered(user);
-          return;
-        }
-        const r = await deps.registrations.of(user);
-        if (r === null || r.key !== fromRpe.key)
-          return;
-        const { rpe: _rpe, key: _key, page, ...frame } = fromRpe;
-        toPage(user, page, { rpe: "live", ...frame });
-      })().catch((error) => deps.log(`a message from RPE was not handled: ${words(error)}`));
-      return;
-    }
-    const fromPage = readFromPage(payload);
-    if (fromPage === null || session === undefined)
-      return;
-    const work = fromPage.rpe === "start" ? start(user, session) : fromPage.rpe === "request" ? request(user, session, fromPage) : follow(user, session, fromPage.chat, fromPage.rpe === "follow");
-    work.catch((error) => deps.log(`a page's message was not handled: ${words(error)}`));
-  });
-  const offClosed = spindle2.on("FRONTEND_SESSION_CLOSED", (payload, user) => {
-    if (user === undefined || !isRecord(payload) || typeof payload.frontendSessionId !== "string")
-      return;
-    const page = payload.frontendSessionId;
-    if (pages.get(user)?.delete(page) !== true)
-      return;
-    (async () => {
-      const road = await deps.registrations.road(user);
-      if (road !== null)
-        await call(road, LIVE_PATH, { page, gone: true });
-    })().catch((error) => deps.log(`RPE was not told a page closed: ${words(error)}`));
-  });
-  return {
-    permissions() {
-      const missing2 = deps.missing();
-      for (const user of deps.registrations.users()) {
-        toRpe(user, { rpe: "permissions", missing: missing2 });
-        for (const page of pages.get(user) ?? [])
-          toPage(user, page, { rpe: "permissions", missing: missing2 });
-      }
-    },
-    stop() {
-      offMessage();
-      offClosed();
-    }
-  };
-}
-
-// src/adapter/lumiverse/wire.ts
-var TAG_FIELD = "rpe_turn";
-var QUESTION_PATH = "/api/v1/ext/question";
-function textHash(text) {
-  return new Bun.CryptoHasher("sha256").update(text).digest("hex").slice(0, 32);
-}
-function replyKindOf(type) {
-  if (type === "normal")
-    return "new";
-  return type === "swipe" || type === "regenerate" || type === "continue" || type === "impersonate" ? type : null;
-}
-function historyCut(items, keep) {
-  if (keep === null)
-    return [];
-  let first = items.length;
-  for (let i = 0;i < items.length; i++) {
-    const item = items[i];
-    if (item !== undefined && item.history && item.index !== null && item.index >= keep.index) {
-      first = i;
-      break;
-    }
-  }
-  const out = [];
-  for (let i = 0;i < first; i++)
-    if (items[i]?.history === true)
-      out.push(i);
-  return out;
-}
-function str3(v) {
-  return typeof v === "string";
-}
-function int(v) {
-  return typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
-}
-function ids(v) {
-  return Array.isArray(v) && v.every(str3);
-}
-function keepPoint(v) {
-  if (v === null)
-    return null;
-  return isRecord(v) && str3(v.id) && int(v.index) ? { id: v.id, index: v.index } : undefined;
-}
-function verdictOf(v) {
-  if (!isRecord(v) || !ids(v.disabled) || !ids(v.enabled) || !Array.isArray(v.mutated))
-    return;
-  const mutated = [];
-  for (const m of v.mutated) {
-    if (!isRecord(m) || !str3(m.id) || !str3(m.content))
-      return;
-    mutated.push({ id: m.id, content: m.content });
-  }
-  return { disabled: [...v.disabled], enabled: [...v.enabled], mutated };
-}
-function readAnswer(value) {
-  if (!isRecord(value) || value.v !== 1)
-    return null;
-  const secrecy = value.secrecy === null ? null : verdictOf(value.secrecy);
-  if (secrecy === undefined)
-    return null;
-  let cut;
-  if (value.cut === null)
-    cut = null;
-  else if (isRecord(value.cut)) {
-    const keep = keepPoint(value.cut.keep);
-    if (keep === undefined)
-      return null;
-    cut = { keep };
-  } else
-    return null;
-  return { v: 1, secrecy, cut };
-}
-
-// src/ext/prompt.ts
-class Stop extends Error {
-}
-var str4 = (v) => typeof v === "string" && v !== "" ? v : null;
-function contextOf(raw) {
-  if (!isRecord(raw))
-    return null;
-  const user = str4(raw.userId);
-  const chat = str4(raw.chatId);
-  if (user === null || chat === null)
-    return null;
-  const lore = [];
-  for (const e of Array.isArray(raw.activatedWorldInfo) ? raw.activatedWorldInfo : []) {
-    if (!isRecord(e) || typeof e.id !== "string")
-      continue;
-    lore.push({ id: e.id, book: str4(e.bookId), title: typeof e.comment === "string" ? e.comment : "", how: str4(e.source) });
-  }
-  return {
-    user,
-    chat,
-    type: str4(raw.generationType),
-    dryRun: raw.dryRun === true || raw.isDryRun === true,
-    connection: str4(raw.connectionId),
-    preset: str4(raw.presetId),
-    persona: str4(raw.personaId),
-    generation: str4(raw.generationId),
-    lore
-  };
-}
-function listedMessage(m) {
-  const role = m.role === "system" || m.role === "assistant" ? m.role : "user";
-  let text = "";
-  let parts;
-  let media = 0;
-  if (typeof m.content === "string")
-    text = m.content;
-  else if (Array.isArray(m.content)) {
-    const texts = [];
-    for (const part of m.content) {
-      if (isRecord(part) && part.type === "text" && typeof part.text === "string")
-        texts.push(part.text);
-      else
-        media++;
-    }
-    text = texts.join("");
-    parts = texts.map((t) => t.length);
-  }
-  return {
-    role,
-    length: text.length,
-    hash: textHash(text),
-    ...text.trim().length === 0 ? { blank: true } : {},
-    ...m.__isChatHistory === true ? { history: true } : {},
-    ...m.__isChatHistory === true && typeof m.sourceMessageId === "string" && typeof m.sourceIndexInChat === "number" ? { source: { id: m.sourceMessageId, index: m.sourceIndexInChat } } : {},
-    ...m.__isWorldInfoEntry === true ? { lore: true } : {},
-    ...m.__isChatHistory === true && m.__cortexHistorySummary === true ? { summary: true } : {},
-    ...m.partial === true ? { partial: true } : {},
-    ...parts !== undefined ? { parts } : {},
-    ...media > 0 ? { media } : {}
-  };
-}
-function promptInterceptor(deps) {
-  return async (messages, context) => {
-    let ours = false;
-    try {
-      const ctx = contextOf(context);
-      if (ctx === null || ctx.dryRun || ctx.connection === null)
-        return messages;
-      const kind = replyKindOf(ctx.type);
-      if (kind === null || ctx.type === null)
-        return messages;
-      ours = await deps.isRpe(ctx.connection, ctx.user);
-      if (!ours)
-        return messages;
-      if (!deps.granted("generation_parameters"))
-        throw new Stop("RPE stopped this reply rather than send it without RPE: its extension may not add to a reply's request. Grant RPE's extension the \u201Cgeneration_parameters\u201D permission in Lumiverse.");
-      const generation = deps.generations.take(ctx.user, ctx.chat, ctx.type, ctx.generation);
-      if (generation === null)
-        throw new Stop("RPE could not tell which generation this prompt belongs to, so it stopped the reply. Send it again.");
-      const cut = deps.generations.cutFor(ctx.user, ctx.chat, generation.id);
-      const left = new Set(cut === null ? [] : historyCut(messages.map((m) => ({ history: m.__isChatHistory === true, index: typeof m.sourceIndexInChat === "number" ? m.sourceIndexInChat : null })), cut.keep));
-      const kept = left.size === 0 ? messages : messages.filter((_, i) => !left.has(i));
-      const tag = {
-        v: 1,
-        user: ctx.user,
-        chat: ctx.chat,
-        generation: generation.id,
-        kind,
-        target: generation.target,
-        speaker: generation.speaker,
-        connection: ctx.connection,
-        preset: ctx.preset,
-        persona: ctx.persona,
-        cut: cut === null ? { answered: false, remembered: null, removed: 0 } : cut.by === "answer" ? { answered: true, keep: cut.keep, removed: left.size } : { answered: false, remembered: cut.keep, removed: left.size },
-        messages: kept.map(listedMessage),
-        lore: ctx.lore
-      };
-      return { messages: kept, parameters: { [TAG_FIELD]: tag, _streaming: true } };
-    } catch (error) {
-      if (!ours) {
-        deps.log(`a prompt not on RPE's connection went on untouched after the extension failed: ${error instanceof Error ? error.message : String(error)}`);
-        return messages;
-      }
-      if (error instanceof Stop)
-        throw error;
-      throw new Error(`RPE stopped this reply before it was sent, because its extension failed: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  };
+  return { disabled: [...verdict.disabled], enabled: [...verdict.enabled], mutated: [...verdict.mutated ?? []] };
 }
 
 // src/ext/road.ts
-async function ask(proxy, road, question, deadlineMs) {
+async function ask(proxy, road, question) {
+  const asked = performance.now();
   const deadline = Promise.withResolvers();
-  const timer = setTimeout(() => deadline.resolve({ none: `RPE gave no answer within ${deadlineMs} ms` }), deadlineMs);
-  const asked = (async () => {
+  const timer = setTimeout(() => deadline.resolve({ none: `RPE gave no answer within ${road.waitMs} ms` }), road.waitMs);
+  const answering = (async () => {
     const res = await proxy(`${road.base}${QUESTION_PATH}`, { method: "POST", headers: { "content-type": "application/json", ...road.headers }, body: JSON.stringify(question) });
     if (res.status !== 200)
-      return { none: `RPE answered ${res.status}${res.body ? `: ${res.body.slice(0, 200)}` : ""}` };
+      return { none: `RPE answered ${res.status}${res.body ? `: ${res.body.slice(0, road.logChars)}` : ""}` };
     let parsed;
     try {
       parsed = JSON.parse(res.body ?? "");
@@ -1354,7 +1354,8 @@ async function ask(proxy, road, question, deadlineMs) {
     return answer === null ? { none: "RPE's answer is not one this extension reads" } : { answer };
   })().catch((error) => ({ none: `RPE was not reached (${error instanceof Error ? error.message : String(error)})` }));
   try {
-    return await Promise.race([asked, deadline.promise]);
+    const reply = await Promise.race([answering, deadline.promise]);
+    return { ...reply, ms: Math.min(road.waitMs, Math.round(performance.now() - asked)) };
   } finally {
     clearTimeout(timer);
   }
@@ -1365,10 +1366,14 @@ function contextOf2(raw) {
   if (!isRecord(raw) || typeof raw.userId !== "string" || raw.userId === "" || typeof raw.chatId !== "string")
     return null;
   const path = [];
+  let lastReply = null;
   for (const m of Array.isArray(raw.messages) ? raw.messages : []) {
     if (!isRecord(m) || typeof m.id !== "string" || typeof m.index_in_chat !== "number")
       continue;
-    path.push({ id: m.id, index: m.index_in_chat, swipe: typeof m.swipe_id === "number" ? m.swipe_id : null });
+    const text = typeof m.content === "string" ? m.content : "";
+    path.push({ id: m.id, index: m.index_in_chat, swipe: typeof m.swipe_id === "number" ? m.swipe_id : null, user: m.is_user === true, hash: textHash(text) });
+    if (m.is_user !== true && (lastReply === null || m.index_in_chat > lastReply.index))
+      lastReply = { id: m.id, index: m.index_in_chat, text };
   }
   const candidates = [];
   for (const e of Array.isArray(raw.entries) ? raw.entries : []) {
@@ -1376,89 +1381,128 @@ function contextOf2(raw) {
       continue;
     candidates.push({ id: e.id, bookId: typeof e.world_book_id === "string" ? e.world_book_id : "", disabled: e.disabled === true, extensions: isRecord(e.extensions) ? e.extensions : {}, comment: typeof e.comment === "string" ? e.comment : "", content: typeof e.content === "string" ? e.content : "" });
   }
-  return { user: raw.userId, chat: raw.chatId, purpose: raw.purpose === "query" ? "query" : "prompt", path, candidates };
-}
-function entryOf(e) {
-  const own = e.extensions[LEDGER_NAMESPACE];
-  const telling = hasSecretMarks(e.content) || unreadableMarks(e.content).length > 0 || isRecord(own);
-  return {
-    id: e.id,
-    book: e.bookId,
-    disabled: e.disabled,
-    key: textOf(e.content),
-    ...telling ? { content: e.content, comment: e.comment, ...isRecord(own) ? { extensions: { [LEDGER_NAMESPACE]: own } } : {} } : {}
-  };
+  return { user: raw.userId, chat: raw.chatId, purpose: raw.purpose === "query" ? "query" : "prompt", path, candidates, lastReply: lastReply === null ? null : { id: lastReply.id, text: lastReply.text } };
 }
 function worldInfoInterceptor(deps) {
   return async (raw) => {
     const ctx = contextOf2(raw);
     if (ctx === null)
       return {};
-    const fallBack = (why) => {
+    const generation = ctx.purpose === "prompt" ? deps.generations.pending(ctx.user, ctx.chat) : null;
+    const continued = generation !== null && replyKindOf(generation.type) === "continue" ? ctx.lastReply : null;
+    const handOn = (handoff) => {
+      if (generation !== null)
+        deps.generations.hold(ctx.user, ctx.chat, generation.id, { ...handoff, continued });
+    };
+    const fallBack = (why, question) => {
       deps.log(`chat ${ctx.chat}: ${why}, so its secrets stay out of this prompt`);
-      if (ctx.purpose === "prompt") {
-        const remembered = deps.keptOut.cutOf(ctx.user, ctx.chat);
-        const at = remembered === null ? undefined : ctx.path.find((s) => s.id === remembered.id);
-        deps.generations.hold(ctx.user, ctx.chat, deps.generations.pending(ctx.user, ctx.chat)?.id ?? null, at === undefined ? null : { keep: { id: at.id, index: at.index }, by: "memory" });
-      }
-      return failClosed(ctx.candidates, deps.keptOut.of(ctx.user, ctx.chat));
+      handOn({ cut: null, secrecy: { by: "extension", why }, question });
+      return failClosed(ctx.candidates);
     };
     try {
       const road = await deps.road(ctx.user);
-      if (road === null)
-        return failClosed(ctx.candidates, deps.keptOut.of(ctx.user, ctx.chat));
-      const generation = ctx.purpose === "prompt" ? deps.generations.pending(ctx.user, ctx.chat) : null;
-      const question = { v: 1, user: ctx.user, chat: ctx.chat, purpose: ctx.purpose, generation, path: ctx.path, entries: ctx.candidates.map(entryOf) };
-      const reply = await ask(deps.proxy, road, question, deps.deadlineMs);
+      if (road === null) {
+        handOn({ cut: null, secrecy: { by: "extension", why: "RPE has not registered with the extension for this user" }, question: null });
+        return failClosed(ctx.candidates);
+      }
+      const question = { v: 1, user: ctx.user, chat: ctx.chat, purpose: ctx.purpose, generation, path: ctx.path, entries: ctx.candidates.map(questionEntryOf) };
+      const reply = await ask(deps.proxy, road, question);
       if ("none" in reply)
-        return fallBack(reply.none);
-      deps.keptOut.heard(ctx.user, ctx.chat, reply.answer);
-      if (ctx.purpose === "prompt")
-        deps.generations.hold(ctx.user, ctx.chat, generation?.id ?? null, reply.answer.cut === null ? null : { keep: reply.answer.cut.keep, by: "answer" });
-      return reply.answer.secrecy ?? failClosed(ctx.candidates, deps.keptOut.of(ctx.user, ctx.chat));
+        return fallBack(reply.none, { ms: reply.ms, answered: false });
+      const time = { ms: reply.ms, answered: true };
+      if (reply.answer.secrecy === null) {
+        handOn({ cut: reply.answer.cut, secrecy: { by: "extension", why: "RPE could not work out the secrets" }, question: time });
+        return failClosed(ctx.candidates);
+      }
+      handOn({ cut: reply.answer.cut, secrecy: { by: "rpe" }, question: time });
+      return reply.answer.secrecy;
     } catch (error) {
-      return fallBack(`the extension failed (${error instanceof Error ? error.message : String(error)})`);
+      return fallBack(`the extension failed (${error instanceof Error ? error.message : String(error)})`, null);
     }
   };
 }
 
 // src/ext/registration.ts
-class Registrations {
-  storage;
-  proxy;
-  byUser = new Map;
-  constructor(storage, proxy) {
-    this.storage = storage;
-    this.proxy = proxy;
+var words2 = (error) => error instanceof Error ? error.message : String(error);
+var WHOSE_WAIT_MS = 2000;
+async function within(read, ms) {
+  const late = Promise.withResolvers();
+  const timer = setTimeout(() => late.reject(new Error(`it did not answer within ${ms / 1000} s`)), ms);
+  try {
+    return await Promise.race([read, late.promise]);
+  } finally {
+    clearTimeout(timer);
   }
-  async of(user) {
+}
+
+class Registrations {
+  deps;
+  byUser = new Map;
+  reading = new Map;
+  marks = new Map;
+  constructor(deps) {
+    this.deps = deps;
+  }
+  of(user) {
     if (this.byUser.has(user))
-      return this.byUser.get(user) ?? null;
-    const kept = readRegistration(await this.storage.getJson(REGISTRATION_FILE, { fallback: null, userId: user }));
+      return Promise.resolve(this.byUser.get(user) ?? null);
+    let read = this.reading.get(user);
+    if (read === undefined) {
+      read = this.read(user).finally(() => this.reading.delete(user));
+      this.reading.set(user, read);
+    }
+    return read;
+  }
+  async read(user) {
+    let stored;
+    try {
+      stored = await this.deps.storage.getJson(REGISTRATION_FILE, { fallback: null, userId: user });
+    } catch (error) {
+      this.deps.unread(user, words2(error));
+      throw error;
+    }
+    this.deps.unread(user, null);
+    let kept = readRegistration(stored);
+    if (kept !== null && !(isRecord(stored) && stored.confirmed === true)) {
+      const doubt = await this.confirm(user, kept);
+      if (doubt === null)
+        await this.store(user, kept).catch((error) => this.deps.log(`the confirmed registration of user ${user} was not stored again: ${words2(error)}`));
+      else {
+        this.deps.log(`the registration stored for user ${user} is not used: ${doubt}`);
+        kept = null;
+      }
+    }
     if (!this.byUser.has(user))
       this.byUser.set(user, kept);
     return this.byUser.get(user) ?? null;
   }
+  store(user, registration) {
+    return this.deps.storage.setJson(REGISTRATION_FILE, { ...registration, confirmed: true }, { userId: user });
+  }
   async keep(user, registration) {
     if (!onLoopback(registration.base))
       return `its address ${registration.base} is not a bare address on this machine's loopback (a scheme, a host and a port, nothing more), the only road the extension takes to RPE.`;
-    if (JSON.stringify(await this.of(user)) === JSON.stringify(registration))
+    const held = await this.of(user).catch(() => {
+      return;
+    });
+    if (held !== undefined && JSON.stringify(held) === JSON.stringify(registration))
       return null;
     const doubt = await this.confirm(user, registration);
     if (doubt !== null)
       return doubt;
     this.byUser.set(user, registration);
-    await this.storage.setJson(REGISTRATION_FILE, registration, { userId: user });
+    this.deps.unread(user, null);
+    await this.store(user, registration);
     return null;
   }
   async confirm(user, registration) {
     const base = registration.base.replace(/\/+$/, "");
-    const ask2 = { relay: registration.relay, connection: registration.connection };
+    const ask2 = { relay: registration.relay, connections: registration.connections };
     let answer;
     try {
-      answer = await this.proxy(`${base}${CONFIRM_PATH}`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${registration.key}`, [USER_HEADER]: user }, body: JSON.stringify(ask2) });
+      answer = await this.deps.proxy(`${base}${CONFIRM_PATH}`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${registration.key}`, [USER_HEADER]: user }, body: JSON.stringify(ask2) });
     } catch (error) {
-      return `the extension could not reach RPE at ${base} to confirm it (${error instanceof Error ? error.message : String(error)}).`;
+      return `the extension could not reach RPE at ${base} to confirm it (${words2(error)}).`;
     }
     let body = null;
     try {
@@ -1473,32 +1517,76 @@ class Registrations {
     return [...this.byUser].flatMap(([user, r]) => r === null ? [] : [user]);
   }
   async road(user) {
-    const r = await this.of(user);
-    return r === null ? null : { base: r.base.replace(/\/+$/, ""), headers: { authorization: `Bearer ${r.key}`, [USER_HEADER]: user } };
+    const r = await this.of(user).catch(() => null);
+    return r === null ? null : { base: r.base.replace(/\/+$/, ""), headers: { authorization: `Bearer ${r.key}`, [USER_HEADER]: user }, waitMs: r.values.questionMs, logChars: r.values.logChars };
   }
-  async isRpe(connection, user) {
-    return (await this.of(user))?.connection === connection;
+  async marked(connection, user) {
+    const key = `${user}\x00${connection}`;
+    const kept = this.marks.get(key);
+    if (kept !== undefined)
+      return kept;
+    const profile = await this.deps.connections.get(connection, user);
+    const marked = profile !== null && rpeMarked(profile.metadata);
+    this.marks.set(key, marked);
+    return marked;
+  }
+  async whose(connection, user) {
+    const held = this.byUser.get(user);
+    if (held?.connections.includes(connection) === true)
+      return { rpe: true };
+    const waitMs = held?.values.whoseMs ?? WHOSE_WAIT_MS;
+    let mark;
+    try {
+      return { rpe: await within(this.marked(connection, user), waitMs) };
+    } catch (error) {
+      mark = words2(error);
+    }
+    if (held !== undefined)
+      return { rpe: false };
+    try {
+      return { rpe: (await within(this.of(user), waitMs))?.connections.includes(connection) === true };
+    } catch (error) {
+      return { unknown: { registration: words2(error), mark } };
+    }
   }
 }
 
 // src/ext/start.ts
-var DEADLINE_MS = 3000;
-var CHATS_FOLLOWED = 256;
 var PRIORITY = Number.MAX_SAFE_INTEGER;
 var NOTICE_ID = "rpe-permissions";
-function noticeItems(lacking) {
-  return [
-    { type: "text", content: "RPE cannot play your chats until its extension has these permissions in Lumiverse. A Lumiverse admin grants them on the Extensions page." },
-    { type: "divider" },
-    ...lacking.map((m) => ({ type: "text", content: `${m.permission}: ${m.why}` }))
-  ];
+function noticeItems(lacking, unread) {
+  const items = [];
+  if (lacking.length > 0) {
+    items.push({ type: "text", content: "RPE cannot play your chats until its extension has these permissions in Lumiverse. A Lumiverse admin grants them on the Extensions page." }, { type: "divider" });
+    for (const m of lacking)
+      items.push({ type: "text", content: `${m.permission}: ${m.why}` });
+  }
+  if (unread !== undefined) {
+    if (items.length > 0)
+      items.push({ type: "divider" });
+    items.push({ type: "text", content: `RPE's extension could not read RPE's registration from its storage in Lumiverse (${unread}). Until it can, it tells RPE's chats by the mark on RPE's connections in Lumiverse.` });
+  }
+  return items;
 }
 async function startExtension(spindle2, options = {}) {
-  const chats = options.chats ?? CHATS_FOLLOWED;
   const log = (message) => spindle2.log.warn(`[RPE] ${message}`);
-  const generations = new Generations(chats);
-  const keptOut = new KeptOut(chats);
-  const registrations = new Registrations(spindle2.userStorage, (url, init) => spindle2.cors(url, init));
+  const generations = new Generations;
+  const unread = new Map;
+  const registrations = new Registrations({
+    storage: spindle2.userStorage,
+    proxy: (url, init) => spindle2.cors(url, init),
+    connections: spindle2.connections,
+    unread: (user, why) => {
+      if (why === null ? !unread.delete(user) : unread.get(user) === why)
+        return;
+      if (why !== null) {
+        unread.set(user, why);
+        log(`the registration of user ${user} could not be read from the extension's storage: ${why}`);
+      }
+      notice();
+    },
+    log
+  });
   let granted = await spindle2.permissions.getGranted();
   const lacking = () => missing(granted);
   const waiting = new Set;
@@ -1506,7 +1594,8 @@ async function startExtension(spindle2, options = {}) {
     spindle: spindle2,
     registrations,
     missing: lacking,
-    build: options.build ?? "c2d59e6d" ?? "dev",
+    build: options.build ?? "cb71de2f" ?? "dev",
+    statedHash: options.statedHash !== undefined ? options.statedHash : "c9989ed731c5e8d7070196198feec754e5d0668540b264ca21ef7622680bce71",
     log,
     registered: () => notice(),
     refused: (user) => {
@@ -1519,8 +1608,10 @@ async function startExtension(spindle2, options = {}) {
   const shown = new Map;
   const notice = () => {
     const now = lacking();
-    const said = JSON.stringify(now);
-    for (const user of new Set([...registrations.users(), ...waiting])) {
+    for (const user of new Set([...registrations.users(), ...waiting, ...unread.keys()])) {
+      const why = unread.get(user);
+      const items = now.length > 0 || why !== undefined ? noticeItems(now, why) : [];
+      const said = JSON.stringify(items);
       if (shown.get(user) === said)
         continue;
       const was = shown.get(user);
@@ -1528,14 +1619,20 @@ async function startExtension(spindle2, options = {}) {
       (async () => {
         if (was !== undefined && was !== "[]")
           await spindle2.modal.close(NOTICE_ID, user);
-        if (now.length > 0)
-          spindle2.modal.open({ title: "RPE needs permissions", items: noticeItems(now), persistent: true, modalRequestId: NOTICE_ID, userId: user });
-      })().catch((error) => log(`the permission notice was not shown: ${error instanceof Error ? error.message : String(error)}`));
+        if (items.length > 0)
+          spindle2.modal.open({ title: now.length > 0 ? "RPE needs permissions" : "RPE's registration could not be read", items, persistent: true, modalRequestId: NOTICE_ID, userId: user });
+      })().catch((error) => log(`the notice was not shown: ${error instanceof Error ? error.message : String(error)}`));
     }
     pipe.permissions();
   };
-  const question = worldInfoInterceptor({ road: (user) => registrations.road(user), proxy: (url, init) => spindle2.cors(url, init), generations, keptOut, deadlineMs: options.deadlineMs ?? DEADLINE_MS, log });
-  const prompt = promptInterceptor({ generations, isRpe: (connection, user) => registrations.isRpe(connection, user), granted: (permission) => spindle2.permissions.has(permission), log });
+  const question = worldInfoInterceptor({ road: (user) => registrations.road(user), proxy: (url, init) => spindle2.cors(url, init), generations, log });
+  const prompt = promptInterceptor({
+    generations,
+    whose: (connection, user) => registrations.whose(connection, user),
+    granted: (permission) => spindle2.permissions.has(permission),
+    log,
+    stopped: (user, record) => pipe.stopped(user, record)
+  });
   let listening = [];
   let unregister = null;
   const open = (permission) => {
@@ -1544,7 +1641,13 @@ async function startExtension(spindle2, options = {}) {
       for (const off of listening)
         off();
       listening = [
-        spindle2.on("GENERATION_STARTED", (payload, user) => generations.started(payload, user)),
+        spindle2.on("GENERATION_STARTED", (payload, user) => {
+          generations.started(payload, user);
+          if (user !== undefined)
+            registrations.of(user).catch(() => {
+              return;
+            });
+        }),
         spindle2.on("GENERATION_ENDED", (payload, user) => generations.over(payload, user)),
         spindle2.on("GENERATION_STOPPED", (payload, user) => generations.over(payload, user))
       ];

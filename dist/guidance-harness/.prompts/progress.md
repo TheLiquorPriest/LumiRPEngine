@@ -6,4 +6,5 @@ started: Reading the turn.
 tool: {{tool}}
 rule: A rule of yours fired: {{rule}}.
 writing: Writing.
+hook_waits: Waiting for a hook of yours to see the reply.
 still: Still working ({{elapsed}}).

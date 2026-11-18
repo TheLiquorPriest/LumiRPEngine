@@ -1,0 +1,331 @@
+---
+description: The sentences the money writes into the chat's history and the world's notices - a credit decision, a card's statement and each stage of a late payment, a standing payment that went out, came in or did not go through, a loan paid off, a payday and its payslip, a late invoice, a bond or an option at its end, a project's step that waits for its money, and the lines of the money summary and the books (accounts, prices, taxes, dividends, a business's sales and draws, an asset's depreciation). One line per name, a name, a colon, then its text. A name in double braces puts in what the engine knows of it (an amount in the world's own coin, a name, a number), and a block opened with a hash and closed with a slash shows only when that value is there. Change the words freely. Delete a line and that is not said at all.
+format: lines
+keys:
+  name_*: the name the economy gives an account, a loan, a lease, a holding or a job it makes (name_symbol_in_account, name_lease and the rest)
+  flow_label_*: the label of a standing payment or a bill the economy sets up (an autopay, a tax, rent, dues, living costs, a payroll, an invoice)
+  party_*: the name of an outside party a posting names (walk-in customers, suppliers, owners, a purchaser)
+  memo_*: the memo written into the books with a posting (a deposit, a fee, a bill paid, a sale, a tax, a share out, an opening balance, a reversal) - each is filled with what it names
+  credit_approved: an application for credit that was approved - product, apr (absent where no rate), limit (absent where none)
+  credit_declined: an application for credit that was declined - product, reason (one of the credit_why lines)
+  credit_why_charged_off: why, when a recent charge-off is on the report
+  credit_why_score: why, when the score is too low
+  credit_why_amount: why, when more was asked than a lender lends - most
+  card_statement: a card's statement - name, owed, interest (absent when none), minimum, due
+  card_due_today: the minimum falls due today - name, left
+  card_penalty_lifted: six payments on time, so the penalty rate ends - name
+  card_payment_late: the minimum was not paid by its day (the first miss) - name, short, fee, penalty
+  card_payment_30: thirty days late - name, short, days, fee, penalty
+  card_payment_60: sixty days late - name, short, days, fee, penalty
+  card_payment_90: ninety days late - name, short, days, fee, penalty
+  card_payment_120: sent to collections - name, short, fee, penalty
+  card_payment_collections: still in collections - name, short, fee, penalty
+  card_payment_charged_off: charged off - name, short, fee, penalty
+  flow_paid: a standing payment went out - label, amount, offscreen or world (where it was set up)
+  flow_received: a standing payment came in - label, amount, offscreen or world (where it was set up)
+  flow_partial: only part of a standing payment was paid - label, part, amount
+  flow_retry: a standing payment did not go through and is tried again - label, amount
+  flow_fallback: a standing payment was paid from another account - label, amount, from
+  flow_deferred: a standing payment could not be paid and carries to next time - label, amount
+  flow_declined: a standing payment was declined - label, amount, reason
+  flow_why_failed: why, when no reason came with it
+  loan_paid_off: a loan between two parties is paid off - borrower, lender
+  payday: a paycheck - net, gross (absent where nothing was withheld)
+  invoice_late: an invoice the player owes is late - memo, business (absent where it is hidden from the player), days, one (true where days is 1), amount
+  invoice_late_owner: an invoice a business is owed is late - memo, customer (absent where it is hidden), days, one (true where days is 1), amount
+  bond_matured: a bond matured - asset, paid, coupon (absent where none)
+  option_exercised: an option was exercised at expiry - asset, value
+  option_expired: an option expired worthless - asset
+  project_wait_start: a project's step cannot start until its money can be paid - project, step, amount, reason
+  project_wait_finish: a project's step cannot finish until its money can be paid - project, step, amount, reason
+  money_*: the lines of the money summary and the books' notes (a worth no longer fixed or its band, prices up or back to normal, a statement closed, a card payment, a delinquency stage, a standing payment's outcome or new name, a hold, a credit report entry or score, card spending, accounts opened or closed, an account's status, an interest period, a declined payment, a year closed, a foundation's marks and taxes, a dividend, a penalty tax) - each is filled with what it names
+  project_*: a project in the books (started, a step waiting for its money, a step started or done, paused, resumed, dropped, a note on it) - project, step, amount, note, text
+  business_*, asset_*, stake_*, stream_*, income_*: what the books call a business's sales and draws, an asset's quote, yield, listing, close and month-end, a stake sold or bought, a revenue stream earned or adjusted, and the income a holding or a source pays - each is filled with what it names
+  payslip, worked_hours, commission, unemployment_accrued, suta_paid, futa_paid, estimated_tax, profit_goes_to, option_qty_exercised, holding_units, donation, depletion_of, depreciation_of, trust_distributed, cash_rule_*: the books' lines for pay and what it owes, an owner's profit, an option's units, a holding, a donation, an asset written down, a trust's payout and the cash rule in this chat - each is filled with what it names
+  econ_*, fin_*: the economy's own pieces of other lines and records (who a payment goes between, what was bought or sold, a standing payment ended, winding up begun, a market and an investor, an option exercised or matured, a tax named, what a company's holders got in a deal) - each is filled with what it names
+  reason_*: why a business's money has nowhere to be, how many days an account is late, a price corrected
+  feed_prices_at: the narrator's prices at a place - place, taxed (absent where none), offers
+---
+credit_approved: Approved: a {{product}}{{#apr}} at {{apr}}% APR{{/apr}}{{#limit}} with a {{limit}} limit{{/limit}}.
+credit_declined: The application for a {{product}} was declined: {{reason}}.
+credit_why_charged_off: a recent charge-off on their report
+credit_why_score: their credit score is too low
+credit_why_amount: it is more than a lender would lend them (at most {{most}})
+card_statement: {{name}} statement: {{owed}}{{#interest}} incl. {{interest}} interest{{/interest}}; minimum {{minimum}} due {{due}}.
+card_due_today: {{name}} payment of {{left}} is due today.
+card_penalty_lifted: {{name}}: six payments on time; the penalty rate is lifted.
+card_payment_late: {{name}} payment of {{short}} missed{{#fee}}; a {{fee}} late fee was charged{{/fee}}{{#penalty}}; the penalty rate of {{penalty}}% applies{{/penalty}}.
+card_payment_30: {{name}} payment of {{short}} {{days}} days late{{#fee}}; a {{fee}} late fee was charged{{/fee}}{{#penalty}}; the penalty rate of {{penalty}}% applies{{/penalty}}.
+card_payment_60: {{name}} payment of {{short}} {{days}} days late{{#fee}}; a {{fee}} late fee was charged{{/fee}}{{#penalty}}; the penalty rate of {{penalty}}% applies{{/penalty}}.
+card_payment_90: {{name}} payment of {{short}} {{days}} days late{{#fee}}; a {{fee}} late fee was charged{{/fee}}{{#penalty}}; the penalty rate of {{penalty}}% applies{{/penalty}}.
+card_payment_120: {{name}} payment of {{short}} sent to collections{{#fee}}; a {{fee}} late fee was charged{{/fee}}{{#penalty}}; the penalty rate of {{penalty}}% applies{{/penalty}}.
+card_payment_collections: {{name}} payment of {{short}} still in collections{{#fee}}; a {{fee}} late fee was charged{{/fee}}{{#penalty}}; the penalty rate of {{penalty}}% applies{{/penalty}}.
+card_payment_charged_off: {{name}} payment of {{short}} charged off{{#fee}}; a {{fee}} late fee was charged{{/fee}}{{#penalty}}; the penalty rate of {{penalty}}% applies{{/penalty}}.
+flow_paid: {{label}}: {{amount}} paid{{#offscreen}} (set up off screen){{/offscreen}}{{#world}} (set up in the world){{/world}}.
+flow_received: {{label}}: {{amount}} received{{#offscreen}} (set up off screen){{/offscreen}}{{#world}} (set up in the world){{/world}}.
+flow_partial: {{label}}: only {{part}} of {{amount}} paid.
+flow_retry: {{label}} ({{amount}}) did not go through; it will be tried again.
+flow_fallback: {{label}}: {{amount}} paid from {{from}}.
+flow_deferred: {{label}} ({{amount}}) could not be paid; it carries over to the next payment.
+flow_declined: {{label}} ({{amount}}) was declined: {{reason}}.
+flow_why_failed: the payment did not go through
+loan_paid_off: The loan of {{borrower}} from {{lender}} is paid off.
+payday: Payday: {{net}} net{{#gross}} ({{gross}} gross){{/gross}}.
+invoice_late: {{memo}} from {{#business}}{{business}}{{/business}}{{^business}}a business{{/business}} is {{days}} {{#one}}day{{/one}}{{^one}}days{{/one}} late: {{amount}} due.
+invoice_late_owner: {{memo}}, billed to {{#customer}}{{customer}}{{/customer}}{{^customer}}a customer{{/customer}}, is {{days}} {{#one}}day{{/one}}{{^one}}days{{/one}} late: {{amount}} owed.
+bond_matured: {{asset}} matured: {{paid}} paid out{{#coupon}}, its last coupon of {{coupon}} with it{{/coupon}}.
+option_exercised: {{asset}} was exercised at expiry and settled for {{value}}.
+option_expired: {{asset}} expired worthless.
+project_wait_start: {{project}}: {{step}} cannot start until {{amount}} can be paid ({{reason}}); it tries again as money comes in.
+project_wait_finish: {{project}}: {{step}} cannot finish until {{amount}} can be paid ({{reason}}); it tries again as money comes in.
+money_worth_free: {{entity}}'s worth is no longer fixed
+money_worth_band: {{entity}} is {{band}}
+money_prices_mult: Prices ×{{mult}}
+money_prices_normal: Prices back to normal
+money_statement_closed: The statement closed at {{closing}}, with at least {{minimum}} due
+money_card_payment: A card payment of {{amount}} was made
+money_stage: {{account}}'s payments are now {{stage}}
+money_flow_outcome: {{flow}}: {{outcome}}
+money_flow_renamed: Standing payment renamed {{name}}
+money_hold_released: Hold released
+money_hold: Hold of {{amount}}
+money_card_posted: Card payments posted
+money_credit_report: {{whose}} credit report now shows {{kind}}
+money_credit_score: {{whose}} credit score is now {{score}}
+money_card_spending: Card spending
+money_accounts_closed: Accounts closed again
+money_accounts_opened: Accounts opened
+money_status: {{account}} is now {{status}}
+money_interest_period: Interest period
+money_declined: {{memo}} was declined
+money_year_closed: {{party}} closed {{year}}
+money_foundation_marked: {{org}}'s assets marked for {{month}}
+money_dividend_received: {{party}} received a dividend from {{source}}
+money_consent_dividend: {{org}}: consent dividend for {{year}}
+money_phc_tax: {{party}}: personal holding company tax for {{year}}
+money_aet_tax: {{party}}: accumulated earnings tax for {{year}}
+money_foundation_tax: {{org}}: foundation taxes for {{year}}
+project_started: Started {{project}}
+project_step_waits_start: {{project}}: {{step}} waits for {{amount}} to start
+project_step_waits_finish: {{project}}: {{step}} waits for {{amount}} to finish
+project_step_started: {{project}}: {{step}} started
+project_step_done: {{project}}: {{step}} done
+project_paused: Paused {{project}}
+project_resumed: Resumed {{project}}
+project_dropped: Dropped {{project}}
+project_note: {{project}}: {{note}}{{#text}} ({{text}}){{/text}}
+business_sale_walkin: {{business}}: sale to walk-in customers
+business_sale: {{business}}: sale of {{memo}} to {{payer}}
+business_remit_tax: {{business}}: sales tax paid
+business_remit_suppliers: {{business}}: suppliers paid
+business_invoice_paid: {{business}}: invoice paid by {{customer}}
+business_draw: {{business}}: owner's draw
+business_profit: {{business}}: profit distributed
+asset_quote: {{symbol}} at {{price}}
+asset_price: {{asset}} at {{price}}
+asset_yield: {{asset}} yields {{yield}}%
+asset_listed: Contract listed: {{asset}}
+stake_sold: {{party}} sold {{pct}}% of their share of {{entity}}
+stake_bought: {{party}} bought into {{entity}}
+trust_distributed: {{trust}} distributed to its beneficiaries
+payslip: Payslip: {{worker}}, {{job}}
+worked_hours: Worked {{hours}} h
+commission: Commission on sales: {{job}}
+unemployment_accrued: Unemployment tax accrued: {{employer}}
+suta_paid: SUTA paid: {{employer}}
+futa_paid: FUTA paid: {{employer}}
+stream_earned: {{stream}}: {{amount}} earned
+stream_adjusted_factor: {{stream}}: ×{{factor}} a payment until {{until}}{{#reason}} ({{reason}}){{/reason}}
+stream_adjusted_amount: {{stream}}: {{amount}} on each payment until {{until}}{{#reason}} ({{reason}}){{/reason}}
+estimated_tax: Estimated tax: {{party}}
+profit_goes_to: {{owner}}'s profit from {{business}} goes to {{#to}}{{to}}{{/to}}{{^to}}their account{{/to}}
+option_qty_exercised: {{option}}: {{qty}} exercised
+income_profit: {{source}}: {{amount}} profit share
+income_kind: {{source}}: {{amount}} {{kind}}
+holding_units: {{holding}}: {{qty}} units ({{kind}}) for {{amount}}
+donation: Donation: {{donor}} to {{org}}
+depletion_of: Depletion of {{asset}} for {{month}}
+depreciation_of: Depreciation of {{asset}} for {{month}}
+cash_rule_world: Cash follows the world's rule again
+cash_rule_machine: In this chat, cash needs a machine or a branch
+cash_rule_free: In this chat, cash needs no machine
+asset_closed: {{asset}} closed {{on}} at {{price}}
+asset_month_end: {{asset}}'s month-end closes
+memo_cash_deposit_where: Cash deposit{{#where}} {{where}}{{/where}}
+memo_cash_deposit: Cash deposit
+memo_name_loan_paid_out: {{name}}: loan paid out
+memo_name_replacement: {{name}} replacement
+memo_walk_in_customers: Walk-in customers
+memo_walk_in_takings: Walk-in takings
+memo_sales_tax: Sales tax
+memo_trust_distribution: Trust distribution
+memo_profit_distribution: Profit distribution
+memo_suppliers: Suppliers
+memo_invoice_memo: Invoice: {{memo}}
+memo_owner_s_draw: Owner's draw
+memo_name_cash_advance_interest: {{name}} cash advance interest
+memo_name_annual_fee: {{name}} annual fee
+memo_name_late_fee: {{name}} late fee
+memo_name_monthly_fee: {{name}} monthly fee
+memo_name_interest: {{name}} interest
+memo_name_rewards: {{name}} rewards
+memo_returned_payment_fee: Returned payment fee
+memo_opening_balance_changed: Opening balance changed
+memo_living_costs: Living costs
+memo_correction: Correction
+memo_payment: Payment
+memo_transfer: Transfer
+memo_loan_payment_received: {{loan}}: payment received
+memo_overdraft_transfer_from_link: Overdraft transfer from {{link}}
+memo_overdraft_fee: Overdraft fee
+memo_cash_advance_fee: Cash advance fee
+memo_cash_you_said_you_had: Cash you said you had
+memo_opening_balances: Opening balances
+memo_opening_balance: Opening balance
+memo_name_mortgage_paid_off: {{name}}: mortgage paid off
+memo_bought_memo: Bought {{memo}}
+memo_share_out_from_org: Share out from {{org}}
+memo_unemployment_tax: Unemployment tax
+memo_corporate_income_tax: Corporate income tax
+memo_foundation_excise_tax_year: Foundation excise tax, {{year}}
+memo_lent_money_to_borrowername: Lent {{money}} to {{borrowerName}}
+memo_borrowed_money_from_lendername: Borrowed {{money}} from {{lenderName}}
+memo_bought_name_for_price: Bought {{name}} for {{price}}
+memo_label_strike_for_units_under: {{label}}: {{strike}} for {{units}} {{under}}
+memo_memo_refunded: {{memo}} refunded
+memo_memo_reversed: {{memo}} reversed
+memo_cash_withdrawal: Cash withdrawal{{#where}} {{where}}{{/where}}{{#fees}} ({{fees}} in fees){{/fees}}
+memo_business_invoice: {{business}} invoice
+memo_payroll_gross_withheld: Payroll: {{gross}} gross, {{withheld}} withheld
+memo_payroll: Payroll
+memo_grant_to: Grant to {{to}}
+memo_donation_to: Donation to {{to}}
+memo_name_kind_reinvested: {{name}} {{kind}} reinvested: {{amount}}
+memo_stolen_with: Stolen with {{item}}
+memo_lost_with: Lost with {{item}}
+memo_memo_paid_from_instead: {{memo}}: paid from {{from}} instead
+memo_part_units: {{units}} units ({{pct}}%) of {{name}}
+memo_part_share: {{pct}}% of {{name}}
+memo_sold_part_for: Sold {{part}} for {{price}}
+memo_gave_part_away: Gave {{part}} away
+memo_penalty_year: {{tax}}, {{year}}
+memo_invoice: Invoice
+memo_sale: Sale
+name_name_card: {{name}} card
+name_name_checking: {{name}} checking
+name_worker_at_employer: {{worker}} at {{employer}}
+name_car_loan_name: Car loan, {{name}}
+name_loan_to_borrowername: Loan to {{borrowerName}}
+name_loan_from_lendername: Loan from {{lenderName}}
+name_name_income: {{name}}: income
+name_mortgage_name: Mortgage, {{name}}
+name_name_s_work: {{name}}'s work
+flow_label_walk_in_takings: Walk-in takings
+flow_label_sales_tax: Sales tax
+flow_label_profit_distribution: Profit distribution
+flow_label_suppliers: Suppliers
+flow_label_invoice_memo: Invoice: {{memo}}
+flow_label_pay_title: Pay: {{title}}
+flow_label_payroll: Payroll
+flow_label_living_costs: Living costs
+flow_label_name_autopay: {{name}} autopay
+flow_label_loan: Loan
+flow_label_payment: Payment
+flow_label_tax_on_investment_income: Tax on investment income
+flow_label_property_tax_name: Property tax, {{name}}
+flow_label_insurance_name: Insurance, {{name}}
+flow_label_upkeep_name: Upkeep, {{name}}
+flow_label_rent_name_unit_unit: Rent, {{name}}, unit {{unit}}
+flow_label_rent_name: Rent, {{name}}
+flow_label_tax_saved_by_donations: Tax saved by donations
+flow_label_dues_org: Dues: {{org}}
+flow_label_foundation_excise_tax: Foundation excise tax
+flow_label_tax_on_kept_earnings: Tax on kept earnings
+party_walk_in_customers: Walk-in customers
+party_purchaser: Purchaser
+name_symbol_in_account: {{symbol}}{{#account}} in {{account}}{{/account}}
+name_lease: Lease: {{tenant}}, {{#unit}}{{unit}}, {{/unit}}{{name}}
+flow_label_name_interest: {{name}} interest
+flow_label_name_dividend: {{name}} dividend
+party_suppliers: Suppliers
+party_owners: Owners
+reason_its_takings_leave_the_world_and: its takings leave the world and its payroll is paid from nowhere
+reason_what_it_holds_and_pays_out: what it holds and pays out has nowhere to be
+reason_its_payroll_is_paid_from_nowhere: its payroll is paid from nowhere
+reason_labelof_days_days_late: {{account}}: {{days}} days late
+reason_memo_price_corrected: {{memo}}: price corrected
+reason_its_money_has_nowhere_to_be: its money has nowhere to be
+memo_fuel_for: Fuel for {{name}} ({{qty}} {{unit}})
+flow_label_insurance: Insurance: {{name}}
+flow_label_registration: Registration: {{name}}
+econ_cash_machine_fees: Cash machine fees
+econ_cash_advance_fee: Cash advance fee
+econ_payment_to_to: Payment to {{to}}
+econ_an_owner: an owner
+econ_memo_from_viewer_is_late_left: {{memo}} from {{viewer}} is late: {{left}} due.
+econ_by_doesn_t_decide_id: {{by}} doesn't decide {{id}}
+econ_nothing_of_theirs_pays: nothing of theirs pays
+econ_bought_what: Bought {{what}}
+econ_name_isn_t_theirs: {{name}} isn't theirs
+econ_name_is_lost: {{name}} is lost
+econ_sold_name: Sold {{name}}
+econ_more_than_half_the_votes: more than half the votes
+econ_more_than_need_of_the_votes: more than {{need}}% of the votes
+econ_winding_up: Winding up
+econ_estimated_tax: Estimated tax
+econ_corporate_income_tax: Corporate income tax
+econ_shared_out_cents: Shared out {{cents}}
+econ_bought_units_what: Bought {{units}} {{what}}
+econ_sold_units_what: Sold {{units}} {{what}}
+feed_prices_at: Prices at {{place}}{{taxed}}: {{offers}}.
+econ_bought_what_down: Bought {{what}}, {{down}} down
+econ_nothing: nothing
+econ_card_payment: {{card}} payment
+econ_card: Card
+econ_doing_needs_votes: {{doing}} {{business}} needs {{votes}}; {{party}} holds {{pct}}%
+econ_memo_billed_to_is_late: {{memo}}, billed to {{customer}}, is late: {{left}} owed.
+econ_a_customer: a customer
+econ_a_business: a business
+econ_at_place: at {{place}}
+econ_the_branch: the branch
+econ_a_cash_machine: a cash machine
+name_account_cash: Cash
+name_account_checking: Checking
+name_account_savings: Savings
+name_account_credit_card: Credit card
+name_account_debit_card: Debit card
+econ_let_who_go: let {{who}} go
+econ_let_staff_go: let {{count}} staff go
+econ_ended_a_standing_payment: ended a standing payment
+econ_ended_standing_payments: ended {{count}} standing payments
+econ_began_winding_up: Began winding up{{#parts}}: {{parts}}{{/parts}}
+fin_approved_by_by: (approved by {{by}})
+fin_approved: (approved)
+fin_cash_goes_hand_to_hand_and: Cash goes hand to hand, and {{to}} isn't here: pay by card or from an account, or type how you hand it over to play it as a turn.
+fin_sold_entity: Sold {{entity}}
+fin_name_kind_reinvested: {{name}} {{kind}} reinvested
+fin_the_market: The market
+fin_an_investor: an investor
+fin_the_public: The public
+fin_exercised_option: Exercised {{option}}
+fin_exercised_qty_label: Exercised {{qty}} {{label}}
+fin_label_matured: {{label}} matured
+fin_label_exercised_at_expiry: {{label}} exercised at expiry
+fin_label_expired: {{label}} expired
+fin_severance_tax: Severance tax
+fin_post_production_costs: Post-production costs
+fin_units_units: {{units}} units
+fin_filer_s_consolidated_return_files_its: {{filer}}'s consolidated return files its income tax
+fin_its_parent: Its parent
+fin_its_parent_2: its parent
+fin_label_matures_maturity: {{label}} matures {{maturity}}.
+fin_back_to_its_owners: back to its owners
+fin_to_be_reinvested: to be reinvested
+fin_something_it_owns: Something it owns
+fin_unemployment_tax: Unemployment tax
+fin_corporate_income_tax: Corporate income tax
+fin_a_paid_off: {{a}} paid off
+fin_paid_owing_it_owed: Paid {{owing}} it owed
+fin_bizname_wound_up: {{bizName}} wound up
+fin_name_merged_into_intoname: {{name}} merged into {{intoName}}
+fin_took_in_deal: Took in {{name}}{{#deal}}: its holders got {{deal}}{{/deal}}

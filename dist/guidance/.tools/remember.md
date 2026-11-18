@@ -10,6 +10,10 @@ arguments:
   memories.who: "The people it is about, by name."
   memories.about: "The places, things and topics it is about."
   memories.from: "The ids of the perceptions it comes from. Each one named is taken in."
+  memories.taken: "The ids of perceptions that are taken in with nothing to remember of them: send only this, with no text, and they are not given to you again."
   memories.top: "true to carry it at the top of your mind; false to set it down."
+  memories.source: "Where it comes from: its kind alone (prose, lore, author, gm, character, player, default or invented), or an object with the kind in from. lore, message and roll cite an entry, message or roll by id. A memory of what you lived is character."
+  memories.precision: "How exact it is: exact, approximate, vague or unknown."
+  memories.standing: "How sure it is: established, proposed or assumed."
 ---
 Commits memories of yours, as many as you need in one call. A memory belongs to this turn: if the turn is swiped or deleted, it goes. The answer gives each memory's id and how it now stands.

@@ -1,6 +1,5 @@
 ---
 description: fill_in_detail as the model is told it - what the tool does, and what each of its arguments is.
-family: people
 arguments:
   who: "The person or thing."
   part: "Which part of their detail: money, gear or vehicles; left out, every part."

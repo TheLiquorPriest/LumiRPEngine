@@ -200,55 +200,6 @@ var DEFAULT_MIND_READS = Object.freeze({
 });
 var KNOWLEDGE_DEFAULTS = Object.freeze({ enabled: true, threshold: 0.7, batch: "scene", callsAtOnce: 1, claimChars: 600, mindTokens: 1600, narratorTokens: 1600, stepTokens: 4000, factsPerChat: 512, holdersPerFact: 64, factsPerTurn: 3, learningsPerTurn: 24, inPlayTurns: 3, perPerson: 3, prompts: {} });
 var KNOWLEDGE_RANGES = { threshold: [0, 1], claimChars: [1, Number.MAX_SAFE_INTEGER], tokens: [0, Number.MAX_SAFE_INTEGER], count: [0, Number.MAX_SAFE_INTEGER], atOnce: [1, 8] };
-var KNOWLEDGE_TEXTS = Object.freeze({
-  mindTitle: "What you know",
-  mindLead: "The facts you hold and how you came by them. You know only these and what is in front of you: never act on, hint at or guess anything that isn't here.",
-  known: "{{claim}} ({{how}})",
-  suspected: "Suspects: {{claim}} ({{how}}, about {{percent}}% sure)",
-  disbelieved: "Doesn't believe: {{claim}} ({{how}})",
-  unsure: "Unsure whether: {{claim}} ({{how}})",
-  keeps: "keeps it from {{whom}}",
-  everyone: "everyone",
-  authored: "from the start",
-  witnessed: "saw it",
-  told: "told by {{by}}",
-  inferred: "worked it out",
-  guessed: "a guess",
-  person: "{{name}}: {{line}}",
-  notKnown: "{{name}} doesn't know: {{claim}}",
-  everyoneHere: "Everyone here: {{line}}",
-  stepHappened: "What happened this turn",
-  stepPresent: "Who could perceive it",
-  stepPeople: "What each of them already knows, and has witnessed lately",
-  stepFacts: "Facts in play (reuse these by id)",
-  stepMade: "Facts this turn already made (reuse these by id)",
-  stepReuse: "A fact listed above is one fact however it is worded: when what someone learns here is one of them, in its words or in others, have them learn that fact by its id, and never make it again as a new fact. Make a new fact only of what none of them says.",
-  stepBudget: "What this turn can still record: {{facts}} new facts (this chat has room for {{chat}} more) and {{learnings}} learnings. A new fact counts only once someone learns it, so make one only for someone to learn.",
-  stepPerson: "{{name}} (id: {{id}})",
-  stepYou: '{{name}} (id: {{id}}; the player character, "you")',
-  stepSaid: "{{name}} said or did: {{text}}",
-  stepStory: "The story, as written: {{text}}",
-  stepThroughout: "there throughout",
-  stepLeft: "there from the start, but not at its end: witnessed none of it, though they may be told",
-  stepCame: "came in during the turn, or was met at its end: witnessed none of it, though they may be told",
-  stepOpen: "(an open question)",
-  stepFalse: "(false)",
-  stepPinned: "Pinned lore",
-  stepTraits: "Is like:",
-  stepHolds: "Holds:",
-  stepNothing: "nothing the story tracks yet",
-  stepWitnessed: "Witnessed lately:",
-  stepSomeone: "someone",
-  stepAnswer: [
-    "- facts: only the few new facts, usually none and at most one or two, that would change what someone does, says, hides, or believes about another person: a secret, a revelation or a lie; something a person would act on, hide, trade, or be hurt or helped by; a promise or debt that rests on it; an open question someone is pursuing. Something said or done in plain view is a fact only when it is one of these; the rest the story holds. Small talk, advice and description are never facts. Each one short sentence, with a ref of your own (n1, n2…) the lists below use; matters: why it matters and to whom, in a few words (a fact without it is dropped); about: the people or places it concerns; truth: true, false (a lie or a false rumour) or open (an open question, such as who did something).",
-    `- learned: who came to know a fact this turn, and how. witnessed: it happened, was said aloud or was shown in front of them, so everyone there throughout perceived it, the player character included; missed: only those there who didn't, such as someone out of earshot of a whisper, asleep or looking away ("you" for the player character); leave it out when no one did. told: who: whom they told; by: who told them, who must already know it. keptFrom: only when the turn shows they mean to keep it from someone, or "everyone"; leave it out otherwise.`,
-    "- inferred: something one person (never the player character) could work out or guess this turn: confidence from 0 to 1; evidence: the ids of facts they hold and the refs of lines from their own witness log it rests on, at least one; belief: true, false or uncertain.",
-    "- doubted: a fact someone (never the player character) held that this turn makes them doubt: their confidence now, from 0 to 1, and what they now take it to be.",
-    "Use empty lists for anything the turn didn't give."
-  ].join(`
-`)
-});
-var KNOWLEDGE_TEXT_IDS = Object.keys(KNOWLEDGE_TEXTS);
 var MIND_LENGTH_DEFAULTS = Object.freeze({ monologue: 2000, depiction: 1000, intent: 600, reaction: 300, reactions: 4, mood: 60, interrupt: 400, note: 600, notes: 4, commitment: 400, commitments: 3, plan: 300, plans: 4, told: 400, tolds: 3, summary: 1800, reason: 300, gmIntent: 1200 });
 var MINDS_PRESETS = Object.freeze({
   lean: { enabled: false, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 1, memoryLevels: [], tokens: 1200, skip: { maxBeats: 4, maxMindsPerBeat: 2 } },
@@ -259,206 +210,10 @@ function defaultMindsSettings(preset = "standard") {
   return { ...structuredClone(MINDS_PRESETS[preset]), reads: structuredClone(DEFAULT_MIND_READS), memory: {}, prompts: {}, knowledge: structuredClone(KNOWLEDGE_DEFAULTS), lengths: { ...MIND_LENGTH_DEFAULTS } };
 }
 var MINDS_DEFAULTS = Object.freeze(defaultMindsSettings());
-var MIND_PROMPT_DEFAULTS = Object.freeze({
-  mind: [
-    "You are the private mind of {{character}} in the roleplay world {{world}}. Think as {{character}}, from only what {{character}} knows: the context below is everything they perceive and remember. Other people's private thoughts are closed to you; ignore any narration of them in the recalled turns.",
-    "Decide how {{character}} reads this moment and what they intend. Everyone else decides for themselves: never script their actions or replies, and never plan around what they will do. Intend broadly, so the intent holds whatever they do. Write no narration and no dialogue."
-  ].join(`
-`),
-  memory: "You keep the memory of {{character}} in the roleplay world {{world}}. Below is what {{character}} knows, then the turn that just happened, as it was written. Only what was written happened, and only what {{character}} could see or hear of it counts; ignore narration of other people's private thoughts.",
-  skip: [
-    "The player character in the roleplay world {{world}} is skipping ahead in time. Below are the skip's span, the moments the engine already found in it, and what the people involved intend.",
-    "Propose further moments inside the span where something worth stopping for may happen: someone acting on a plan that involves the player character, a deadline, an occasion. Only moments the context supports; never invent people or places."
-  ].join(`
-`),
-  consolidate: "You keep the long-term memory of {{character}} in the roleplay world {{world}}. Fold the older notes below into their summary: keep what still matters to them, let the rest go, and keep everything the summary already holds that is still true.",
-  knowledge: [
-    "You keep track of who knows what in the roleplay world {{world}}. Below is a turn that just happened, as it was written: what was said and done, who could perceive it, the facts already in play, and what each person already knows, has witnessed lately and is like.",
-    "The story itself is what everyone who was there knows of the scene: never restate it. Record only the few facts, usually none and at most one or two, that would change what someone does, says, hides, or believes about another person: a secret, a revelation or a lie; something a person would act on, hide, trade, or be hurt or helped by; a promise or debt that rests on it; an open question someone is pursuing. Something said or done in plain view is a fact only when it is one of these; the rest the story holds. Small talk, advice and description are never facts. Say of each fact why it matters and to whom.",
-    "Everyone there throughout witnessed what happened in front of them (seeing it, hearing it said aloud, reading it), the player character included: name only who missed something, such as a whisper out of earshot, or someone asleep or looking away. Whoever was there for only part of the turn, or wasn't there, witnessed none of it. Someone may also be told something by someone who already knows it, or work something out, or guess at it, from what they already hold or witnessed: say how sure they are, and what it rests on. Note anyone the turn makes doubt something they held.",
-    "A fact is one short, plain claim. Reuse a fact already listed, by its id, rather than restating it. Never give anyone what they couldn't have learned here, and never reveal a secret they don't hold."
-  ].join(`
-`)
-});
-var KNOWLEDGE_ANSWER_SHAPE = 'Answer with JSON only: {"facts": [{"ref": "n1", "claim": "...", "matters": "why it matters, and to whom", "about": ["a name"], "truth": "true"}], "learned": [{"fact": "a fact id or n1", "how": "witnessed", "missed": ["a name"], "keptFrom": ["a name"]}, {"fact": "a fact id or n2", "how": "told", "who": ["a name"], "by": "a name", "keptFrom": ["a name"]}], "inferred": [{"who": "a name", "fact": "a fact id or n1", "confidence": 0.5, "evidence": ["a fact id or a witness ref"], "belief": "true"}], "doubted": [{"who": "a name", "fact": "a fact id", "confidence": 0.3, "belief": "uncertain"}]}';
-var MIND_ANSWER_FORMATS = Object.freeze({
-  mind: [
-    'Answer with JSON only: {"monologue": "...", "depiction": "...", "intent": "...", "reactions": ["..."], "mood": "...", "interrupt": {"reason": "..."}}',
-    "- monologue: their private reasoning in the first person.",
-    "- depiction: how they come across right now, as behaviour anyone present could see (posture, tone, what they do). Never a secret, an unspoken reason or a thought.",
-    "- intent: what they mean to do next, in one sentence.",
-    '- reactions: short conditional reactions ("if pressed about the cellar, changes the subject").',
-    "- mood: one or two words.",
-    "- interrupt: only when the moment is a beat inside a time skip and what they'd do now would interrupt the player character's skipped time (seeking them out, calling them). Leave it out otherwise."
-  ].join(`
-`),
-  memory: [
-    'Answer with JSON only: {"notes": [{"text": "...", "salience": 3}], "commitments": [{"kind": "promise|debt|grudge|favour|plan|other", "with": ["a name"], "text": "...", "due": "YYYY-MM-DD HH:MM"}], "resolved": [{"id": "...", "status": "kept|broken|released"}], "plans": [], "told": [{"to": ["a name"], "what": "..."}], "summary": "..."}',
-    "- notes: the things they will remember, in their own perspective; salience 1 (passing) to 5 (unforgettable).",
-    "- commitments: promises, debts, grudges, favours and plans with someone that this turn made; due only when a time was set.",
-    "- resolved: their open commitments (listed with ids) that this turn kept, broke or released.",
-    '- plans: only what this turn states they will do later: said aloud, agreed with someone, or scheduled in the story as written; never a guess at what they might do. Each {"what": "...", "kind": "errand|meet|visit|work|rest|leisure|pay|lend|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3, "amount": 20}, with local times; priority 1 (whenever it fits) to 5 (it must happen); kind pay or lend, with amount, when they mean to hand someone money, and no amount otherwise.',
-    "- told: what they told whom in this turn, in a few words each.",
-    "- summary: their one-paragraph summary rewritten, only when this turn changed who they are or what they're about; leave it out otherwise.",
-    "Use empty lists for anything the turn didn't give."
-  ].join(`
-`),
-  skip: 'Answer with JSON only: {"beats": [{"at": "YYYY-MM-DD HH:MM", "reason": "..."}]}, at most five, in time order; an empty list when there are none.',
-  consolidate: 'Answer with JSON only: {"summary": "..."}: plain prose, in their own perspective.',
-  knowledge: `${KNOWLEDGE_ANSWER_SHAPE}
-${KNOWLEDGE_TEXTS.stepAnswer}`
-});
-var MEMORY_ANSWER_V2 = MIND_ANSWER_FORMATS.memory.replace(', "told": [{"to": ["a name"], "what": "..."}]', "").split(`
-`).filter((line) => !line.startsWith("- told:")).join(`
-`);
 
 // src/shared/timeouts.ts
 var MIN = 60000;
-var TIMEOUTS = {
-  engineRunMs: {
-    label: "Engine run",
-    group: "turn",
-    limits: "Everything the engine does before the reply is generated: reading your action, people's choices, judging your approach, puzzle answers, the minds, the plan, the brief and the outline.",
-    fires: "The engine run stops: no reply is generated, and the chat says which step ran out, with a Retry.",
-    defaultMs: 5 * MIN,
-    minMs: 1000,
-    none: "the run takes as long as it needs"
-  },
-  preLookupMs: {
-    label: "Lore lookups before the reply",
-    group: "turn",
-    limits: "How long after the engine run starts a helper may still ask for lore; a lookup also starts only while a third of the run's time is left.",
-    fires: "Helpers answer with the lore they already have.",
-    defaultMs: 2 * MIN,
-    minMs: 0,
-    zero: "no lookups",
-    none: "lookups may start until the run's last third"
-  },
-  finalReviewMs: {
-    label: "Final review",
-    group: "turn",
-    limits: "The main agent's final review of the narrator's prompt, after the engine run makes the turn's sections and before the reply is generated (Settings → Agents → Main agent → Final review).",
-    fires: "The review stops and its edits are dropped: the narrator gets the sections as the engine made them, with a Diagnostics record, or the turn stops with a Retry, as the review's failure setting says.",
-    defaultMs: 5 * MIN,
-    minMs: 1000,
-    none: "the review takes as long as it needs (its budget still bounds it)"
-  },
-  postReplyMs: {
-    label: "Reading the reply",
-    group: "turn",
-    limits: "Everything the engine asks a model after the reply: what changed, people elsewhere, suggested choices, memory.",
-    fires: "The reads still waiting are skipped; the reply stands, and Re-read tries again.",
-    defaultMs: 5 * MIN,
-    minMs: 0,
-    zero: "no model calls after the reply",
-    none: "the reads take as long as they need"
-  },
-  postLookupMs: {
-    label: "Lore lookups after the reply",
-    group: "turn",
-    limits: "How long after the reply's reading starts a helper may still ask for lore; a lookup also starts only while a third of the reading's time is left.",
-    fires: "Helpers answer with the lore they already have.",
-    defaultMs: 2 * MIN,
-    minMs: 0,
-    zero: "no lookups",
-    none: "lookups may start until the reading's last third"
-  },
-  guardMs: {
-    label: "Generation guard",
-    group: "turn",
-    limits: "Lumiverse's wait for the engine's check, as a generation starts, that the engine's lore entries are fresh. The check itself is instant; this matters only while the engine is busy.",
-    fires: "Lumiverse stops the generation, so nothing goes out with stale entries.",
-    defaultMs: 2 * MIN,
-    minMs: 1000,
-    none: "as long as Lumiverse waits",
-    host: "contextHandler"
-  },
-  skipPlanMs: {
-    label: "Time skip plan",
-    group: "turn",
-    limits: "The one call, as a time skip starts, that plans how the people whose skip is planned by the model spend it.",
-    fires: "Nobody is planned: they stay where they are, the GM gets a note, and the skip still runs.",
-    defaultMs: 2 * MIN,
-    minMs: 1000,
-    none: "the call takes as long as the engine run allows"
-  },
-  requestMs: {
-    label: "Engine requests",
-    group: "app",
-    limits: "How long this tab waits for the engine to answer a request: a view, an edit, a setting.",
-    fires: "The tab says the engine didn't answer; the engine may still finish the request.",
-    defaultMs: 5 * MIN,
-    minMs: 1000,
-    none: "the tab waits as long as it takes"
-  },
-  caveatsMs: {
-    label: "Preset check",
-    group: "app",
-    limits: "How long Settings → Caveats waits for its test prompt of the chat before saying the check is still running.",
-    fires: "Caveats says the check is still running; it finishes in the background for the next look.",
-    defaultMs: MIN,
-    minMs: 0,
-    zero: "always answer at once",
-    none: "wait for the check (Engine requests still bounds the tab's wait)"
-  },
-  mcpReconnectMs: {
-    label: "MCP server reconnect",
-    group: "work",
-    limits: "How long Reconnect in Lumiverse waits for a server Lumiverse runs to come back with this build's tools, after it is asked to exit.",
-    fires: "The server's line says it isn't back, with how to disconnect and connect it in Lumiverse's Settings → MCP Servers.",
-    defaultMs: MIN,
-    minMs: 1000,
-    none: "the line waits until the server is back"
-  },
-  mindsRunMs: {
-    label: "Minds run on demand",
-    group: "work",
-    limits: "A minds run started from GM → Minds, from start to end.",
-    fires: "The run stops; the minds it finished are kept.",
-    defaultMs: 10 * MIN,
-    minMs: 1000,
-    none: "the run goes on until it ends or you cancel it"
-  },
-  jobCallMs: {
-    label: "Import and Refine calls",
-    group: "work",
-    limits: "Each model call of an Import, a Refine, a lore index, a map description or a routine proposal in Build.",
-    fires: "That call counts as failed; the job goes on with what the other calls proposed.",
-    defaultMs: 10 * MIN,
-    minMs: 1000,
-    none: "a call takes as long as it needs (Cancel still stops the job)"
-  },
-  tokenCountMs: {
-    label: "Token counts",
-    group: "work",
-    limits: "How long Lumiverse's tokenizer may take to count a section before the engine's estimate stands in for it.",
-    fires: "The section is priced by the engine's estimate, which stays above the real count.",
-    defaultMs: 30000,
-    minMs: 0,
-    zero: "always the estimate",
-    none: "wait for every count"
-  },
-  laneStartupMs: {
-    label: "Background lane start-up",
-    group: "work",
-    limits: "How long Playtest and Check world's background process may take to start.",
-    fires: "Lumiverse stops the process and the job fails.",
-    defaultMs: MIN,
-    minMs: 1000,
-    none: "as long as Lumiverse waits",
-    host: "processStartup"
-  },
-  laneHeartbeatMs: {
-    label: "Background lane heartbeat",
-    group: "work",
-    limits: "The longest gap between the background process's heartbeats; it beats after each simulated day or turn.",
-    fires: "Lumiverse terminates the process and the job fails.",
-    defaultMs: MIN,
-    minMs: 1000,
-    none: "Lumiverse checks no heartbeat",
-    host: "processHeartbeat"
-  }
-};
+var REQUEST_WAIT_MS = 5 * MIN;
 function formatMs(ms) {
   if (!Number.isFinite(ms))
     return "no limit";
@@ -699,26 +454,8 @@ class HostConnection {
   async open() {
     const { token } = this.signedIn();
     this.openedToken = token;
-    const extension = await this.findExtension(token);
-    for (let attempt = 1;; attempt++) {
-      try {
-        await this.connect(await this.ticket(token));
-        break;
-      } catch (error) {
-        if (!(error instanceof LiveError && error.problem === "protocol" && attempt === 1))
-          throw error;
-      }
-    }
-    this.opened = { extension, agentApi: null };
-    try {
-      await this.greet();
-    } catch (error) {
-      this.close();
-      if (error instanceof LiveError && error.problem === "timeout")
-        throw new LiveError("timeout", `LumiRPEngine on ${this.options.base} didn't answer within ${formatMs(this.timeoutMs ?? 0)}. Check that it's running (lumirpengine status), and restart it in Lumiverse's Extensions tab if it is. ${RAISE}`);
-      throw error;
-    }
-    return this.opened;
+    await this.findExtension(token);
+    throw new LiveError("later_build", `This command returns with a later build of LumiRPEngine: until then the command line and MCP server can't read or change the worlds and chats on ${this.options.base}. Use RPE's own pages for now.`);
   }
   async greet() {
     const opened = this.opened;
@@ -952,10 +689,9 @@ var package_default = {
   devDependencies: {
     "@earendil-works/pi-ai": "1.5.2",
     "bun-types": "^1.4.2",
-    "lumi-ah": "github:TheLiquorPriest/LumiAH#6a38779a5e33fe563f0c8c617640343473617569",
-    "lumiverse-spindle-types": "0.6.79",
+    "lumiverse-spindle-types": "0.6.80",
     preact: "11.0.1",
-    "rp-harness": "github:TheLiquorPriest/RPHarness#8ba60ec15ce27ddc682af918df81ef20d0811a2f",
+    "rp-harness": "git+https://github.com/TheLiquorPriest/RPHarness.git#bb3645b8009f58d5001795c9550f6a3ff26823e3",
     typescript: "7.0.2"
   },
   exports: {
@@ -963,7 +699,8 @@ var package_default = {
     "./schemas/lre-map-v1.schema.json": "./src/shared/lre-map-v1.schema.json"
   },
   bin: {
-    lumirpengine: "dist/lumirpengine.js"
+    lumirpengine: "dist/lumirpengine.js",
+    rpe: "dist/rpe.js"
   },
   engines: {
     bun: ">=1.4",
@@ -976,13 +713,14 @@ var package_default = {
     tables: "bun scripts/tables/build.ts",
     templates: "bun scripts/templates/build.ts",
     reference: "bun scripts/reference/build.ts",
-    test: '"$npm_execpath" test ./test/app ./test/adapter ./test/store ./test/iface ./test/cast ./test/story ./test/lore ./test/play ./test/turn ./test/tree ./test/ui ./test/ext ./test/migrate ./test/guidance ./test/build ./test/build-mode ./test/docs-standalone ./test/standalone-boundaries.test.ts',
-    "test:old": "bun scripts/test/run.ts",
-    check: "bun scripts/test/run.ts --check",
-    "test:all": "bun scripts/test-all.ts",
-    "test:release": "bun scripts/test/run.ts --release",
-    "test:properties": "bun scripts/test/run.ts --properties",
-    "test:timings": "bun scripts/test-all.ts --record"
+    api: "bun scripts/api/generate.ts",
+    settings: "bun scripts/settings/generate.ts",
+    test: '"$npm_execpath" scripts/test-all.ts',
+    check: '"$npm_execpath" scripts/test/run.ts --check',
+    "test:all": '"$npm_execpath" scripts/test-all.ts',
+    "test:release": '"$npm_execpath" scripts/test/run.ts --release',
+    "test:properties": '"$npm_execpath" scripts/test/run.ts --properties',
+    "test:timings": '"$npm_execpath" scripts/test-all.ts --record'
   },
   type: "module"
 };
@@ -998,7 +736,7 @@ var DEFAULT_PLACE_CAPS = Object.freeze({ turn: 2, chat: 64 });
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "c2d59e6d";
+var BUILD = "cb71de2f";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;

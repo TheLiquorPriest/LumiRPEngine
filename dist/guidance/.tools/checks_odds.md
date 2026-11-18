@@ -1,6 +1,5 @@
 ---
 description: checks_odds as the model is told it - what the tool does, and what each of its arguments is.
-family: checks
 arguments:
   action: "The action, by its id."
   actor: "Who would take it: their id, or their name as the world has it; leave it out for the player's character."

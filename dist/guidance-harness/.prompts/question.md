@@ -4,9 +4,9 @@ description: How a question from an agent the lead delegated to is shown to the 
 {{agent}} stopped to ask before going on:
 
 {{question}}
-{{#found}}
+{{#searched}}
 
-What it found before asking:
+What it looked up before asking:
 
-{{found}}
-{{/found}}
+{{searched}}
+{{/searched}}

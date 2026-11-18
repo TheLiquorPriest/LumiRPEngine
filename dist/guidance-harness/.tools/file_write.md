@@ -8,4 +8,4 @@ arguments:
   new: For edit, the text to put in its place.
   all: For edit, replace the old text everywhere it is, not only once.
 ---
-Changes one file where agents may write: the notes folder, and this turn's own folders. It says what changed and how large the file is now.
+Changes one file where agents may write: the notes folder, and this turn's own folders. It says what changed and how large the file is now, and shows what the file now says: its text after a write or an append, the lines it changed, with their numbers, after an edit.

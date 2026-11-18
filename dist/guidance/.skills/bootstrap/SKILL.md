@@ -10,21 +10,21 @@ How you go about it is yours to judge. The chat can be played while you work, an
 
 ## What you have to work with
 
-- **The lore index.** If it is not built, start that job first. It is cheap, and everything else leans on it.
+- **The lore index,** which the `indexer` builds. It is cheap, and everything else leans on it.
 - **The chat,** by range with `chat_read` and by search with `chat_search`. Hand long ranges to the historian with `delegate`: one range and one purpose each, several at once.
 - **Summaries and memories that already exist.** Search the archive with `archive_search` before you read raw messages. Where the player kept a book of summaries, start there, and check a summary against the messages only where the next turns will lean on it.
-- **For a chat carried over from the earlier build:** the state, the cast and the beats it left, its notebook, and each character's old mind files. Trust the carried state. Your work there is filing, below.
+- **For a chat carried over from the earlier build:** the state, the cast and the beats it left, its notebook, each character's old mind files, and the notes the older minds pack kept of a character (its summary, notes, commitments, what it witnessed, its last mind). Your work there is filing, below.
 
 ## What you are given
 
-- **`bootstrap:job`:** what the player chose when starting this job: `relive`, how much of the past to relive (below; absent when the player chose none), and `tokenLimit`, the limit the player set (below).
+- **`bootstrap:job`:** what the player chose when starting this job: `relive`, how much of the past to relive (below; absent when the player chose none), and `tokenLimit`, the limit the player set (below; absent when there is none).
 - **`bootstrap:facts`:** where the six things below stand when you are given it, as counts and names: the lore index's entries and how many are indexed, the messages the history window leaves out and how many the story record covers and summarizes, the cast and who has no casting, the story model's parts, the horizon's entries, and each principal's base and memories. The counts say what there is, not whether it is enough: that is yours to judge against the six. Hand it on by name to any agent you delegate to. A fact given as `"known": false` with `"why": "unreadable"` is one whose records could not be read; read what you need of it with your own tools.
 
 ## Done enough
 
 Stop when all six hold. They are in the order to do them. Whether each holds is yours to judge, from the records and against the words here. Say which hold when you report.
 
-1. The lore index exists.
+1. The lore index exists: the `indexer` has written a line for every attached entry.
 2. Every message the history window leaves out is covered by the story record, and every covered stretch has its summary. Do the stretch nearest the window first.
 3. The cast is listed, each with its casting. The skill `casting` says how.
 4. The story model has a premise, a skeleton of the timeline, the open threads, an arc for each principal, and a first read of the player.
@@ -34,8 +34,8 @@ Stop when all six hold. They are in the order to do them. Whether each holds is 
 ## Filing a chat that was carried over
 
 - **The notebook** (threads, questions, setups, arcs, the player, futures, the scene): move each note into its place in the story model with `story_record`. Keep the note's own words.
-- **Mind files:** hand each principal's files to its own agent, and have it file them into its mind, its memories and its relationships, in its own voice. File a supporting character's files yourself, into its base, relationships and knowledge.
-- **Marking files filed:** until a character's old mind files are marked filed, they are given whole every turn: to its own agent, or to you while a supporting character is on stage. Once what matters in them is filed, mark those files filed with `cast_update`'s `filed` operation, naming each file (`core.md`). They stay on the character's record.
+- **Mind files:** a principal's `core.md` and `outline.md`, and whatever else in its mind files belongs to its base, you file into its base yourself; its `arcs.md` goes into its history, with `cast_update`'s `history` operation naming the beats each part tells of (`beats`), so that its history points into the story record. Hand the rest of its files, and the notes the older minds pack kept of it, to its own agent, and have it file them into its mind, its memories and its relationships, in its own voice, because only it can say how it lived them. File a supporting character's files and notes yourself, into its base, relationships and knowledge.
+- **Marking files filed:** until a character's old mind files and minds notes are marked filed, they are given whole every turn: to its own agent, or to you while a supporting character is on stage. Once what matters in them is filed, mark them filed with `cast_update`'s `filed` operation, naming each file (`core.md`), and `minds` for the minds pack's notes. They stay on the character's record.
 - **Beats without scenes:** the earlier build recorded beats and no scenes. Group them into scenes and chapters, and summarize each. The skills `scene-end` and `chapter-pass` say what a summary holds.
 
 ## Reliving
@@ -49,8 +49,8 @@ To relive a stretch of the past is to have a principal's own agent take it in as
 
 ## Limits
 
-The player set a token limit for this job (`tokenLimit`): tokens sent and written together, by every agent of the job. The job is stopped when it reaches it, and ends with what is recorded by then. So record as you go: write each thing where it belongs as soon as you have settled it, not at the end.
+Where the player set a token limit for this job (`tokenLimit`), it counts tokens sent and written together, by every agent of the job. When the job reaches it, it pauses and asks the player whether to go on, and ends with what is recorded by then if the player says no. If the player says go on, the job has the same limit again from there, unless the player gave another. Record as you go, limit or none: write each thing where it belongs as soon as you have settled it, not at the end, so that a job stopped for any reason leaves what it found.
 
 ## What you end with
 
-A report in a few lines: which of the six hold, what you could not settle, and what you would read next if given more.
+A report in a few lines: which of the six hold, what you could not make out, and what you would read next if given more.

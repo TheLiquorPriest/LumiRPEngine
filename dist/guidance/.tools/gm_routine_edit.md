@@ -1,6 +1,5 @@
 ---
 description: gm_routine_edit as the model is told it - what the tool does, and what each of its arguments is.
-family: time
 arguments:
   op: "routine_follow sets how they follow their routine; routine_block sets one block of it; schedule_override changes one of their schedules."
   person: "Whose routine."

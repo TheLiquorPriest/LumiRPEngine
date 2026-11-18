@@ -1,6 +1,5 @@
 ---
 description: item_use as the model is told it - what the tool does, and what each of its arguments is.
-family: things
 arguments:
   item: "The thing, or the stack, used up."
   qty: "How many of a stack are used up; one when left out."

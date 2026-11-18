@@ -3,19 +3,33 @@ description: The layout of the story so far, shown in the briefing for the histo
 ---
 {{#parts}}
 {{#chapter}}
+{{#chapter.gone}}
+Chapter summary; its messages are gone from the chat, it was written at message {{chapter.from}}:
+{{/chapter.gone}}
+{{^chapter.gone}}
 Chapter summary, messages {{chapter.from}} to {{chapter.to}}:
+{{/chapter.gone}}
 {{chapter.text}}
 
 {{/chapter}}
 {{#scene}}
+{{#scene.gone}}
+Scene summary; its messages are gone from the chat, it was written at message {{scene.from}}:
+{{/scene.gone}}
+{{^scene.gone}}
 Scene summary, messages {{scene.from}} to {{scene.to}}:
+{{/scene.gone}}
 {{scene.text}}
 
 {{/scene}}
+{{#gap}}
+Not covered by the record: messages {{gap.from}} to {{gap.to}}.
+
+{{/gap}}
 {{#beats}}
 Beats with no summary yet, messages {{beats.from}} to {{beats.to}}:
 {{#beats.lines}}
-- Message {{at}}: {{text}}
+- Message {{at}}{{#through}} to {{through}}{{/through}}{{#gone}} (its messages are gone from the chat; written there){{/gone}}: {{text}}
 {{/beats.lines}}
 
 {{/beats}}

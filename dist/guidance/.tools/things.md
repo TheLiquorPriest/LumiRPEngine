@@ -1,0 +1,9 @@
+---
+description: How the tools for things and for a person's saved outfits are called - item_condition, item_use, item_own, item_grant, item_revoke, item_permit, item_unpermit, item_home, item_label, item_merge, item_lose, item_remove, set_save, set_apply and set_drop. It says how to call them, not when. Delete this file and an agent that finds one of them by search is given no such guide.
+---
+Each of these tools changes one fact of a thing and leaves the rest: item_own whose it is, item_grant and item_permit who may use it, item_home where it is kept, item_remove whether it is in the world. Name a thing, a person or a place as the world does, or by its id. A name that fits more than one is answered with the ones it fits, and a name that fits none with the nearest; a call that cannot be read records nothing. item_home takes exactly one of `in`, `at`, `owner` and `clear`. In item_label, `aliases` and `specs` are the whole list, not additions. `until` is a date and time (YYYY-MM-DD HH:MM) or a span in words, such as two days. A person's saved outfits and loadouts are found by their `set` name; set_save keeps what the person wears now of its `kind` unless you give `pieces`.
+
+What the world's rules for things would refuse (a loan that ends before now, more used than there is, a thing too big to carry) is recorded as you gave it, and the answer reports it with how the thing now stands. A change that is so already changes nothing, and the answer says so. Each write also takes `source`, and `precision` and `standing` where you know them.
+
+    tool_use {"name": "item_grant", "args": {"item": "knife", "who": "Odile", "basis": "loan", "until": "two days", "by": "Wren", "source": {"from": "prose", "message": "m-12"}}}
+    tool_use {"name": "item_home", "args": {"item": "cloak", "in": "satchel", "source": {"from": "prose", "message": "m-12"}}}

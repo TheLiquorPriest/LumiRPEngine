@@ -6,5 +6,6 @@ arguments:
   from_id: The id of the first message, in place of from.
   to_id: The id of the last message, in place of to.
   last: The last this many messages, in place of the others.
+  story: True to give only the messages that are part of the story. Leave it out to give every message.
 ---
-Reads messages of the chat, each in full, whether or not they are in the prompt. Each comes with its position, its id and who wrote it; a hidden or summarized one is marked.
+Reads messages of the chat, each in full, whether or not they are in the prompt. Each comes with its position, its id and who wrote it; a hidden or summarized one is marked, and so is one the chat's story choice leaves out of the story.

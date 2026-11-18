@@ -7,4 +7,7 @@ at: turn-start
 repeat: once per turn
 ---
 These characters were on stage in earlier turns and have no perception recorded for them: {{path.unperceived.names}}.
+{{#path.unperceived.read.owner}}
+In {{path.unperceived.read.owner}} of the earlier turns no scene was recorded, so who was on stage there is who the world state placed where the player's character was.
+{{/path.unperceived.read.owner}}
 See the perceptions rule, "If one is missing".

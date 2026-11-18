@@ -4,9 +4,9 @@ description: How a question from an agent the Author delegated to is shown to th
 {{agent}} stopped to ask before going on:
 
 {{question}}
-{{#found}}
+{{#searched}}
 
-What it found before asking:
+What it looked up before asking:
 
-{{found}}
-{{/found}}
+{{searched}}
+{{/searched}}

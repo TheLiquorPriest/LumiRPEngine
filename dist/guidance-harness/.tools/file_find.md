@@ -10,4 +10,4 @@ arguments:
   depth: For list, how many folders deep to list; one when left out.
   limit: The most results to give.
 ---
-Finds files and folders in the agents' files: lists a folder, matches paths against a pattern, or finds the lines that match a pattern. Each result is one line.
+Finds files and folders in the agents' files: lists a folder, matches paths against a pattern, or finds the lines that match a pattern. Each result is one line. When a search stopped before it looked everywhere, a last line says why and how to narrow it.

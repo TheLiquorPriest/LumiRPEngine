@@ -3,12 +3,13 @@ description: The sentences the story tools answer with (story_query, story_recor
 format: lines
 ---
 no_chat: There is no chat {{id}} in the engine's records.
+no_chat_run: {{tool}} works on a chat's story, and this run belongs to no chat: nothing was done.
 no_turn: There is no turn {{id}} in this chat.
-turn_needed: This call belongs to no turn, so nothing can be recorded. Reading needs no turn.
+turn_needed: Operation {{n}} ({{op}}): a record of a turn needs a turn, and this chat has none yet, so nothing was written.
 no_operations: operations cannot be read: send a list of operations.
 unknown_op: Operation {{n}}: op cannot be read, you sent {{value}}. It is one of: {{choices}}.
 unreadable: {{field}} cannot be read{{#value}}: you sent {{value}}{{/value}}.{{#choices}} It is one of: {{choices}}.{{/choices}}
-unreadable_op: Operation {{n}} ({{op}}): {{field}} cannot be read, you sent {{value}}.{{#choices}} It is one of: {{choices}}.{{/choices}}{{#wants}} It takes {{wants}}.{{/wants}}
+unreadable_op: Operation {{n}} ({{op}}): {{field}} cannot be read, you sent {{value}}.{{#choices}} It is one of: {{choices}}.{{/choices}}{{#wants}} It takes {{wants}}.{{/wants}}{{#says}} What you meant can go in {{says}}, which takes any words.{{/says}}
 wants_names: a name, or a list of names
 op_takes: {{op}} reads {{reads}}{{#needs}}, and needs {{needs}}{{/needs}}{{#new_needs}}, and a new one needs {{new_needs}}{{/new_needs}}.{{#ignored}} It does not read {{ignored}}.{{/ignored}}
 not_read: Operation {{n}} ({{op}}) was recorded without {{left}}. It reads {{reads}}.
@@ -17,18 +18,35 @@ needs_one: Operation {{n}} ({{op}}) needs at least one of {{fields}}.
 one_name: Operation {{n}} ({{op}}): who names one person, or plot.
 no_message: Operation {{n}} ({{op}}): {{field}} names no message: you sent {{value}}, and the chat's messages are numbered 0 to {{last}}.
 no_clock: Operation {{n}} ({{op}}): {{field}} is kept as you wrote it, {{value}}, but this chat keeps no story time, so it will not come up as due.
-unreadable_time: Operation {{n}} ({{op}}): {{field}} is kept as you wrote it, {{value}}, but holds no date that can be counted from, so it will not come up as due. A date and time (YYYY-MM-DD HH:MM) or a span from now (two days, until dawn) can be counted.
-unknown_id: {{#n}}Operation {{n}} ({{op}}): {{/n}}the story record on this path holds no {{#part}}{{part}} {{/part}}{{id}}.
+unreadable_time: Operation {{n}} ({{op}}): {{field}} is kept as you wrote it, {{value}}, but holds no date that can be counted from, so it will not come up as due. A date and time (YYYY-MM-DD HH:MM), a clock time (18:30) or a span from now (two days) can be counted.
+unknown_id: {{#n}}Operation {{n}} ({{op}}): {{/n}}the story record on this path holds no {{#part}}{{part}} {{/part}}{{id}}.{{#near}} The nearest {{#part}}{{part}} {{/part}}ids it holds: {{near}}.{{/near}}{{#nothing}} {{nothing}}{{/nothing}}
+nothing_stored: The story record holds no {{#part}}{{part}}{{/part}}{{^part}}item{{/part}} yet; story_query lists what it holds.
 no_current: Operation {{n}} ({{op}}): there is no {{part}} yet. Open one with new.
 current_closed: Operation {{n}} ({{op}}): the current {{part}}, {{id}}, is closed. Open a new one with new, or name {{id}} to write to it.
 nothing_recorded: Nothing was recorded. Send the call again with that put right.
+unsourced: Operation {{n}} ({{op}}) names no source, so it is marked unsourced.
+invented_unchecked: Operation {{n}} ({{op}}) is recorded as invented and names no gap check, so it is marked so.
+invented_unconsented: Operation {{n}} ({{op}}) is recorded as invented and names no consent, so it is marked so.
 already_closed: Operation {{n}} ({{op}}): {{id}} was already closed.
 due_now: Operation {{n}} ({{op}}): it falls due at {{due}}, which is not after now ({{now}}), so it is due at once.
 due_now_undated: Operation {{n}} ({{op}}): it falls due no later than now, so it is due at once.
-no_overlays: Operation {{n}} ({{op}}): this host keeps no lore overlays yet, so none was written.
 overlay_unknown: Operation {{n}} (overlay): there is no lore entry {{entry}}.{{#near}} Near: {{near}}.{{/near}}
+store_unread: The story record could not read that call: {{why}}
+turn_joined: This turn, {{turn}}, was joined to turn {{joined}}, the turn the continue extended, so nothing was read or recorded here. Address turn {{joined}} instead.
+engine_fault: {{tool}} failed in the engine, not in your call: the fault is in RPE's log. Nothing was recorded.
+quest_unresolved: Operation {{n}} ({{op}}): the quest {{quest}} names no quest of this world, so it is kept as the words you wrote and tied to none.
+place_unresolved: Operation {{n}} ({{op}}): the place {{place}} names no place of this world, so it is kept as the words you wrote and tied to none.
 none: Nothing in the story record matches.
 no_clock_due: This chat keeps no story time, so nothing falls due.
 more: {{count}} more match. Ask again with a part, a range or a name to see them; the next is {{next}}.
-page_turning: A turn of this chat is going on: nothing is struck or restored until it is over.
-page_branch_no_turn: This chat was branched from another and has no turn of its own yet. A strike is kept with this chat's newest turn, and the newest one here is the other chat's, so a strike here would change that chat too: nothing was struck or restored. It can be done once a turn has been played in this chat.
+correction_empty: Nothing of that could be corrected: {{id}} takes {{fields}}.
+correction_ignored: {{id}} does not take {{fields}}, so {{fields}} was left out.
+timeline_gone: The timeline has no {{id}} any more, so the page after it cannot be told. Read the timeline again from its start.
+so_far_unavailable: The story so far is not worked out here.
+quest_gone: The quests have no {{id}} any more, so the page after it cannot be told. Read the quests again from their start.
+no_quest: The chat has no quest {{id}}.
+no_place: The chat has no place {{id}}.
+place_gone: The places have no {{id}} any more, so the page after it cannot be told. Read the places again from their start.
+page_not_taken: The request has {{field}}, which it does not take.{{#choices}} It takes {{choices}}.{{/choices}}
+page_size: This list gives at most {{most}} a page, and this asks for {{value}}.
+page_cursor: This cursor is not one this list gave: read the list again from its start, with no cursor.

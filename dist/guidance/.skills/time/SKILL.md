@@ -8,11 +8,11 @@ The world has one clock for the chat. The world state shows the date, the hour a
 
 ## Letting time pass
 
-`world_apply` with a `pass_time` operation: how long, or until when.
+`world_apply` with a `pass_time` operation: how long, or until when. A time is read as it is written: a date and time, a clock time (22:00, noon), a part of the day the world's calendar names, or a counted span (two hours). Words that count nothing (a while) and a part of the day the calendar does not name are refused with what a time takes.
 
 - Pass the time the story took. A conversation is minutes. A meal is an hour. A night's sleep is a night. If the prose does not say, choose plainly and say what you chose.
-- Pass it once per turn, for the whole of what the turn covers. Do not pass it again when a sub-agent has already done so: look at the clock first.
-- In a fight or a chase on a room grid, time moves in the grid's own step, a few seconds a round. Do not add minutes on top.
+- Pass the whole of what the turn covers. Time passed twice is time passed twice, so look at the clock before passing more when a sub-agent may already have done so.
+- In a fight or a chase on a room grid, time moves in the grid's own step, a few seconds a round. Pass it as `rounds` (the scene's grid says how long each is) or as `seconds`; do not add minutes on top. The round tool already moves the clock by the rounds it plays: do not pass those again.
 
 ## What time brings due
 
@@ -31,11 +31,11 @@ When the story jumps days or weeks:
 1. Ask ahead first: what will come due in the span? (`world_query` with the span.)
 2. Split the span where something due would change what comes after it: a deadline, an arrival, a season turning. Pass the time one stretch at a time.
 3. For people off stage, the Author says what they did meanwhile. Record where they ended up and anything that changed for them.
-4. For the routine remainder (meals, wages, rent), record totals for the stretch, not every instance.
+4. For the routine remainder (meals, wages, rent), record totals for the stretch, not every instance. `time_totals` (found with `tool_search`) gives a person's totals for a span, from the engine run on a copy of the world, and records nothing.
 
 ## Setting the clock
 
-If the clock is wrong (the story says dusk and the clock says noon), set it with a `set` operation on the time. The prose is its source. Time set backwards is reported; say in your answer that you did it and why.
+If the clock is wrong (the story says dusk and the clock says noon), set it with a `set` operation on the time. The prose is its source. Time set backwards is reported, and `SIMULATION.md` says what to do with a report.
 
 In a chat with no world the clock has no date until you set one: nobody chose its start, so no date is shown to anyone, and times are given as how long from now. `set` the time, or `pass_time` `until`, with a date and a time (YYYY-MM-DD HH:MM), once the story says when it is. A span or a time of day alone only moves the clock.
 
