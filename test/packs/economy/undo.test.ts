@@ -30,7 +30,8 @@ async function play(r: Rig, steps: readonly Step[]): Promise<void> {
 
 describe("the money's presses are taken back whole", () => {
   test("a person's own accounts, cards, payments, standing payments, credit and trades", async () => {
-    await play(await rig("pov"), [
+    const r = await rig("pov");
+    await play(r, [
       { label: "pay someone", id: "pay", params: { to: "danny_okafor", amount: 5000 } },
       { label: "move money between accounts", id: "move_money", params: { from: "acct_pov_savings", to: "acct_pov_auto_loan", amount: 5000 } },
       { label: "pay a card", id: "pay_card", params: { card: "acct_pov_card" } },
@@ -46,9 +47,14 @@ describe("the money's presses are taken back whole", () => {
       { label: "a new standing payment", id: "flow_create", params: { label: "Zed", kind: "bill", from: "acct_pov_checking", to: "danny_okafor", amount: 5000, every: "month", day: 3 } },
       { label: "apply for credit", id: "apply_credit", params: { product: "credit_card" } },
       { label: "a trade", id: "trade", params: { side: "buy", holding: "hold_pov_index", asset: "bond", account: "acct_pov_savings", qty: 1, from: "acct_pov_checking" } },
+      // A contract no one held before is a holding of its own; bought again after its Undo it is a holding again, and it can be exercised.
+      { label: "buy an option", id: "trade", params: { side: "buy", asset: "broad_us_equity_index", right: "call", strike: 3000, expiry: "2027-06-01", qty: 1, account: "acct_pov_brokerage", from: "acct_pov_checking" }, keep: true },
       { label: "end a lease", id: "lease_end", params: { lease: "bill_rent" } },
       { label: "a donation", id: "donate", params: { to: "danny_okafor", amount: 5000 } },
     ]);
+    const option = Object.entries(r.world().entities).find(([, e]) => e.kind === "holding" && e.fields.gone !== true && String(e.fields.asset).startsWith("opt:"))?.[0] ?? "";
+    expect(option).not.toBe("");
+    await play(r, [{ label: "exercise an option", id: "exercise_option", params: { holding: option, qty: 1 } }]);
   });
 
   test("an employer's staff, invoices and a business's own books", async () => {
@@ -96,7 +102,17 @@ describe("the money's presses are taken back whole", () => {
       { label: "a consolidated return", id: "tax_consolidate", params: { org: corp } },
       { label: "issue shares at a price", id: "shares_issue", params: { business: corp, to: "danny_okafor", units: 10, price: 5000 }, keep: true },
       { label: "wind up", id: "org_wind_up", params: { org: corp, stage: "begin", property: "sell" } },
-      { label: "start a project", id: "project_start", params: { org: corp, template: "building", name: "Zed Hall" } },
+      { label: "list on the market", id: "shares_list", params: { business: corp, units: 5, price: 100, symbol: "ZED" }, keep: true },
+      { label: "take off the market", id: "shares_delist", params: { business: corp }, keep: true },
+      { label: "hire someone", id: "job_hire", params: { business: corp, worker: "danny_okafor", title: "Hand", basis: "hourly", rate: 2000, hours_per_week: 5, pay_every: "week" } },
+      { label: "start a project", id: "project_start", params: { org: corp, template: "building", name: "Zed Hall" }, keep: true },
+    ]);
+    const project = Object.entries(r.world().entities).find(([, e]) => e.kind === "project" && e.fields.gone !== true)?.[0] ?? "";
+    expect(project).not.toBe("");
+    await play(r, [
+      { label: "pause the project", id: "project_pause", params: { project }, keep: true },
+      { label: "resume it", id: "project_resume", params: { project } },
+      { label: "drop it", id: "project_drop", params: { project } },
       { label: "found another", id: "org_found", params: { type: "company", name: "Zed Two", structure: "llc", amount: 50000 }, keep: true },
     ]);
     const two = Object.entries(r.world().entities).find(([, e]) => e.name === "Zed Two" && e.fields.gone !== true)?.[0] ?? "";
