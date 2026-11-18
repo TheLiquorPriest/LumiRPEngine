@@ -694,7 +694,7 @@ export const vehiclesPack: PackDef = {
         const product = fuelProduct(ctx, v);
         const qty = Math.round(((wanted / 100) * product.capacity) * 100) / 100;
         const cents = product.catalog !== null ? priceOf(ctx, product.catalog, qty) : Math.round(product.perUnit * qty);
-        const paid = charge(ctx, payer, cents, `Fuel for ${e.name} (${qty} ${product.unit})`, "fuel");
+        const paid = charge(ctx, payer, cents, say("memo_fuel_for", { name: e.name, qty, unit: product.unit }), "fuel");
         if (!Array.isArray(paid)) return paid;
         if (recorded !== null) return [...paid, bump(ctx.state, v, "fuel_pct", wanted, recorded)];
         return asked === null ? [...paid, { type: "set", entity: v, field: "fuel_pct", value: 100 }] : paid;
@@ -792,7 +792,7 @@ export const vehiclesPack: PackDef = {
         const owner = e ? (ownersIn(e.fields)[0]?.party ?? null) : null;
         if (!e || !owner || !own(ctx.state.entities, owner) || !kindIs(ctx.registry, ctx.world, e.kind, "vehicle") || ownerLevel(ctx, v) < 4) continue;
         const premium = Math.round(numOf(classRow(ctx, v)?.insurance_full_cents_per_month));
-        if (premium > 0) out.push({ vehicle: v, owner, cents: premium, label: `Insurance: ${e.name}` });
+        if (premium > 0) out.push({ vehicle: v, owner, cents: premium, label: say("flow_label_insurance", { name: e.name }) });
       }
       return out;
     });
@@ -807,7 +807,7 @@ export const vehiclesPack: PackDef = {
         const owner = e ? (ownersIn(e.fields)[0]?.party ?? null) : null;
         if (!e || !owner || !own(ctx.state.entities, owner) || !kindIs(ctx.registry, ctx.world, e.kind, "vehicle") || isGone(ctx.state, v) || ownerLevel(ctx, v) < 4) continue;
         const fee = Math.round(numOf(objOf(classRow(ctx, v)?.registration_cents_per_year).typical));
-        if (fee > 0) out.push({ vehicle: v, owner, cents: fee, label: `Registration: ${e.name}`, month: (parseInt(hashParts("registration", v).slice(0, 4), 16) % 12) + 1 });
+        if (fee > 0) out.push({ vehicle: v, owner, cents: fee, label: say("flow_label_registration", { name: e.name }), month: (parseInt(hashParts("registration", v).slice(0, 4), 16) % 12) + 1 });
       }
       return out;
     });

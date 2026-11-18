@@ -164,7 +164,7 @@ export function holdProblem(ctx: ReadContext, thing: EntityId, holder: EntityId)
   const h = own(ctx.state.entities, holder);
   if (!e || !h) return null;
   const as = holdsAs(ctx, holder);
-  if (as === null) return `${h.name} can't hold anything`;
+  if (as === null) return say("eng_name_cant_hold_anything", { name: h.name });
   const goes = goesIn(ctx, thing);
   const fixed = fixedOf(ctx, thing);
   if (goes === "nowhere") return fixed === "part" ? say("why_name_is_built_into_what_holds_it", { name: e.name }) : fixed === "fixed" ? say("why_name_is_fixed_in_place", { name: e.name }) : say("why_name_isnt_a_thing_that_goes_inside", { name: e.name });

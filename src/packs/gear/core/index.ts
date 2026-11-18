@@ -118,8 +118,8 @@ function authoredMoves(world: WorldDoc): { things: Map<string, string>; holders:
     for (const rel of e.relations) {
       const holder = rel.type === "in" ? own(world.entities, rel.to) : undefined;
       if (!holder) continue;
-      note(holders, holder.kind, `${holder.name} holds ${e.name}`);
-      note(things, e.kind, `${holder.name} holds ${e.name}`);
+      note(holders, holder.kind, say("eng_holder_holds_thing", { holder: holder.name, thing: e.name }));
+      note(things, e.kind, say("eng_holder_holds_thing", { holder: holder.name, thing: e.name }));
     }
   }
   for (const { path, effects } of effectLists(world)) {
@@ -128,7 +128,7 @@ function authoredMoves(world: WorldDoc): { things: Map<string, string>; holders:
       const at = argName(arg);
       if (!at) return null;
       const param = action ? own(action.params, at.name) : undefined;
-      if (param) return { kind: param.type === "ref" ? param.ref : undefined, words: `its ${param.label ?? at.name}` };
+      if (param) return { kind: param.type === "ref" ? param.ref : undefined, words: say("eng_its_name", { name: param.label ?? at.name }) };
       if (at.param || hasOwn(at.formula ? FORMULA_NAMES : BOUND, at.name)) return null;
       const e = own(world.entities, at.formula && at.name === "pov" ? world.pov : at.name);
       return e ? { kind: e.kind, words: e.name } : null;
@@ -142,9 +142,9 @@ function authoredMoves(world: WorldDoc): { things: Map<string, string>; holders:
       }
       const by = action?.label ?? path;
       const into = named(spec.args?.[move.into]);
-      if (into) note(holders, into.kind, `${by} gives things to ${into.words}`);
+      if (into) note(holders, into.kind, say("eng_by_gives_things_to", { by, to: into.words }));
       const thing = move.thing === undefined ? null : named(spec.args?.[move.thing]);
-      if (thing) note(things, thing.kind, `${by} moves ${thing.words}`);
+      if (thing) note(things, thing.kind, say("eng_by_moves", { by, thing: thing.words }));
     }
   }
   return { things, holders };

@@ -248,3 +248,6 @@ reason_its_payroll_is_paid_from_nowhere: its payroll is paid from nowhere
 reason_labelof_days_days_late: {{account}}: {{days}} days late
 reason_memo_price_corrected: {{memo}}: price corrected
 reason_its_money_has_nowhere_to_be: its money has nowhere to be
+memo_fuel_for: Fuel for {{name}} ({{qty}} {{unit}})
+flow_label_insurance: Insurance: {{name}}
+flow_label_registration: Registration: {{name}}

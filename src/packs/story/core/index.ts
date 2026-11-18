@@ -4,7 +4,7 @@
 // (tracks.ts); this pack is how they reach effects, formulas, the narrator and the panel. Story has
 // no realism domain: tracks behave the same at every level.
 
-import { say } from "../../../engine/lines";
+import { say, listOf } from "../../../engine/lines";
 import type { TrackId } from "../../../shared/ids";
 import { hasOwn, isRecord, type JsonValue } from "../../../shared/json";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
@@ -489,7 +489,7 @@ function askedFor(ctx: ReadContext, ref: string): string | null {
 
 /** What the player asked for, for the GM: their words, and the track a track's own id names. */
 function askedForGm(ctx: ReadContext, ref: string): string {
-  if (ref.trim() === "") return "an answer that names none";
+  if (ref.trim() === "") return say("eng_an_answer_that_names_none");
   const t = own(ctx.world.tracks, ref);
   return t ? `"${ref}" (${t.label})` : `"${ref}"`;
 }
@@ -612,10 +612,10 @@ export const storyPack: PackDef = {
         unsetFlags(world).map((u) => {
           const many = u.flags.length > 1;
           const names = u.flags.map((f) => `"${f}"`);
-          const list = many ? `${names.slice(0, -1).join(", ")} and ${names.at(-1) ?? ""}` : (names[0] ?? "");
-          const it = many ? "them" : "it";
-          const reads = u.kind === "track" ? `"${u.what}" waits on` : `The gate of "${u.what}" reads`;
-          const so = u.kind === "track" ? `what reads ${it} in this track never changes, and only the GM's Stage moves the track past ${it}` : "the gate never opens or closes";
+          const list = listOf(names);
+          const it = many ? say("word_them") : say("word_it");
+          const reads = u.kind === "track" ? say("eng_track_waits_on", { what: u.what }) : say("eng_the_gate_of_reads", { what: u.what });
+          const so = u.kind === "track" ? say("eng_track_never_changes", { it }) : say("eng_gate_never_opens");
           return {
             severity: "warning" as const,
             code: "story.unset_flag",

@@ -167,3 +167,7 @@ word_how_core: Core
 word_how_companion: Companion
 word_how_hired: Hired
 word_how_ally: Ally
+word_season_summer: summer
+word_season_winter: winter
+word_them: them
+word_it: it

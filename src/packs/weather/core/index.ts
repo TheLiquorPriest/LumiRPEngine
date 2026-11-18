@@ -30,7 +30,7 @@ import type { PackDef, ReadContext, Rejection } from "../../../engine/registry";
 import type { Rng } from "../../../engine/rng";
 import { evalExpr, kindIs, placeOfEntity, scopeEnv, truthy } from "../../../engine/scope";
 import { passMemo } from "../../../engine/read-pass";
-import { say } from "../../../engine/lines";
+import { say, orOf } from "../../../engine/lines";
 
 export type Season = "winter" | "spring" | "summer" | "autumn";
 
@@ -427,7 +427,7 @@ export const weatherPack: PackDef = {
         const v = buildWeatherView(ctx);
         if (v.level === 0 || v.label === "") return [];
         if (v.level === 1) return [say("feed_season_label", { label: v.label })];
-        return [`Weather: ${v.label.toLowerCase()}.${v.closed.length > 0 ? ` No ${v.closed.join(" or ")} travel.` : ""}`];
+        return [say("feed_weather_closed", { weather: v.label.toLowerCase(), closed: v.closed.length > 0 ? orOf(v.closed) : undefined })];
       },
     });
     r.view({ panel: "weather.now", build: (ctx) => buildWeatherView(ctx) as unknown as JsonValue });

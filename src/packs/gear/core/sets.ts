@@ -55,8 +55,8 @@ export function wornPieces(ctx: ReadContext, who: EntityId, kind?: SetKind): Set
 /** Why `who` can't put a set's piece on now, in words after its name, or null: gone, lost, someone else has it, it isn't theirs to use, or it is beyond a short walk. */
 export function pieceProblem(ctx: ReadContext, who: EntityId, item: EntityId): string | null {
   const e = own(ctx.state.entities, item);
-  if (!e || isGone(ctx.state, item) || !isThing(ctx, item)) return "is gone";
-  if (e.fields.lost === true) return "is lost";
+  if (!e || isGone(ctx.state, item) || !isThing(ctx, item)) return say("eng_piece_is_gone");
+  if (e.fields.lost === true) return say("eng_piece_is_lost");
   const has = possessorOf(ctx, item);
   if (has !== null && has !== who) return say("why_is_with_has", { has: labelOf(ctx, has) });
   if (accessFor(ctx, who, item).use === null) return say("why_isnt_yours_to_use");

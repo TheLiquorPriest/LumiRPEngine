@@ -9,3 +9,4 @@ keys:
 weather_closes: {{state}} over {{place}}: {{closes}} travel is closed.
 holiday_set: {{holiday}} is a holiday
 holiday_removed: {{holiday}} is no longer a holiday
+feed_weather_closed: Weather: {{weather}}.{{#closed}} No {{closed}} travel.{{/closed}}

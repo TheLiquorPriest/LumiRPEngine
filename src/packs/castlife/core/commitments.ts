@@ -57,13 +57,13 @@ interface Played {
  * entry is no block of anyone's day: another pack carries it out and settles it.
  */
 const PLAYED: Readonly<Partial<Record<PlanKind, Played>>> = {
-  errand: { minutes: 45, hours: [9, 18], activity: "errand", label: "Errand" },
-  meet: { minutes: 90, hours: [10, 22], activity: "socialize", label: "Meeting someone" },
-  visit: { minutes: 120, hours: [10, 21], activity: "visiting", label: "A visit" },
-  work: { minutes: 240, hours: [6, 20], activity: "work", label: "Work" },
-  rest: { minutes: 60, hours: [0, 24], activity: "rest", label: "Rest" },
-  leisure: { minutes: 90, hours: [9, 22], activity: "leisure", label: "Time out" },
-  other: { minutes: 60, hours: [8, 21], activity: "busy", label: "Busy" },
+  errand: { minutes: 45, hours: [9, 18], activity: "errand", get label() { return say("plan_label_played_errand"); } },
+  meet: { minutes: 90, hours: [10, 22], activity: "socialize", get label() { return say("plan_label_played_meet"); } },
+  visit: { minutes: 120, hours: [10, 21], activity: "visiting", get label() { return say("plan_label_played_visit"); } },
+  work: { minutes: 240, hours: [6, 20], activity: "work", get label() { return say("plan_label_played_work"); } },
+  rest: { minutes: 60, hours: [0, 24], activity: "rest", get label() { return say("plan_label_played_rest"); } },
+  leisure: { minutes: 90, hours: [9, 22], activity: "leisure", get label() { return say("plan_label_played_leisure"); } },
+  other: { minutes: 60, hours: [8, 21], activity: "busy", get label() { return say("plan_label_played_other"); } },
 };
 
 /** Whether a plan is the planner's to lay and settle: one of the kinds it plays as a block of someone's day. */
@@ -79,7 +79,14 @@ const SEARCH_DAYS = 14;
  * player's own words, which are safe to show; a standing order under way holds those hours of each
  * day it runs.
  */
-const ORDER_PLAYED = { minutes: 60, hours: [6, 22] as const, activity: "work", reason: say("reason_an_order") };
+const ORDER_PLAYED = {
+  minutes: 60,
+  hours: [6, 22] as const,
+  activity: "work",
+  get reason() {
+    return say("reason_an_order");
+  },
+};
 
 /** `blocks` with every span a cutter covers taken out: a block overlapping one keeps only its parts outside it. */
 export function cutAround(blocks: Commitment[], cutters: readonly Commitment[]): Commitment[] {
@@ -203,7 +210,7 @@ function orderLayables(ctx: ReadContext, who: EntityId): Layable[] {
     const until = o.closed ?? Infinity;
     if (to <= from || until <= from) return [];
     const p: MindPlan = { id: o.plan, what: o.text, kind: "work", when: { from, to }, where: o.place, with: [], priority: o.priority, status: o.closed === null ? "open" : "done", made: o.made, source: "gm", closed: o.closed, reason: null };
-    return [{ p, played: { ...ORDER_PLAYED, label: `On an order: ${o.text}` }, from, until, ...(o.hold ? { hold: true as const } : {}), ...(o.hold && o.window.to === null ? { givesWay: true as const } : {}) }];
+    return [{ p, played: { ...ORDER_PLAYED, label: say("plan_label_on_an_order", { text: o.text }) }, from, until, ...(o.hold ? { hold: true as const } : {}), ...(o.hold && o.window.to === null ? { givesWay: true as const } : {}) }];
   });
 }
 

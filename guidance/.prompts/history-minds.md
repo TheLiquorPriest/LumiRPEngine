@@ -50,3 +50,4 @@ knowledge_guessed: a guess
 knowledge_person: {{name}}: {{line}}
 knowledge_notKnown: {{name}} doesn't know: {{claim}}
 knowledge_everyoneHere: Everyone here: {{line}}
+mind_unworded: Something you can't put into words yet

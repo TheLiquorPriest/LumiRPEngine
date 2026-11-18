@@ -38,3 +38,10 @@ fight_narrate_the_fight_in_this_order_add: Narrate the fight in this order; add 
 fight_the_fight_is_over: The fight is over.
 fight_current_of_max_left:  ({{current}}{{#if_max}} of {{max}}{{/if_max}} left)
 fight_round_round: Round {{round}}.
+fight_who_takes_damage: {{who}} takes damage
+fight_who_recovers: {{who}} recovers
+fight_who_is_now: {{who}} is now {{band}}
+fight_who_takes_damage_wound: {{who}} takes damage{{#wound}} ({{wound}}){{/wound}}.
+fight_who_recovers_wound: {{who}} recovers{{#wound}} ({{wound}}){{/wound}}.
+fight_who_down: {{who}} {{#you}}are{{/you}}{{^you}}is{{/you}} down.
+fight_who_back_up: {{who}} {{#you}}are{{/you}}{{^you}}is{{/you}} back up.

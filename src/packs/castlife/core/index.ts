@@ -48,7 +48,7 @@ import { hashParts } from "../../../shared/hash";
 import { allSchedules, routineStays, scheduleInstants, scheduleOwners } from "../../../engine/schedules";
 import { fieldDef, isGone, kindDef, kindIs, placeOfEntity } from "../../../engine/scope";
 import { povLead, together } from "../../../engine/presence";
-import { listOf, say } from "../../../engine/lines";
+import { listOf, say, wordOf } from "../../../engine/lines";
 import { noteOf, signalOf } from "../../../engine/notices";
 import { relocate } from "../../../engine/relocate";
 import { acts as lifeActs, povLife } from "../../../engine/life";
@@ -292,12 +292,12 @@ function groundedOptions(ctx: ReadContext, who: EntityId, dayStart: number): Pla
       options.push({ id: `chore:${i}`, label: strOf(c.label, "Chores"), activity: "chores", place: strOf(c.place) || home, duration: numOf(c.minutes, 45), window: within(dayStart, 8, 20), utility: numOf(c.utility, 2), reasons: ["chore"] });
     });
   }
-  for (const a of agendaFor(ctx.world, ctx.state, who)) options.push({ id: `${AGENDA_OPTION}${a.track}`, label: a.stageLabel, activity: AGENDA_ACTIVITY, place: home, duration: 60, window: within(dayStart, 9, 20), utility: 1 + a.priority, reasons: [`agenda: ${a.label}`] });
+  for (const a of agendaFor(ctx.world, ctx.state, who)) options.push({ id: `${AGENDA_OPTION}${a.track}`, label: a.stageLabel, activity: AGENDA_ACTIVITY, place: home, duration: 60, window: within(dayStart, 9, 20), utility: 1 + a.priority, reasons: [say("plan_reason_agenda", { agenda: a.label })] });
   const overdue = optionalQuery(ctx, "gear.overdue");
   if (overdue) {
     for (const g of overdue(ctx, who)) {
       const where = placeOfEntity(ctx.state, g.borrower) ?? placeOfEntity(ctx.state, g.thing);
-      options.push({ id: `retrieve:${g.thing}`, label: `Get ${own(ctx.state.entities, g.thing)?.name ?? g.thing} back from ${own(ctx.state.entities, g.borrower)?.name ?? g.borrower}`, activity: `retrieve:${g.thing}`, place: where, duration: 45, window: within(dayStart, 8, 20), utility: 7, reasons: ["overdue loan"] });
+      options.push({ id: `retrieve:${g.thing}`, label: say("plan_label_retrieve", { thing: own(ctx.state.entities, g.thing)?.name ?? g.thing, borrower: own(ctx.state.entities, g.borrower)?.name ?? g.borrower }), activity: `retrieve:${g.thing}`, place: where, duration: 45, window: within(dayStart, 8, 20), utility: 7, reasons: [say("plan_reason_overdue_loan")] });
     }
   }
   return options;
@@ -326,26 +326,26 @@ export function legacyDayOptions(ctx: ReadContext, who: EntityId, dayStart: numb
   const company = placeOfType(ctx, "conversation", home) ?? home;
   const outdoors = occasion.foul ? home : (placeOfType(ctx, "exploration", home) ?? home);
   const outside = (occasion.season === "summer" ? 0.5 : occasion.season === "winter" ? -0.5 : 0) - (occasion.foul ? 1 : 0);
-  const unwind = [...(off ? ["a day off"] : []), ...(occasion.season === "summer" || occasion.season === "winter" ? [occasion.season] : []), ...(occasion.foul ? ["bad weather"] : [])];
+  const unwind = [...(off ? [say("plan_reason_a_day_off")] : []), ...(occasion.season === "summer" || occasion.season === "winter" ? [wordOf("season", occasion.season)] : []), ...(occasion.foul ? [say("plan_reason_bad_weather")] : [])];
   const options: PlanOption[] = [
-    { id: "sleep", label: "Sleep", activity: "sleep", place: home, duration: 480, repeat: true, reasons: ["night"], utility: (t) => (hourOf(t) >= 21.5 || hourOf(t) < 6 ? 10 : 0) },
-    { id: "breakfast", label: "Breakfast", activity: "breakfast", place: home, duration: 30, window: off ? within(dayStart, 7, 11) : within(dayStart, 6, 10), utility: (t, laid) => 4 + need("hunger", t, laid) / 20, reasons: off ? ["morning meal", "a slow morning"] : ["morning meal"], because: pressed("hunger", "hungry") },
-    { id: "lunch", label: "Lunch", activity: "lunch", place: company, duration: 45, window: within(dayStart, 11, 14), utility: (t, laid) => 4 + need("hunger", t, laid) / 20, reasons: ["midday meal"], because: pressed("hunger", "hungry") },
-    { id: "dinner", label: "Dinner", activity: "dinner", place: home, duration: 60, window: within(dayStart, 17, 21), utility: (t, laid) => 4.5 + need("hunger", t, laid) / 20, reasons: ["evening meal"], because: pressed("hunger", "hungry") },
-    { id: "leisure", label: "Time out", activity: "leisure", place: outdoors, duration: 60, window: within(dayStart, 9, off ? 22 : 20), utility: (t, laid) => 1.5 + (off ? 1 : 0) + outside + need("fun", t, laid) / 30, reasons: ["unwind", ...unwind], because: pressed("fun", "bored") },
+    { id: "sleep", label: say("plan_label_sleep"), activity: "sleep", place: home, duration: 480, repeat: true, reasons: [say("plan_reason_night")], utility: (t) => (hourOf(t) >= 21.5 || hourOf(t) < 6 ? 10 : 0) },
+    { id: "breakfast", label: say("plan_label_breakfast"), activity: "breakfast", place: home, duration: 30, window: off ? within(dayStart, 7, 11) : within(dayStart, 6, 10), utility: (t, laid) => 4 + need("hunger", t, laid) / 20, reasons: off ? [say("plan_reason_morning_meal"), say("plan_reason_a_slow_morning")] : [say("plan_reason_morning_meal")], because: pressed("hunger", "hungry") },
+    { id: "lunch", label: say("plan_label_lunch"), activity: "lunch", place: company, duration: 45, window: within(dayStart, 11, 14), utility: (t, laid) => 4 + need("hunger", t, laid) / 20, reasons: [say("plan_reason_midday_meal")], because: pressed("hunger", "hungry") },
+    { id: "dinner", label: say("plan_label_dinner"), activity: "dinner", place: home, duration: 60, window: within(dayStart, 17, 21), utility: (t, laid) => 4.5 + need("hunger", t, laid) / 20, reasons: [say("plan_reason_evening_meal")], because: pressed("hunger", "hungry") },
+    { id: "leisure", label: say("plan_label_leisure"), activity: "leisure", place: outdoors, duration: 60, window: within(dayStart, 9, off ? 22 : 20), utility: (t, laid) => 1.5 + (off ? 1 : 0) + outside + need("fun", t, laid) / 30, reasons: [say("plan_reason_unwind"), ...unwind], because: pressed("fun", "bored") },
   ];
   const social = optionalQuery(ctx, "regard");
   let fondness = 0;
   if (social) for (const other of Object.keys(ctx.state.entities)) if (other !== who && kindIs(ctx.registry, ctx.world, own(ctx.state.entities, other)?.kind ?? "", "person")) fondness = Math.max(fondness, social(ctx, who, other));
-  options.push({ id: "socialize", label: "See friends", activity: "socialize", place: company, duration: 90, window: off ? within(dayStart, 12, 23) : within(dayStart, 17, 22), utility: (t, laid) => 2.5 + (off ? 1 : 0) - (occasion.foul ? 0.5 : 0) + fondness / 50 + need("social", t, laid) / 25, reasons: ["company", ...(fondness >= FOND ? ["a close friend"] : []), ...(off ? ["a day off"] : [])], because: pressed("social", "lonely") });
+  options.push({ id: "socialize", label: say("plan_label_socialize"), activity: "socialize", place: company, duration: 90, window: off ? within(dayStart, 12, 23) : within(dayStart, 17, 22), utility: (t, laid) => 2.5 + (off ? 1 : 0) - (occasion.foul ? 0.5 : 0) + fondness / 50 + need("social", t, laid) / 25, reasons: [say("plan_reason_company"), ...(fondness >= FOND ? [say("plan_reason_a_close_friend")] : []), ...(off ? [say("plan_reason_a_day_off")] : [])], because: pressed("social", "lonely") });
   options.push(...groundedOptions(ctx, who, dayStart));
   for (const h of occasion.holidays) {
     options.push(h.dayOff ? { id: `holiday:${h.id}`, label: h.label, activity: "socialize", place: home, duration: 180, window: within(dayStart, 12, 20), utility: 5.5, reasons: [h.label] } : { id: `holiday:${h.id}`, label: h.label, activity: "leisure", place: company, duration: 90, window: within(dayStart, 17, 22), utility: 3, reasons: [h.label] });
   }
-  if (occasion.birthday) options.push({ id: "birthday", label: "Birthday", activity: "socialize", place: company, duration: 150, window: within(dayStart, 17, 23), utility: 6.5, reasons: ["their birthday"] });
+  if (occasion.birthday) options.push({ id: "birthday", label: say("plan_label_birthday"), activity: "socialize", place: company, duration: 150, window: within(dayStart, 17, 23), utility: 6.5, reasons: [say("plan_reason_their_birthday")] });
   for (const friend of occasion.friends.slice(0, 2)) {
     const theirs = homeOf(ctx, friend);
-    options.push({ id: `birthday:${friend}`, label: "A friend's birthday", activity: "socialize", place: theirs !== null && own(ctx.world.places, theirs) ? theirs : company, duration: 90, window: within(dayStart, 17, 22), utility: 4 + (social?.(ctx, who, friend) ?? 0) / 50, reasons: ["a friend's birthday"] });
+    options.push({ id: `birthday:${friend}`, label: say("plan_label_a_friend_s_birthday"), activity: "socialize", place: theirs !== null && own(ctx.world.places, theirs) ? theirs : company, duration: 90, window: within(dayStart, 17, 22), utility: 4 + (social?.(ctx, who, friend) ?? 0) / 50, reasons: [say("plan_label_a_friend_s_birthday")] });
   }
   return options;
 }
@@ -414,8 +414,8 @@ export function planFor(ctx: ReadContext, who: EntityId, day: number, rng: Rng, 
     // Chosen-by-utility blocks state their utility; a close call says so, and says when the person's own choice (the recorded `npc.choose` decision) settled it.
     blocks: plan.blocks.map((b: PlanBlock) => {
       const tie = plan.ties.find((t) => t.at === b.start);
-      const close = tie ? [tie.via === "seed" ? "close call" : `close call, ${own(ctx.state.entities, who)?.name.split(" ")[0] ?? "they"} chose`] : [];
-      return { start: b.start, end: b.end, option: b.option, label: b.label, activity: b.activity, place: b.place, reasons: b.fixed || b.utility <= 0 ? b.reasons : [...b.reasons, `utility ${Math.round(b.utility * 10) / 10}`, ...close], fixed: b.fixed };
+      const close = tie ? [tie.via === "seed" ? say("plan_reason_close_call") : say("plan_reason_close_call_chose", { name: own(ctx.state.entities, who)?.name.split(" ")[0] ?? say("plan_word_they") })] : [];
+      return { start: b.start, end: b.end, option: b.option, label: b.label, activity: b.activity, place: b.place, reasons: b.fixed || b.utility <= 0 ? b.reasons : [...b.reasons, say("plan_reason_utility", { utility: Math.round(b.utility * 10) / 10 }), ...close], fixed: b.fixed };
     }),
     ties: plan.ties.map((t) => ({ key: t.key, chosen: t.chosen, via: t.via, options: t.options.map((o) => o.id) })),
     tieZone: plan.tieZone,
@@ -677,7 +677,7 @@ function bookInvitation(ctx: ReadContext, host: EntityId): LedgerEvent[] {
   const end = blocks.find((b) => b.start === at)?.end;
   const place = typeof inv.place === "string" && own(ctx.world.places, inv.place) && canSeePlace(ctx.registry, ctx.world, ctx.state, pov, inv.place) ? inv.place : null;
   const people = [...new Set([host, ...(plan?.with ?? [])])].filter((id) => id !== pov);
-  const appointment: JsonObject = { at, minutes: end !== undefined && end > at ? end - at : 60, ...(place ? { place } : {}), label: `With ${own(ctx.state.entities, host)?.name ?? host}`, with: people, invitation: key };
+  const appointment: JsonObject = { at, minutes: end !== undefined && end > at ? end - at : 60, ...(place ? { place } : {}), label: say("plan_label_with", { host: own(ctx.state.entities, host)?.name ?? host }), with: people, invitation: key };
   return [{ type: "set", entity: pov, field: "appointments", value: [...booked, appointment] }];
 }
 
@@ -1453,7 +1453,7 @@ export function playerBlocks(ctx: ReadContext, who: EntityId, plan: DayPlan): (P
     const to = formatTimeOfDay(dateAt(cal, b.end).minuteOfDay);
     const routineId = b.option.startsWith(ROUTINE_OPTION) ? b.option.slice(ROUTINE_OPTION.length).replace(/:carried$/, "") : null;
     const a = routineId !== null ? applied.get(routineId) : undefined;
-    if ((b.option.startsWith(AGENDA_OPTION) && !publicTrack(ctx.world, b.option.slice(AGENDA_OPTION.length))) || a?.block.private === true) return { start: b.start, from, to, label: "Busy", kind: "other", reasons: ["their own business"], source: { type: "routine" } };
+    if ((b.option.startsWith(AGENDA_OPTION) && !publicTrack(ctx.world, b.option.slice(AGENDA_OPTION.length))) || a?.block.private === true) return { start: b.start, from, to, label: say("plan_label_busy"), kind: "other", reasons: [say("plan_reason_their_own_business")], source: { type: "routine" } };
     let source: PlayerBlock["source"];
     if (a) {
       const entry = a.from.source.type === "lore" ? own(ctx.world.lore, a.from.source.entry) : undefined;
@@ -1900,7 +1900,7 @@ export const castlifePack: PackDef = {
           const owned = Object.values(world.schedules).filter((s) => s.owner === e.id && s.target === "activity");
           // Appointments clash with each other, with trips, and with the person's activity schedules.
           const dated = [
-            ...(Array.isArray(e.fields.appointments) ? e.fields.appointments : []).map((raw, i) => ({ path: `entities.${e.id}.fields.appointments.${i}`, label: strOf(objOf(raw).label, "an appointment"), start: numOf(objOf(raw).at, NaN), end: numOf(objOf(raw).at, NaN) + numOf(objOf(raw).minutes, 60), trip: false })),
+            ...(Array.isArray(e.fields.appointments) ? e.fields.appointments : []).map((raw, i) => ({ path: `entities.${e.id}.fields.appointments.${i}`, label: strOf(objOf(raw).label, say("plan_label_an_appointment")), start: numOf(objOf(raw).at, NaN), end: numOf(objOf(raw).at, NaN) + numOf(objOf(raw).minutes, 60), trip: false })),
             ...(Array.isArray(e.fields.trips) ? e.fields.trips : []).map((raw, i) => ({ path: `entities.${e.id}.fields.trips.${i}`, label: strOf(objOf(raw).label, "a trip"), start: numOf(objOf(raw).from, NaN), end: numOf(objOf(raw).until, NaN), trip: true })),
           ].filter((d) => Number.isFinite(d.start) && Number.isFinite(d.end));
           for (let i = 0; i < dated.length; i++) {

@@ -162,10 +162,10 @@ export function hpLine(ctx: ReadContext, e: LedgerEvent): string | null | undefi
   if (seen === null) return null;
   if (!("wound" in seen)) return undefined;
   const who = labelOf(ctx, e.entity);
-  if (e.type === "add") return `${who} ${e.delta < 0 ? "takes damage" : "recovers"}`;
+  if (e.type === "add") return say(e.delta < 0 ? "fight_who_takes_damage" : "fight_who_recovers", { who });
   if (e.atMost) return null;
   const band = typeof e.value === "number" ? woundOf(rules, e.value, hpMaxOf(ctx, rules, e.entity)) : "";
-  return band !== "" ? `${who} is now ${band}` : null;
+  return band !== "" ? say("fight_who_is_now", { who, band }) : null;
 }
 
 /** The HP field's name for lines: its label on the POV's kind, else the field id in words. */
@@ -206,7 +206,7 @@ class FightLines {
       if (now === was || who === "someone") continue;
       const seen = hpSeen(ctx, this.rules, id);
       if (seen && "wound" in seen) {
-        this.push(`${capital(who)} ${now < was ? "takes damage" : "recovers"}${seen.wound ? ` (${seen.wound})` : ""}.`);
+        this.push(say(now < was ? "fight_who_takes_damage_wound" : "fight_who_recovers_wound", { who: capital(who), wound: seen.wound || undefined }));
         continue;
       }
       const verb = (now < was ? "lose" : "gain") + (id === ctx.world.pov ? "" : "s");
@@ -290,7 +290,7 @@ function settle(w: Working, rules: CombatDef, rng: Rng, lines: FightLines): bool
     applyEffects(w.reg, w, effects, { bindings: { self: f.id }, rng: fall });
     asUnit(w, from, fall.seed);
     const who = nameFor(w.ctx, f.id);
-    if (who !== "someone") lines.push(`${capital(who)} ${f.id === w.world.pov ? "are" : "is"} ${down ? "down" : "back up"}.`);
+    if (who !== "someone") lines.push(say(down ? "fight_who_down" : "fight_who_back_up", { who: capital(who), you: f.id === w.world.pov }));
   }
   const now = encounterOf(w.state);
   if (!now) return true;

@@ -219,3 +219,16 @@ reason_name_is_on_name2_too_big: {{name}} is on {{holder}}: too big to carry ({{
 reason_name_is_in_name2_too_big: {{name}} is in {{holder}}: too big for it ({{holder}} takes things up to {{ceiling}}).
 reason_name_is_in_around_which: {{name}}: it is in {{around}}, which {{which}}
 reason_vehicle_goes_only_on_another: {{name}} is {{#on}}on{{/on}}{{^on}}in{{/on}} {{holder}}: a vehicle goes only on another vehicle.
+eng_piece_is_gone: is gone
+eng_piece_is_lost: is lost
+eng_name_cant_hold_anything: {{name}} can't hold anything
+eng_put_away: Put away
+eng_holder_holds_thing: {{holder}} holds {{thing}}
+eng_its_name: its {{name}}
+eng_by_gives_things_to: {{by}} gives things to {{to}}
+eng_by_moves: {{by}} moves {{thing}}
+eng_track_waits_on: "{{what}}" waits on
+eng_the_gate_of_reads: The gate of "{{what}}" reads
+eng_track_never_changes: what reads {{it}} in this track never changes, and only the GM's Stage moves the track past {{it}}
+eng_gate_never_opens: the gate never opens or closes
+eng_an_answer_that_names_none: an answer that names none

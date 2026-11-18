@@ -25,9 +25,9 @@ import { restOf } from "../../../engine/things";
 import { Working } from "../../../engine/working";
 import { minutesBetween } from "../../../engine/world-state";
 import { fitsOn, grants } from "./model";
+import { say } from "../../../engine/lines";
 
 /** What a put-away move says it was for (`got.why` where one is written). */
-const WHY = "Put away";
 
 /**
  * The events of every thing the put-away process takes back to its rest at the end of a slot
@@ -63,7 +63,7 @@ export function putAwayEvents(ctx: ReadContext, end: number): LedgerEvent[] {
       if (to === null || ("place" in to && to.place === place)) continue;
       w ??= new Working(ctx.registry, ctx.world, ctx.state);
       const mark = w.lightMark();
-      const done = applyItemOp(w, { do: "move", item: id, to, why: WHY }, { by: npc ?? owners[0] ?? pov, confirmed: false, gm: false, salt: `put_away:${id}:${end}`, viewer: pov });
+      const done = applyItemOp(w, { do: "move", item: id, to, why: say("eng_put_away") }, { by: npc ?? owners[0] ?? pov, confirmed: false, gm: false, salt: `put_away:${id}:${end}`, viewer: pov });
       if ("code" in done) w.restore(mark);
     }
   }

@@ -197,7 +197,7 @@ export function gearLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
     for (const id of away) {
       // On someone else by no grant of theirs (taken, found), it is somewhere they can't know.
       const where = possessorOf(ctx, id) === null ? whereWords(ctx, id) : null;
-      lines.push({ text: sentence(`Not with you: ${thingText(ctx, id, [where ?? "you don't know where"])}`), known: "pov" });
+      lines.push({ text: sentence(say("feed_not_with_you", { thing: thingText(ctx, id, [where ?? say("feed_you_dont_know_where")]) })), known: "pov" });
     }
     // Their saved outfits and loadouts by name (Gear 3, DESIGN §28.16), so a change into one is told and read by it.
     const sets = level >= 3 ? Object.values(setsOf(own(ctx.state.entities, pov)?.fields)) : [];

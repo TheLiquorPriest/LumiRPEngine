@@ -5,7 +5,7 @@
 // A chat that doesn't track knowledge says so and lists nothing. A claim's text goes out with any
 // secret mark in it left out (`applyMarks`), as on every player surface, and fails closed: one still
 // carrying a secret's words, or naming anyone or anything the player character can't see, is never
-// worded (`UNWORDED`); nor is a teller, or anyone it is kept from, they may not know (`povMayKnow`).
+// worded (`say("mind_unworded")`); nor is a teller, or anyone it is kept from, they may not know (`povMayKnow`).
 
 import { hashParts } from "../../../shared/hash";
 import type { KnownItem, KnownView } from "../../../shared/minds";
@@ -19,9 +19,7 @@ import { findLeaks, unrevealedSecrets } from "../../../engine/visibility";
 import { factsOf, factText, holdingsOf, isSuspicion } from "./knowledge";
 import { worldSecrets } from "./knowledge-section";
 import { readSlice } from "./state";
-
-/** What a fact What you know may not word reads as. */
-const UNWORDED = "Something you can't put into words yet";
+import { say } from "../../../engine/lines";
 
 /** Play → What you know, read against the chat's state: suspicions and reveals by the threshold its turns recorded (`knowledgeThreshold`), so the two never disagree. */
 export function buildKnownView(ctx: ReadContext): KnownView {
@@ -34,7 +32,7 @@ export function buildKnownView(ctx: ReadContext): KnownView {
   const hidden = hiddenNameCheck(reg, world, state, world.pov, { stages: false });
   // Someone the player character may not know reads as no one's, as the chip words them.
   const name = (id: string): string => (povMayKnow(reg, world, state, id) ? (own(state.entities, id)?.name ?? id) : "someone");
-  const worded = (text: string): string => (findLeaks(text, secrets).length > 0 || hidden(text) ? UNWORDED : text);
+  const worded = (text: string): string => (findLeaks(text, secrets).length > 0 || hidden(text) ? say("mind_unworded") : text);
   // A world secret their holding doesn't reveal (one they hold from the start by the world's design, or only suspect) is never worded, however its claim reads.
   const secret = worldSecrets(ctx);
   const sure = knowledgeThreshold(slice);
@@ -44,7 +42,7 @@ export function buildKnownView(ctx: ReadContext): KnownView {
       const f = own(facts, fact);
       return {
         key: hashParts("lre.known", fact),
-        claim: secret(fact, f) && !revealsFact(fact, h, sure) ? UNWORDED : worded(applyMarks(f ? factText(world, f, fact) : "", { world, state }, "omit")),
+        claim: secret(fact, f) && !revealsFact(fact, h, sure) ? say("mind_unworded") : worded(applyMarks(f ? factText(world, f, fact) : "", { world, state }, "omit")),
         how: h.how,
         byName: h.by === null ? null : name(h.by),
         sinceText: formatClock(cal, h.since.at),

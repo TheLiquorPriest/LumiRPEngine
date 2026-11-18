@@ -150,3 +150,5 @@ feed_mood_mood: Mood: {{mood}}.
 feed_reactions_reactions: Reactions: {{reactions}}.
 feed_shows_depiction: Shows: {{depiction}}.
 feed_today_is_holidays: Today is {{holidays}}.
+feed_not_with_you: Not with you: {{thing}}
+feed_you_dont_know_where: you don't know where
