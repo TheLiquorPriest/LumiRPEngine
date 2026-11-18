@@ -10,7 +10,7 @@ A fight is the part of the story where position, order and numbers decide things
 
 1. **Who is in it,** and on which side. Everyone present either fights, flees, hides or watches: say which for each.
 2. **Where everyone stands.** If the place has no grid at the scale of a room, lay one first (the skill `places-and-maps`). Place everyone.
-3. **What each fighter has to hand:** check what they wear and carry. A weapon left at home is not drawn.
+3. **What each fighter has to hand:** check what they wear and carry. A weapon left at home is not drawn. With the tabletop rules, `sheet` shows the weapons each has readied: a weapon it does not show is not yet one of the rules' own (the skill `items-and-wardrobe` says how a weapon comes to be), and that is put right before the first blow, not during the fight.
 4. **Open the fight** with the fight tools. Find them with `tool_search` ("fight"). The engine has the action `fight` (`target`) for the player's own press on it, carried out with the `world_apply` operation `act`; `who` is the one who starts it.
 
 ## A round
@@ -22,7 +22,7 @@ A round on a room grid is a few seconds. The grid keeps that time, and `fight_ro
 3. **You choose for everyone else,** by who they are and what they want. A guard fights like a guard. Something cornered fights like something cornered. Most people do not fight to the death.
 4. **Resolve in the ruleset's order.** Measure reach, range and line of sight with `map_measure`. Roll what the ruleset calls for, once each.
 5. **Record what changed.** With the tabletop rules, the next section is this step. Without them: the round with `fight_round`, each fighter's act as it came out, the roll that decided it, and the harm it did in `harm`, a number that comes off the gauge the world's ruleset names for a fight's harm (a fighter it leaves down is marked down; where the world names no gauge, the answer says so). Do not set a value of your own naming for harm. Conditions are a `set`; who moved is `move`; what was dropped, drawn or broken is `place`, `wear` or the item tools. A player's press to end their turn is the action `end_turn`, carried out with `act`; a requirement that does not hold is told in the answer, and the action is carried out all the same (`SIMULATION.md`).
-6. **Say what the round did** for the Author: who acted, what landed, who is down, where everyone now stands.
+6. **Say what the round did** to whoever asked: who acted, what landed, who is down, where everyone now stands. A reply tells it as the story, in the story's own voice, with no block of numbers: they are on the turn's card.
 
 ## With the tabletop rules
 
@@ -45,7 +45,8 @@ Then the aftermath, which is where fights are forgotten:
 - What was taken from the fallen changes hands with `give`, said as taken.
 - Who saw it. The perceptions rule says what is owed to those who did.
 - Time: the fight itself took seconds. What follows it (binding wounds, searching, fleeing) takes its own time, passed afterwards.
-- With the tabletop rules: experience is `award` with `overcame` naming those who were overcome (the rules' own table says what each is worth), a level taken is `advance`, what is given back in the story is `heal`, and a night's rest is `d20_rest`. The skill `ruleset-and-sheets` says how each is called.
+- With the tabletop rules, **experience:** when the fight is over, give it with `act` and `award`. `overcame` names each one the party overcame (the rules' own table says what each is worth), and `who` and `also` those who took part, who share it. If the answer says someone has reached a level, take it with `advance` (`class`). A fight broken off with nothing overcome gives none.
+- With the tabletop rules, what is given back in the story is `heal`, and a night's rest is `d20_rest`. The skill `ruleset-and-sheets` says how each is called.
 
 ## What a tool tells you
 
