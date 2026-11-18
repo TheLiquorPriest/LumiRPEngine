@@ -12,6 +12,7 @@ import { loreTerm, topicIdOf } from "../../shared/lore";
 import { neutralizeMacros } from "../../shared/macros";
 import type { WorldDoc } from "../../shared/world";
 import { addDrop, type DropCounts } from "./checks";
+import { say } from "../../engine/lines";
 
 /** The most an entry written from pasted text keeps. */
 const CONTENT_MAX = 4000;
@@ -109,7 +110,7 @@ export function checkIndexProposals(world: WorldDoc, raw: readonly JobProposal[]
     for (const link of names(v.links, 200, LINKS_MAX * 2)) {
       if (hasOwn(world.entities, link) || hasOwn(world.places, link)) {
         if (links.length < LINKS_MAX) links.push(link);
-      } else notes.push(`dropped unknown link ${link}`);
+      } else notes.push(say("build_dropped_unknown_link_link", { link }));
     }
     const terms = [...new Set([title, ...aliases, ...names(v.terms, NAME_MAX, TERMS_MAX)].map(loreTerm))].filter((t) => safeKey(t)).slice(0, TERMS_MAX);
     const filed = [...new Map(topics.map((label) => [topicIdOf(label), label])).entries()].filter(([id]) => safeKey(id)).map(([id, label]) => ({ id, label }));

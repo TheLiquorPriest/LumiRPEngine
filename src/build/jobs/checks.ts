@@ -13,6 +13,7 @@ import { spawnTierOf, tierOf, tiersInOrder } from "../../shared/tiers";
 import { overlayKind } from "../../shared/world";
 import type { FieldDef, KindDef, WorldDoc } from "../../shared/world";
 import type { Registry } from "../../engine/registry-impl";
+import { say } from "../../engine/lines";
 
 export type ProposalMode = "import" | "refine";
 
@@ -277,7 +278,7 @@ export function checkProposals(world: WorldDoc, registry: Registry, raw: readonl
         drop("unknown_kind", { kind: stated || "none" });
         continue;
       }
-      if (assumeKind) notes.push(`assumed kind: ${kindId} (the lore named none)`);
+      if (assumeKind) notes.push(say("build_assumed_kind_kindid_the_lore_named", { kindId }));
       if (name === "") {
         drop("no_name");
         continue;
@@ -294,7 +295,7 @@ export function checkProposals(world: WorldDoc, registry: Registry, raw: readonl
       for (const [f, raw] of Object.entries(isRecord(v.fields) ? v.fields : {})) {
         const def = safeKey(f) && hasOwn(defs, f) ? defs[f] : undefined;
         const checked = def ? fieldValue(def, raw, known) : undefined;
-        if (checked === undefined) notes.push(`dropped field ${f}`);
+        if (checked === undefined) notes.push(say("build_dropped_field_f", { f }));
         else fields[f] = checked;
       }
       const relations = (Array.isArray(v.relations) ? v.relations : []).filter((r): r is JsonObject => isRecord(r) && typeof r.type === "string" && typeof r.to === "string" && known(r.to) && (hasOwn(world.relations, r.type) || registry.relations.has(r.type)));
@@ -311,12 +312,12 @@ export function checkProposals(world: WorldDoc, registry: Registry, raw: readonl
         if (typeof given === "string" && from.some((t) => hasOwn(t.rows, given))) continue;
         const row = matchRowIn(from, typeof given === "string" && given.trim() !== "" ? given : name);
         if (!row) {
-          if (given !== undefined) notes.push(`${f} "${String(given)}" matches no ${table.label} row`);
+          if (given !== undefined) notes.push(say("build_f_given_matches_no_label_row", { f, given: String(given), label: table.label }));
           continue;
         }
         fields[f] = row;
         assumed.push(f);
-        notes.push(`assumed ${f}: ${row}`);
+        notes.push(say("build_assumed_f_row", { f, row }));
       }
       // A tier the world doesn't have is the world's spawn tier for something new; a change keeps its own.
       const tier = typeof v.tier === "string" && tierOf(world, v.tier) ? v.tier : (base?.tier ?? spawnTierOf(world));
@@ -334,7 +335,7 @@ export function checkProposals(world: WorldDoc, registry: Registry, raw: readonl
         continue;
       }
       const parent = typeof v.parent === "string" && v.parent !== p.key && placeKnown(v.parent) ? v.parent : undefined;
-      if (typeof v.parent === "string" && !parent) notes.push(`dropped unknown parent ${v.parent}`);
+      if (typeof v.parent === "string" && !parent) notes.push(say("build_dropped_unknown_parent_parent", { parent: v.parent }));
       const base = exists ? world.places[p.key] : undefined;
       const link = sources?.linkOf(p.source) ?? null;
       const linked = [...new Set([...(base?.sources ?? []), ...(link ? [link] : [])])];

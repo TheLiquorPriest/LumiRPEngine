@@ -2,6 +2,7 @@
 description: The sentences of the narrator's vehicles section and of a vehicle's record - where it stands, whose it is and who may use it, its state and fuel, its service, who drives it and who is aboard, what it carries, and its specs. One line per name, a name, a colon, then its text. A name in double braces puts in what the engine knows of it (an amount in the world's own coin, a name, a number), and a block opened with a hash and closed with a slash shows only when that value is there. Change the words freely. Delete a line and that is not said at all.
 format: lines
 keys:
+  trip_*: a way to a place by a vehicle as the travel options give it - its name (drive, sail or fly the vehicle to a place), why it is offered greyed (broken down, not enough fuel) and what each leg of it takes the minutes for (reaching it, getting going, driving, parking, walking the rest)
   vehicle_service_due: a vehicle is due for service - name
   vehicle_line: one vehicle in the narrator's section - name, parts
   vehicle_someone: no one the player may know
@@ -55,3 +56,19 @@ vehicle_specs: specs {{specs}}{{#more}}, and {{more}} more{{/more}}
 vehicle_holding: {{name}} (holding {{inner}})
 vehicle_aboard: Aboard: {{who}}.
 vehicle_cargo: Cargo: {{what}}.
+trip_the_vehicle: the {{name}}
+trip_drive: Drive {{vehicle}} to {{place}}
+trip_sail: Sail {{vehicle}} to {{place}}
+trip_fly: Fly {{vehicle}} to {{place}}
+trip_broken_down: broken down
+trip_not_enough_fuel: not enough fuel
+trip_fetch_at_home: to reach it at home
+trip_fetch_at: to reach it at {{place}}
+trip_start: to get going
+trip_driving: driving
+trip_sailing: sailing
+trip_flying: flying
+trip_park: to park
+trip_park_water: to tie up
+trip_park_air: to land and tie down
+trip_on_foot_from: on foot from {{place}}

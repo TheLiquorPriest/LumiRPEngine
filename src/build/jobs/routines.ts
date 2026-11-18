@@ -35,6 +35,7 @@ import { entityVisibility, findLeaks, loreGateReader, namesAny, unrevealedSecret
 import { initialState, minutesBetween } from "../../engine/world-state";
 import { blockOnDay, routineIssues } from "../../packs/castlife/core/routines";
 import { addDrop, type Say, sayOr, snake, type DropCounts } from "./checks";
+import { say as sayLine } from "../../engine/lines";
 
 /** A job's input as the job reads it: whom it proposes for (absent, every one it may read), and where a second pass starts. */
 export interface RoutineJobInput {
@@ -327,16 +328,16 @@ export function loreCutMessage(scope: RoutineScope, cut: readonly LoreCut[], lor
 /** A schedule's days and slots in a line: "Mon–Fri 07:00–12:00 alder_automotive". */
 function scheduleLine(scope: RoutineScope, s: ScheduleDef): string {
   const r = s.recurrence;
-  const days = r.every === "week" && r.weekdays && r.weekdays.length > 0 ? r.weekdays.map((d) => weekdayName(scope.cal, d).slice(0, 3)).join(", ") : r.every === "month" && r.days ? `days ${r.days.join(", ")} of the month` : `every ${r.every}`;
+  const days = r.every === "week" && r.weekdays && r.weekdays.length > 0 ? r.weekdays.map((d) => weekdayName(scope.cal, d).slice(0, 3)).join(", ") : r.every === "month" && r.days ? sayLine("build_days_of_the_month", { days: r.days.join(", ") }) : sayLine("build_every", { every: r.every });
   const slots = s.slots.map((slot) => `${slot.start}–${slot.end}${typeof slot.value === "string" ? ` ${slot.value}` : ""}`).join("; ");
-  return `${s.id} (${s.target}): ${days}${r.from ? ` from ${r.from}` : ""}${r.until ? ` until ${r.until}` : ""}: ${slots}`;
+  return sayLine("build_schedule_line", { id: s.id, target: s.target, days, from: r.from || undefined, until: r.until || undefined, slots });
 }
 
 /** A routine block in a line, as what someone's routine already holds is given. */
 function blockLine(b: RoutineBlock): string {
-  const when = b.kind === "fixed" ? `at ${b.at ?? "?"}` : `${b.window?.from ?? "?"}–${b.window?.to ?? "?"}`;
-  const days = b.days?.weekdays ? ` on ${b.days.weekdays.join(",")}` : b.days?.off ? ` ${b.days.off === "only" ? "on days off" : "on working days"}` : "";
-  return `${b.id}: ${b.label} (${b.kind}, ${when}, ${b.minutes} min${b.perWeek ? `, ${b.perWeek}× a week` : ""}${days})`;
+  const when = b.kind === "fixed" ? sayLine("build_block_at", { at: b.at ?? "?" }) : `${b.window?.from ?? "?"}–${b.window?.to ?? "?"}`;
+  const days = b.days?.weekdays ? sayLine("build_block_on_days", { days: b.days.weekdays.join(",") }) : b.days?.off ? sayLine(b.days.off === "only" ? "build_block_on_days_off" : "build_block_on_working_days") : undefined;
+  return sayLine("build_block_line", { id: b.id, label: b.label, kind: b.kind, when, minutes: b.minutes, perWeek: b.perWeek || undefined, days });
 }
 
 /** Someone's schedules (theirs and their groups') and routine blocks (their own), as the world already has them. */
@@ -352,7 +353,7 @@ function held(scope: RoutineScope, who: EntityId): { schedules: string[]; routin
     .sort()
     .flatMap((id) => {
       const r = own(scope.world.routines ?? {}, id);
-      return r && r.owner === who ? r.blocks.map((b) => (isOff(b) ? `${r.id}: off ${b.id}` : `${r.id}: ${blockLine(b)}`)) : [];
+      return r && r.owner === who ? r.blocks.map((b) => (isOff(b) ? sayLine("build_block_off", { routine: r.id, block: b.id }) : `${r.id}: ${blockLine(b)}`)) : [];
     });
   return { schedules, routines };
 }
@@ -565,7 +566,7 @@ function checkItem(scope: RoutineScope, batch: RoutineBatch, item: { type: "rout
     else if (!c.sources.some((x) => x.key === checked.key)) c.sources.push(checked);
   }
   if (c.sources.length === 0) c.fatal.push(why[0] ?? sayOr(say, "fix_no_source"));
-  else if (why.length > 0) c.notes.push(`a source left out: ${why.join("; ")}`);
+  else if (why.length > 0) c.notes.push(sayLine("build_a_source_left_out_why", { why: why.join("; ") }));
   if (label !== "" && batch.owners.includes(owner)) {
     const named = labelProblem(scope, owner, label, say);
     if (named) c.problems.push(named);
@@ -822,7 +823,7 @@ function heldRuns(scope: RoutineScope, owner: EntityId): HeldRun[] {
     for (const slot of s.slots) {
       if (typeof slot.value !== "string") continue;
       const value = slot.value;
-      for (const run of scheduleSpans(scope, s.recurrence, [slot])) out.push({ what: `the schedule ${id}`, span: run, ...(s.target === "activity" ? { activity: value } : { place: value }) });
+      for (const run of scheduleSpans(scope, s.recurrence, [slot])) out.push({ what: sayLine("build_the_schedule_id", { id }), span: run, ...(s.target === "activity" ? { activity: value } : { place: value }) });
     }
   }
   for (const id of Object.keys(scope.world.routines ?? {}).sort()) {
@@ -830,7 +831,7 @@ function heldRuns(scope: RoutineScope, owner: EntityId): HeldRun[] {
     if (!r || r.owner !== owner) continue;
     for (const b of r.blocks) {
       if (isOff(b)) continue;
-      const what = `the block ${b.id} of the routine ${id}`;
+      const what = sayLine("build_what_block", { block: b.id, routine: id });
       const place = placeFor(scope, owner, b.place, b.company);
       for (const run of blockSpans(scope, owner, b, true)) out.push({ what, span: run, activity: b.activity, place, ...(b.kind === "fixed" ? {} : { floating: true }) });
     }
@@ -889,7 +890,7 @@ function pullsAway(scope: RoutineScope, owner: EntityId, spans: readonly Span[],
     const at = placeOfEntity(scope.state, who);
     const there = place(who);
     if (at === null || there === null || placeWithin(scope.world, at, there) || placeWithin(scope.world, there, at)) continue;
-    return `it would take ${nameOf(scope, who)} from ${scope.places.has(at) ? nameOf(scope, at) : "where the story starts them"} as the story starts`;
+    return sayLine("build_would_take_from", { who: nameOf(scope, who), from: scope.places.has(at) ? nameOf(scope, at) : sayLine("build_where_the_story_starts_them") });
   }
   return null;
 }
@@ -960,9 +961,9 @@ export function finishRoutines(scope: RoutineScope, candidates: readonly Routine
         drop("in_world");
         continue;
       }
-      for (const what of clashes) problems.push(`it clashes with ${what}`);
+      for (const what of clashes) problems.push(sayLine("build_it_clashes_with_what", { what }));
       const busy = held.filter((h) => !h.floating).map((h) => h.span);
-      if (!findsRoom(scope, c.owner, block, busy)) problems.push(`it never has room in its window: ${[...new Set(held.filter((h) => !h.floating && p.reach.some((r) => meets(h.span, r))).map((h) => h.what))].join(", ")} fill it`);
+      if (!findsRoom(scope, c.owner, block, busy)) problems.push(sayLine("build_no_room_in_window", { what: [...new Set(held.filter((h) => !h.floating && p.reach.some((r) => meets(h.span, r))).map((h) => h.what))].join(", ") }));
       const away = pullsAway(scope, c.owner, p.fixed, (who) => placeFor(scope, who, block.place, block.company));
       if (away) problems.push(away);
       // A meal or sleep's id replaces it on every day: a block on fewer days, or not every time, takes its own.
@@ -977,11 +978,11 @@ export function finishRoutines(scope: RoutineScope, candidates: readonly Routine
       if (mine.has(id)) {
         const taken = mine;
         const free = freeId(id, (x) => taken.has(x));
-        notes.push(`its id is ${free}: ${id} is taken in ${nameOf(scope, c.owner)}'s routine`);
+        notes.push(sayLine("build_note_id_taken", { free, id, owner: nameOf(scope, c.owner) }));
         id = free;
       }
       mine.add(id);
-      held.push(...p.reach.map((r) => ({ what: `the proposed block ${id}`, span: r, activity: block.activity, place, proposed: true, ...(block.kind === "fixed" ? {} : { floating: true }) })));
+      held.push(...p.reach.map((r) => ({ what: sayLine("build_the_proposed_block_id", { id }), span: r, activity: block.activity, place, proposed: true, ...(block.kind === "fixed" ? {} : { floating: true }) })));
       const routineId = freeId(snake(`${c.owner} ${id}`), (x) => hasOwn(routines, x) || takenRoutines.has(x));
       takenRoutines.add(routineId);
       const value: RoutineDef = { id: routineId, label: block.label, owner: c.owner, blocks: [{ ...block, id }] };
@@ -998,18 +999,18 @@ export function finishRoutines(scope: RoutineScope, candidates: readonly Routine
       drop("in_world");
       continue;
     }
-    for (const what of clashes) problems.push(`it clashes with ${what}`);
+    for (const what of clashes) problems.push(sayLine("build_it_clashes_with_what", { what }));
     const away = pullsAway(scope, c.owner, fixed, () => s.place);
     if (away) problems.push(away);
     const base = freeId(snake(`${c.owner} ${s.id}`), (x) => [`${x}_activity`, `${x}_place`].some((y) => hasOwn(scope.world.schedules, y) || takenSchedules.has(y)));
-    held.push(...fixed.map((r) => ({ what: `the proposed schedule ${base}`, span: r, activity: s.activity, place: s.place, proposed: true })));
+    held.push(...fixed.map((r) => ({ what: sayLine("build_what_proposed_schedule", { base }), span: r, activity: s.activity, place: s.place, proposed: true })));
     const source = c.sources[0]?.source;
     const twins = [{ target: "activity", value: s.activity }, ...(s.place ? [{ target: "place", value: s.place }] : [])];
     for (const t of twins) {
       const id = `${base}_${t.target}`;
       takenSchedules.add(id);
       const value: ScheduleDef = { id, owner: c.owner, target: t.target, recurrence: s.recurrence, slots: [{ start: s.start, end: s.end, value: t.value }], pack: "castlife", ...(source ? { source } : {}) };
-      const twin = twins.length > 1 ? [`goes with schedules.${base}_${t.target === "activity" ? "place" : "activity"}: apply both`] : [];
+      const twin = twins.length > 1 ? [sayLine("build_note_twin", { schedule: `${base}_${t.target === "activity" ? "place" : "activity"}` })] : [];
       proposals.push(proposalOf("schedules", id, value as unknown as JsonValue, c, problems, [...notes, ...twin], sourceNames));
     }
   }

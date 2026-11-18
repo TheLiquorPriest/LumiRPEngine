@@ -584,22 +584,22 @@ export const vehiclesPack: PackDef = {
         const at = placeOfEntity(ctx.state, v);
         // One parked elsewhere is offered where the player character may know it is: the row says where.
         if (!at || (at !== from && !canSeePlace(ctx.registry, ctx.world, ctx.state, pov, at))) continue;
-        const named = /^(your|my|the|a|an)\s/i.test(e.name) ? e.name.charAt(0).toLowerCase() + e.name.slice(1) : `the ${e.name}`;
+        const named = /^(your|my|the|a|an)\s/i.test(e.name) ? e.name.charAt(0).toLowerCase() + e.name.slice(1) : say("trip_the_vehicle", { name: e.name });
         for (const [to, trip] of tripsFor(ctx, v, from, targets)) {
           // Left short of the place, a trip is worth offering only when it beats walking there.
           const direct = walk ? walk(ctx, from, to, "walk") : null;
           if (trip.park !== to && direct && trip.minutes >= direct.minutes) continue;
           const leg = legOf(trip);
-          const why = e.fields.status === "broken" ? "broken down" : !fuelOk(ctx, v, leg) ? "not enough fuel" : undefined;
+          const why = e.fields.status === "broken" ? say("trip_broken_down") : !fuelOk(ctx, v, leg) ? say("trip_not_enough_fuel") : undefined;
           const sail = trip.drive.mode === "water";
           const fly = trip.drive.mode === "air";
           const parts: TravelPart[] = [];
-          if (trip.fetch) parts.push({ kind: "fetch", minutes: trip.fetch.minutes, words: `to reach it ${at === home ? "at home" : `at ${placeName(at)}`}` });
-          if (trip.startMinutes > 0) parts.push({ kind: "start", minutes: trip.startMinutes, words: "to get going" });
-          if (trip.drive.minutes > 0) parts.push({ kind: "drive", minutes: trip.drive.minutes, words: fly ? "flying" : sail ? "sailing" : "driving" });
-          if (trip.parkMinutes > 0) parts.push({ kind: "park", minutes: trip.parkMinutes, words: fly ? "to land and tie down" : sail ? "to tie up" : "to park" });
-          if (trip.walk && trip.walk.minutes > 0) parts.push({ kind: "walk", minutes: trip.walk.minutes, words: `on foot from ${placeName(trip.park)}` });
-          out.push({ to, label: `${fly ? "Fly" : sail ? "Sail" : "Drive"} ${named} to ${placeName(to)}`, mode: trip.drive.mode, minutes: trip.minutes, parts, vehicle: e.name, action: "drive", params: { vehicle: v, to }, ...(why ? { disabled: why } : {}) });
+          if (trip.fetch) parts.push({ kind: "fetch", minutes: trip.fetch.minutes, words: at === home ? say("trip_fetch_at_home") : say("trip_fetch_at", { place: placeName(at) }) });
+          if (trip.startMinutes > 0) parts.push({ kind: "start", minutes: trip.startMinutes, words: say("trip_start") });
+          if (trip.drive.minutes > 0) parts.push({ kind: "drive", minutes: trip.drive.minutes, words: say(fly ? "trip_flying" : sail ? "trip_sailing" : "trip_driving") });
+          if (trip.parkMinutes > 0) parts.push({ kind: "park", minutes: trip.parkMinutes, words: say(fly ? "trip_park_air" : sail ? "trip_park_water" : "trip_park") });
+          if (trip.walk && trip.walk.minutes > 0) parts.push({ kind: "walk", minutes: trip.walk.minutes, words: say("trip_on_foot_from", { place: placeName(trip.park) }) });
+          out.push({ to, label: say(fly ? "trip_fly" : sail ? "trip_sail" : "trip_drive", { vehicle: named, place: placeName(to) }), mode: trip.drive.mode, minutes: trip.minutes, parts, vehicle: e.name, action: "drive", params: { vehicle: v, to }, ...(why ? { disabled: why } : {}) });
         }
       }
       return out;

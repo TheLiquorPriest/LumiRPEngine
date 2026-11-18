@@ -112,8 +112,7 @@ function summaryLines(api: FinanceApi, ctx: ReadContext, who: EntityId): string[
     const share = api.shareOf(ctx.state, id, who);
     if (share <= 0) continue;
     const owed = securedLoans(api, ctx.state, id).reduce((a, l) => a + l.owed, 0);
-    const part = share < 100 ? `a ${Math.round(share)}% share of ` : "";
-    out.push(say("feed_owns_part_id_worth_id2_owed_left", { part: part, id: labelOf(ctx, id), id2: about(ctx, propertyValue(ctx.state, id)), owed: about(ctx, owed), if_owed: owed > 0 }));
+    out.push(say("feed_owns_part_id_worth_id2_owed_left", { pct: share < 100 ? Math.round(share) : undefined, id: labelOf(ctx, id), id2: about(ctx, propertyValue(ctx.state, id)), owed: about(ctx, owed), if_owed: owed > 0 }));
   }
   const rent = monthlyRent(api, ctx, who);
   if (rent > 0) out.push(say("feed_collects_about_rent_a_month_in_rent", { rent: about(ctx, rent) }));

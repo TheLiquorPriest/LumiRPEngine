@@ -114,7 +114,7 @@ feed_you_have_cash_in_cash_and_inbank: You have {{cash}} in cash and {{inBank}} 
 feed_whats_due_this_week_is_more_than: What's due this week is more than you have in cash and the bank.
 feed_contract_of_label_expire_expiry: {{contract}} of {{label}} expire {{expiry}}.
 feed_has_about_invested_invested: Has about {{invested}} invested.
-feed_owns_part_id_worth_id2_owed_left: Owns {{part}}{{id}} (worth {{id2}}{{#if_owed}}; {{owed}} left on the mortgage{{/if_owed}}).
+feed_owns_part_id_worth_id2_owed_left: Owns {{#pct}}a {{pct}}% share of {{/pct}}{{id}} (worth {{id2}}{{#if_owed}}; {{owed}} left on the mortgage{{/if_owed}}).
 feed_collects_about_rent_a_month_in_rent: Collects about {{rent}} a month in rent.
 feed_owns_share_of_id_the_shares_worth: Owns {{#if_share}}{{share}}% of {{/if_share}}{{id}} ({{#if_floored}}the shares worth nothing: its net worth is below zero{{/if_floored}}{{^if_floored}}the shares worth about {{share2}}{{/if_floored}}).
 feed_b_which_they_own_has_madelost_profit: {{b}}, which they own, has {{#if_profit}}made{{/if_profit}}{{^if_profit}}lost{{/if_profit}} {{profit}} so far this month on {{revenue}} taken in{{#if_payroll}}, {{payroll}} of it gone on wages{{/if_payroll}}.
