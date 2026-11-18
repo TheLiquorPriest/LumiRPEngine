@@ -4,6 +4,7 @@
 import calendar from "../packs/calendar/ui";
 import combat from "../packs/combat/ui";
 import castlife from "../packs/castlife/ui";
+import d20 from "../packs/d20/ui";
 import economy from "../packs/economy/ui";
 import gear from "../packs/gear/ui";
 import minds from "../packs/minds/ui";
@@ -24,4 +25,4 @@ const core: UiPackDef = {
   },
 };
 
-export const UI_PACKS: readonly UiPackDef[] = [core, sheets, economy, vehicles, gear, castlife, orgs, calendar, story, space, combat, minds];
+export const UI_PACKS: readonly UiPackDef[] = [core, sheets, economy, vehicles, gear, castlife, orgs, calendar, story, space, combat, minds, d20];

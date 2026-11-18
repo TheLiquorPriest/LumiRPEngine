@@ -18,7 +18,7 @@ import type { SheetSectionView } from "../../../shared/state-view";
 import { tierLabel } from "../../../shared/tiers";
 import type { BandDef, CheckDef } from "../../../shared/world";
 import { createEnv, evalNumber } from "../../../engine/expr";
-import { labelOf, numOf, objOf, strOf, own } from "../../../engine/pack-kit";
+import { labelOf, numOf, objOf, optionalQuery, strOf, own } from "../../../engine/pack-kit";
 import type { PackDef, ReadContext, Rejection } from "../../../engine/registry";
 import { buildEntitySheet } from "../../../engine/ruleset";
 import { bandOf, kindIs } from "../../../engine/scope";
@@ -294,7 +294,8 @@ export const sheetsPack: PackDef = {
         return conditions.length > 0 ? [say("feed_you_are_conditions", { conditions: conditions.map((c) => c.label.toLowerCase()).join(", ") })] : [];
       },
     });
-    r.view({ panel: "sheets.you", build: (ctx) => buildSheetView(ctx) as unknown as JsonValue });
+    // With the tabletop rules on in the chat, their sheet is Play's You (the `d20` pack's `d20.sheet`), and this one gives way to it.
+    r.view({ panel: "sheets.you", build: (ctx) => (optionalQuery(ctx, "d20.on")?.(ctx) === true ? null : (buildSheetView(ctx) as unknown as JsonValue)) });
 
     r.proposal({
       type: "condition",

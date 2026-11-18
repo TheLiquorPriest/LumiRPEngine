@@ -234,6 +234,25 @@ export interface PlacePartDef {
   component: ComponentType<PlacePartProps>;
 }
 
+/** What a pack's part of Play's person sheet gets: the person, and the sheet's own props. */
+export interface PersonPartProps {
+  chatId: ChatId;
+  person: EntityId;
+  state: StateView;
+  send: Send;
+  /** Opens a sheet over the person sheet. */
+  open(route: SheetRoute): void;
+}
+
+/** A part a pack adds to Play's person sheet, under the person's details (the tabletop rules' sheet); it draws nothing where it has nothing to say. */
+export interface PersonPartDef {
+  /** Unique across packs, with a dot (`d20.sheet`). */
+  id: `${string}.${string}`;
+  /** Order among the parts, ties by id. */
+  order: number;
+  component: ComponentType<PersonPartProps>;
+}
+
 export interface UiRegistry {
   panel(def: PanelDef): void;
   editor(def: EditorDef): void;
@@ -255,6 +274,8 @@ export interface UiRegistry {
   orgTab(def: OrgTabDef): void;
   /** A part of Play's place sheet, under the place's details; ids are unique across packs. */
   placePart(def: PlacePartDef): void;
+  /** A part of Play's person sheet, under the person's details; ids are unique across packs. */
+  personPart(def: PersonPartDef): void;
 }
 
 export interface UiPackDef {

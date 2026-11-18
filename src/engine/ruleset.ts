@@ -112,7 +112,8 @@ function display(ctx: ReadContext, def: FieldDef | undefined, v: JsonValue | und
 
 const FIXABLE: Readonly<Record<string, true>> = { number: true, text: true, bool: true, enum: true, money: true, duration: true };
 
-function fixOf(entity: EntityId, field: string, def: FieldDef, value: JsonValue | undefined, bounds: { min?: number; max?: number }): FieldFixTarget | undefined {
+/** A ✎ fix of a stored field, typed and bounded as its definition says; none for a derived field or a type no fix types. */
+export function fixOf(entity: EntityId, field: string, def: FieldDef, value: JsonValue | undefined, bounds: { min?: number; max?: number }): FieldFixTarget | undefined {
   if (def.derived !== undefined || !own(FIXABLE, def.type)) return undefined;
   return {
     entity,

@@ -217,6 +217,7 @@ export function PersonSheet(props: SheetProps) {
           </div>
         ) : null}
         <Empty icon="user">{present ? "You don't know much about them yet." : "They aren't among the people you know any more."}</Empty>
+        {present ? <PersonParts {...props} /> : null}
       </div>
     );
   }
@@ -308,6 +309,19 @@ export function PersonSheet(props: SheetProps) {
           </List>
         </Section>
       ) : null}
+      <PersonParts {...props} />
     </div>
+  );
+}
+
+/** The parts other packs add to the person sheet (`r.personPart`: the tabletop rules' sheet), each drawing nothing where it has nothing to say. */
+function PersonParts(props: SheetProps) {
+  const app = useApp();
+  return (
+    <>
+      {app.catalog.personParts.map((part) => (
+        <part.component key={part.id} chatId={props.chatId} person={props.id} state={props.state} send={props.send} open={props.open} />
+      ))}
+    </>
   );
 }

@@ -17,6 +17,26 @@ import { MoneyInput } from "./money-input";
 import { fixRequest, timeFixRequest, type Req } from "./requests";
 import { toastQueued } from "./queued";
 import { PlaceSheet } from "./character/place-picker";
+import { list, obj } from "./decode";
+
+const FIELD_TYPES = ["number", "text", "bool", "enum", "ref", "list", "dice", "money", "date", "duration"] as const;
+
+/** A field's fix target from JSON (a sheet row's, a sheet value's), or undefined when it lacks entity and field. */
+export function decodeFix(value: unknown): FieldFixTarget | undefined {
+  const fix = obj(value);
+  if (!fix || typeof fix.entity !== "string" || typeof fix.field !== "string") return undefined;
+  const type = FIELD_TYPES.find((candidate) => candidate === fix.type) ?? "text";
+  const options = list(fix.options, (o) => (typeof o.label === "string" ? { label: o.label, value: (o.value ?? null) as JsonValue } : null));
+  return {
+    entity: fix.entity,
+    field: fix.field,
+    type,
+    value: (fix.value ?? null) as JsonValue,
+    options: options.length > 0 ? options : undefined,
+    min: typeof fix.min === "number" ? fix.min : undefined,
+    max: typeof fix.max === "number" ? fix.max : undefined,
+  };
+}
 
 function initialText(target: FixTarget, currency: WorldCurrency): string {
   if (target.type === "money" && typeof target.value === "number") return formatMoneyInput(target.value, currency);
