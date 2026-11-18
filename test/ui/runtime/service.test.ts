@@ -20,7 +20,17 @@ const HOW: ServiceHow = {
   build: "a1b2c3d4",
   fellBack: null,
   restart: "none",
-  memory: { holds: 300 * MIB, peak: 420 * MIB, threads: 2, service: { holds: 512 * MIB, peak: 700 * MIB, limit: 2048 * MIB } },
+  memory: {
+    holds: 300 * MIB,
+    heap: { used: 60 * MIB, total: 90 * MIB },
+    outside: 20 * MIB,
+    buffers: 2 * MIB,
+    allocator: 150 * MIB,
+    peak: 420 * MIB,
+    threads: 2,
+    kept: [{ name: "Session files kept read", count: 3, chars: 1200 }],
+    service: { holds: 512 * MIB, peak: 700 * MIB, limit: 2048 * MIB },
+  },
 };
 
 describe("how RPE runs", () => {
@@ -47,6 +57,13 @@ describe("how RPE runs", () => {
     expect(words).toContain("300.0 MB");
     expect(words).toContain("at most 420.0 MB since it started; 2 worker threads running");
     expect(words).toContain("512.0 MB of 2.0 GB");
+    expect(words).toContain("60.0 MB of a heap of 90.0 MB; 20.0 MB its objects own outside it (2.0 MB of that in buffers); the allocator holds 150.0 MB");
+    expect(words).toContain("Session files kept read: 3, holding 1,200 characters");
+    let pressed = 0;
+    const freed = expand(h(ServiceView, { how: HOW, problem: null, restart: NO_RESTART, onRestart: () => undefined, onFree: () => pressed++, freed: { busy: false, problem: null, answer: { before: HOW.memory, after: { ...HOW.memory, holds: 120 * MIB }, ms: 40 } } }));
+    press(freed, "Free what can be freed now");
+    expect(pressed).toBe(1);
+    expect(textOf(freed)).toContain("RPE held 300.0 MB before and 120.0 MB after");
     const byHand = textOf(expand(h(ServiceView, { how: { ...HOW, runs: "by hand", unit: null, restart: "by hand", memory: { ...HOW.memory, service: null } }, problem: null, restart: NO_RESTART, onRestart: () => undefined })));
     expect(byHand).toContain("300.0 MB");
     expect(byHand).not.toContain("Against its service's limit");

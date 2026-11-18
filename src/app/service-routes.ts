@@ -7,7 +7,7 @@ import type { App } from "./app";
 import { buildsStatus, restartState } from "./app";
 import { COMMAND_PATHS } from "./command-routes";
 import { route, shape } from "./routes";
-import { memoryHeld } from "./service-memory";
+import { freeNow, memoryHeld } from "./service-memory";
 import { acrossTurns, type TurnTimes } from "./service-timings";
 
 /** Where the extension says a new app file has arrived (the extension's road, open to the extension's key alone). */
@@ -20,13 +20,27 @@ const T = shape.text();
 const N = shape.number();
 const level = shape.oneOf("debug", "info", "warn", "error");
 
+const figures = {
+  holds: shape.field(N, "The process's resident size now: what it holds in the machine's memory."),
+  heap: shape.field(shape.object({ used: N, total: N }), "The engine's heap: what its objects take, and the heap's whole size with its free room."),
+  outside: shape.field(N, "What the heap's objects own outside it: the text of long strings and the bytes of buffers."),
+  buffers: shape.field(N, "Of what is outside the heap, the bytes of buffers."),
+  allocator: shape.field(N, "What the allocator outside the heap holds from the system, freed memory it has not given back yet among it."),
+};
+
+const memoryFiguresShape = shape.named("MemoryFigures", "The process's own memory figures, in bytes: its resident size, the engine's heap, what the heap's objects own outside it, and what the allocator holds.", shape.object(figures));
+
 const memory = shape.named(
   "ServiceMemory",
-  "What RPE holds now, in bytes: the process's own count, now and at its highest, its worker threads, and what the kernel counts against its service's limit with that limit.",
+  "What RPE holds now, in bytes: the process's own figures, its highest resident size, its worker threads, what RPE and its harness keep that can grow with play, by name, and what the kernel counts against its service's limit with that limit.",
   shape.object({
-    holds: shape.field(N, "The process's resident size now: what it holds in the machine's memory."),
+    ...figures,
     peak: shape.field(N, "The most it has held since it started."),
-    threads: shape.field(N, "Worker threads running now, each a runtime of its own (about 50 MB in the built app); one with nothing to do ends after workers.idleSeconds."),
+    threads: shape.field(N, "Worker threads running now, each a runtime of its own (about 40 MB in the built app); one with nothing to do ends after workers.idleSeconds."),
+    kept: shape.field(
+      shape.list(shape.named("KeptCount", "A thing RPE or its harness keeps in memory: its name, how many, and the characters of text they hold where that is counted.", shape.object({ name: T, count: N, chars: shape.nullable(N) }))),
+      "What RPE and its harness keep in memory that can grow with play, each by its name: how many, and the characters of text they hold where that is counted (null where it is not).",
+    ),
     service: shape.field(
       shape.nullable(shape.object({ holds: N, peak: shape.nullable(N), limit: shape.nullable(N) })),
       "What the kernel counts against the service's limit now and at its highest (it takes in the pages of the files RPE wrote that the system keeps in memory, which it gives back before the limit is reached), and the limit, the unit's MemoryMax (null: none); null where RPE does not run as a service, or the count cannot be read.",
@@ -68,7 +82,7 @@ const partTime = shape.object({
   latest: shape.field(N, "The newest turn's, in milliseconds."),
 });
 
-export function serviceRoutes(at: Pick<App, "builds" | "version" | "config" | "listening" | "serviceLog" | "now" | "workers" | "index">, turns?: TurnsTimed) {
+export function serviceRoutes(at: Pick<App, "builds" | "version" | "config" | "listening" | "serviceLog" | "now" | "workers" | "index" | "kept">, turns?: TurnsTimed) {
   const { builds } = at;
   const started = at.now() - process.uptime() * 1000;
   return [
@@ -109,9 +123,18 @@ export function serviceRoutes(at: Pick<App, "builds" | "version" | "config" | "l
           build: at.version,
           fellBack: runs.fellBack,
           restart: builds.status().restart,
-          memory: await memoryHeld(at.workers.running + at.index.threads, runs.service),
+          memory: await memoryHeld(at.workers.running + at.index.threads, runs.service, at.kept.read()),
         };
       },
+    }),
+    route({
+      method: "POST",
+      path: "/api/v1/service/memory/free",
+      access: "page",
+      group: "service",
+      does: "\"Free what can be freed now\": a full collection of the engine's heap, with the memory outside it freed too, and the process's figures before and after. Where they fall far, the engine was slow to collect; where they do not, something holds the memory.",
+      reply: shape.named("MemoryFreed", "The process's figures before and after a full collection, and how long it took in milliseconds.", shape.object({ before: memoryFiguresShape, after: memoryFiguresShape, ms: N })),
+      handle: () => freeNow(),
     }),
     route({
       method: "POST",

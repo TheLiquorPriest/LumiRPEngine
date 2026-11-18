@@ -5,7 +5,7 @@
 // here decides whether RPE may restart.
 
 import type { ComponentChildren } from "preact";
-import type { BuildsStatus, RestartState, ServiceHow, ServiceMemory } from "../../../shared/api";
+import type { BuildsStatus, KeptCount, MemoryFigures, MemoryFreed, RestartState, ServiceHow, ServiceMemory } from "../../../shared/api";
 import { Badge, Banner, Button, Row, Section } from "../../../frontend/components";
 import { bytesWords, counted, duration, when } from "../../words";
 import type { RpeClient } from "../../client";
@@ -24,6 +24,15 @@ export interface RestartShown {
 }
 
 export const NO_RESTART: RestartShown = { busy: false, answer: null, problem: null };
+
+/** Where "Free what can be freed now" stands: pressed and waiting, what it answered, or why it failed. */
+export interface FreedShown {
+  busy: boolean;
+  answer: MemoryFreed | null;
+  problem: string | null;
+}
+
+export const NOT_FREED: FreedShown = { busy: false, answer: null, problem: null };
 
 /**
  * Waits for RPE to come back after a restart: asks how RPE runs every `poll.every` (a read that fails while RPE is down is tried again), and when the
@@ -85,6 +94,9 @@ export interface ServiceViewProps {
   problem: string | null;
   restart: RestartShown;
   onRestart(): void;
+  /** "Free what can be freed now": where it stands, and the press. */
+  freed?: FreedShown;
+  onFree?(): void;
 }
 
 export function ServiceView(props: ServiceViewProps) {
@@ -130,7 +142,7 @@ export function ServiceView(props: ServiceViewProps) {
           />
           <Row k="Its build" v={<code>{how.build}</code>} />
           <Row k="It listens on" v={<span data-listens>{how.listens.map((a) => <code key={a} class="lre-id"> {a}</code>)}</span>} />
-          <MemoryRows memory={how.memory} />
+          <MemoryRows memory={how.memory} freed={props.freed ?? NOT_FREED} {...(props.onFree === undefined ? {} : { onFree: props.onFree })} />
           <p class="rpe-line" data-restart-state>
             {RESTART_WORDS[how.restart]}
             {how.runs === "by hand" ? " Restart is not offered: nothing starts RPE again once it stops." : ""}
@@ -151,12 +163,55 @@ export function ServiceView(props: ServiceViewProps) {
   );
 }
 
-/** What RPE holds now, and against its service's limit where it runs as a service whose count can be read. */
-function MemoryRows(props: { memory: ServiceMemory }) {
-  const { holds, peak, threads, service } = props.memory;
+/** The heap and the rest of a figure, in a line: what the heap's objects take of the heap, what they own outside it, and what the allocator holds. */
+function heapWords(f: MemoryFigures): string {
+  return `${bytesWords(f.heap.used)} of a heap of ${bytesWords(f.heap.total)}; ${bytesWords(f.outside)} its objects own outside it (${bytesWords(f.buffers)} of that in buffers); the allocator holds ${bytesWords(f.allocator)}`;
+}
+
+/** One thing kept, in a line: its count, and the characters of its text where they are counted. */
+function keptWords(k: KeptCount): string {
+  return k.chars === null ? `${k.count}` : `${k.count}, holding ${counted(k.chars, "character")}`;
+}
+
+/** What RPE holds now, the heap from the rest, what it keeps by name, against its service's limit where it runs as a service whose count can be read, and the press that frees what can be freed. */
+function MemoryRows(props: { memory: ServiceMemory; freed: FreedShown; onFree?(): void }) {
+  const { holds, peak, threads, kept, service } = props.memory;
+  const freed = props.freed.answer;
   return (
     <>
       <Row k="Memory it holds" v={<span data-memory>{bytesWords(holds)}</span>} sub={`at most ${bytesWords(peak)} since it started; ${counted(threads, "worker thread")} running`} />
+      <Row k="Of it, the engine's heap" v={<span data-memory-heap>{heapWords(props.memory)}</span>} />
+      {props.onFree === undefined ? null : (
+        <div>
+          <Button size="sm" busy={props.freed.busy} onClick={props.onFree}>
+            Free what can be freed now
+          </Button>
+        </div>
+      )}
+      {kept.length === 0 ? null : (
+        <div class="lre-stack" data-memory-kept>
+          <p class="rpe-meta">What RPE and its harness keep in memory that can grow as you play:</p>
+          <ul class="rpe-plain lre-stack">
+            {kept.map((k) => (
+              <li key={k.name} class="rpe-meta">
+                {k.name}: {keptWords(k)}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {props.freed.problem === null ? null : (
+        <Banner tone="neg" icon="alert" title="Nothing was freed">
+          <span>{props.freed.problem}</span>
+        </Banner>
+      )}
+      {freed === null ? null : (
+        <Banner tone="info" icon="check" title="A full collection">
+          <span data-memory-freed>
+            It took {duration(freed.ms)}. RPE held {bytesWords(freed.before.holds)} before and {bytesWords(freed.after.holds)} after. Before: {heapWords(freed.before)}. After: {heapWords(freed.after)}. Where the figures fell far, the engine was slow to collect what nothing needed; where they did not, something RPE keeps holds the memory.
+          </span>
+        </Banner>
+      )}
       {service === null ? null : (
         <Row
           k="Against its service's limit"

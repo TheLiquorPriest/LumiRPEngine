@@ -1327,6 +1327,13 @@ export interface JournalQuestRow {
   thread: string | null;
 }
 
+/** A thing RPE or its harness keeps in memory: its name, how many, and the characters of text they hold where that is counted. */
+export interface KeptCount {
+  name: string;
+  count: number;
+  chars: number | null;
+}
+
 /** How long a kind is kept: for good, until the chat is deleted or he prunes it, or by a setting, which gives its key and what it is now (null: none, all kept). */
 export type KeptFor = { by: "never" } | { by: "chat" } | { by: "setting"; setting: string; value: number | null };
 
@@ -1822,6 +1829,27 @@ export interface MeasureTurn {
 
 /** A memory's tier: top of mind, short term, long term. */
 export type MemoryBand = "top" | "short" | "long";
+
+/** The process's own memory figures, in bytes: its resident size, the engine's heap, what the heap's objects own outside it, and what the allocator holds. */
+export interface MemoryFigures {
+  /** The process's resident size now: what it holds in the machine's memory. */
+  holds: number;
+  /** The engine's heap: what its objects take, and the heap's whole size with its free room. */
+  heap: { used: number; total: number };
+  /** What the heap's objects own outside it: the text of long strings and the bytes of buffers. */
+  outside: number;
+  /** Of what is outside the heap, the bytes of buffers. */
+  buffers: number;
+  /** What the allocator outside the heap holds from the system, freed memory it has not given back yet among it. */
+  allocator: number;
+}
+
+/** The process's figures before and after a full collection, and how long it took in milliseconds. */
+export interface MemoryFreed {
+  before: MemoryFigures;
+  after: MemoryFigures;
+  ms: number;
+}
 
 /** A list of memories, bounded as the entries are. */
 export interface MemoryItems {
@@ -2876,14 +2904,24 @@ export interface ServiceLog {
   kept: number;
 }
 
-/** What RPE holds now, in bytes: the process's own count, now and at its highest, its worker threads, and what the kernel counts against its service's limit with that limit. */
+/** What RPE holds now, in bytes: the process's own figures, its highest resident size, its worker threads, what RPE and its harness keep that can grow with play, by name, and what the kernel counts against its service's limit with that limit. */
 export interface ServiceMemory {
   /** The process's resident size now: what it holds in the machine's memory. */
   holds: number;
+  /** The engine's heap: what its objects take, and the heap's whole size with its free room. */
+  heap: { used: number; total: number };
+  /** What the heap's objects own outside it: the text of long strings and the bytes of buffers. */
+  outside: number;
+  /** Of what is outside the heap, the bytes of buffers. */
+  buffers: number;
+  /** What the allocator outside the heap holds from the system, freed memory it has not given back yet among it. */
+  allocator: number;
   /** The most it has held since it started. */
   peak: number;
-  /** Worker threads running now, each a runtime of its own (about 50 MB in the built app); one with nothing to do ends after workers.idleSeconds. */
+  /** Worker threads running now, each a runtime of its own (about 40 MB in the built app); one with nothing to do ends after workers.idleSeconds. */
   threads: number;
+  /** What RPE and its harness keep in memory that can grow with play, each by its name: how many, and the characters of text they hold where that is counted (null where it is not). */
+  kept: KeptCount[];
   /** What the kernel counts against the service's limit now and at its highest (it takes in the pages of the files RPE wrote that the system keeps in memory, which it gives back before the limit is reached), and the limit, the unit's MemoryMax (null: none); null where RPE does not run as a service, or the count cannot be read. */
   service: { holds: number; peak: number | null; limit: number | null } | null;
 }
@@ -6377,6 +6415,16 @@ export interface ApiRoutes {
     query: { area?: string; chat?: string; turn?: string; job?: string; level?: "debug" | "info" | "warn" | "error"; limit?: number };
     body: undefined;
     reply: ServiceLog;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** "Free what can be freed now": a full collection of the engine's heap, with the memory outside it freed too, and the process's figures before and after. Where they fall far, the engine was slow to collect; where they do not, something holds the memory. */
+  "POST /api/v1/service/memory/free": {
+    params: Record<string, never>;
+    query: Record<string, never>;
+    body: undefined;
+    reply: MemoryFreed;
     paged: false;
     long: false;
     joined: false;

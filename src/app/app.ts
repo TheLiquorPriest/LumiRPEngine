@@ -27,6 +27,7 @@ import { startServer } from "./server";
 import { guardSwitches, Switches } from "./switches";
 import { RPE_UI, uiRoute } from "./ui";
 import { ServiceLog } from "./service-log";
+import { KeptCounts } from "./service-memory";
 import { type AppFile, Builds, type BuildsStatus } from "./update";
 import { defaultThreads, Workers } from "./workers/pool";
 
@@ -106,6 +107,8 @@ export interface App {
   readonly builds: Builds;
   /** The worker threads heavy work runs on (plan §4.1): a task of the one list (`workers/tasks.ts`), its answer back. */
   readonly workers: Workers;
+  /** What each part keeps in memory that can grow with play, counted by name when the Runtime page asks: an area adds its own when it mounts. */
+  readonly kept: KeptCounts;
   /** The index file: contentless full-text indexes the lanes feed and search (`index-file/index-file.ts`). */
   readonly index: IndexFile;
   /** What the migrations did when the app opened. */
@@ -321,6 +324,7 @@ export async function openApp(options: OpenAppOptions): Promise<App> {
     now,
     builds,
     workers,
+    kept: new KeptCounts(),
     index,
     migrated,
     async start() {

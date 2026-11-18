@@ -15,7 +15,7 @@ import { useSettingView } from "../settings/names";
 import { errorWords } from "../../words";
 import { type BuildsReader, type BuildsShown, BuildsView, NO_BUILDS, readBuilds, readSession, SessionLine } from "./builds";
 import { type LogFilter, logAt, logFilterOf, LogView } from "./logs";
-import { NO_RESTART, type RestartShown, ServiceView, watchRestart } from "./service";
+import { type FreedShown, NO_RESTART, NOT_FREED, type RestartShown, ServiceView, watchRestart } from "./service";
 import { TimingsView } from "./timings";
 
 export { NO_BUILDS, readBuilds, readSession } from "./builds";
@@ -76,7 +76,19 @@ function ServicePart(props: { onBack(): void }) {
       (error: unknown) => setRestart({ busy: false, answer: null, problem: errorWords(error) }),
     );
   };
-  return <ServiceView how={service.value} problem={service.problem} restart={restart} onRestart={restartNow} />;
+  const [freed, setFreed] = useState<FreedShown>(NOT_FREED);
+  const freeNow = (): void => {
+    if (freed.busy) return;
+    setFreed({ busy: true, answer: null, problem: null });
+    app.client.call("POST /api/v1/service/memory/free", {}).then(
+      (answer) => {
+        setFreed({ busy: false, answer, problem: null });
+        service.again();
+      },
+      (error: unknown) => setFreed({ busy: false, answer: null, problem: errorWords(error) }),
+    );
+  };
+  return <ServiceView how={service.value} problem={service.problem} restart={restart} onRestart={restartNow} freed={freed} onFree={freeNow} />;
 }
 
 function LogPart(props: { route: Route; reload: number }) {

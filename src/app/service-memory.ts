@@ -1,15 +1,64 @@
 // The memory RPE's service may hold (`service.memory`, `rpe up --memory`): the size its systemd unit
 // holds it to (`MemoryMax`). Only a size systemd reads is taken, so no limit makes a unit systemd
 // refuses, and none is so small that RPE cannot start under it. And what RPE holds now, for the
-// Runtime page: as the process counts it, and as the kernel counts it against the service's limit.
+// Runtime page: as the process counts it, split into the engine's heap and the rest, as the kernel
+// counts it against the service's limit, and what RPE and its harness keep that can grow with play.
 
+import { memoryUsage as allocatorUsage } from "bun:jsc";
 import { readFile } from "node:fs/promises";
 
-/** What RPE holds now, in bytes: the process's resident size now and at its highest, its worker threads, and its service's own count where it has one. */
-export interface MemoryHeld {
+/** The process's own figures, in bytes: what tells the engine's heap from the rest. */
+export interface MemoryFigures {
+  /** The resident size now: what the process holds in the machine's memory. */
   holds: number;
+  /** The engine's heap: the objects in it, and the heap's whole size with its free room. */
+  heap: { used: number; total: number };
+  /** Memory the heap's objects own outside it (the text of long strings, the bytes of buffers), and of that the buffers. */
+  outside: number;
+  buffers: number;
+  /** What the allocator outside the heap holds from the system: what freed memory it has not yet given back shows here. */
+  allocator: number;
+}
+
+/** What RPE keeps that can grow with play, by its name: how many, and the characters of text they hold where that is counted. */
+export interface KeptCount {
+  name: string;
+  count: number;
+  chars: number | null;
+}
+
+/**
+ * What each part of RPE keeps in memory that can grow with play, each told once under its name, read when the Runtime page asks: a
+ * part counts what it holds itself (how many, and the characters of their text where it has them), so the count costs no more than a
+ * walk of the part's own map. A count that throws is left out of that read.
+ */
+export class KeptCounts {
+  readonly #counts = new Map<string, () => { count: number; chars?: number | null }>();
+
+  /** A part's count under `name`, which says in plain words what is kept ("Session files kept read"). */
+  add(name: string, read: () => { count: number; chars?: number | null }): void {
+    this.#counts.set(name, read);
+  }
+
+  read(): KeptCount[] {
+    const out: KeptCount[] = [];
+    for (const [name, read] of this.#counts) {
+      try {
+        const { count, chars } = read();
+        out.push({ name, count, chars: chars ?? null });
+      } catch {
+        // A part that cannot count now is left out of this read; the next read asks it again.
+      }
+    }
+    return out;
+  }
+}
+
+/** What RPE holds now, in bytes: the process's figures, its highest resident size, its worker threads, what it keeps by name, and its service's own count where it has one. */
+export interface MemoryHeld extends MemoryFigures {
   peak: number;
   threads: number;
+  kept: KeptCount[];
   /**
    * What the kernel counts against the service's limit (its cgroup's `memory.current` and `memory.peak`, which take in the pages of the
    * files RPE wrote that the system keeps in memory and gives back before the limit is reached), and the limit itself (`memory.max`:
@@ -33,10 +82,27 @@ async function serviceCount(): Promise<MemoryHeld["service"]> {
   return holds === null ? null : { holds, peak, limit };
 }
 
+/** The process's own figures now. */
+export function memoryFigures(): MemoryFigures {
+  const used = process.memoryUsage();
+  return { holds: used.rss, heap: { used: used.heapUsed, total: used.heapTotal }, outside: used.external, buffers: used.arrayBuffers, allocator: allocatorUsage().currentCommit };
+}
+
 /** What RPE holds now; `asService`: it runs under its own service unit, whose cgroup is its own (one started by hand shares its terminal's). */
-export async function memoryHeld(threads: number, asService: boolean): Promise<MemoryHeld> {
+export async function memoryHeld(threads: number, asService: boolean, kept: readonly KeptCount[] = []): Promise<MemoryHeld> {
   // `maxRSS` is in kilobytes.
-  return { holds: process.memoryUsage.rss(), peak: process.resourceUsage().maxRSS * 1024, threads, service: asService ? await serviceCount() : null };
+  return { ...memoryFigures(), peak: process.resourceUsage().maxRSS * 1024, threads, kept: [...kept], service: asService ? await serviceCount() : null };
+}
+
+/**
+ * A full collection now, the memory outside the heap freed with it, and the figures before and after: where they fall far, the engine
+ * was slow to collect what nothing held; where they do not, something holds it.
+ */
+export function freeNow(): { before: MemoryFigures; after: MemoryFigures; ms: number } {
+  const before = memoryFigures();
+  const started = performance.now();
+  Bun.gc(true);
+  return { before, after: memoryFigures(), ms: Math.round(performance.now() - started) };
 }
 
 /** The least RPE may be given: Bun alone holds about 35M once started, and RPE serves, holds its stores and runs agents on top. */
