@@ -47,4 +47,23 @@ describe("the Migration page", () => {
     expect(PAGES.find((n) => n.id === "migration")?.shells).toEqual(["web", "drawer"]);
     expect(routeOfHash(hashOf({ page: "migration" }))).toEqual({ page: "migration" });
   });
+
+  test("a chat not carried heads the page with its cause and the press that opens its record; a chat carried since says so", () => {
+    const notCarried = { head: "Not carried: 1 chat.", chats: [{ chat: "chat-gate", line: "Gate (chat-gate): the fold failed at message 2 (swipe 0): no words. See /srv/rpe/migration-failures/chat-gate.json.", lines: ["RPE holds nothing of it."], record: "/srv/rpe/migration-failures/chat-gate.json" }], carried: [{ chat: "chat-fog", line: "Fog (chat-fog) was carried by the run of 2026-11-15." }] };
+    const opened: string[] = [];
+    const record = (chat: string) => {
+      opened.push(chat);
+      return h("span", { "data-record": chat }, "the record");
+    };
+    const tree = expand(h(MigrationView, { shown: { ...MIGRATED, notCarried }, starting: false, said: null, saving: null, of: "run", onOf: () => undefined, onRehearse: () => undefined, onSave: () => undefined, folder: null, onFolder: () => undefined, record }));
+    const failed = elements(tree).find((e) => e.props["data-not-carried"] === "");
+    expect(textOf(failed?.props.children)).toContain("at message 2 (swipe 0): no words. See /srv/rpe/migration-failures/chat-gate.json.");
+    expect(opened).toEqual(["chat-gate"]);
+    expect(elements(tree).find((e) => e.props["data-record"] === "chat-gate")).toBeDefined();
+    expect(textOf(elements(tree).find((e) => e.props["data-carried-now"] === "")?.props.children)).toBe("Fog (chat-fog) was carried by the run of 2026-11-15.");
+    // Carried and none left open: the carried line alone, no alarm.
+    const calm = view({ ...MIGRATED, notCarried: { head: "", chats: [], carried: notCarried.carried } }).tree;
+    expect(elements(calm).find((e) => e.props["data-not-carried"] === "")).toBeUndefined();
+    expect(elements(calm).find((e) => e.props["data-carried-now"] === "")).toBeDefined();
+  });
 });

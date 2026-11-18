@@ -3377,6 +3377,19 @@ Answers the keep-or-discard question today's build left the chat paused on (R-54
 | Reply | [`PausedAnswered`](#pausedanswered) |
 | Long | over TCP it answers at once, status 202, with `{ answer: <id> }`, and its reply is read from `GET /api/v1/answers/:id` once ready |
 
+### `GET /api/v1/migration/chats/:chat/failure`
+
+One chat's record of why a run could not carry it, as RPE's data folder keeps it until a run carries the chat: the stage, the error's own words and its stack, the message it stood at, the broken record's place, kind and shape (never its content), and where that record is in the previous build's files; and the record's file.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat` |
+| Query | none |
+| Body | none |
+| Reply | [`MigrationFailureReply`](#migrationfailurereply) |
+
 ### `POST /api/v1/migration/connection`
 
 Picks one of RPE's connections for the work one of his own agents does, where today's choice named a connection that lives in Lumiverse: written as the `model:` of the agent's attached file, and of the one in force where it is switched on, so that work uses it from then on.
@@ -6748,6 +6761,17 @@ export interface MigrationDifferencesReply {
 }
 ```
 
+### `MigrationFailureReply`
+
+One chat's record of why a run could not carry it, as RPE's data folder keeps it, and the file it is in: when that run read the previous build's data, the stage, the error's own name, message and stack, the world and revision, the message it stood at (its id, its place in the chat, the swipe), the record of the ledger that broke by its place, its kind and its shape alone (never its content), and where that record is in the previous build's files.
+
+```ts
+export interface MigrationFailureReply {
+  path: string;
+  failure: { chat: string; at: string; stage: "read" | "fold" | "store" | "check"; error: { name: string; message: string; stack: string | null }; world: { id: string; revision: string } | null; message: { id: string; number: number; swipe: number } | null; record: { place: string; kind: string; shape: JsonValue } | null; file: { store: "lumiverse-database" | "user-storage" | "runtime-copy"; path: string; row: string | null; at: string; inside: string | null } | null };
+}
+```
+
 ### `MigrationFileReply`
 
 A report whole, to be saved as a file: the name to save it under, the report (a document the migration made, as JSON: counts, paths and checksums, never content) and its printed text.
@@ -6800,7 +6824,7 @@ export interface MigrationReply {
   sources: { lumiverse: string | null; runtime: { configDir: string; dataDir: string } | null };
   /** The backup the last run took before it wrote anything. */
   backup: { path: string; bytes: number; sha256: string; present: boolean } | null;
-  /** The chats the last real run did not carry that hold records of the previous build, at the top of the page while its report holds one; null where it holds none. */
+  /** The chats a real run did not carry that hold records of the previous build, at the top of the page while each one's record of why is kept, and the chats the last real run carried that an earlier one could not; null where there is neither. */
   notCarried: NotCarriedShown | null;
   /** The chats still off RPE: a group of its own at the head of the page. */
   offRpe: OffRpeShown[];
@@ -7047,12 +7071,13 @@ export interface NotAppliedShown {
 
 ### `NotCarriedShown`
 
-The chats a real run did not carry that hold records of the previous build, in the migration's own words (`.prompts/history-migration.md`): the head, and each chat by its id, with its line (its name and its character's as Lumiverse's database holds them, its id, and why) and what of it RPE holds and what it does not, and what to do.
+The chats a real run did not carry that hold records of the previous build, while each one's record of why is kept, in the migration's own words (`.prompts/history-migration.md`): the head, with where the records are kept, and each chat by its id, with its line (its name and its character's as Lumiverse's database holds them, its id, and the cause: the stage, the message it stood at, the error's own words) and what of it RPE holds and what it does not, and what to do, and the file of its record (null where he removed it); and the chats the last real run carried that an earlier run could not, each with its line.
 
 ```ts
 export interface NotCarriedShown {
   head: string;
-  chats: { chat: string; line: string; lines: string[] }[];
+  chats: ({ chat: string; line: string; lines: string[]; record: string | null })[];
+  carried: { chat: string; line: string }[];
 }
 ```
 

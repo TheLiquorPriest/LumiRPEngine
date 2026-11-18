@@ -27,7 +27,7 @@ describe("the Migration page's data", () => {
       db.close();
     }
   };
-  const page = (): MigrationPage => withDb((db) => migrationPage(pageInput(db, fixture)));
+  const page = (): MigrationPage => withDb((db) => migrationPage(pageInput(db, fixture, data)));
 
   beforeAll(async () => {
     fixture = await buildFixture("operator");

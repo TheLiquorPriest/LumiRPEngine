@@ -476,6 +476,29 @@ function PrintedText(props: { of: Of }) {
   return read.problem !== null ? <p class="rpe-line">{read.problem}</p> : read.value === null ? <p class="lre-muted rpe-line">Reading the printed report…</p> : <Pre text={read.value.text} />;
 }
 
+/** A chat's record of why a run could not carry it, as RPE's data folder keeps it, read once it is opened: the file it is in, and the record whole. */
+function FailureRecord(props: { chat: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Disclosure summary="The record of why" open={open} onToggle={setOpen}>
+      {open ? <RecordRead chat={props.chat} /> : null}
+    </Disclosure>
+  );
+}
+
+function RecordRead(props: { chat: string }) {
+  const app = useApp();
+  const read = useRead(() => app.client.call("GET /api/v1/migration/chats/:chat/failure", { chat: props.chat }), [props.chat]);
+  if (read.problem !== null) return <p class="rpe-line">{read.problem}</p>;
+  if (read.value === null) return <p class="lre-muted rpe-line">Reading the record…</p>;
+  return (
+    <>
+      <p class="rpe-meta">{read.value.path}</p>
+      <Pre text={JSON.stringify(read.value.failure, null, 2)} />
+    </>
+  );
+}
+
 /** The report the lists read, a page at a time. */
 function ReportLists(props: { of: Of; names: ChatNames; open(chat: string): void }) {
   return (
@@ -519,6 +542,8 @@ export function MigrationView(props: {
   names?: ChatNames;
   /** Opens a chat, as the Chats page does; left out, a chat's name does not open it. */
   open?(chat: string): void;
+  /** A chat's record of why a run could not carry it, opened under its line; left out, the record's file is named alone. */
+  record?: (chat: string) => ComponentChildren;
 }) {
   const { shown } = props;
   const names = props.names ?? NO_NAMES;
@@ -528,7 +553,7 @@ export function MigrationView(props: {
   return (
     <div class="lre-stack rpe-page" data-page="migration">
       <PageHeader title="Migration" subtitle="A rehearsal over the previous build's data, the last real run, what waits on you, the switch and going back." />
-      {shown.notCarried === null ? null : (
+      {shown.notCarried === null || shown.notCarried.chats.length === 0 ? null : (
         <Banner tone="neg" icon="alert" title={shown.notCarried.head}>
           <ul class="lre-stack rpe-plain" data-not-carried="">
             {shown.notCarried.chats.map((c) => (
@@ -539,6 +564,18 @@ export function MigrationView(props: {
                     {line}
                   </p>
                 ))}
+                {c.record === null || props.record === undefined ? null : props.record(c.chat)}
+              </li>
+            ))}
+          </ul>
+        </Banner>
+      )}
+      {shown.notCarried === null || shown.notCarried.carried.length === 0 ? null : (
+        <Banner tone="info" icon="check">
+          <ul class="lre-stack rpe-plain" data-carried-now="">
+            {shown.notCarried.carried.map((c) => (
+              <li key={c.chat} class="rpe-line" data-chat={c.chat}>
+                {c.line}
               </li>
             ))}
           </ul>
@@ -731,6 +768,7 @@ export function MigrationPage() {
       line={(w) => <WaitingLine w={w} given={shown.given} onDone={summary.again} names={names} open={open} />}
       names={names}
       open={open}
+      record={(chat) => <FailureRecord chat={chat} />}
       goingBack={<GoingBack />}
     />
   );

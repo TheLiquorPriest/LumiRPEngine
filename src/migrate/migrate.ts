@@ -29,6 +29,7 @@ import { STORY_MIGRATIONS, STORY_STORE_AREA } from "../story";
 import { chatCarried } from "./briefing";
 import { carry, placesOf } from "./carry";
 import { checkConnectionsSteady } from "./connections";
+import { closeFailure, type FoundFailure, keepFailure } from "./failures";
 import { type CarriedRuns, chatsToImport, importChats } from "./import-chats";
 import { type ChatNames, type TreeLayout } from "./own-files";
 import { openQuiet } from "./quiet-db";
@@ -192,7 +193,20 @@ export async function migrate(sources: Sources, options: MigrateOptions): Promis
       step = "importing the chats";
       const s = store.user(sources.userId);
       const run = crypto.randomUUID();
-      report.imports = importChats({ store, s, db, registry, chats, notOpened, present: new Set(today.chats.map((c) => c.id)), earlier: importedChats(db, sources.userId), run, ...(options.runs ? { keepRun: options.runs.keep } : {}) });
+      const failures = new Map<string, FoundFailure>();
+      report.imports = importChats({ store, s, db, registry, chats, notOpened, present: new Set(today.chats.map((c) => c.id)), earlier: importedChats(db, sources.userId), run, ...(options.runs ? { keepRun: options.runs.keep } : {}), failed: (f) => failures.set(f.chat, f) });
+      // Each chat it could not carry has its record of why in RPE's data folder, his alone; one it carried that an earlier run could not has that record closed.
+      step = "keeping the record of each chat not carried";
+      for (const c of report.imports) {
+        const found = failures.get(c.chatId);
+        if (c.notCarried !== undefined) {
+          if (found === undefined) throw new Error(`the import left ${c.chatId} not carried without saying what failed`);
+          await keepFailure(paths.root, { format: 1, at: report.at, ...found });
+        } else if (c.outcome === "imported" || c.outcome === "replaced") {
+          const was = await closeFailure(paths.root, c.chatId);
+          if (was !== null) (report.closed ??= []).push({ chat: c.chatId, failed: was.at });
+        }
+      }
       step = "carrying the worlds, files, settings and connections";
       const layout = options.tree;
       const tree = layout

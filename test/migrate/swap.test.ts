@@ -19,6 +19,7 @@ import { type App, lineLog, openApp, rawRoute } from "../../src/app";
 import { type CliIO, runCli } from "../../src/app/cli";
 import { dataPaths, loadConfig } from "../../src/app/config";
 import { CapturingFold } from "../../src/migrate/capture";
+import { failureFile, failuresFolder, readFailure } from "../../src/migrate/failures";
 import { sha256 } from "../../src/migrate/files";
 import { PREVIOUS_PERMISSIONS } from "../../src/migrate/going-back";
 import { isRecord } from "../../src/shared/json";
@@ -628,15 +629,19 @@ describe("the swap, and going back", () => {
     } finally {
       spy.mockRestore();
     }
-    const head = say("migration_not_carried_head", { count: 1 });
+    const head = say("migration_not_carried_head", { count: 1, folder: failuresFolder(data) });
     expect(head).not.toBe("");
+    // The cause, kept whole in RPE's data folder: its sentence is made from it.
+    const record = readFailure(data, CHAT.harness);
+    expect(record?.stage).toBe("fold");
+    expect(record?.error.message).toBe("an invented fault of the previous build's fold");
     const lines = ran.out.split("\n");
     const at = lines.indexOf(head);
     expect(at).toBeGreaterThanOrEqual(0);
     expect(lines.slice(at, at + 7)).toEqual([
       head,
       // Named as Lumiverse's database names it: the chat's name, its character's, and its id after them.
-      `  ${say("migration_not_carried_chat", { label: say("migration_not_carried_label", { name: "Fog (harness)", character: CHARACTER.name, chat: CHAT.harness }), why: say("migration_not_carried_fold") })}`,
+      `  ${say("migration_not_carried_chat", { label: say("migration_not_carried_label", { name: "Fog (harness)", character: CHARACTER.name, chat: CHAT.harness }), why: say("migration_not_carried_fold"), number: record?.message === null || record === null ? null : String(record.message.number), swipe: record?.message === null || record === null ? null : String(record.message.swipe), error: "an invented fault of the previous build's fold", file: failureFile(data, CHAT.harness) })}`,
       `    ${say("migration_not_carried_stands")}`,
       `    ${say("migration_not_carried_kept")}`,
       `    ${say("migration_not_carried_again_switched", { line: `rpe migrate --lumiverse ${fixture.sources.lumiverse} --user ${USER} --data ${data}` })}`,
@@ -644,6 +649,7 @@ describe("the swap, and going back", () => {
       "",
     ]);
     expect(lines[at + 1]).toStartWith(`  Fog (harness), with ${CHARACTER.name} (${CHAT.harness}): `);
+    expect(lines[at + 1]).toContain(`See ${failureFile(data, CHAT.harness)}.`);
     expect(at).toBeLessThan(lines.findIndex((l) => l.startsWith("Migration real run")));
     // The switch went through as the plan orders it: RPE's service runs in the previous runtime's place; what the earlier run carried of the chat stands.
     expect(ran.out).toContain(`Started ${UNIT}, RPE's service`);

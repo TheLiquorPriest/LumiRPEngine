@@ -31,7 +31,7 @@ import { LumiverseDb } from "./lumiverse-db";
 import { earlierRuns, migrate, type MigrateOptions, type MigrateResult } from "./migrate";
 import { type ChatReport, type MigrationReport, refusalsOf, reportText } from "./report";
 import { disownedLines } from "./no-runtime";
-import { type NotCarriedSteps, notCarriedLines, notCarriedOf } from "./not-carried";
+import { type NotCarriedSteps, notCarriedLines } from "./not-carried";
 import { runtimeConfig, type SavedRuntime } from "./runtime-folders";
 import { openToday, type Sources } from "./today";
 
@@ -420,8 +420,8 @@ export async function swapRun(plan: SwapPlan, rpe: RpeStart, io: SwapIo): Promis
     } catch (error) {
       throw new Error(`the migration stopped: ${error instanceof Error ? error.message : String(error)}`);
     }
-    // A chat holding records of the previous build that the run did not carry is named first, ahead of the report; the switch goes on as the plan has it.
-    for (const line of notCarriedLines(notCarriedOf(run.report), rpe.notCarried, { lumiverse: plan.sources.lumiverse, user: plan.sources.userId })) io.out(line);
+    // A chat holding records of the previous build that the run did not carry is named first, ahead of the report, with its cause and where its record of why is kept; the switch goes on as the plan has it.
+    for (const line of notCarriedLines(run.report, rpe.notCarried, { lumiverse: plan.sources.lumiverse, user: plan.sources.userId }, plan.options.data)) io.out(line);
     io.out(reportText(run.report).replace(/\n$/, ""));
     if (!run.ran) throw new Error("the run was refused, as the report says");
     going();

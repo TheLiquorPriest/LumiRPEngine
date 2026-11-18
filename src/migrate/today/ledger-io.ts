@@ -427,8 +427,8 @@ export class LedgerService {
   private readonly chats = new Map<ChatId, ChatSlot>();
   private readonly unsubscribe: (() => void)[] = [];
   private outstanding = 0;
-  /** Every operation failure, also logged to the host. */
-  readonly errors: string[] = [];
+  /** Every operation failure, by its chat, with the error as it was thrown (its message and stack); each is also logged to the host. */
+  readonly failures: { chatId: ChatId; error: unknown }[] = [];
   hooks: TurnHooks | null = null;
   /** Where each turn's phases, failures and activity go (DESIGN §6.9); the runtime sets it. */
   diag: LedgerDiagnostics | null = null;
@@ -817,7 +817,7 @@ export class LedgerService {
         })
         .catch((error: unknown) => {
           const text = `[LumiRPEngine] ledger ${chatId}: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`;
-          this.errors.push(text);
+          this.failures.push({ chatId, error });
           this.host.log("error", text, slot.userId);
           this.diag?.error({ chatId, userId: slot.userId, turn: null }, "ledger", error);
         });

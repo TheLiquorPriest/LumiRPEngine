@@ -95,6 +95,8 @@ export class ChatReader {
   private readonly staged: StagedActions;
   private readonly chips: ChipStore;
   private readonly why = new Map<ChatId, NotOpened>();
+  /** Per chat, the error its world's read threw, kept whole for the record of the chat's failure (`failureOf`). */
+  private readonly worldErrors = new Map<ChatId, unknown>();
   /** His answers to the keep-or-discard questions today's build left, by chat (`answers.ts`): each written as today's own pause chip writes it, once the chat is opened. */
   private answers = new Map<string, readonly PauseAnswer[]>();
 
@@ -115,9 +117,10 @@ export class ChatReader {
     let world: WorldDoc;
     try {
       world = (await this.worlds.get(run.worldId, userId, run.revision)).world;
-    } catch {
-      // A fixed reason: the reader's own words can quote the file's text, and the report holds no content.
+    } catch (error) {
+      // A fixed reason: the reader's own words can quote the file's text, and the report holds no content. The error itself goes to the chat's record of its failure, which is his alone.
       this.why.set(chatId, new NotOpened(`its world ${run.worldId} at revision ${run.revision} can't be read by the previous build's world store`));
+      this.worldErrors.set(chatId, error);
       return null;
     }
     const pinned = new Map<RevisionId, WorldDoc>([[run.revision, world]]);
@@ -204,7 +207,7 @@ export class ChatReader {
       const stored = await this.host.storage.read(journalPath(chatId), userId);
       const decoded = decodeJournal(stored, chatId, run);
       state = stored === null ? "none" : ((decoded.reset as JournalRead | null) ?? "read");
-      const failed = this.ledger.errors.length;
+      const failed = this.ledger.failures.length;
       const first = await this.open(chatId, userId);
       wasOpen = first.before;
       held = first.held;
@@ -213,7 +216,7 @@ export class ChatReader {
         chain = core.chain(seen);
       });
       // The service logs what fails on a chat's queue rather than throwing it: each failure is one this read met. Its words are left out: they can quote the chat.
-      for (let i = failed; i < this.ledger.errors.length; i++) unreadable.push({ path: `chats/${chatId}`, why: "the previous build's ledger reader failed on this chat" });
+      for (let i = failed; i < this.ledger.failures.length; i++) unreadable.push({ path: `chats/${chatId}`, why: "the previous build's ledger reader failed on this chat" });
       if (journal === null) {
         state = "not opened";
         notOpened = this.why.get(chatId)?.why ?? "the previous build's reader didn't open it";
@@ -286,19 +289,32 @@ export class ChatReader {
    * and run name, pinned), and how to work a GM edit or ✎ fix out again. Null for a chat that plays no
    * world, or that today's reader can't open.
    */
-  async today(chatId: ChatId, userId: UserId): Promise<{ input: FoldInput; revisions: Set<RevisionId>; run: ChatRun } | null> {
+  async today(chatId: ChatId, userId: UserId): Promise<{ input: FoldInput; revisions: Set<RevisionId>; run: ChatRun; journaled: Set<string> } | null> {
     const run = readRun(await this.host.chats.chatMetadata(chatId, userId));
     if (!run) return null;
-    let found: { input: FoldInput; revisions: Set<RevisionId> } | null = null;
+    let found: { input: FoldInput; revisions: Set<RevisionId>; journaled: Set<string> } | null = null;
     // As today's build opens it first: edits it never saw pause the chat, and the writes held through a window it left open land.
     await this.open(chatId, userId);
     await this.ledger.with(chatId, userId, async (core, seen) => {
       // A copy: the importer's folds read it after the reader is done with the chat.
       const input = core.foldInput(seen);
-      found = { input: { ...input, chain: structuredClone(input.chain), pauses: structuredClone(input.pauses), tombstones: structuredClone(input.tombstones) }, revisions: core.revisionsIn(seen) };
+      // The messages whose engine record the journal holds over the one on the message: where each record is in the previous build's files.
+      const journaled = new Set(Object.keys(core.journal.messages));
+      found = { input: { ...input, chain: structuredClone(input.chain), pauses: structuredClone(input.pauses), tombstones: structuredClone(input.tombstones) }, revisions: core.revisionsIn(seen), journaled };
     });
-    const opened = found as { input: FoldInput; revisions: Set<RevisionId> } | null;
+    const opened = found as { input: FoldInput; revisions: Set<RevisionId>; journaled: Set<string> } | null;
     return opened === null ? null : { ...opened, run };
+  }
+
+  /**
+   * What failed as today's reader read the chat, for the record of its failure: the error its world's read threw, where it threw (what the
+   * ledger then met follows from it), else the last error its ledger's operations threw (the ledger service catches each, as today's build
+   * does); undefined where neither did.
+   */
+  failureOf(chatId: ChatId): { error: unknown; world: boolean } | undefined {
+    if (this.worldErrors.has(chatId)) return { error: this.worldErrors.get(chatId), world: true };
+    const ledger = this.ledger.failures.findLast((f) => f.chatId === chatId);
+    return ledger === undefined ? undefined : { error: ledger.error, world: false };
   }
 
   /** Today's settings reader over the stand-in: the user's settings as today's build reads them. */

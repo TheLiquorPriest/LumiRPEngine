@@ -29,6 +29,7 @@
 // the earlier run imported of it.
 
 import type { Database } from "bun:sqlite";
+import { join } from "node:path";
 import type { Migration, MigrationArea } from "../app/migrations";
 import { chatKnowledgePrefsOf } from "./today/chat-knowledge-prefs";
 import { readRun } from "./today/run";
@@ -38,10 +39,11 @@ import type { Registry } from "../engine/registry-impl";
 import { hashJson } from "../shared/hash";
 import type { ChatId, RevisionId, UserId, WorldId } from "../shared/ids";
 import { isRecord } from "../shared/json";
-import type { ChatRun, Tombstone } from "../shared/ledger";
+import { type ChatRun, LEDGER_NAMESPACE, type Tombstone } from "../shared/ledger";
 import { type KeptOwn, matchTurn, StoreInputError, type ShownMessage, type Store, type UserStore } from "../store";
-import { CapturingFold, foldToday } from "./capture";
-import { textHash, type SwipeFacts } from "./lumiverse-db";
+import { CapturingFold, type FoldedStep, foldToday } from "./capture";
+import { brokenRecord, errorOf, type FailureFile, type FailureStage, type FoldHandling, type FoundFailure, shapeOf } from "./failures";
+import { DATABASE_FILE, textHash, type SwipeFacts } from "./lumiverse-db";
 import type { KeepCarriedJob } from "./history-things";
 import { chainOf, placements, type Pick, type Placement } from "./own-path";
 import type { ChatImportReport, Difference } from "./report";
@@ -62,6 +64,21 @@ export interface ChatToImport {
   wasOn: boolean;
   /** The engine that played it, as the chat's own choice holds it (classic where none). */
   engine: string;
+  /** Where a message's engine record is in the previous build's files: the journal, where it holds the message's record over the one on the message, else the message's own row in Lumiverse's database. */
+  fileOf(message: string): Omit<FailureFile, "inside">;
+}
+
+/** A chat today's reader can't open: why, in fixed words, and the record of its failure (`failures.ts`). */
+export interface NotOpenedChat {
+  chatId: string;
+  why: string;
+  failure: FoundFailure;
+}
+
+/** A file of the user's storage as the run read it: from the runtime's working copy where that had not sent it yet, else from the user's storage folder. */
+function storageFile(today: Today, path: string): { store: FailureFile["store"]; path: string } {
+  if (today.pending.has(path)) return { store: "runtime-copy", path };
+  return { store: "user-storage", path: today.user === null ? path : join(today.user, path) };
 }
 
 /** The chats LumiAH's own `harness/chats.json` says the engine is switched on for; null where it keeps no such file. */
@@ -75,18 +92,25 @@ function switchedOn(text: string | null): Set<string> | null {
   return isRecord(doc) && isRecord(doc.on) ? new Set(Object.keys(doc.on)) : null;
 }
 
-/** Every chat of the user's that plays a world, read by today's reader; and those today's reader can't open, with why (fixed words). */
-export async function chatsToImport(today: Today): Promise<{ chats: ChatToImport[]; notOpened: { chatId: string; why: string }[] }> {
+/** Every chat of the user's that plays a world, read by today's reader; and those today's reader can't open, with why (fixed words) and what failed. */
+export async function chatsToImport(today: Today): Promise<{ chats: ChatToImport[]; notOpened: NotOpenedChat[] }> {
   const user = today.sources.userId as UserId;
   const chats: ChatToImport[] = [];
-  const notOpened: { chatId: string; why: string }[] = [];
+  const notOpened: NotOpenedChat[] = [];
   const switched = switchedOn(await today.userView.read("harness/chats.json"));
+  const database = join(today.sources.lumiverse, DATABASE_FILE);
   for (const row of today.chats) {
     const run = readRun(row.metadata);
     if (!run) continue;
     const read = await today.reader.today(row.id as ChatId, user);
     if (!read) {
-      notOpened.push({ chatId: row.id, why: "the previous build's reader can't open it: its world can't be read" });
+      const failed = today.reader.failureOf(row.id as ChatId);
+      const world = { id: run.worldId, revision: run.revision };
+      // A world that does not read is its revision's file; a ledger that fails is in the chat's journal and records, where the stack says.
+      const file = failed?.world === true ? { ...storageFile(today, `worlds/${run.worldId}/rev/${run.revision}.json`), row: null, at: "$", inside: null } : { ...storageFile(today, `runs/${row.id}/journal.json`), row: null, at: "$", inside: null };
+      const error = failed?.error ?? new Error("today's reader gave no reading of the chat and met no error");
+      const why = failed === undefined ? "the previous build's reader didn't open it" : failed.world ? "the previous build's reader can't open it: its world can't be read" : "the previous build's ledger reader failed on it";
+      notOpened.push({ chatId: row.id, why, failure: { chat: row.id, stage: "read", error: errorOf(error), world, message: null, record: null, file } });
       continue;
     }
     const from = row.metadata.branched_from;
@@ -101,6 +125,10 @@ export async function chatsToImport(today: Today): Promise<{ chats: ChatToImport
       branch: typeof from === "string" && typeof at === "string" ? { from, at } : null,
       wasOn: switched === null || switched.has(row.id) || chatKnowledgePrefsOf(row.metadata).engine !== "harness",
       engine: chatKnowledgePrefsOf(row.metadata).engine ?? "classic",
+      fileOf: (message) =>
+        read.journaled.has(message)
+          ? { ...storageFile(today, `runs/${row.id}/journal.json`), row: null, at: `$.messages.${message}.ledger` }
+          : { store: "lumiverse-database", path: database, row: message, at: `$.spindle_metadata.${LEDGER_NAMESPACE}` },
     });
   }
   return { chats, notOpened };
@@ -246,8 +274,18 @@ function savedOf(rec: unknown): string | null {
   return kept.length > 0 ? kept.join("\n") : null;
 }
 
-/** Imports one chat into the store. */
-function importOne(s: UserStore, db: Database, registry: Registry, chat: ChatToImport, link: Link | null, turnOfShared: (link: Link, index: number, swipe: number) => string | null, keepRun: KeepCarriedRun | undefined): Imported {
+/**
+ * Where an import stands as it goes, for the record of a chat it could not carry: its stage, the message (by its place in the chain) and
+ * swipe it is at, and what today's fold was handling where the fold failed.
+ */
+interface Spot {
+  stage: FailureStage;
+  at: { index: number; swipe: number } | null;
+  handling: FoldHandling;
+}
+
+/** Imports one chat into the store, keeping where it stands in `spot`. */
+function importOne(s: UserStore, db: Database, registry: Registry, chat: ChatToImport, link: Link | null, turnOfShared: (link: Link, index: number, swipe: number) => string | null, keepRun: KeepCarriedRun | undefined, spot: Spot): Imported {
   const chain = chat.input.chain;
   const id = chat.chatId;
   if (link) s.branchChat({ id, from: link.from, map: link.map, at: link.at, seed: chat.run.runSeed, started: chat.run.startedAt, wasOn: chat.wasOn, engine: chat.engine });
@@ -295,6 +333,8 @@ function importOne(s: UserStore, db: Database, registry: Registry, chat: ChatToI
       continue;
     }
     const m = chain[p.at] as ChainMessage;
+    spot.stage = "store";
+    spot.at = { index: p.at, swipe: p.swipe };
     // A reply that stood with no turn played has no turn here either: it stays on the chat's path as an unplayed stretch, with the reason the old engine gave.
     const standing = unplayedReason(m.ledger?.swipes[String(p.swipe)]);
     if (standing !== undefined) {
@@ -302,7 +342,15 @@ function importOne(s: UserStore, db: Database, registry: Registry, chat: ChatToI
       continue;
     }
     const on = nodeOf(p.picks);
-    const step = capture.last({ ...chat.input, chain: chainOf(chain, p) });
+    spot.stage = "fold";
+    let step: FoldedStep;
+    try {
+      step = capture.last({ ...chat.input, chain: chainOf(chain, p) });
+    } catch (error) {
+      spot.handling = capture.handling();
+      throw error;
+    }
+    spot.stage = "store";
     const turn = s.beginTurn({ chat: id, kind: p.swipe === 0 ? "normal" : "swipe", imported: true, on });
     // Changes before the tie: both orders give the same state, and this one writes no snapshot twice.
     if (step.changes.length > 0) s.addChanges(turn.id, step.changes);
@@ -321,6 +369,7 @@ function importOne(s: UserStore, db: Database, registry: Registry, chat: ChatToI
     out.dropped += step.dropped;
     out.violations += step.violations;
     // The check at this swipe: RPE's fold of its changes against today's state where it was folded.
+    spot.stage = "check";
     out.matched.of++;
     const ours = s.stateAt(turn.id).state.world;
     if (hashJson(ours) === hashJson(step.state)) out.matched.swipes++;
@@ -330,10 +379,13 @@ function importOne(s: UserStore, db: Database, registry: Registry, chat: ChatToI
     }
   }
   // The chat as it stands: its path as today's build last read it (a reply edited since, as its turn is tied), each message with the hidden mark Lumiverse holds for it (R-21), and the check at its head against today's fold of it.
+  spot.stage = "store";
+  spot.at = null;
   const shownOf = (messages: readonly ChainMessage[]): ShownMessage[] => messages.map((m) => (m.isUser ? { id: m.id, user: true, hash: hashOf(m, m.swipeId), hidden: facts(m)?.hidden === true } : { id: m.id, user: false, hash: tieHash(chat, m, m.swipeId), date: dateOf(m, m.swipeId), hidden: facts(m)?.hidden === true }));
   s.sync(id, shownOf(chain));
   // The import's own comparison is not the Author's: the edits it found are told by the first comparison on RPE, each once.
   s.forgetEdits(id);
+  spot.stage = "check";
   const today = foldToday(registry, chat.input);
   const head = s.headState(id).state.world;
   if (hashJson(head) !== hashJson(today.state)) {
@@ -348,23 +400,45 @@ function importOne(s: UserStore, db: Database, registry: Registry, chat: ChatToI
       if (mine) s.setBase(turn, today.state, last?.node ?? undefined);
     }
   }
+  // What follows the import (his own changes written again) is the store's.
+  spot.stage = "store";
   return out;
 }
 
-/** Fixed words for why a chat couldn't be imported: an error's own words can quote the chat. */
-function whyNot(error: unknown): string {
-  if (error instanceof StoreInputError) return "the store refused what the previous build's fold gave for it";
-  return "the previous build's fold could not fold it";
+/** Fixed words for why a chat couldn't be imported, by the stage it failed in: an error's own words can quote the chat, so they go only to the chat's own record of its failure (`failures.ts`). */
+const WHY_NOT: Readonly<Record<Exclude<FailureStage, "read">, string>> = {
+  fold: "the previous build's fold could not fold it",
+  store: "the store refused what the previous build's fold gave for it",
+  check: "the check against the previous build's state could not be made",
+};
+
+/** The record of a chat's failure in its import, from where the import stood (`spot`) and the error it met. */
+function failureOf(chat: ChatToImport, spot: Spot, error: unknown): FoundFailure {
+  const chain = chat.input.chain;
+  const broken = spot.at === null ? null : brokenRecord(chain, spot.at.index, spot.at.swipe, spot.stage === "fold" ? spot.handling : null);
+  const index = broken?.index ?? spot.at?.index ?? null;
+  const m = index === null ? undefined : chain[index];
+  const swipe = broken?.swipe ?? spot.at?.swipe ?? 0;
+  return {
+    chat: chat.chatId,
+    stage: spot.stage,
+    error: errorOf(error),
+    world: { id: chat.run.worldId, revision: chat.run.revision },
+    message: m === undefined || index === null ? null : { id: m.id, number: index + 1, swipe },
+    record: broken === null ? null : { place: broken.place, kind: broken.kind, shape: shapeOf(broken.value) },
+    file: m === undefined ? null : { ...chat.fileOf(m.id), inside: broken?.place ?? null },
+  };
 }
 
 /**
  * Imports every chat into the store for one run. A chat's replacing and its import are one
  * transaction: a chat that fails leaves nothing of the attempt behind, and what an earlier run
  * imported of it stands. `earlier` lists the chats earlier runs imported; `notOpened` the chats
- * today's reader can't open, with why; `present` every chat Lumiverse has of the user's: only a chat
- * missing from it is gone.
+ * today's reader can't open, with why and what failed; `present` every chat Lumiverse has of the
+ * user's: only a chat missing from it is gone. `failed` is given the record of each chat it could
+ * not carry, the error with it, for the run to keep (`failures.ts`).
  */
-export function importChats(input: { store: Store; s: UserStore; db: Database; registry: Registry; chats: readonly ChatToImport[]; notOpened: readonly { chatId: string; why: string }[]; present: ReadonlySet<string>; earlier: readonly { chat: string; source: string | null }[]; run: string; keepRun?: KeepCarriedRun }): ChatImportReport[] {
+export function importChats(input: { store: Store; s: UserStore; db: Database; registry: Registry; chats: readonly ChatToImport[]; notOpened: readonly NotOpenedChat[]; present: ReadonlySet<string>; earlier: readonly { chat: string; source: string | null }[]; run: string; keepRun?: KeepCarriedRun; failed?: (failure: FoundFailure) => void }): ChatImportReport[] {
   const { store, s, db, registry, run } = input;
   const reports: ChatImportReport[] = [];
   const wasImported = new Set(input.earlier.map((e) => e.chat));
@@ -391,6 +465,8 @@ export function importChats(input: { store: Store; s: UserStore; db: Database; r
     const id = chat.chatId;
     const earlier = s.chat(id) !== null;
     const freed: KeptOwn[] = [];
+    // Where its import stands, for the record of its failure: replacing an earlier import and linking a branch are the store's work.
+    const spot: Spot = { stage: "store", at: null, handling: null };
     /** Writes his changes of this chat again, tied to the same replies, once its turns are tied afresh. */
     const restored = (): { placed: number; lost: number } => {
       const r = s.restoreOwn([...(keptOwn.get(id) ?? []), ...freed.filter((k) => k.chat === id)]);
@@ -408,11 +484,13 @@ export function importChats(input: { store: Store; s: UserStore; db: Database; r
         }
         const source = chat.branch ? byId.get(chat.branch.from) : undefined;
         const link = source && s.chat(source.chatId) ? linkOf(chat, source) : null;
-        return { done: db.transaction(() => importOne(s, db, registry, chat, link, turnOfShared, input.keepRun))(), link, replaced: earlier || wasImported.has(id), own: restored() };
+        return { done: db.transaction(() => importOne(s, db, registry, chat, link, turnOfShared, input.keepRun, spot))(), link, replaced: earlier || wasImported.has(id), own: restored() };
       })();
     } catch (error) {
       store.dropCaches();
-      reports.push({ chatId: id, outcome: "not imported", why: stands(id, whyNot(error)), ...blank, notCarried: { cause: error instanceof StoreInputError ? "store" : "fold", stands: s.chat(id) !== null } });
+      const stage = spot.stage === "read" ? "store" : spot.stage;
+      reports.push({ chatId: id, outcome: "not imported", why: stands(id, WHY_NOT[stage]), ...blank, notCarried: { stage, stands: s.chat(id) !== null } });
+      input.failed?.(failureOf(chat, spot, error));
       continue;
     }
     if ("left" in outcome) {
@@ -427,7 +505,10 @@ export function importChats(input: { store: Store; s: UserStore; db: Database; r
     reports.push({ chatId: id, outcome: replaced ? "replaced" : "imported", turns: done.turns, placed: done.placed, shares, matched: done.matched, differences: done.differences, dropped: done.dropped, violations: done.violations, edited: done.edited, ...(own.placed + own.lost > 0 ? { own } : {}) });
     keepChat(db, s.id, id, run, shares?.chat ?? null, replaced ? "replaced" : "imported", done.differences.length > 0);
   }
-  for (const n of input.notOpened) reports.push({ chatId: n.chatId, outcome: "not imported", why: stands(n.chatId, n.why), ...blank, notCarried: { cause: "unopened", stands: s.chat(n.chatId) !== null } });
+  for (const n of input.notOpened) {
+    reports.push({ chatId: n.chatId, outcome: "not imported", why: stands(n.chatId, n.why), ...blank, notCarried: { stage: "read", stands: s.chat(n.chatId) !== null } });
+    input.failed?.(n.failure);
+  }
   const unread = new Set(input.notOpened.map((n) => n.chatId));
   // Chats an earlier run imported that this run didn't read: gone only when Lumiverse no longer has them.
   for (const gone of input.earlier) {

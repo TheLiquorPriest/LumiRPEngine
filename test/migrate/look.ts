@@ -27,12 +27,12 @@ const registry = createRegistry(ALL_PACKS);
 /** The store each user's store was opened by, so a look at a character reads through it. */
 const opened = new WeakMap<UserStore, Store>();
 
-/** The Migration page's input over RPE's database `db`, with no rehearsal and the runtime's folders as the fixture has them. */
-export function pageInput(db: Database, fixture: Pick<Fixture, "sources">): MigrationPageInput {
+/** The Migration page's input over RPE's database `db` in the data folder `data`, with no rehearsal and the runtime's folders as the fixture has them. */
+export function pageInput(db: Database, fixture: Pick<Fixture, "sources">, data: string): MigrationPageInput {
   const none = async (): Promise<never> => {
     throw new Error("no rehearsal here");
   };
-  return { db, user: USER, identifier: IDENT, rehearsals: new Rehearsals(none, Date.now), database: null, runtime: fixture.sources.runtime ?? { configDir: "", dataDir: "" } };
+  return { db, user: USER, identifier: IDENT, rehearsals: new Rehearsals(none, Date.now), database: null, runtime: fixture.sources.runtime ?? { configDir: "", dataDir: "" }, data };
 }
 
 /** RPE's database in the data folder `data` and the user's store in it, its worlds the store's own, for one look. */

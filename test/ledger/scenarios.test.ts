@@ -30,7 +30,7 @@ async function expectAgree(h: Harness, chatId: string): Promise<void> {
   expect(optimized.notes).toEqual(reference.notes);
   expect(optimized.keepReport).toEqual(reference.keepReport);
   expect(reference.violations).toEqual([]);
-  expect(h.service.errors).toEqual([]);
+  expect(h.service.failures).toEqual([]);
 }
 
 describe("ledger scenarios", () => {

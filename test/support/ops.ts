@@ -1065,7 +1065,7 @@ export class Runner {
 
   /** Invariants checked after every top-level operation. */
   async check(): Promise<void> {
-    if (this.h.service.errors.length > 0) throw new InvariantError("errors", this.h.service.errors.join("\n"));
+    if (this.h.service.failures.length > 0) throw new InvariantError("errors", this.h.service.failures.map((f) => (f.error instanceof Error ? (f.error.stack ?? f.error.message) : String(f.error))).join("\n"));
     for (const chatId of this.chats) {
       const core = await this.h.core(chatId);
       const { reference, optimized, cold, materializedTwice } = await this.h.folds(chatId);

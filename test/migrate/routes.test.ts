@@ -33,7 +33,7 @@ describe("the Migration page's routes", () => {
   });
 
   const routesOver = (db: Database) =>
-    migrateRoutes({ db, identifier: IDENT, paths: dataPaths(data), config: configOf({ port: 0, lumiverse: { url: null, user: USER } }, {}, "the test's config"), rehearsals: pageInput(db, fixture).rehearsals, env: {}, home: "/nowhere" });
+    migrateRoutes({ db, identifier: IDENT, paths: dataPaths(data), config: configOf({ port: 0, lumiverse: { url: null, user: USER } }, {}, "the test's config"), rehearsals: pageInput(db, fixture, data).rehearsals, env: {}, home: "/nowhere" });
   const routeAt = (db: Database, method: string, path: string) => {
     const found = routesOver(db).find((r) => r.method === method && r.path === path);
     if (found === undefined) throw new Error(`no route ${method} ${path}`);
@@ -44,7 +44,7 @@ describe("the Migration page's routes", () => {
     const db = new Database(join(data, "rpe.db"), { readonly: true });
     try {
       const answered = (await callRoute(routeAt(db, "GET", MIGRATION_PATH), { user: USER })) as { run: unknown };
-      expect(answered.run).toEqual(migrationPage(pageInput(db, fixture)).run);
+      expect(answered.run).toEqual(migrationPage(pageInput(db, fixture, data)).run);
       const other = (await callRoute(routeAt(db, "GET", MIGRATION_PATH), { user: "someone-else" })) as { run: unknown; swap: string[]; goingBack: { permissions: string[] } };
       expect(other.run).toBeNull();
       expect(other.swap.length).toBe(4);

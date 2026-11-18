@@ -13,11 +13,12 @@ import type { ChainMessage, FoldInput } from "../engine/ledger/chain";
 import { LedgerFold } from "../engine/ledger/fold";
 import { activeRecord, isLive, turnPath } from "../engine/ledger/path";
 import { validMarkerBody } from "../engine/events";
-import type { EventTypeDef, ReadContext } from "../engine/registry";
+import type { EventTypeDef, ReadContext, Rejection } from "../engine/registry";
 import type { Registry } from "../engine/registry-impl";
 import type { WorldState } from "../engine/state";
 import type { JsonObject } from "../shared/json";
 import type { LedgerEvent, Marker, MessageFold, PathHash, PostEntry } from "../shared/ledger";
+import type { FoldHandling } from "./failures";
 import type { ChangeInput } from "../store/types";
 
 /** The fold's own snapshot key: today's stored snapshots, made under another, never apply. */
@@ -61,21 +62,35 @@ export class CapturingFold {
   private readonly fold: LedgerFold;
   /** Every event a reducer applied during the current fold, with the state it was applied to. */
   private noted: { event: LedgerEvent; state: WorldState }[] = [];
+  /** What the fold was handling last: the event its type's check or reducer was given, else the type it asked for (`handling`). */
+  private handled: FoldHandling = null;
 
   constructor(registry: Registry) {
     const wrapped = new Map<string, EventTypeDef | undefined>();
     const noted = (event: LedgerEvent, state: WorldState): void => {
       this.noted.push({ event, state });
     };
+    const handles = (event: LedgerEvent): void => {
+      this.handled = { event };
+    };
     const get = (type: string): EventTypeDef | undefined => {
+      // Asked for a type, the fold is about to handle an event of it: until its check or reducer is given that event, the type is all it knows.
+      this.handled = { type };
       if (wrapped.has(type)) return wrapped.get(type);
       const def = registry.get(type);
-      // The type as the registry has it, its reducer followed by the note; everything else read through to it (defined, not assigned: the registry's types are frozen).
+      // The type as the registry has it, its check and its reducer each noting the event it is given, the reducer then noting what it applied; everything else read through to it (defined, not assigned: the registry's types are frozen).
       const own =
         def &&
         (Object.create(def, {
+          validate: {
+            value(event: LedgerEvent, ctx: ReadContext): Rejection | null {
+              handles(event);
+              return def.validate(event, ctx);
+            },
+          },
           apply: {
             value(event: LedgerEvent, state: WorldState, ctx: ReadContext): void {
+              handles(event);
               def.apply(event, state, ctx);
               noted(event, state);
             },
@@ -90,11 +105,20 @@ export class CapturingFold {
   }
 
   /**
+   * What the fold was handling when the last `last` failed: the event its type's check or reducer was given, or the type it asked for
+   * where that was all it knew of the event (a type it has none of); null where it was handling none.
+   */
+  handling(): FoldHandling {
+    return this.handled;
+  }
+
+  /**
    * Today's fold of `input`, and what its last message applied. The chain without its last message
    * is folded first: the fold keeps the state it ended on, so the second fold's own work is that last
    * message alone. Callers fold a chat's chains shortest first, so no chain is folded whole before.
    */
   last(input: FoldInput): FoldedStep {
+    this.handled = null;
     const chain = input.chain;
     const m = chain.at(-1);
     if (m === undefined) throw new Error("A chain with no message has no last step.");

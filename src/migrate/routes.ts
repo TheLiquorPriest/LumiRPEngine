@@ -33,6 +33,7 @@ import {
   migrationDifferencesReply,
   migrationFileReply,
   migrationItemsReply,
+  migrationFailureReply,
   migrationReply,
   migrationRowsReply,
   migrationTextReply,
@@ -45,6 +46,7 @@ import {
 } from "./shapes";
 import { switchOn, SwitchOnRefused } from "./switch-on";
 import { lastReport } from "./tables";
+import { failureFile, readFailure } from "./failures";
 
 /** What the presses of the waiting list take from the app: its clock, its one writer of the database, the packs, and what the composition gives (the store, the tree's writer as him and its folder names); a press whose part is not given is refused in words. */
 export interface MigratePresses {
@@ -116,6 +118,7 @@ export function migrateRoutes(deps: MigrateRoutesDeps) {
     rpeConnections: deps.config.lumiverse.connections,
     ...(presses?.folders === undefined ? {} : { tree: { files: deps.paths.files, ...presses.folders } }),
     ...(presses?.store === undefined ? {} : { store: presses.store() }),
+    data: deps.paths.root,
   });
   /** A press's part the composition gives, or the press refused in words. */
   const needs = <T>(part: T | undefined, what: string): T => {
@@ -146,6 +149,21 @@ export function migrateRoutes(deps: MigrateRoutesDeps) {
         const p = migrationPage({ ...page(user), given: (await rowsGiven(deps.paths)).given });
         // What today's build put in Lumiverse is a document the migration kept as JSON; it is carried as it is.
         return { ...p, lumiverse: p.lumiverse === null ? null : { ...p.lumiverse } };
+      },
+    }),
+    route({
+      method: "GET",
+      path: `${MIGRATION_PATH}/chats/:chat/failure`,
+      access: "page",
+      group: "migration",
+      does: "One chat's record of why a run could not carry it, as RPE's data folder keeps it until a run carries the chat: the stage, the error's own words and its stack, the message it stood at, the broken record's place, kind and shape (never its content), and where that record is in the previous build's files; and the record's file.",
+      reply: migrationFailureReply,
+      handle: ({ user, params }) => {
+        // Only a chat of his that a run looked at: the records are in his data folder, but each is a chat's of one user.
+        const failure = lastReport(deps.db, user)?.imports?.some((c) => c.chatId === params.chat) === true ? readFailure(deps.paths.root, params.chat) : null;
+        if (failure === null) throw new RouteError(404, "No record of a failure is kept for that chat.");
+        const { format: _, ...rest } = failure;
+        return { path: failureFile(deps.paths.root, params.chat), failure: rest };
       },
     }),
     route({

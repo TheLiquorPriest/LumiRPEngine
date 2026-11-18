@@ -23,10 +23,11 @@ import { IMPORTED, IMPORTED_AGENTS, IMPORTED_SKILLS, SET_APART } from "./own-fil
 import type { LumiverseNow, Rehearsals } from "./rehearse-job";
 import type { ChatImportReport, ChatReport, Difference, Item, MigrationReport, RowReport } from "./report";
 import { disownedLines } from "./no-runtime";
-import { type NotCarriedShown, notCarriedOf, notCarriedShown } from "./not-carried";
+import { type NotCarried, type NotCarriedShown, notCarriedOf, notCarriedShown } from "./not-carried";
+import { failedChats, readFailure } from "./failures";
 import type { RuntimeFolders } from "./runtime-folders";
 import type { OwnerRow } from "./setting-list";
-import { answersOf, chatRecord, lastReport } from "./tables";
+import { answersOf, chatRecord, importedChats, lastReport } from "./tables";
 
 /** Which report a page reads: the last real run's, or the rehearsal started from the page. */
 export type ReportOf = "run" | "rehearsal";
@@ -131,6 +132,8 @@ export interface MigrationPageInput {
   rpeConnections?: readonly string[];
   /** RPE's store, where it holds what RPE did with a chat: whether it played a turn there. Absent: no chat counts as played. */
   store?: Store;
+  /** RPE's data folder, where each chat a run could not carry has its record of why (`failures.ts`). */
+  data: string;
 }
 
 export function summaryOf(report: MigrationReport): ReportSummary {
@@ -263,9 +266,12 @@ export function migrationPage(input: MigrationPageInput): MigrationPage {
   }
   // The chats the run found off RPE, as Lumiverse and RPE hold them now.
   out.offRpe.push(...offRpeNow(input, report));
-  // The chats it did not carry, named as Lumiverse's database names them (the folder the run read, else the one RPE's config names, as the list of chats reads it), with the line that runs it again over that folder and, where a switch was made, the one that goes back.
+  // The chats whose record of why is kept, while it is kept, named as Lumiverse's database names them (the folder the run read, else the one RPE's config names, as the list of chats reads it), with the line that runs it again over that folder and, where a switch was made, the one that goes back; and those the last run carried that an earlier one could not.
   const lumiverse = sources?.lumiverse ?? (input.database === null ? null : dirname(input.database));
-  out.notCarried = notCarriedShown(notCarriedOf(report), { again: ["rpe", "migrate", "--lumiverse", lumiverse ?? "", "--user", input.user].map(shellWord).join(" "), back: lastSwap(input.db, input.user) === null ? null : "rpe down" }, { lumiverse, user: input.user });
+  const stage = new Map(notCarriedOf(report).map((c) => [c.chat, c.stage]));
+  const standing = new Set(importedChats(input.db, input.user).map((c) => c.chat));
+  const kept: NotCarried[] = failedChats(input.data).map((chat) => ({ chat, stage: readFailure(input.data, chat)?.stage ?? stage.get(chat) ?? "fold", stands: standing.has(chat) }));
+  out.notCarried = notCarriedShown(kept, report, { again: ["rpe", "migrate", "--lumiverse", lumiverse ?? "", "--user", input.user].map(shellWord).join(" "), back: lastSwap(input.db, input.user) === null ? null : "rpe down" }, { lumiverse, user: input.user }, input.data);
   if (out.run !== null) out.run.counts.offRpe = out.offRpe.filter((c) => !c.done).length;
   const tree = input.tree;
   const at = (path: string): boolean => tree !== undefined && existsSync(join(tree.files, path));

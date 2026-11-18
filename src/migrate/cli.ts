@@ -84,12 +84,12 @@ export async function migrateCli(argv: readonly string[], io: CliIo, tree: TreeL
   const runtime = none ? null : folderPair;
   try {
     const { report, ran } = await migrate({ lumiverse, identifier: values.identifier ?? IDENTIFIER, userId: user, runtime, ...(none ? { ignored: folderPair } : {}), ...(values.runtime !== undefined ? { runtimeName: values.runtime } : {}), ...(Object.keys(folders).length > 0 ? { runtimeFolders: folders } : {}) }, { data, rehearse: switches.has("rehearse"), version: io.env.LRE_BUILD_ID ?? "dev", env: io.env, tree, ...(settings ? { settings } : {}), ...(runs ? { runs } : {}) });
-    // A chat that holds records of the previous build and that the run did not carry is named first, ahead of the report, and last again; the run then ends with 1.
+    // A chat that holds records of the previous build and that the run did not carry is named first, ahead of the report, with its cause and where its record of why is kept, and last again; the run then ends with 1. A chat it carried that an earlier run could not is said there too.
     const missing = ran ? notCarriedOf(report) : [];
     const switched = missing.length > 0 && readRpe(dataPaths(data).database, (db) => lastSwap(db, user)) !== null;
     if (switches.has("json")) io.out(`${JSON.stringify(report, null, 2)}\n`);
     else {
-      const first = notCarriedLines(missing, { again: lines?.again ?? "rpe migrate", back: switched ? (lines?.down ?? "rpe down") : null }, { lumiverse, user });
+      const first = ran ? notCarriedLines(report, { again: lines?.again ?? "rpe migrate", back: switched ? (lines?.down ?? "rpe down") : null }, { lumiverse, user }, data) : [];
       if (first.length > 0) io.out(`${first.join("\n")}\n`);
       io.out(reportText(report));
       if (missing.length > 0) io.out(notCarriedEnd(missing, false));

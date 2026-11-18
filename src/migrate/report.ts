@@ -15,6 +15,7 @@ import { goingBack, swapSteps } from "./going-back";
 import type { RuntimeFolders } from "./runtime-folders";
 import { type Disowned, disownedLines } from "./no-runtime";
 import type { Sources } from "./today";
+import type { FailureStage } from "./failures";
 
 export const REPORT_FORMAT = "rpe-migration-report-v1";
 
@@ -139,9 +140,6 @@ export interface Difference {
   kept: boolean;
 }
 
-/** Why a run did not carry a chat that holds records of the previous build. */
-export type NotCarriedCause = "fold" | "store" | "unopened";
-
 /** What the real run did with one chat (§15.5: its turns found and imported, and whether its state matched at the head and at every swipe). */
 export interface ChatImportReport {
   chatId: string;
@@ -184,12 +182,13 @@ export interface ChatImportReport {
    */
   own?: { placed: number; lost: number };
   /**
-   * A chat that holds records of the previous build and that this run did not carry ("not imported"): why (the previous build's fold failed
-   * on it, RPE's store refused what that fold gave, or the previous build's reader could not open it) and whether what an earlier run carried
-   * of it stands in RPE. Said ahead of the report, and a command that leaves one ends with exit code 1 (`not-carried.ts`). Absent for every
-   * other outcome, and for a chat the previous build plays no world in now.
+   * A chat that holds records of the previous build and that this run did not carry ("not imported"): the stage it failed in (reading
+   * the previous build's records, its fold, RPE's store taking what the fold gave, the check) and whether what an earlier run carried of
+   * it stands in RPE. The error itself, and where in the chat's records it stood, are in the chat's own record of its failure in RPE's data
+   * folder (`failures.ts`), never in the report. Said ahead of the report, and a command that leaves one ends with exit code 1
+   * (`not-carried.ts`). Absent for every other outcome, and for a chat the previous build plays no world in now.
    */
-  notCarried?: { cause: NotCarriedCause; stands: boolean };
+  notCarried?: { stage: FailureStage; stands: boolean };
 }
 
 export interface MigrationReport {
@@ -230,6 +229,8 @@ export interface MigrationReport {
   underWay: number;
   /** What the real run did with each chat; null for a rehearsal. */
   imports: ChatImportReport[] | null;
+  /** The chats this run carried that an earlier run could not, each with when that run was (null where its record no longer said): the record of that failure is closed (removed from RPE's data folder). Absent where there is none. */
+  closed?: { chat: string; failed: string | null }[];
   /** The backup the real run took before it wrote anything: where, its size and its checksum; null for a rehearsal. */
   backup: { path: string; bytes: number; sha256: string } | null;
   /** Where each row's things now are in RPE, by row; null for a rehearsal (`carry.ts`). */

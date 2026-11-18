@@ -9,6 +9,7 @@ import type { OldListed, OldRecord } from "./old-records";
 import { type Exactly, type Holds, type Infer, shape } from "../app";
 import type { MigrationPage, PageChat, PageChatOne, PageRow, RehearsalShown, ReportSummary, Waiting } from "./page";
 import type { Difference, Item } from "./report";
+import type { ChatFailure } from "./failures";
 
 const T = shape.text();
 const N = shape.number();
@@ -97,8 +98,26 @@ const offRpe = shape.named(
 
 const notCarried = shape.named(
   "NotCarriedShown",
-  "The chats a real run did not carry that hold records of the previous build, in the migration's own words (`.prompts/history-migration.md`): the head, and each chat by its id, with its line (its name and its character's as Lumiverse's database holds them, its id, and why) and what of it RPE holds and what it does not, and what to do.",
-  shape.object({ head: T, chats: shape.list(shape.object({ chat: T, line: T, lines: shape.list(T) })) }),
+  "The chats a real run did not carry that hold records of the previous build, while each one's record of why is kept, in the migration's own words (`.prompts/history-migration.md`): the head, with where the records are kept, and each chat by its id, with its line (its name and its character's as Lumiverse's database holds them, its id, and the cause: the stage, the message it stood at, the error's own words) and what of it RPE holds and what it does not, and what to do, and the file of its record (null where he removed it); and the chats the last real run carried that an earlier run could not, each with its line.",
+  shape.object({ head: T, chats: shape.list(shape.object({ chat: T, line: T, lines: shape.list(T), record: nullable(T) })), carried: shape.list(shape.object({ chat: T, line: T })) }),
+);
+
+export const migrationFailureReply = shape.named(
+  "MigrationFailureReply",
+  "One chat's record of why a run could not carry it, as RPE's data folder keeps it, and the file it is in: when that run read the previous build's data, the stage, the error's own name, message and stack, the world and revision, the message it stood at (its id, its place in the chat, the swipe), the record of the ledger that broke by its place, its kind and its shape alone (never its content), and where that record is in the previous build's files.",
+  shape.object({
+    path: T,
+    failure: shape.object({
+      chat: T,
+      at: T,
+      stage: shape.oneOf("read", "fold", "store", "check"),
+      error: shape.object({ name: T, message: T, stack: nullable(T) }),
+      world: nullable(shape.object({ id: T, revision: T })),
+      message: nullable(shape.object({ id: T, number: N, swipe: N })),
+      record: nullable(shape.object({ place: T, kind: T, shape: json })),
+      file: nullable(shape.object({ store: shape.oneOf("lumiverse-database", "user-storage", "runtime-copy"), path: T, row: nullable(T), at: T, inside: nullable(T) })),
+    }),
+  }),
 );
 
 const folders = shape.object({ configDir: T, dataDir: T });
@@ -111,7 +130,7 @@ export const migrationReply = shape.named(
     rehearsal: rehearsalShown,
     sources: field(shape.object({ lumiverse: nullable(T), runtime: nullable(folders) }), "The folders a rehearsal from the page reads: the last run's, else Lumiverse's database's folder as RPE's config names it and today's runtime's own."),
     backup: field(nullable(shape.object({ path: T, bytes: N, sha256: T, present: field(shape.yesNo(), "Whether a file of that size is still there.") })), "The backup the last run took before it wrote anything."),
-    notCarried: field(nullable(notCarried), "The chats the last real run did not carry that hold records of the previous build, at the top of the page while its report holds one; null where it holds none."),
+    notCarried: field(nullable(notCarried), "The chats a real run did not carry that hold records of the previous build, at the top of the page while each one's record of why is kept, and the chats the last real run carried that an earlier one could not; null where there is neither."),
     offRpe: field(shape.list(offRpe), "The chats still off RPE: a group of its own at the head of the page."),
     waiting: field(shape.list(waiting), "In the order the plan lists it: GUIDANCE.md first."),
     given: field(shape.list(shape.object({ path: T, fate: shape.oneOf("archived", "attached"), line: T })), "The rows he has given (`migration.rows`)."),
@@ -262,8 +281,9 @@ type DifferenceMirrored = Holds<Exactly<Infer<typeof difference>, Difference>>;
 type ItemMirrored = Holds<Exactly<keyof Infer<typeof itemShown>, keyof Item>>;
 type RowFieldsMirrored = Holds<Exactly<keyof Infer<typeof rowShown>, keyof PageRow>>;
 type ChatOneMirrored = Holds<Exactly<Infer<typeof migrationChatReply>["chat"], Omit<PageChatOne, "read" | "carried">>>;
+type FailureMirrored = Holds<Exactly<Infer<typeof migrationFailureReply>["failure"], Omit<ChatFailure, "format">>>;
 /** The checks above hold, and are read by no one. */
-export type Mirrors = [OutcomeMirrored, WaitingMirrored, PageMirrored, SummaryMirrored, RehearsalMirrored, ChatMirrored, DifferenceMirrored, ItemMirrored, RowFieldsMirrored, ChatOneMirrored];
+export type Mirrors = [OutcomeMirrored, WaitingMirrored, PageMirrored, SummaryMirrored, RehearsalMirrored, ChatMirrored, DifferenceMirrored, ItemMirrored, RowFieldsMirrored, ChatOneMirrored, FailureMirrored];
 type CarriedMirrored = Holds<Exactly<Infer<typeof carriedTurnReply>, OldRecord>>;
 type CarriedListMirrored = Holds<Exactly<Infer<typeof carriedTurnsReply>["turns"][number], OldListed>>;
 /** The checks of the carried turns' routes, read by no one. */
