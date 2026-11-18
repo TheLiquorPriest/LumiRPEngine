@@ -465,6 +465,25 @@ describe("the Files page's routes", () => {
     expect((await moved("rules/none.md", "rules/other.md")).status).toBe(404);
   });
 
+  test("a folder of his is deleted when it is empty; one that holds anything is refused in words that say what it holds, until contents asks for it to go with all it holds; a shipped or generated folder is refused", async () => {
+    await mkdir(join(chatFolder, "skills", "empty"), { recursive: true });
+    expect((await call("DELETE", `/api/v1/files/skills/empty?chat=${CHAT}`)).status).toBe(200);
+    await expect(readdir(join(chatFolder, "skills", "empty"))).rejects.toThrow();
+    await mkdir(join(chatFolder, "skills", "walk", "assets"), { recursive: true });
+    await writeFile(join(chatFolder, "skills", "walk", "SKILL.md"), "---\nname: walk\ndescription: Walks.\n---\nWalk.\n");
+    await writeFile(join(chatFolder, "skills", "walk", "assets", "a.txt"), "a\n");
+    const asked = await call<{ error: string }>("DELETE", `/api/v1/files/skills/walk?chat=${CHAT}`);
+    expect(asked.status).toBe(409);
+    expect(asked.body.error).toBe("skills/walk holds 2 files and 1 folder, which would be deleted with it: nothing was deleted.");
+    expect((await readdir(join(chatFolder, "skills", "walk"))).sort()).toEqual(["SKILL.md", "assets"]);
+    expect((await call<{ removed: string }>("DELETE", `/api/v1/files/skills/walk?chat=${CHAT}&contents=true`)).body).toEqual({ removed: "skills/walk" });
+    await expect(readdir(join(chatFolder, "skills", "walk"))).rejects.toThrow();
+    await mkdir(join(chatFolder, "sessions", "s2"), { recursive: true });
+    expect((await call("DELETE", `/api/v1/files/sessions/s2?chat=${CHAT}&contents=true`)).status).toBe(403);
+    expect((await call("DELETE", "/api/v1/files/@shipped/.rules/examples?contents=true")).status).toBe(403);
+    expect((await call("DELETE", `/api/v1/files/skills/nowhere?chat=${CHAT}`)).status).toBe(404);
+  });
+
   test("a shipped file or folder is only read by a copy, so its copy is the user's own at the level asked for; a copy into the shipped level is refused, and so is a move of a shipped file", async () => {
     const copy = await call<{ path: string; guidance: string | null }>("POST", "/api/v1/files-copy", { chat: CHAT, from: "@shipped/.rules/examples/nudge.md", to: "@global/.rules/nudge.md" });
     expect(copy.body).toMatchObject({ path: "@global/.rules/nudge.md", guidance: "rules" });

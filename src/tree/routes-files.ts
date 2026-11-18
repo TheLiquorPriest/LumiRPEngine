@@ -246,14 +246,23 @@ export function fileRoutes(kit: RouteKit) {
       path: FILE_PATH,
       access: "page",
       group: "files",
-      does: "Removes a file of the user's; for one in place of a default, that is resetting to the default. \"Delete\" on a shipped file writes its name in the `stack.off` list of the level named (the chat's when a chat is named, else the global level's), so the shipped file stays and is not in force.",
-      query: { chat: chatQuery, level: shape.optional(shape.oneOf("global", "chat"), "For a shipped file, the level whose `stack.off` list takes its name; the chat's when a chat is named, else the global level's.") },
+      does: "Removes a file of the user's; for one in place of a default, that is resetting to the default. \"Delete\" on a shipped file writes its name in the `stack.off` list of the level named (the chat's when a chat is named, else the global level's), so the shipped file stays and is not in force. A folder of the user's goes when it is empty; one that holds anything is refused in words that say what it holds, until `contents` asks for it to go with all it holds.",
+      query: {
+        chat: chatQuery,
+        level: shape.optional(shape.oneOf("global", "chat"), "For a shipped file, the level whose `stack.off` list takes its name; the chat's when a chat is named, else the global level's."),
+        contents: shape.optional(shape.yesNo(), "For a folder that holds files or folders: true deletes it with all it holds; left out, it is refused and the answer says what it holds."),
+      },
       reply: fileRemovedReply,
       handle: async ({ user, params, query }) => {
         const chat = chatOf(query.chat);
         const loc = await own.locationFor(user, chat);
         const at = await own.found(loc, viewPathOf(params["*"]));
-        if (at.is !== "file") throw new RouteError(404, `The tree has no file ${at.path}.`);
+        if (at.is === "folder") {
+          await own.removeFolder(at, query.contents === true);
+          await kit.written(user, chat, at.path, at.level);
+          return { removed: at.path };
+        }
+        if (at.is !== "file") throw new RouteError(404, `The tree has no file or folder ${at.path}.`);
         if (at.level !== "shipped") {
           await own.remove(at);
           await kit.written(user, chat, at.path, at.level);

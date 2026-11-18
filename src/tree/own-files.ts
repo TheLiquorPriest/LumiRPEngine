@@ -184,6 +184,22 @@ export class OwnFiles {
   }
 
   /**
+   * Removes a folder of the user's, found already. An empty one goes at once; one that holds anything goes only with `contents`, and is
+   * otherwise refused in words that say what it holds, so a folder with files is never deleted by one press.
+   */
+  async removeFolder(at: FoundFile, contents: boolean): Promise<void> {
+    this.#yours(at);
+    const held = await readdir(at.disk, { recursive: true, withFileTypes: true });
+    if (held.length > 0 && !contents) {
+      const folders = held.filter((e) => e.isDirectory()).length;
+      const files = held.length - folders;
+      const parts = [...(files > 0 ? [`${files} ${files === 1 ? "file" : "files"}`] : []), ...(folders > 0 ? [`${folders} ${folders === 1 ? "folder" : "folders"}`] : [])];
+      throw new RouteError(409, `${at.path} holds ${parts.join(" and ")}, which would be deleted with it: nothing was deleted.`);
+    }
+    await oneFileAtATime(at.disk, () => rm(at.disk, { recursive: true, force: true }));
+  }
+
+  /**
    * Renames or moves a file or folder of the user's to a path that is not taken, or with `copy` copies it there (a copy of a folder
    * leaves its links out). The place it goes to is the user's: never the shipped level or a place RPE makes again. What is moved is the
    * user's too, since a move takes it away from where it stands; what is copied is only read, so a shipped file or folder is copied as

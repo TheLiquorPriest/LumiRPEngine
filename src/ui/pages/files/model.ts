@@ -5,7 +5,7 @@
 // words: what RPH does with a file is RPH's own list, never worked out here from names.
 
 import type { LayerLevel, ApplyNowReply, DiffRow, FilePinAsk, FileSwitchAsk, FileWrittenReply, StackReply, SuggestionAcceptedReply, SuggestionDismissedReply, SuggestionsReply, SuggestionShown, TreeDiffReply, TreeFileReply, TreeFileRow, TreeListed, TreeListedReply } from "../../../shared/api";
-import type { RpeClient } from "../../client";
+import { RpeError, type RpeClient } from "../../client";
 import { errorWords } from "../../words";
 
 export type { DiffRow };
@@ -46,7 +46,7 @@ export interface FilesCalls {
   read(path: string, offset: number, length: number): Promise<TreeFileReply>;
   diff(path: string): Promise<TreeDiffReply>;
   save(path: string, level: WriteLevel, text: string): Promise<FileWrittenReply>;
-  remove(path: string): Promise<{ removed: string }>;
+  remove(path: string, contents?: boolean): Promise<{ removed: string }>;
   switchName(path: string, level: FileSwitchAsk["level"], off: boolean): Promise<FileWrittenReply>;
   pin(path: string, level: FilePinAsk["level"], agent: string, pinned: boolean): Promise<FileWrittenReply>;
   suggestions(): Promise<SuggestionsReply>;
@@ -69,7 +69,7 @@ export function filesCalls(client: Pick<RpeClient, "call">, chat: string | null)
     read: (path, offset, length) => client.call("GET /api/v1/files/*", { "*": path }, { query: { ...query, offset, length } }),
     diff: (path) => client.call("GET /api/v1/files-diff/*", { "*": path }, { query }),
     save: (path, level, text) => client.call("PUT /api/v1/files/*", { "*": path }, { body: { level, text, ...query } }),
-    remove: (path) => client.call("DELETE /api/v1/files/*", { "*": path }, { query }),
+    remove: (path, contents) => client.call("DELETE /api/v1/files/*", { "*": path }, { query: contents === true ? { ...query, contents: true } : query }),
     switchName: (path, level, off) => client.call("PUT /api/v1/files-off/*", { "*": path }, { body: { level, off, ...query } }),
     pin: (path, level, agent, pinned) => client.call("PUT /api/v1/files-pin/*", { "*": path }, { body: { level, agent, pinned, ...query } }),
     suggestions: () => client.call("GET /api/v1/suggestions", {}, { query: { ...query, state: "open" } }),
@@ -148,13 +148,15 @@ export interface FilesShown {
   apply: ApplyShown;
   busy: boolean;
   refusal: { at: "file" | "make" | number; words: string } | null;
+  /** A folder that holds files, asked about before it is deleted: its path, and what RPE says it holds. */
+  deleting: { path: string; words: string } | null;
   /** The pin form: the agent chosen or typed, and the level of the config that holds the pin (null: the default for the chat). */
   pinning: { agent: string; level: "global" | "chat" | null };
 }
 
 export const NO_BROWSE: BrowseShown = { folder: "", search: "", items: [], next: null, loading: true, problem: null, levels: [], stopped: null };
 export const NO_APPLY: ApplyShown = { busy: false, note: null, problem: null };
-export const NO_FILES: FilesShown = { browse: NO_BROWSE, open: null, suggestions: { list: null, problem: null, editing: null, levels: {} }, agents: null, stack: null, apply: NO_APPLY, busy: false, refusal: null, pinning: { agent: "", level: null } };
+export const NO_FILES: FilesShown = { browse: NO_BROWSE, open: null, suggestions: { list: null, problem: null, editing: null, levels: {} }, agents: null, stack: null, apply: NO_APPLY, busy: false, refusal: null, deleting: null, pinning: { agent: "", level: null } };
 
 /** The entry the listing holds for a path, among those read. */
 export function entryOf(browse: BrowseShown, path: string): TreeFileRow | undefined {
@@ -177,6 +179,10 @@ export interface FilesControl {
   draft(draft: OpenFile["draft"]): void;
   save(): void;
   remove(): void;
+  /** Deletes a folder of his: at once where it is empty; where it holds anything, RPE says what, and the page asks, then sends it again with `contents`. */
+  removeFolder(path: string, contents: boolean): void;
+  /** Leaves the folder asked about where it is. */
+  keepFolder(): void;
   switchName(path: string, level: FileSwitchAsk["level"], off: boolean): void;
   /** Pins the file for an agent at a level, or takes the pin away. */
   pin(path: string, level: FilePinAsk["level"], agent: string, pinned: boolean): void;
@@ -344,6 +350,23 @@ export function filesControl(calls: FilesCalls, limits: () => FilesLimits, onCha
       const now = shown.open;
       if (now === null) return;
       ask("file", () => calls.remove(now.path), shut);
+    },
+    removeFolder(path, contents) {
+      show({ ...shown, busy: true, refusal: null, deleting: null });
+      calls.remove(path, contents).then(
+        () => {
+          show({ ...shown, busy: false });
+          refresh();
+        },
+        (error: unknown) => {
+          // A folder that holds something is asked about, in what RPE says it holds; any other refusal is kept in its words.
+          if (error instanceof RpeError && error.status === 409) show({ ...shown, busy: false, deleting: { path, words: errorWords(error) } });
+          else show({ ...shown, busy: false, refusal: { at: "make", words: errorWords(error) } });
+        },
+      );
+    },
+    keepFolder() {
+      show({ ...shown, deleting: null });
     },
     switchName(path, level, off) {
       ask(

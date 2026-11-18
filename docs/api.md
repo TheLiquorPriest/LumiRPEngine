@@ -1721,14 +1721,14 @@ Writes a file's whole text as the user at a level (for a file of another level, 
 
 ### `DELETE /api/v1/files/*`
 
-Removes a file of the user's; for one in place of a default, that is resetting to the default. "Delete" on a shipped file writes its name in the `stack.off` list of the level named (the chat's when a chat is named, else the global level's), so the shipped file stays and is not in force.
+Removes a file of the user's; for one in place of a default, that is resetting to the default. "Delete" on a shipped file writes its name in the `stack.off` list of the level named (the chat's when a chat is named, else the global level's), so the shipped file stays and is not in force. A folder of the user's goes when it is empty; one that holds anything is refused in words that say what it holds, until `contents` asks for it to go with all it holds.
 
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | `*` (the rest of the path) |
-| Query | `chat` (may be left out): `string`, The chat whose view of the tree is read; left out, the shipped level and the user's own<br>`level` (may be left out): `"global" | "chat"`, For a shipped file, the level whose `stack.off` list takes its name; the chat's when a chat is named, else the global level's |
+| Query | `chat` (may be left out): `string`, The chat whose view of the tree is read; left out, the shipped level and the user's own<br>`level` (may be left out): `"global" | "chat"`, For a shipped file, the level whose `stack.off` list takes its name; the chat's when a chat is named, else the global level's<br>`contents` (may be left out): `boolean`, For a folder that holds files or folders: true deletes it with all it holds; left out, it is refused and the answer says what it holds |
 | Body | none |
 | Reply | `{ removed: string; switchedOff?: LayerLevel }` |
 

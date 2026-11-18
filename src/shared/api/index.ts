@@ -5771,10 +5771,10 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
-  /** Removes a file of the user's; for one in place of a default, that is resetting to the default. "Delete" on a shipped file writes its name in the `stack.off` list of the level named (the chat's when a chat is named, else the global level's), so the shipped file stays and is not in force. */
+  /** Removes a file of the user's; for one in place of a default, that is resetting to the default. "Delete" on a shipped file writes its name in the `stack.off` list of the level named (the chat's when a chat is named, else the global level's), so the shipped file stays and is not in force. A folder of the user's goes when it is empty; one that holds anything is refused in words that say what it holds, until `contents` asks for it to go with all it holds. */
   "DELETE /api/v1/files/*": {
     params: { "*": string };
-    query: { chat?: string; level?: "global" | "chat" };
+    query: { chat?: string; level?: "global" | "chat"; contents?: boolean };
     body: undefined;
     reply: { removed: string; switchedOff?: LayerLevel };
     paged: false;

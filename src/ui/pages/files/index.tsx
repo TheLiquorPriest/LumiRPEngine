@@ -55,7 +55,7 @@ export function FilesView(props: FilesViewProps) {
         </>
       )}
       <div class="rpe-files-split" data-open={open === null ? "no" : "yes"}>
-        <Browser browse={shown.browse} openPath={open?.path ?? null} onFolder={props.onFolder} onSearch={props.onSearch} onMore={props.onMore} onOpen={props.onOpen} />
+        <Browser browse={shown.browse} openPath={open?.path ?? null} deleting={shown.deleting} onFolder={props.onFolder} onSearch={props.onSearch} onMore={props.onMore} onOpen={props.onOpen} onRemoveFolder={props.onRemoveFolder} onKeepFolder={props.onKeepFolder} />
         {open === null ? null : (
           <div class="lre-stack rpe-files-open">
             <OpenPanel {...props} open={open} entry={entry} unread={unread.has(open.path)} />
@@ -150,6 +150,8 @@ export function FilesPage(props: { chat: string | null; at?: readonly string[] }
       onMake={(path, level, shippedPath) => control?.make(path, level, shippedPath)}
       onMove={(from, to) => control?.move(from, to)}
       onCopy={(from, to) => control?.copy(from, to)}
+      onRemoveFolder={(path, contents) => control?.removeFolder(path, contents)}
+      onKeepFolder={() => control?.keepFolder()}
     />
   );
 }

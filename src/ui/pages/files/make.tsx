@@ -15,6 +15,8 @@ export interface MakeActions {
   onMakeFolder(path: string): void;
   onMove(from: string, to: string): void;
   onCopy(from: string, to: string): void;
+  onRemoveFolder(path: string, contents: boolean): void;
+  onKeepFolder(): void;
 }
 
 /** A refusal of RPE's, in its words, where the page made or moved something. */

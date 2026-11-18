@@ -33,7 +33,12 @@ function Trail(props: { folder: string; onFolder(path: string): void }) {
   );
 }
 
-function Entry(props: { item: TreeListed; open: boolean; unread: boolean; onFolder(path: string): void; onOpen(path: string): void }) {
+/** A folder of the user's own can be deleted from its row; a level's own folder at the top (`@global`) and the shipped level's are not offered. */
+function deletable(item: TreeListed): boolean {
+  return item.level !== "shipped" && !(item.path.startsWith("@") && !item.path.includes("/"));
+}
+
+function Entry(props: { item: TreeListed; open: boolean; unread: boolean; onFolder(path: string): void; onOpen(path: string): void; onDelete(path: string, contents: boolean): void }) {
   const { item } = props;
   if (item.folder) {
     return (
@@ -42,6 +47,11 @@ function Entry(props: { item: TreeListed; open: boolean; unread: boolean; onFold
           {`${item.name}/`}
         </Button>
         <Badge>{LEVEL_WORDS[item.level]}</Badge>
+        {deletable(item) ? (
+          <Button size="sm" variant="ghost" title={`Delete ${item.path}`} onClick={() => props.onDelete(item.path, false)}>
+            Delete
+          </Button>
+        ) : null}
       </li>
     );
   }
@@ -65,10 +75,14 @@ function Entry(props: { item: TreeListed; open: boolean; unread: boolean; onFold
 export interface BrowserProps {
   browse: BrowseShown;
   openPath: string | null;
+  /** A folder asked about before it is deleted, with what RPE says it holds; null when none is. */
+  deleting: { path: string; words: string } | null;
   onFolder(path: string): void;
   onSearch(words: string): void;
   onMore(): void;
   onOpen(path: string): void;
+  onRemoveFolder(path: string, contents: boolean): void;
+  onKeepFolder(): void;
 }
 
 export function Browser(props: BrowserProps) {
@@ -112,6 +126,19 @@ export function Browser(props: BrowserProps) {
           <span>It did not look everywhere. Narrow the words, or search in a folder.</span>
         </Banner>
       )}
+      {props.deleting === null ? null : (
+        <Banner tone="warn" icon="alert" title={`Delete ${props.deleting.path}?`}>
+          <span data-deleting>{props.deleting.words}</span>
+          <div class="lre-inline">
+            <Button variant="danger" onClick={() => props.deleting !== null && props.onRemoveFolder(props.deleting.path, true)}>
+              Delete it with all it holds
+            </Button>
+            <Button variant="ghost" onClick={props.onKeepFolder}>
+              Keep it
+            </Button>
+          </div>
+        </Banner>
+      )}
       {browse.items.length === 0 ? (
         browse.loading ? (
           <p class="lre-muted rpe-line">Reading the files…</p>
@@ -123,7 +150,7 @@ export function Browser(props: BrowserProps) {
       ) : (
         <ul class="lre-stack rpe-plain">
           {browse.items.map((item) => (
-            <Entry key={item.path} item={item} open={props.openPath === item.path} unread={unread.has(item.path)} onFolder={props.onFolder} onOpen={props.onOpen} />
+            <Entry key={item.path} item={item} open={props.openPath === item.path} unread={unread.has(item.path)} onFolder={props.onFolder} onOpen={props.onOpen} onDelete={props.onRemoveFolder} />
           ))}
         </ul>
       )}

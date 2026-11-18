@@ -10,6 +10,7 @@ import { importedTarget, KINDS, viewPathAt } from "../../../src/ui/pages/files/k
 import { filesControl, type FilesShown } from "../../../src/ui/pages/files/model";
 import { standingOf, unreadIn } from "../../../src/ui/pages/files/standing";
 import { askingClient, settle } from "../asking";
+import { RpeError } from "../../../src/ui/client";
 import { elements, expand, press, textOf } from "../vnodes";
 import { filesCalls } from "../../../src/ui/pages/files";
 
@@ -49,6 +50,8 @@ function view(shown: Partial<FilesShown>, chat: string | null = "chat-calder") {
     onMakeFolder: (p) => void calls.push(`make-folder:${p}`),
     onMove: (from, to) => void calls.push(`move:${from}>${to}`),
     onCopy: noop("copy"),
+    onRemoveFolder: (p, all) => void calls.push(`remove-folder:${p}:${all}`),
+    onKeepFolder: noop("keep-folder"),
   };
   const tree = expand(h(FilesView, props));
   return { tree, text: textOf(tree), calls };
@@ -128,5 +131,42 @@ describe("the Files page", () => {
     press(page.tree, "Unpin");
     press(page.tree, "Pin");
     expect(page.calls).toEqual(["pin:persistent-workspace/tide-table.md:chat:gm:false", "pin:persistent-workspace/tide-table.md:global:keeper:true"]);
+  });
+
+  test("a folder of his is deleted from its row: at once where it is empty; where it holds anything the page asks, in what RPE says it holds, and sends it again with contents", async () => {
+    const folder: TreeListed = { name: "walk", path: "skills/walk", folder: true, level: "chat", entry: null };
+    // A file is open, so the page does not show the form for a new file, which this test does not render.
+    const opened = { path: "WORLD.md", file: { path: "WORLD.md", level: "chat" as const, kind: "yours" as const, bytes: 3, editable: true, text: "abc" }, piece: false, problem: null, mode: "read" as const, draft: { text: "abc", level: "chat" as const }, diff: null };
+    const page = view({ open: opened, browse: { ...NO_FILES.browse, loading: false, items: [folder, { ...folder, name: "x", path: "@shipped/.skills/x", level: "shipped" }, { ...folder, name: "@global", path: "@global", level: "global" }] } });
+    press(page.tree, "Delete");
+    expect(page.calls).toEqual(["remove-folder:skills/walk:false"]);
+
+    const { client, asked } = askingClient();
+    let last: FilesShown = NO_FILES;
+    const control = filesControl(filesCalls(client, "chat-calder"), () => ({ entries: 5, bytes: 10 }), (s) => (last = s));
+    control.removeFolder("skills/walk", false);
+    const first = asked.filter((a) => a.key === "DELETE /api/v1/files/*").at(-1);
+    expect(first).toMatchObject({ params: { "*": "skills/walk" }, query: { chat: "chat-calder" } });
+    first?.fail(new RpeError(409, "skills/walk holds 2 files, which would be deleted with it: nothing was deleted."));
+    await settle();
+    expect(last.deleting).toEqual({ path: "skills/walk", words: "skills/walk holds 2 files, which would be deleted with it: nothing was deleted." });
+    expect(last.refusal).toBeNull();
+    const asking = view({ open: opened, deleting: last.deleting });
+    expect(asking.text).toContain("holds 2 files");
+    press(asking.tree, "Delete it with all it holds");
+    expect(asking.calls).toEqual(["remove-folder:skills/walk:true"]);
+    control.removeFolder("skills/walk", true);
+    const again = asked.filter((a) => a.key === "DELETE /api/v1/files/*").at(-1);
+    expect(again).toMatchObject({ query: { chat: "chat-calder", contents: true } });
+    again?.answer({ removed: "skills/walk" });
+    await settle();
+    expect(last.deleting).toBeNull();
+    // Any other refusal is kept in its words, and nothing is asked.
+    control.removeFolder("sessions", false);
+    asked.filter((a) => a.key === "DELETE /api/v1/files/*").at(-1)?.fail(new RpeError(403, "sessions is not yours to change: RPE makes it again."));
+    await settle();
+    expect(last.deleting).toBeNull();
+    expect(last.refusal).toEqual({ at: "make", words: "sessions is not yours to change: RPE makes it again." });
+    control.stop();
   });
 });
