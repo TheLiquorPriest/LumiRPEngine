@@ -9,6 +9,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { Guidance, LinesPart, TemplatePart } from "../../src/app/guidance";
 import type { JsonValue } from "rp-harness/contract";
 import { openSet, type OpenSet, shippedTexts, split } from "./set";
+import { replyErrorWords } from "../../src/turn/turns";
 
 const SHIPPED = shippedTexts();
 
@@ -321,6 +322,18 @@ describe("a row each of E.6: present, laid out as its row says, asking for nothi
       }
       expect(part.line(name, { detail: "The key is missing." })).toContain(name === "pass-stopped" ? "stopped" : "The key is missing.");
     }
+  });
+
+  test("reply-errors.md's provider lines name how many tries were made and what broke the last, where the call was made more than once, and read whole without them", async () => {
+    const part = await lines("reply-errors");
+    const tried = { code: "provider" as const, detail: "529: Overloaded (overloaded_error)", broke: { failure: "overloaded" as const, tries: 3 } };
+    expect(replyErrorWords(tried, part)).toBe("The model's provider failed before a reply was written, after 3 tries; the last time the provider was busy: 529: Overloaded (overloaded_error)");
+    expect(replyErrorWords({ ...tried, broke: { failure: "connection", tries: 2 } }, part, true)).toBe(
+      "The model's provider failed after the reply began to go out, after 2 tries; the last time the connection broke, so the turn's record of what the reply says was not finished: 529: Overloaded (overloaded_error)",
+    );
+    expect(replyErrorWords({ code: "provider", broke: { failure: "too-long", tries: 2 } }, part)).toBe("The model's provider failed before a reply was written, after 2 tries; the last time the prompt was too long for the model.");
+    // Made once, the line is as it was.
+    expect(replyErrorWords({ code: "provider", detail: "401: invalid x-api-key", broke: { failure: "key", tries: 1 } }, part)).toBe("The model's provider failed before a reply was written: 401: invalid x-api-key");
   });
 
   test("tag-check.md has the ask that wants an intent record and a reply, and simple messages of the player's to play", async () => {

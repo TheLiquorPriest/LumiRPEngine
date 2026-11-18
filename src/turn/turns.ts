@@ -177,10 +177,13 @@ export async function turnErrorWords(files: FilesPort, at: { user: string; chat:
 
 /**
  * How a turn's run ended, in the words of the reply-errors part: why it ended with no reply; or, `after` its reply began to go out, why
- * the turn's record of that reply was not finished (the part's line of the same name ending `-after`). "" where the part has no such line.
+ * the turn's record of that reply was not finished (the part's line of the same name ending `-after`). A provider that failed after its
+ * call was made more than once gives the line `tries` and what broke the last (`is.<kind>`, `too-long` as `tooLong`). "" where the part
+ * has no such line.
  */
 export function replyErrorWords(e: ReplyError, errors: LinesPart | undefined, after = false): string {
-  const fields = { ...(e.detail !== undefined ? { detail: e.detail } : {}), ...(e.limit !== undefined ? { limit: e.limit.limit, per: e.limit.per, max: e.limit.max, value: e.limit.value } : {}) };
+  const broke = e.broke !== undefined && e.broke.tries > 1 ? { tries: e.broke.tries, is: { [e.broke.failure === "too-long" ? "tooLong" : e.broke.failure]: true } } : {};
+  const fields = { ...(e.detail !== undefined ? { detail: e.detail } : {}), ...(e.limit !== undefined ? { limit: e.limit.limit, per: e.limit.per, max: e.limit.max, value: e.limit.value } : {}), ...broke };
   return errors?.line(after ? `${e.code}-after` : e.code, fields) ?? "";
 }
 
