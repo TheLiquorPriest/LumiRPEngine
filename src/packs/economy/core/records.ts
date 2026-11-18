@@ -4,7 +4,7 @@
 // investment tax read them.
 
 import type { EntityId } from "../../../shared/ids";
-import { safeKey, type JsonValue } from "../../../shared/json";
+import { isRecord, safeKey, type JsonValue } from "../../../shared/json";
 import { calendarOf, dateAt } from "../../../engine/calendar";
 import { numOf, objOf, own } from "../../../engine/pack-kit";
 import type { ReadContext } from "../../../engine/registry";
@@ -49,6 +49,21 @@ export function recordGain(state: WorldState, world: ReadContext["world"], party
   const realised = holdingsRecord(state, "realised");
   const list = Array.isArray(own(realised, party)) ? (own(realised, party) as JsonValue[]) : [];
   realised[party] = [...list.slice(-(REALISED_KEPT - 1)), { at: state.clock, label: g.label, qty: g.qty, proceeds: g.proceeds, basis: g.basis, gain: g.gain, term: g.term }];
+}
+
+/** A realised gain taken off again (`recordGain`'s reverse): its amounts off the year `clock` falls in, and the newest of the party's latest sales that reads the same. */
+export function unrecordGain(state: WorldState, world: ReadContext["world"], party: EntityId, clock: number, g: GainRecord): void {
+  if (!safeKey(party)) return;
+  const year = yearOf(world, clock);
+  const gains = holdingsRecord(state, "gains");
+  const mine = objOf(own(gains, party));
+  const y = objOf(own(mine, year));
+  mine[year] = { ...y, [g.term]: numOf(y[g.term]) - g.gain, proceeds: numOf(y.proceeds) - g.proceeds, basis: numOf(y.basis) - g.basis, ...(g.home ? { home: numOf(y.home) - g.gain } : {}) };
+  gains[party] = mine;
+  const realised = holdingsRecord(state, "realised");
+  const list = own(realised, party);
+  const sale = Array.isArray(list) ? list.findLastIndex((r) => isRecord(r) && r.label === g.label && r.proceeds === g.proceeds && r.gain === g.gain) : -1;
+  if (Array.isArray(list) && sale !== -1) realised[party] = list.filter((_, i) => i !== sale);
 }
 
 /** A party's realised gains in a year: short and long term, the part on selling their home, proceeds and basis. */

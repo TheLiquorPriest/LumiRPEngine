@@ -14,6 +14,8 @@ import { say, wordedParam } from "../../../engine/lines";
 import { hashParts } from "../../../shared/hash";
 import type { EntityId } from "../../../shared/ids";
 import type { JsonObject, JsonValue } from "../../../shared/json";
+import { isRecord } from "../../../shared/json";
+import { jsonEqual } from "../../../shared/json-patch";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
 import { isPlanStatus, isPlanStatusLive, PLAN_ACTIONS, PLAN_EFFECTS, PLAN_SECTION, PLAN_SOURCES, PLAN_TEXT_MAX, type OrgPlanView, type PlanGoal, type PlanGoalView, type PlanNote, type PlanOrder, type PlanOrderView, type PlanSource, type PlanStatus } from "../../../shared/org-feed";
 import type { OrgRef } from "../../../shared/org-view";
@@ -51,6 +53,8 @@ export const ORGS_GOAL = "orgs.goal";
 export const ORGS_ORDER = "orgs.order";
 export const ORGS_STATUS = "orgs.status";
 export const ORGS_LIVED = "orgs.lived";
+/** A goal or an order put back as it was before an event of it (the Undo of one). */
+export const ORGS_PLAN_BACK = "orgs.plan_back";
 
 /** The longest words a note or an offered saying keeps. */
 export const PLAN_LIMITS = { text: PLAN_TEXT_MAX } as const;
@@ -115,6 +119,11 @@ function writePlan(state: Parameters<EventTypeDef<PackEvent>["apply"]>[1], org: 
   all[org] = { goals: plan.goals as unknown as JsonValue, orders: plan.orders as unknown as JsonValue };
 }
 
+/** A goal or order of an organization's plan as `state` holds it, or null. */
+function itemOf(state: ReadContext["state"], org: EntityId, list: "goals" | "orders", id: string): JsonValue {
+  return (planOf(state, org)[list].find((x) => x.id === id) as unknown as JsonValue | undefined) ?? null;
+}
+
 export const PLAN_EVENTS: EventTypeDef<PackEvent>[] = [
   {
     // A goal set or changed, whole: the plan keeps every closed goal.
@@ -140,6 +149,14 @@ export const PLAN_EVENTS: EventTypeDef<PackEvent>[] = [
       writePlan(state, org, { goals: upsert(plan.goals, goal), orders: plan.orders });
     },
     describe: (e) => say("plan_goal", { text: strOf(objOf(e.data.goal).text) }),
+    // The goal goes back to what it was before, or off the plan where it was new; one moved on since is left.
+    reverse: (e, before, now) => {
+      const goal = goalIn(objOf(e.data.goal));
+      if (!goal) return [];
+      const org = strOf(e.data.org);
+      if (!jsonEqual(itemOf(now, org, "goals", goal.id), goal as unknown as JsonValue)) return "changed_since";
+      return [{ type: ORGS_PLAN_BACK, data: { org, list: "goals", id: goal.id, item: itemOf(before, org, "goals", goal.id), visibility: "secret" } }];
+    },
   },
   {
     // An order given or changed, whole: the plan keeps every closed order.
@@ -164,6 +181,13 @@ export const PLAN_EVENTS: EventTypeDef<PackEvent>[] = [
       writePlan(state, org, { goals: plan.goals, orders: upsert(plan.orders, order) });
     },
     describe: (e) => say("plan_order", { text: strOf(objOf(e.data.order).text) }),
+    reverse: (e, before, now) => {
+      const order = orderIn(objOf(e.data.order));
+      if (!order) return [];
+      const org = strOf(e.data.org);
+      if (!jsonEqual(itemOf(now, org, "orders", order.id), order as unknown as JsonValue)) return "changed_since";
+      return [{ type: ORGS_PLAN_BACK, data: { org, list: "orders", id: order.id, item: itemOf(before, org, "orders", order.id), visibility: "secret" } }];
+    },
   },
   {
     // A goal or an order moved along: its status and the latest word on it.
@@ -192,6 +216,30 @@ export const PLAN_EVENTS: EventTypeDef<PackEvent>[] = [
       writePlan(state, org, { goals: plan.goals.map(move), orders: plan.orders.map(order) });
     },
     describe: (e) => say("plan_status", { id: strOf(e.data.id), status: planStatusWords[isPlanStatus(e.data.status) ? e.data.status : "open"].toLowerCase() }),
+    // The goal or order moves back along: each plan item of that id goes back to what it was before.
+    reverse: (e, before) => {
+      const org = strOf(e.data.org);
+      const id = strOf(e.data.id);
+      return (["goals", "orders"] as const).flatMap((list) => (planOf(before, org)[list].some((x) => x.id === id) ? [{ type: ORGS_PLAN_BACK, data: { org, list, id, item: itemOf(before, org, list, id), visibility: "secret" } }] : []));
+    },
+  },
+  {
+    // A goal or an order put back as it was before an event (the Undo of one), or taken off the plan where it had none.
+    type: ORGS_PLAN_BACK,
+    validate: (e) => (strOf(e.data.org) !== "" && strOf(e.data.id) !== "" ? null : { code: "bad_event", reason: say("why_a_plan_item_put_back_needs_its_organization_and_id") }),
+    apply: (e, state) => {
+      const org = strOf(e.data.org);
+      const id = strOf(e.data.id);
+      const plan = planOf(state, org);
+      if (e.data.list === "orders") {
+        const order = isRecord(e.data.item) ? orderIn(e.data.item) : null;
+        writePlan(state, org, { goals: plan.goals, orders: order ? upsert(plan.orders, order) : plan.orders.filter((o) => o.id !== id) });
+      } else {
+        const goal = isRecord(e.data.item) ? goalIn(e.data.item) : null;
+        writePlan(state, org, { goals: goal ? upsert(plan.goals, goal) : plan.goals.filter((g) => g.id !== id), orders: plan.orders });
+      }
+    },
+    describe: () => "",
   },
   {
     // The day planner's marker (`orgs.orders`): every block it laid for an order has ended, at `at`. It closes nothing.

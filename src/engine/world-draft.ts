@@ -24,6 +24,7 @@ import { SIGHT_MAX } from "../shared/grid";
 import { hashJson } from "../shared/hash";
 import type { PlaceVisibility } from "../shared/ids";
 import { hasOwn, isRecord, safeKey, type JsonObject } from "../shared/json";
+import { jsonEqual } from "../shared/json-patch";
 import type { LedgerEvent, PackEvent } from "../shared/ledger";
 import { compileMaps, readMap, TRAVEL_MODES } from "../shared/maps";
 import type { MapSettings, WorldDoc } from "../shared/world";
@@ -419,4 +420,45 @@ export const draftEventDef: EventTypeDef<PackEvent> = {
           : say("draft_place", { place: typeof v?.name === "string" ? v.name : labelOf(ctx, change.id) });
     return say("draft_change", { what, how });
   },
+  // The draft's entry for that item goes back to what it was before (or away, where there was none), unless a later change has written it since.
+  reverse(e, before, now) {
+    const change = changeOf(e.data);
+    if (!change) return [];
+    const entryAt = (state: Readonly<WorldState>): DraftEntry | null => {
+      const draft = chatDraftOf(state);
+      return entryOf("part" in change ? draft[change.part] : own(draft[change.collection] ?? {}, change.id));
+    };
+    const back = "value" in change ? change.over !== null && digestOf(change.value) === change.over : change.over === null;
+    const made: DraftEntry | null = back ? null : "value" in change ? { value: change.value, over: change.over } : { gone: true, over: change.over };
+    if (!jsonEqual((entryAt(now) as JsonObject | null) ?? null, (made as JsonObject | null) ?? null)) return "changed_since";
+    return [{ type: DRAFT_BACK_EVENT, data: { ...("part" in change ? { part: change.part } : { collection: change.collection, id: change.id }), entry: (entryAt(before) as JsonObject | null) ?? null } }];
+  },
+};
+
+/** A change of this chat's draft put back as the draft held it before (the Undo of one): the entry of that place, path, map or part, or none. */
+export const DRAFT_BACK_EVENT = "engine.world_back";
+
+export const draftBackDef: EventTypeDef<PackEvent> = {
+  type: DRAFT_BACK_EVENT,
+  validate: (e) => ((DRAFT_PARTS.some((p) => p === e.data.part) && e.data.collection === undefined) || (DRAFT_COLLECTIONS.some((c) => c === e.data.collection) && safeKey(e.data.id)) ? null : reject("bad_change", say("why_a_draft_change_put_back_needs_its_item"))),
+  apply(e, state) {
+    const slice = mutableSlice(state, PACK);
+    const was: JsonObject = isRecord(slice[SLICE]) ? (slice[SLICE] as JsonObject) : {};
+    const entry = isRecord(e.data.entry) ? structuredClone(e.data.entry) : null;
+    const part = DRAFT_PARTS.find((p) => p === e.data.part);
+    if (part) {
+      const next: JsonObject = { ...was };
+      if (entry) next[part] = entry;
+      else delete next[part];
+      slice[SLICE] = next;
+      return;
+    }
+    const collection = DRAFT_COLLECTIONS.find((c) => c === e.data.collection);
+    if (!collection || !safeKey(e.data.id)) return;
+    const items: JsonObject = { ...(isRecord(was[collection]) ? (was[collection] as JsonObject) : {}) };
+    if (entry) items[e.data.id] = entry;
+    else delete items[e.data.id];
+    slice[SLICE] = { ...was, [collection]: items };
+  },
+  describe: () => "",
 };

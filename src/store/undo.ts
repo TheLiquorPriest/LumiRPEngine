@@ -15,9 +15,10 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import { jsonEqual } from "../shared/json-patch";
 import { FINANCE_EVENTS } from "../shared/finance";
-import type { LedgerEvent, MaterializeEvent, PostEvent } from "../shared/ledger";
+import type { LedgerEvent, MarkerBody, MaterializeEvent, PostEvent } from "../shared/ledger";
 import { ENGINE_EVENTS } from "../engine/engine-pack";
 import type { EventTypes } from "../engine/events";
+import { validMarkerBody } from "../engine/events";
 import { numOf, objOf, own, strOf } from "../engine/pack-kit";
 import { GONE_FIELD, placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
@@ -188,6 +189,44 @@ function reverseEvent(ev: LedgerEvent, posts: readonly PostEvent[], before: Stor
   }
 }
 
+/** What the control a marker sets holds in `world`; undefined where it holds none. */
+function markerValue(world: Readonly<WorldState>, body: Exclude<MarkerBody, { kind: "migrate" }>): JsonValue | undefined {
+  switch (body.kind) {
+    case "time": {
+      const t = world.time;
+      const s = body.scope;
+      switch (body.control) {
+        case "tick":
+          return "sceneType" in s ? own(t.sceneTicks, s.sceneType) : undefined;
+        case "scale":
+          return t.scale;
+        case "pause":
+          return t.paused;
+        case "interrupt":
+          return "interrupt" in s ? own(t.interrupts, s.interrupt) : undefined;
+        case "speed_through":
+          return "activity" in s ? (own(t.speedThrough, s.activity) as unknown as JsonValue | undefined) : undefined;
+        case "montage":
+          return t.montage;
+        case "unit_cap":
+          return t.unitCap as unknown as JsonValue;
+        default:
+          return undefined;
+      }
+    }
+    case "resolve": {
+      const s = body.scope;
+      return "all" in s ? world.realism.levels[body.domain] : "tier" in s ? own(world.realism.tierCaps, s.tier)?.[body.domain] : own(world.entities, s.entity)?.levels[body.domain];
+    }
+    case "adjudicate":
+      return world.adjudication as unknown as JsonValue | undefined;
+    case "claims":
+      return world.claims as unknown as JsonValue | undefined;
+    case "infer":
+      return world.inferred as unknown as JsonValue | undefined;
+  }
+}
+
 /** The reverse of one change of `unit`, read against the state just before the unit and the state now; or why it has none. */
 function reverseOne(c: ChangeRow, unit: readonly ChangeRow[], before: StoreState, now: StoreState, group: string, unlinked: Set<string>, registry: EventTypes): ChangeInput[] | Report {
   const input = (op: string, value: JsonValue): ChangeInput => ({ lane: c.lane, op, value, precision: c.precision, standing: c.standing });
@@ -210,6 +249,16 @@ function reverseOne(c: ChangeRow, unit: readonly ChangeRow[], before: StoreState
     const key = typeof v.key === "string" ? v.key : "";
     if (!jsonEqual(now.values?.[key] ?? null, v.value ?? null)) return leftOf("changed_since", c);
     return [input(c.op, { at: "world", key, value: before.values?.[key] ?? null })];
+  }
+  if (c.op === STORE_OPS.marker) {
+    // A level, a time control or a policy goes back to what it held before. An Upgrade has its own undo (the chat's), and a control that held
+    // no value before has none to put back.
+    const body = validMarkerBody(c.value);
+    if (!body || body.kind === "migrate") return leftOf("not_reversible", c);
+    const was = markerValue(before.world, body);
+    if (was === undefined) return leftOf("not_reversible", c);
+    if (!jsonEqual(markerValue(now.world, body) ?? null, body.to as unknown as JsonValue)) return leftOf("changed_since", c);
+    return [input(c.op, { ...body, to: was })];
   }
   return leftOf("not_reversible", c);
 }

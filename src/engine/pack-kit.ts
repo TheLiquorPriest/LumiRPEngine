@@ -55,6 +55,11 @@ export function own<T>(map: Readonly<Record<string, T>>, key: string): T | undef
   return hasOwn(map, key) ? map[key] : undefined;
 }
 
+/** The newest entry of a list that `match` takes; undefined when the value is no list or none matches (a record of the kind an event appended). */
+export function newestOf(list: JsonValue | undefined, match: (entry: JsonValue) => boolean): JsonValue | undefined {
+  return Array.isArray(list) ? list.findLast(match) : undefined;
+}
+
 /** A readable name for an id in a reason: the entity's or place's name, a track's label, else the id in words. */
 export function labelOf(ctx: Pick<ReadContext, "world" | "state">, id: string): string {
   return own(ctx.state.entities, id)?.name ?? own(ctx.world.places, id)?.name ?? own(ctx.world.tracks, id)?.label ?? (id.replace(/_/g, " ").trim() || "nothing");

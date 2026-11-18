@@ -18,7 +18,8 @@ import { labelOf, numOf, objOf, own, strOf } from "../../../engine/pack-kit";
 import type { EffectContext, EventTypeDef, ReadContext, Rejection } from "../../../engine/registry";
 import type { WorldState } from "../../../engine/state";
 import type { FinanceApi, FinanceRegistry } from "./module";
-import { assetDefOf, assetFromDef, assetOf, clockOfDate, dateText, listedCompany, optionDef, optionId, performanceOf, priceOf, reject, type Asset, type AssetBooks } from "./assets";
+import { assetDefOf, assetFromDef, assetOf, clockOfDate, dateText, holdingsSlice, listedCompany, optionDef, optionId, performanceOf, priceOf, reject, type Asset, type AssetBooks } from "./assets";
+import { UNBOOK, unbooking } from "./unbook";
 import { byShare, recordGain } from "./records";
 import { intrinsic, QTY_EPSILON, roundQty, takeFifo, YEAR_MINUTES, type OpenLot, type TakenLot } from "./pricing";
 import { actAs, asParam, mayAs, moneyWords } from "./acting";
@@ -264,6 +265,20 @@ function lotsEvent(api: FinanceApi): EventTypeDef<PackEvent> {
     apply: (e, state, ctx) => applyLots(api, state, ctx.world, ctx.tables, str(e, "holding"), numOf(e.data.qty), numOf(e.data.cents), strOf(e.data.label, labelOf(ctx, str(e, "holding")))),
     describe: (e, ctx, viewer) => (viewer ? "" : say("holding_units", { holding: labelOf(ctx, str(e, "holding")), qty: `${numOf(e.data.qty) > 0 ? "+" : ""}${numOf(e.data.qty)}`, kind: strOf(e.data.kind, "trade"), amount: formatMoney(numOf(e.data.cents), ctx.world.currency) })),
     touches: (e) => [{ entity: str(e, "holding"), field: "lots" }, ...(str(e, "legacy") !== "" ? [{ entity: str(e, "legacy"), field: "units" }] : [])],
+    // The holding's lots go back to what they were (and an older chat's units to theirs), and what a sale realised for its owners comes off their years and latest sales.
+    reverse: (e, before, now) => {
+      const holding = str(e, "holding");
+      const legacy = str(e, "legacy");
+      const out: JsonObject[] = [{ type: "set", entity: holding, field: "lots", value: own(before.entities, holding)?.fields.lots ?? null }];
+      if (legacy !== "") out.push({ type: "set", entity: legacy, field: "units", value: own(before.entities, legacy)?.fields.units ?? null });
+      if (numOf(e.data.qty) >= 0) return out;
+      // The sales this event realised: the entries of this label made at this time that the party's sales now hold beyond what they held before.
+      const label = strOf(e.data.label, own(now.entities, holding)?.name ?? holding);
+      const made = (list: JsonValue | undefined): JsonObject[] => (Array.isArray(list) ? list.filter((r): r is JsonObject => isRecord(r) && r.label === label && r.at === before.clock) : []);
+      const sold = objOf(holdingsSlice(now).realised);
+      const gains = Object.entries(sold).flatMap(([party, list]) => made(list).slice(made(own(objOf(holdingsSlice(before).realised), party)).length).map((r) => ({ party, term: r.term === "long" ? ("long" as const) : ("short" as const), gain: numOf(r.gain), proceeds: numOf(r.proceeds), basis: numOf(r.basis), label, qty: numOf(r.qty) })));
+      return gains.length === 0 ? out : [...out, { type: UNBOOK, data: unbooking({ at: before.clock, gains }) }];
+    },
   };
 }
 

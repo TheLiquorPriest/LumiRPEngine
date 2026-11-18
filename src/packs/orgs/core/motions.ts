@@ -23,7 +23,8 @@ import { parseOrgOp } from "../../../shared/org-ops";
 import type { ParamDef } from "../../../shared/world";
 import { calendarOf, formatStamp } from "../../../engine/calendar";
 import { mayAct, membersOfOrg, orgTypeOf, trusteesOf } from "../../../engine/org";
-import { labelOf, objOf, optionalQuery, own, sliceOf, sliceRecord, strOf } from "../../../engine/pack-kit";
+import { unlisting } from "../../../engine/engine-pack";
+import { labelOf, newestOf, objOf, optionalQuery, own, sliceOf, sliceRecord, strOf } from "../../../engine/pack-kit";
 import type { Advice, CoreRegistry, EffectContext, EventTypeDef, ProcessDef, ReadContext, Rejection, PackAction } from "../../../engine/registry";
 import type { Rng } from "../../../engine/rng";
 import { isGone, kindIs } from "../../../engine/scope";
@@ -498,6 +499,13 @@ export const MOTION_EVENTS: EventTypeDef<PackEvent>[] = [
       if (!m) return say("org_motion_bare");
       const by = m.by === "" ? say("org_the_gm") : nameFor(ctx, viewer, m.by);
       return say("org_motion_put", { by: `${by.charAt(0).toUpperCase()}${by.slice(1)}`, org: labelOf(ctx, str(e, "org")), text: m.text, closes: when(ctx, m.closes) });
+    },
+    // The motion comes off the organization's motions, as it stands there now.
+    reverse: (e, _before, now) => {
+      const org = str(e, "org");
+      const id = motionIn(e.data.motion)?.id;
+      const entry = newestOf(objOf(sliceOf(now, "orgs").motions)[org], (m) => isRecord(m) && m.id === id);
+      return entry === undefined ? [] : [unlisting("orgs", ["motions", org], entry)];
     },
   },
   {

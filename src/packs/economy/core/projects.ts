@@ -36,6 +36,7 @@ import { mayAct, membersOfOrg, orgTypeOf } from "../../../engine/org";
 import { labelOf, numOf, objOf, optionalService, own, sliceOf, sliceRecord, strOf } from "../../../engine/pack-kit";
 import type { EffectContext, EventTypeDef, ProposalChannelDef, ReadContext, Rejection, SlotInfo, PackAction } from "../../../engine/registry";
 import { isGone, kindIs } from "../../../engine/scope";
+import type { WorldState } from "../../../engine/state";
 import { monthOf } from "./books";
 import { bookRecovery, depreciates } from "./depreciation";
 import { DEFAULT_FLOW_MINUTE, isBusinessDay } from "./flows";
@@ -244,6 +245,19 @@ function allDone(def: ProjectDef, run: ProjectRun): boolean {
   return def.steps.every((s) => s.done === true || typeof run.steps[s.id]?.done === "number");
 }
 
+/**
+ * The Undo of an event of a project: its run goes back to what it was before the change, so long as the clock has not moved since (the
+ * project's steps go on with time, and what they did since is not the event's to take back). A project that ended with capital to write off
+ * booked that off beside its run, which has no reverse.
+ */
+function putBack(e: PackEvent, before: Readonly<WorldState>, now: Readonly<WorldState>): JsonObject[] | "changed_since" | "not_reversible" {
+  if (now.clock !== before.clock) return "changed_since";
+  const project = strOf(e.data.project);
+  const was = own(objOf(sliceOf(before, "economy").projects), project);
+  if (e.type === PROJECT_EVENTS.drop && numOf(objOf(was).capex) > 0) return "not_reversible";
+  return [{ type: PROJECT_EVENTS.back, data: { project, run: was ?? null } }];
+}
+
 export const PROJECT_EVENT_DEFS: EventTypeDef<PackEvent>[] = [
   {
     // A planned project set going, at its instant.
@@ -258,6 +272,7 @@ export const PROJECT_EVENT_DEFS: EventTypeDef<PackEvent>[] = [
       writeRun(state, id, { ...projectRunOf(state, id), status: "active", started: numOf(e.data.at) });
     },
     describe: (e, ctx) => say("project_started", { project: labelOf(ctx, strOf(e.data.project)) }),
+    reverse: putBack,
   },
   {
     // A step started (its payment beside it), waiting for money, or done (its payment and what it made beside it); the last one done ends the project.
@@ -291,6 +306,7 @@ export const PROJECT_EVENT_DEFS: EventTypeDef<PackEvent>[] = [
       if (phase === "wait") return say(e.data.side === "end" ? "project_step_waits_finish" : "project_step_waits_start", { project: what, step: name, amount: formatMoneyIn(ctx.world, numOf(e.data.cents)) });
       return say(phase === "start" ? "project_step_started" : "project_step_done", { project: what, step: name });
     },
+    reverse: putBack,
   },
   {
     // A project paused: each step under way keeps the work it had left.
@@ -305,6 +321,7 @@ export const PROJECT_EVENT_DEFS: EventTypeDef<PackEvent>[] = [
       writeRun(state, id, { ...run, status: "paused", paused: numOf(e.data.at), steps });
     },
     describe: (e, ctx) => say("project_paused", { project: labelOf(ctx, strOf(e.data.project)) }),
+    reverse: putBack,
   },
   {
     // A paused project going again: each step under way ends its work left after now.
@@ -323,6 +340,7 @@ export const PROJECT_EVENT_DEFS: EventTypeDef<PackEvent>[] = [
       writeRun(state, id, { ...run, status: "active", steps });
     },
     describe: (e, ctx) => say("project_resumed", { project: labelOf(ctx, strOf(e.data.project)) }),
+    reverse: putBack,
   },
   {
     // A project dropped: what it paid stays paid, and what it made stays made; what nothing it made took is written off.
@@ -335,6 +353,7 @@ export const PROJECT_EVENT_DEFS: EventTypeDef<PackEvent>[] = [
       writeRun(state, id, writtenOff(state, ctx.world, id, { ...run, status: "dropped", ended: at }, at));
     },
     describe: (e, ctx) => say("project_dropped", { project: labelOf(ctx, strOf(e.data.project)) }),
+    reverse: putBack,
   },
   {
     // A step set back or costing more, as the story or the GM tells it: its days and cost on top, and its end moved when it is under way.
@@ -368,6 +387,18 @@ export const PROJECT_EVENT_DEFS: EventTypeDef<PackEvent>[] = [
       const name = p?.def.steps.find((s) => s.id === strOf(e.data.step))?.name ?? strOf(e.data.step);
       return say("project_note", { project: labelOf(ctx, strOf(e.data.project)), note: noteWords(ctx.world, name, numOf(e.data.days), numOf(e.data.cents)), ...(strOf(e.data.text) !== "" ? { text: strOf(e.data.text) } : {}) });
     },
+    reverse: putBack,
+  },
+  {
+    // A project's run as it was before an event of it, or taken away where it had none (the Undo of one).
+    type: PROJECT_EVENTS.back,
+    validate: (e) => (strOf(e.data.project) !== "" ? null : { code: "bad_event", reason: say("why_a_project_put_back_needs_its_project") }),
+    apply: (e, state) => {
+      const projects = sliceRecord(state, "economy", "projects");
+      if (isRecord(e.data.run)) projects[strOf(e.data.project)] = e.data.run;
+      else delete projects[strOf(e.data.project)];
+    },
+    describe: () => "",
   },
 ];
 

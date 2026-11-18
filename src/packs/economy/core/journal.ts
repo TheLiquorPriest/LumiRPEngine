@@ -8,14 +8,15 @@
 // `statement`, `card_paid`, `decline`) fold here unchanged.
 
 import { say } from "../../../engine/lines";
-import type { JsonObject, JsonValue } from "../../../shared/json";
+import { isRecord, type JsonObject, type JsonValue } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import type { PackEvent } from "../../../shared/ledger";
 import { ACCOUNT_STATUSES, DELINQUENCY_STAGES, FINANCE_EVENTS, isCredit, type AccountStatus, type CreditEntry, type CycleState, type DelinquencyStage, type FlowRunState, type JournalEntry } from "../../../shared/finance";
 import { formatMoney } from "../../../shared/world";
 import { calendarOf, dateAt } from "../../../engine/calendar";
 import { EXTERNAL_ACCOUNT_PREFIX } from "../../../engine/events";
-import { mutableSlice, numOf, objOf, own, sliceOf, sliceRecord, strOf } from "../../../engine/pack-kit";
+import { bumping, unlisting } from "../../../engine/engine-pack";
+import { mutableSlice, newestOf, numOf, objOf, own, sliceOf, sliceRecord, strOf } from "../../../engine/pack-kit";
 import type { EventTypeDef, ReadContext, Rejection } from "../../../engine/registry";
 import type { WorldState } from "../../../engine/state";
 import { availableOf, balance, classOf, holdersOf } from "./model";
@@ -272,6 +273,12 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
       notes[str(e, "entity")] = pushCapped(notes[str(e, "entity")], { at: typeof e.data.at === "number" ? e.data.at : state.clock, class: str(e, "class"), text: str(e, "text") }, NOTES_CAP);
     },
     describe: (e) => str(e, "text"),
+    // The note comes off the party's notes.
+    reverse: (e, _before, now) => {
+      const entity = str(e, "entity");
+      const entry = newestOf(own(objOf(sliceOf(now, "economy").notes), entity), (n) => isRecord(n) && n.text === str(e, "text") && n.class === str(e, "class") && (typeof e.data.at !== "number" || n.at === e.data.at));
+      return entry === undefined ? [] : [unlisting("economy", ["notes", entity], entry)];
+    },
   },
   {
     // A price multiplier (festival, storm, scarcity) by category and place, until a time or until replaced.
@@ -318,6 +325,16 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
       if (typeof period.owed === "number") sliceRecord(state, "economy", "adb")[account] = { ...period, paid: numOf(period.paid) + numOf(e.data.cents) };
     },
     describe: (e, ctx) => say("money_card_payment", { amount: formatMoney(numOf(e.data.cents), ctx.world.currency) }),
+    // What it counted as paid comes off the statement, and off the period's, where it counted.
+    reverse: (e, _before, now) => {
+      const account = str(e, "account");
+      const eco = sliceOf(now, "economy");
+      const cents = numOf(e.data.cents);
+      return [
+        ...(typeof objOf(own(objOf(eco.cycles), account)).paid === "number" ? [bumping("economy", ["cycles", account, "paid"], -cents)] : []),
+        ...(typeof objOf(own(objOf(eco.adb), account)).owed === "number" ? [bumping("economy", ["adb", account, "paid"], -cents)] : []),
+      ];
+    },
   },
   {
     // A credit account moves to a delinquency stage, or back to current.
@@ -414,6 +431,12 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
     },
     // A credit report is its person's alone: the player reads their own, never anyone else's.
     describe: (e, ctx, viewer) => (viewer !== undefined && viewer !== str(e, "person") ? "" : say("money_credit_report", { whose: whoseFor(ctx, viewer, str(e, "person")), kind: wordOf("credit", str(e, "kind")) })),
+    // The entry comes off the person's credit history.
+    reverse: (e, _before, now) => {
+      const person = str(e, "person");
+      const entry = newestOf(objOf(own(objOf(sliceOf(now, "economy").credit), person)).entries, (n) => isRecord(n) && n.kind === e.data.kind && n.account === e.data.account && n.note === e.data.note && (typeof e.data.at !== "number" || n.at === e.data.at));
+      return entry === undefined ? [] : [unlisting("economy", ["credit", person, "entries"], entry)];
+    },
   },
   {
     // A person's monthly score.
@@ -462,6 +485,13 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
       }
     },
     describe: (e) => say(e.data.close === true ? "money_accounts_closed" : "money_accounts_opened"),
+    // Opened accounts close again, closed ones open again (an Undo of either).
+    reverse: (e, _before, now) => {
+      const opened = objOf(sliceOf(now, "economy").opened);
+      const closing = e.data.close === true;
+      const accounts = (Array.isArray(e.data.accounts) ? e.data.accounts : []).filter((a): a is string => typeof a === "string" && (own(opened, a) === true) !== closing);
+      return accounts.length > 0 ? [{ type: FINANCE_EVENTS.open, data: { accounts, ...(closing ? {} : { close: true }) } }] : [];
+    },
   },
   {
     type: FINANCE_EVENTS.status,

@@ -14,6 +14,7 @@ import { facetsInOrder } from "../shared/classes";
 import { isLifeState, lifeStateOf, type FacetDef } from "../shared/world";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord, safeKey } from "../shared/json";
+import { jsonEqual } from "../shared/json-patch";
 import type { EntityId, InterruptClass, Level, Visibility } from "../shared/ids";
 import { DOMAIN_LABEL, DOMAINS, INTERRUPT_CLASSES, LEVEL_LABEL } from "../shared/ids";
 import { isBand, tierBand, tierLabel, tierOf } from "../shared/tiers";
@@ -35,7 +36,7 @@ import { minutesBetween } from "./world-state";
 import { feedEvent } from "./feed";
 import { wsDeleteEvent, wsPinEvent, wsReadersEvent, wsWriteEvent } from "./workspace";
 import { outLinesEvent, outSceneEvent } from "./outputs";
-import { draftEventDef } from "./world-draft";
+import { draftBackDef, draftEventDef } from "./world-draft";
 import { UNMATERIALIZED, unmaterializedEvent } from "./materialize";
 
 const LEVELS: readonly Level[] = [0, 1, 2, 3, 4];
@@ -81,7 +82,35 @@ export const ENGINE_EVENTS = {
   rewind: "engine.rewind",
   /** A materialization's detail taken off the record of what was sampled (the Undo of one, `engine/materialize`). */
   unmaterialized: UNMATERIALIZED,
+  /** The newest entry equal to `entry` taken off a list at `path` in a pack's slice (`pack`, `path`, `entry`): the Undo of an event that appended it. */
+  unlist: "engine.unlist",
+  /** A number at `path` in a pack's slice changed by `delta` (`pack`, `path`, `delta`), where the path holds one: the Undo of an event that added to it. */
+  bump: "engine.bump",
 } as const;
+
+/** The event that takes the newest entry equal to `entry` off the list at `path` in a pack's slice, for an event's `reverse` (`ENGINE_EVENTS.unlist`). */
+export function unlisting(pack: string, path: readonly string[], entry: JsonValue): JsonObject {
+  return { type: ENGINE_EVENTS.unlist, data: { pack, path: [...path], entry } };
+}
+
+/** The event that changes the number at `path` in a pack's slice by `delta`, for an event's `reverse` (`ENGINE_EVENTS.bump`). */
+export function bumping(pack: string, path: readonly string[], delta: number): JsonObject {
+  return { type: ENGINE_EVENTS.bump, data: { pack, path: [...path], delta } };
+}
+
+/** The object that holds the last key of `path` in a pack's slice, and that key; none where the path does not lead to one. */
+function parentAt(state: WorldState, e: PackEvent): { at: JsonObject; key: string } | null {
+  const path = Array.isArray(e.data.path) ? e.data.path.filter((k): k is string => typeof k === "string") : [];
+  const key = path.pop();
+  let at: JsonValue | undefined = state.packs[str(e, "pack")];
+  for (const step of path) at = isRecord(at) ? (at as JsonObject)[step] : undefined;
+  return key !== undefined && isRecord(at) ? { at: at as JsonObject, key } : null;
+}
+
+/** Whether an event names a pack and a path of safe keys in it. */
+function pathNamed(e: PackEvent): boolean {
+  return safeKey(str(e, "pack")) && Array.isArray(e.data.path) && e.data.path.length > 0 && e.data.path.every((k) => typeof k === "string" && safeKey(k));
+}
 
 /** An action's latest attempt at a check, as a retry rule reads it (DESIGN §11). */
 export interface TryRecord {
@@ -256,9 +285,35 @@ const events: EventTypeDef<PackEvent>[] = [
     validate: (e) => (signalOf(e) ? null : { code: "bad_event", reason: say("why_signal_needs_a_known_class") }),
     apply: noop,
     describe: (e) => str(e, "text"),
+    // A signal only notes: it writes nothing, so there is nothing to take back.
+    reverse: () => [],
   },
-  { type: ENGINE_EVENTS.note, validate: () => null, apply: noop, describe: (e) => str(e, "text") },
-  { type: ENGINE_EVENTS.beat, validate: () => null, apply: noop, describe: (e) => str(e, "hint") },
+  { type: ENGINE_EVENTS.note, validate: () => null, apply: noop, describe: (e) => str(e, "text"), reverse: () => [] },
+  { type: ENGINE_EVENTS.beat, validate: () => null, apply: noop, describe: (e) => str(e, "hint"), reverse: () => [] },
+  {
+    // The newest entry equal to `entry` off a list in a pack's slice, as the Undo of an event that appended it.
+    type: ENGINE_EVENTS.unlist,
+    validate: (e) => (pathNamed(e) && e.data.entry !== undefined ? null : { code: "bad_event", reason: say("why_taking_an_entry_off_needs_a_pack_a_path") }),
+    apply: (e, state) => {
+      const found = parentAt(state, e);
+      const list = found === null ? undefined : found.at[found.key];
+      if (!Array.isArray(list)) return;
+      const at = list.findLastIndex((x) => jsonEqual(x, e.data.entry ?? null));
+      if (at !== -1) list.splice(at, 1);
+    },
+    describe: () => "",
+  },
+  {
+    // A number in a pack's slice changed by `delta`, as the Undo of an event that added to it; a path that holds no number is left.
+    type: ENGINE_EVENTS.bump,
+    validate: (e) => (pathNamed(e) && typeof e.data.delta === "number" && Number.isFinite(e.data.delta) ? null : { code: "bad_event", reason: say("why_changing_a_number_needs_a_pack_a_path") }),
+    apply: (e, state) => {
+      const found = parentAt(state, e);
+      const held = found === null ? undefined : found.at[found.key];
+      if (found !== null && typeof held === "number" && typeof e.data.delta === "number") found.at[found.key] = held + e.data.delta;
+    },
+    describe: () => "",
+  },
   {
     type: ENGINE_EVENTS.caught,
     validate: (e, ctx) => {
@@ -351,6 +406,8 @@ const events: EventTypeDef<PackEvent>[] = [
       slice(state).pauseScene = typeof e.data.scene === "string" ? e.data.scene : null;
     },
     describe: () => say("ev_clock_pause"),
+    // The clock's pause is pinned to the scene it was before (or to none).
+    reverse: (_e, before) => [{ type: ENGINE_EVENTS.pause, data: { scene: readEngineSlice(before).pauseScene } }],
   },
   {
     type: ENGINE_EVENTS.rewind,
@@ -591,6 +648,7 @@ export const enginePack: PackDef = {
     r.event(outSceneEvent);
     // This chat's own draft of its world (`world-draft.ts`): places, paths and maps made or changed in play.
     r.event(draftEventDef);
+    r.event(draftBackDef);
     // The Undo of a materialization (`engine/materialize`).
     r.event(unmaterializedEvent);
     r.proposal(knowsChannel);

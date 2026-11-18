@@ -26,6 +26,7 @@ import type { Rng } from "../../../engine/rng";
 import { isGone, kindIs, placeOfEntity, placeWithin } from "../../../engine/scope";
 import type { WorldState } from "../../../engine/state";
 import { addToBooks, addToPayables, businessBooks, firstBookedMonth, monthBook, monthOf, monthsBetween, operatingAccount, owedOf, payablesOf } from "./books";
+import { UNBOOK, UNBOOK_EVENT, unbooking } from "./unbook";
 import { allJobs, jobBlocks, payrollProblem, staffViews, type Job } from "./employment";
 import { businessAt, businessIds, orgTypeOf, placesOf, tradingDays, windingUpSince } from "../../../engine/org";
 import type { FinanceApi, FinanceRegistry, FlowPosting } from "./module";
@@ -277,6 +278,14 @@ export const INVOICE_PAID: EventTypeDef<PackEvent> = {
     if (own(state.entities, customer) && kindIs(ctx.registry, ctx.world, own(state.entities, customer)?.kind ?? "", "business")) addToBooks(state, customer, month, { bills: cents });
   },
   describe: (e, ctx, viewer) => (viewer ? "" : say("business_invoice_paid", { business: labelOf(ctx, str(e, "business")), customer: own(ctx.state.entities, str(e, "customer")) ? labelOf(ctx, str(e, "customer")) : str(e, "customer") })),
+  // What it booked comes off the month it was paid in: the business's invoices, and the customer's bills where it keeps books.
+  reverse: (e, before, now) => {
+    const business = str(e, "business");
+    const customer = str(e, "customer");
+    const kept = objOf(sliceOf(now, "economy").books);
+    const books = [...(own(now.entities, business) ? [{ business, entries: { invoices: numOf(e.data.cents) } }] : []), ...(own(now.entities, customer) && own(kept, customer) !== undefined ? [{ business: customer, entries: { bills: numOf(e.data.cents) } }] : [])];
+    return books.length === 0 ? [] : [{ type: UNBOOK, data: unbooking({ at: before.clock, books }) }];
+  },
 };
 
 /** The events that mark an invoice paid in full with a payment of `cents`, and book it. */
@@ -431,6 +440,15 @@ export const PAYOUT: EventTypeDef<PackEvent> = {
     sliceRecord(state, "economy", "distributed")[business] = state.clock;
   },
   describe: (e, ctx, viewer) => (viewer ? "" : say(e.data.what === "draw" ? "business_draw" : "business_profit", { business: labelOf(ctx, str(e, "business")) })),
+  // What it booked comes off the months it went to, and a distribution's clock goes back to what it was.
+  reverse: (e, before) => {
+    const business = str(e, "business");
+    const months = Object.entries(objOf(e.data.months));
+    if (e.data.what === "draw") return [{ type: UNBOOK, data: unbooking({ at: before.clock, books: [{ business, entries: { draws: numOf(e.data.cents) } }] }) }];
+    const was = own(objOf(sliceOf(before, "economy").distributed), business);
+    const books = months.length === 0 ? [{ business, entries: { distributions: numOf(e.data.cents) } }] : months.map(([month, cents]) => ({ business, month, entries: { distributions: numOf(cents) } }));
+    return [{ type: UNBOOK, data: unbooking({ at: before.clock, books, distributed: [{ business, was: typeof was === "number" ? was : null }] }) }];
+  },
 };
 
 /** Whether an owner may draw on a business: an owner or joint owner; a corporation pays its owners by salary or dividends instead. */
@@ -705,7 +723,7 @@ function invoiceAlerts(ctx: ReadContext, api: FinanceApi, party: EntityId, viewe
 export function registerBusiness(r: FinanceRegistry): void {
   const { api, core } = r;
   r.fields("business", BUSINESS_FIELDS);
-  for (const def of [SALE, REMIT, INVOICE_PAID, PAYOUT]) core.event(def);
+  for (const def of [SALE, REMIT, INVOICE_PAID, PAYOUT, UNBOOK_EVENT]) core.event(def);
 
   r.sale((ctx, sale) => saleTerms(ctx, api, sale));
   r.flows({

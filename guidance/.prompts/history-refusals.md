@@ -312,6 +312,7 @@ why_name_hasnt_started: {{name}} hasn't started
 why_name_cant_wait_to_side: {{name}} can't wait to {{side}}
 why_a_project_step_is_started_waits_or: a project step is started, waits or is done, not {{phase}}
 why_theres_no_such_step: there's no such step
+why_a_project_put_back_needs_its_project: a project put back as it was needs its project
 why_a_note_sets_a_step_back_by: a note sets a step back by whole days or adds to its cost
 why_from_doesnt_have_cents: {{from}} doesn't have {{cents}}
 why_theres_no_project_project_named: there's no project {{#project}}{{project}}{{/project}}{{^project}}named{{/project}}
@@ -924,6 +925,9 @@ why_no_one_who_named_the_player_character: no one {{#who}}{{who}}{{/who}}{{^who}
 why_an_answer_is_join: an answer is {{join}}
 why_a_history_line_needs_an_organization_and: a History line needs an organization and its words
 why_spending_needs_an_organization_who_spent_a: spending needs an organization, who spent, a month and an amount
+why_taking_an_entry_off_needs_a_pack_a_path: taking an entry off a list needs the pack it is in, its path there and the entry
+why_changing_a_number_needs_a_pack_a_path: changing a number needs the pack it is in, its path there and by how much
+why_taking_a_booking_off_needs_when_it_was: taking a booking off needs the time it was made
 why_why_and_it_cant_be_put_up: {{why}}, and it can't be put up for approval from here
 why_why_and_no_one_above_you_may: {{why}}, and no one above you may approve it
 why_org_has_open_requests_waiting_already: {{org}} has {{open}} requests waiting already
@@ -936,6 +940,8 @@ why_no_such_request: no such request
 why_a_request_is_approved_denied_or_withdrawn_2: a request is approved, denied or withdrawn
 why_a_goal_needs_an_organization_an_id: a goal needs an organization, an id, its words, a status and where it came from
 why_an_order_needs_an_organization_an_id: an order needs an organization, an id, whom it is for, its words, a status and where it came from
+why_a_plan_item_put_back_needs_its_organization_and_id: a goal or an order put back needs its organization and its id
+why_a_draft_change_put_back_needs_its_item: a change of the world's draft put back needs the place, path, map or part it was made to
 why_a_status_change_needs_a_status_and: a status change needs a status and where it came from
 why_nothing_on_the_plan_is_id: nothing on the plan is {{id}}
 why_no_order_on_the_plan_is_id: no order on the plan is {{id}}

@@ -22,9 +22,10 @@ import type { EventTypeDef, ReadContext } from "../../../engine/registry";
 import { isGone, kindIs } from "../../../engine/scope";
 import type { WorldState } from "../../../engine/state";
 import type { AmountProvider, FinanceApi, FinanceRegistry, FlowPosting } from "./module";
-import { clockOfDate, reject } from "./assets";
+import { clockOfDate, holdingsSlice, reject } from "./assets";
 import { isExempt } from "./exempt";
 import { basisRecord, gainsIn, incomeIn, recordGain, recordedParties, recordedYears, setBasisRecord } from "./records";
+import { UNBOOK, unbooking } from "./unbook";
 import { YEAR_MINUTES } from "./pricing";
 
 export const TAX_PROVIDER = "investment_tax";
@@ -83,6 +84,20 @@ function disposeEvent(api: FinanceApi): EventTypeDef<PackEvent> {
       setBasisRecord(state, entity, party, pct >= 100 ? null : { basis: b.basis - part, since: b.since });
     },
     describe: (e, ctx, viewer) => (viewer ? "" : say("stake_sold", { party: labelOf(ctx, str(e, "party")), pct: numOf(e.data.pct), entity: labelOf(ctx, str(e, "entity")) })),
+    // The basis goes back to what it was, and the gain comes off the party's year and off their latest sales, as that sale (the newest of its proceeds made then) records it.
+    reverse: (e, before, now) => {
+      const party = str(e, "party");
+      const entity = str(e, "entity");
+      const sales = own(objOf(holdingsSlice(now).realised), party);
+      const sale = Array.isArray(sales) ? sales.findLast((r) => isRecord(r) && r.proceeds === numOf(e.data.proceeds) && r.at === before.clock) : undefined;
+      const gain = isRecord(sale) ? numOf(sale.gain) : 0;
+      const years = objOf(own(objOf(holdingsSlice(now).gains), party));
+      const yearsBefore = objOf(own(objOf(holdingsSlice(before).gains), party));
+      // Where the year's home gain grew by this gain, it was the sale of their home.
+      const home = gain !== 0 && Object.entries(years).some(([year, v]) => numOf(objOf(v).home) - numOf(objOf(own(yearsBefore, year)).home) === gain);
+      const gains = isRecord(sale) ? [{ party, term: sale.term === "long" ? ("long" as const) : ("short" as const), gain, proceeds: numOf(sale.proceeds), basis: numOf(sale.basis), label: strOf(sale.label), qty: numOf(sale.qty), ...(home ? { home: true } : {}) }] : [];
+      return [{ type: UNBOOK, data: unbooking({ at: before.clock, basis: [{ entity, party, was: basisRecord(before, entity, party) }], gains }) }];
+    },
   };
 }
 
@@ -99,6 +114,8 @@ const acquireEvent: EventTypeDef<PackEvent> = {
     setBasisRecord(state, str(e, "entity"), str(e, "party"), { basis: (r?.basis ?? 0) + numOf(e.data.cents), since: r?.since ?? state.clock });
   },
   describe: (e, ctx, viewer) => (viewer ? "" : say("stake_bought", { party: labelOf(ctx, str(e, "party")), entity: labelOf(ctx, str(e, "entity")) })),
+  // The basis goes back to what the party's record held before.
+  reverse: (e, before) => [{ type: UNBOOK, data: unbooking({ at: before.clock, basis: [{ entity: str(e, "entity"), party: str(e, "party"), was: basisRecord(before, str(e, "entity"), str(e, "party")) }] }) }],
 };
 
 // ---------------------------------------------------------------- trusts

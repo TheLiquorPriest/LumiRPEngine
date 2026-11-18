@@ -24,6 +24,8 @@ export const PROJECT_EVENTS = {
   resume: "economy.project_resume",
   drop: "economy.project_drop",
   note: "economy.project_note",
+  /** A project's run put back as it was before an event of it (the Undo of one). */
+  back: "economy.project_back",
 } as const;
 
 export const PROJECT_EFFECTS = {

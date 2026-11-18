@@ -93,7 +93,7 @@ Taxonomy and life states:
 
 Core: `add`, `clock`, `link`, `materialize`, `post`, `set`, `spawn`, `stage`, `timelapse`, `unlink`.
 
-Engine bookkeeping: `engine.adjudged`, `engine.attempt`, `engine.beat`, `engine.caught`, `engine.check`, `engine.choice`, `engine.class`, `engine.cursor`, `engine.entity`, `engine.feed`, `engine.fired`, `engine.hint`, `engine.hint_closed`, `engine.life`, `engine.note`, `engine.observed`, `engine.out.lines`, `engine.out.scene`, `engine.pause`, `engine.rename`, `engine.revealed`, `engine.rewind`, `engine.signal`, `engine.told`, `engine.unmaterialized`, `engine.world`, `engine.ws.delete`, `engine.ws.pin`, `engine.ws.readers`, `engine.ws.write`.
+Engine bookkeeping: `engine.adjudged`, `engine.attempt`, `engine.beat`, `engine.bump`, `engine.caught`, `engine.check`, `engine.choice`, `engine.class`, `engine.cursor`, `engine.entity`, `engine.feed`, `engine.fired`, `engine.hint`, `engine.hint_closed`, `engine.life`, `engine.note`, `engine.observed`, `engine.out.lines`, `engine.out.scene`, `engine.pause`, `engine.rename`, `engine.revealed`, `engine.rewind`, `engine.signal`, `engine.told`, `engine.unlist`, `engine.unmaterialized`, `engine.world`, `engine.world_back`, `engine.ws.delete`, `engine.ws.pin`, `engine.ws.readers`, `engine.ws.write`.
 
 ### Relation types
 
@@ -751,7 +751,7 @@ Each is carried out by an agent with `world_apply`'s `act` operation: `action` i
 
 ### Events
 
-Its own: `economy.accrue`, `economy.acquire`, `economy.anchor`, `economy.card_paid`, `economy.closes`, `economy.commission`, `economy.config`, `economy.consent_dividend`, `economy.credit`, `economy.decline`, `economy.delinquency`, `economy.depreciate`, `economy.dispose`, `economy.dividend_received`, `economy.donation`, `economy.estimated_tax`, `economy.exercise`, `economy.flow_renamed`, `economy.flow_run`, `economy.foundation_mark`, `economy.foundation_tax`, `economy.hold`, `economy.income`, `economy.invoice_paid`, `economy.lots`, `economy.mint`, `economy.modifier`, `economy.note`, `economy.open`, `economy.payout`, `economy.payslip`, `economy.penalty_tax`, `economy.price`, `economy.project_begin`, `economy.project_drop`, `economy.project_note`, `economy.project_pause`, `economy.project_resume`, `economy.project_step`, `economy.quote`, `economy.remit`, `economy.revenue`, `economy.revenue_adjusted`, `economy.sale`, `economy.score`, `economy.settle`, `economy.spend`, `economy.stake_route`, `economy.statement`, `economy.status`, `economy.timesheet`, `economy.trust_distribution`, `economy.txn`, `economy.unemployment_accrued`, `economy.unemployment_paid`, `economy.year_close`.
+Its own: `economy.accrue`, `economy.acquire`, `economy.anchor`, `economy.card_paid`, `economy.closes`, `economy.commission`, `economy.config`, `economy.consent_dividend`, `economy.credit`, `economy.decline`, `economy.delinquency`, `economy.depreciate`, `economy.dispose`, `economy.dividend_received`, `economy.donation`, `economy.estimated_tax`, `economy.exercise`, `economy.flow_renamed`, `economy.flow_run`, `economy.foundation_mark`, `economy.foundation_tax`, `economy.hold`, `economy.income`, `economy.invoice_paid`, `economy.lots`, `economy.mint`, `economy.modifier`, `economy.note`, `economy.open`, `economy.payout`, `economy.payslip`, `economy.penalty_tax`, `economy.price`, `economy.project_back`, `economy.project_begin`, `economy.project_drop`, `economy.project_note`, `economy.project_pause`, `economy.project_resume`, `economy.project_step`, `economy.quote`, `economy.remit`, `economy.revenue`, `economy.revenue_adjusted`, `economy.sale`, `economy.score`, `economy.settle`, `economy.spend`, `economy.stake_route`, `economy.statement`, `economy.status`, `economy.timesheet`, `economy.trust_distribution`, `economy.txn`, `economy.unbook`, `economy.unemployment_accrued`, `economy.unemployment_paid`, `economy.year_close`.
 
 Checks it adds to: `post`.
 
@@ -1101,7 +1101,7 @@ Each is carried out by an agent with `world_apply`'s `act` operation: `action` i
 
 ### Events
 
-Its own: `orgs.answer`, `orgs.ask`, `orgs.config`, `orgs.entry`, `orgs.goal`, `orgs.lived`, `orgs.log`, `orgs.log_removed`, `orgs.motion`, `orgs.motion_end`, `orgs.order`, `orgs.spent`, `orgs.status`, `orgs.trespass`, `orgs.vote`.
+Its own: `orgs.answer`, `orgs.ask`, `orgs.config`, `orgs.entry`, `orgs.goal`, `orgs.lived`, `orgs.log`, `orgs.log_removed`, `orgs.motion`, `orgs.motion_end`, `orgs.order`, `orgs.plan_back`, `orgs.spent`, `orgs.status`, `orgs.trespass`, `orgs.vote`.
 
 ### Proposals
 

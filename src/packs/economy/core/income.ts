@@ -10,7 +10,7 @@
 
 import { say } from "../../../engine/lines";
 import type { EntityId } from "../../../shared/ids";
-import type { JsonObject } from "../../../shared/json";
+import { isRecord, type JsonObject } from "../../../shared/json";
 import type { LedgerEvent, PackEvent, PostingLine } from "../../../shared/ledger";
 import { formatMoney } from "../../../shared/world";
 import { worthShares, type Flow, type Owner } from "../../../shared/finance";
@@ -174,20 +174,27 @@ function incomeEvent(api: FinanceApi): EventTypeDef<PackEvent> {
       const cents = numOf(e.data.cents);
       const party = str(e, "party");
       const source = str(e, "source");
+      // Taken off again (the Undo of one): the same sums with the sign the other way, in the year it was recorded in.
+      const back = e.data.back === true;
+      const sign = back ? -1 : 1;
+      const year = back ? dateAt(calendarOf(ctx.world), numOf(e.data.at)).year : undefined;
       if (party !== "") {
-        recordIncome(state, ctx.world, party, kind, cents);
+        recordIncome(state, ctx.world, party, kind, sign * cents, year);
         if (e.data.reinvested === true && kind === "profit") {
           const r = basisRecord(state, source, party);
-          setBasisRecord(state, source, party, { basis: (r?.basis ?? 0) + cents, since: r?.since ?? null });
+          if (!back) setBasisRecord(state, source, party, { basis: (r?.basis ?? 0) + cents, since: r?.since ?? null });
+          else setBasisRecord(state, source, party, isRecord(e.data.was) ? { basis: numOf(e.data.was.basis), since: typeof e.data.was.since === "number" ? e.data.was.since : null } : null);
         }
         return;
       }
       // A retirement account's income isn't the year's to tax: it stays in the account untaxed.
       if (sheltered(api, { world: ctx.world, state }, source)) return;
       const shares = worthShares(sourceOwners(api, state, source));
-      for (const p of byShare(shares, cents)) recordIncome(state, ctx.world, p.party, kind, p.cents);
+      for (const p of byShare(shares, cents)) recordIncome(state, ctx.world, p.party, kind, sign * p.cents, year);
     },
-    describe: (e, ctx, viewer) => (viewer ? "" : say(str(e, "kind") === "profit" ? "income_profit" : "income_kind", { source: labelOf(ctx, str(e, "source")), amount: formatMoney(numOf(e.data.cents), ctx.world.currency), kind: str(e, "kind") })),
+    describe: (e, ctx, viewer) => (viewer || e.data.back === true ? "" : say(str(e, "kind") === "profit" ? "income_profit" : "income_kind", { source: labelOf(ctx, str(e, "source")), amount: formatMoney(numOf(e.data.cents), ctx.world.currency), kind: str(e, "kind") })),
+    // The income comes off the years it was recorded in, and a reinvested share's basis goes back to what it was.
+    reverse: (e, before) => (e.data.back === true ? "not_reversible" : [{ type: "economy.income", data: { ...e.data, back: true, at: before.clock, was: e.data.reinvested === true ? (basisRecord(before, str(e, "source"), str(e, "party")) as JsonObject | null) : null } }]),
   };
 }
 
