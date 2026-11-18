@@ -17,6 +17,7 @@ import type { LumiverseMarks } from "./lumiverse-db";
 import { IMPORTED, IMPORTED_AGENTS, IMPORTED_SKILLS, SET_APART } from "./own-files";
 import type { Rehearsals } from "./rehearse-job";
 import type { ChatImportReport, ChatReport, Difference, Item, MigrationReport, RowReport } from "./report";
+import { disownedLines } from "./no-runtime";
 import type { RuntimeFolders } from "./runtime-folders";
 import type { OwnerRow } from "./setting-list";
 import { answersOf, chatRecord, lastReport } from "./tables";
@@ -28,6 +29,8 @@ export type ReportOf = "run" | "rehearsal";
 export interface ReportSummary {
   mode: MigrationReport["mode"];
   at: string;
+  /** Where you said there is no runtime and this user's is found all the same: what was found and what is therefore not carried, a line each; none where it was not said or nothing is found. */
+  disowned: string[];
   refusals: string[];
   counts: { rows: number; chats: number; items: number; notClassified: number; unreadable: number; differences: number; offRpe: number };
   disk: MigrationReport["disk"];
@@ -117,6 +120,7 @@ export function summaryOf(report: MigrationReport): ReportSummary {
   return {
     mode: report.mode,
     at: report.at,
+    disowned: report.disowned === undefined ? [] : disownedLines(report.disowned),
     refusals: report.refusals,
     counts: {
       rows: report.rows.length,

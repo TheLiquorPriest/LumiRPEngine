@@ -235,8 +235,10 @@ export function migrateRoutes(deps: MigrateRoutesDeps) {
         if (lumiverse === null) throw new RouteError(400, "Say where Lumiverse's data folder is (the one holding lumiverse.db): RPE's config names no Lumiverse database, and no run has read one yet.");
         const last = lastReport(deps.db, user)?.sources;
         const runtime = body.runtime === undefined ? p.sources.runtime : body.runtime;
+        // Told there is no runtime, the rehearsal reads none; the folders the last run was told to ignore, else this machine's own, are looked at so that what that leaves out is said.
+        const ignored = runtime === null ? (last?.ignored ?? page(user).runtime) : undefined;
         try {
-          const read = await deps.rehearsals.start({ lumiverse, identifier: deps.identifier, userId: user, runtime, ...(last?.runtimeName !== undefined ? { runtimeName: last.runtimeName } : {}), ...(last?.runtimeFolders !== undefined ? { runtimeFolders: last.runtimeFolders } : {}) });
+          const read = await deps.rehearsals.start({ lumiverse, identifier: deps.identifier, userId: user, runtime, ...(ignored === undefined ? {} : { ignored }), ...(last?.runtimeName !== undefined ? { runtimeName: last.runtimeName } : {}), ...(last?.runtimeFolders !== undefined ? { runtimeFolders: last.runtimeFolders } : {}) });
           return { summary: summaryOf(read) };
         } catch (error) {
           if (error instanceof RehearsalRunning) throw new RouteError(409, error.message);

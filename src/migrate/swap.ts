@@ -30,6 +30,7 @@ import { loopbackKeyHash } from "./inside";
 import { LumiverseDb } from "./lumiverse-db";
 import { earlierRuns, migrate, type MigrateOptions, type MigrateResult } from "./migrate";
 import { type ChatReport, type MigrationReport, refusalsOf, reportText } from "./report";
+import { disownedLines } from "./no-runtime";
 import { runtimeConfig, type SavedRuntime } from "./runtime-folders";
 import { openToday, type Sources } from "./today";
 
@@ -331,6 +332,8 @@ export async function swapCheck(input: { sources: Sources; options: MigrateOptio
     io.out(reportText(gate.report).replace(/\n$/, ""));
     return stop("The switch stopped before it stopped anything: the run would be refused, as the report says.");
   }
+  // Told there is no runtime, and this user's found all the same: the switch goes on as told, and says what that leaves out.
+  if (gate.report.disowned !== undefined) for (const line of disownedLines(gate.report.disowned)) io.out(line);
   const today = await openToday(sources);
   let registry: unknown = null;
   try {

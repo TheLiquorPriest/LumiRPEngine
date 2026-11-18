@@ -87,9 +87,12 @@ export async function migrateCli(argv: readonly string[], io: CliIo, tree: TreeL
     return 2;
   }
   const found = runtimeFoldersOf(io.env, io.home);
-  const runtime = switches.has("no-runtime") ? null : { configDir: values["runtime-config"] ?? found.configDir, dataDir: values["runtime-data"] ?? found.dataDir };
+  const folderPair = { configDir: values["runtime-config"] ?? found.configDir, dataDir: values["runtime-data"] ?? found.dataDir };
+  const none = switches.has("no-runtime");
+  // Told there is none, the run reads none; where it is found all the same, the report says what that leaves out.
+  const runtime = none ? null : folderPair;
   try {
-    const { report, ran } = await migrate({ lumiverse, identifier: values.identifier ?? IDENTIFIER, userId: user, runtime, ...(values.runtime !== undefined ? { runtimeName: values.runtime } : {}), ...(Object.keys(folders).length > 0 ? { runtimeFolders: folders } : {}) }, { data, rehearse: switches.has("rehearse"), version: io.env.LRE_BUILD_ID ?? "dev", env: io.env, tree, ...(settings ? { settings } : {}), ...(runs ? { runs } : {}) });
+    const { report, ran } = await migrate({ lumiverse, identifier: values.identifier ?? IDENTIFIER, userId: user, runtime, ...(none ? { ignored: folderPair } : {}), ...(values.runtime !== undefined ? { runtimeName: values.runtime } : {}), ...(Object.keys(folders).length > 0 ? { runtimeFolders: folders } : {}) }, { data, rehearse: switches.has("rehearse"), version: io.env.LRE_BUILD_ID ?? "dev", env: io.env, tree, ...(settings ? { settings } : {}), ...(runs ? { runs } : {}) });
     io.out(switches.has("json") ? `${JSON.stringify(report, null, 2)}\n` : reportText(report));
     return (switches.has("rehearse") ? report.refusals.length === 0 : ran) ? 0 : 1;
   } catch (error) {

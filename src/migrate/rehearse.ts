@@ -32,6 +32,8 @@ import type { OwnerRow } from "./setting-list";
 import { runtimeOrigins } from "./today/lumiah/runtime/lumiverse";
 import { loopbackModel, loopsBack, runtimeBase } from "./today/lumiah/link/contract";
 import { openToday, type Sources, type Today } from "./today";
+import { disownedOf } from "./no-runtime";
+import { registeredNames } from "./runtime-folders";
 
 export interface RehearseOptions {
   mode?: "rehearsal" | "real run";
@@ -475,6 +477,11 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
       const pinned = typeof pin === "string" && pin.trim() !== "" ? pin.trim() : null;
       return pinned !== null && rpeConnections.has(pinned) ? [] : [{ chat: c.id, pinned }];
     });
+    // What `--no-runtime` leaves out where this user's runtime is found all the same, by its registration or its folders: the chats that would be on RPE's connections with it count as one.
+    const away = found.disowned?.runtimes[0] ?? null;
+    const awayBase = away === null ? null : runtimeBase(away.config.listen, away.config.port);
+    const awayConnections = new Set(awayBase === null ? [] : db.connectionProfiles().flatMap((c) => (loopsBack(c, model, [awayBase]) ? [c.id] : [])));
+    const disowned = found.disowned === null || sources.ignored === undefined ? null : disownedOf(sources.ignored, found.disowned, registeredNames(await userView.read("harness/registry.json")), offRpe.filter((c) => c.pinned !== null && awayConnections.has(c.pinned)).length);
     const report: MigrationReport = {
       format: REPORT_FORMAT,
       at,
@@ -488,6 +495,7 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
       unreadable,
       unsent: found.runtime.unsent.map((u) => ({ runtime: u.runtime, files: u.files.size, kept: u.kept, why: u.why })),
       runtime: { taken: found.runtime.runtimes.map(({ name, why, config }) => ({ name, why, unit: config.service?.unit ?? null, source: config.source })).at(0) ?? null, leftAlone: found.runtime.leftAlone, archived: found.runtime.archived },
+      ...(disowned === null ? {} : { disowned }),
       ...(given.length > 0 ? { given: given.map((g, i) => ({ ...g, found: gave[i] ?? 0 })) } : {}),
       standIn: { writes, logged },
       lumiverse: db.marks(chatRows, sources.identifier, found.runtime.runtimes.flatMap((r) => runtimeOrigins(r.config.listen, r.config.port))),
@@ -500,7 +508,7 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
       worldsInStore: null,
       changes: null,
       identifier: sources.identifier,
-      sources: { lumiverse: sources.lumiverse, runtime: sources.runtime, ...(sources.runtimeName !== undefined ? { runtimeName: sources.runtimeName } : {}), ...(sources.runtimeFolders !== undefined ? { runtimeFolders: sources.runtimeFolders } : {}) },
+      sources: { lumiverse: sources.lumiverse, runtime: sources.runtime, ...(sources.ignored !== undefined ? { ignored: sources.ignored } : {}), ...(sources.runtimeName !== undefined ? { runtimeName: sources.runtimeName } : {}), ...(sources.runtimeFolders !== undefined ? { runtimeFolders: sources.runtimeFolders } : {}) },
       offRpe,
       tidy,
       refusals: [],

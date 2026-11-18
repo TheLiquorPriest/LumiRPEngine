@@ -270,6 +270,15 @@ function SummaryView(props: { summary: MigrationSummaryShown; onSave(): void; sa
   return (
     <div class="lre-stack">
       <Row k="Read at" v={s.at} />
+      {s.disowned.length === 0 ? null : (
+        <div class="lre-stack" data-notice="no-runtime">
+          {s.disowned.map((line, i) => (
+            <p key={i} class="rpe-line">
+              {line}
+            </p>
+          ))}
+        </div>
+      )}
       <Row k={s.mode === "real run" ? "What did not balance" : "The real run"} v={s.refusals.length === 0 ? (s.mode === "real run" ? "every row balances" : "may start") : counted(s.refusals.length, "reason it won't start", "reasons it won't start")} />
       {s.refusals.length === 0 ? null : (
         <ul class="rpe-reports">

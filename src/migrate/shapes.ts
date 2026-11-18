@@ -39,10 +39,11 @@ const difference = shape.named(
 
 const summary = shape.named(
   "MigrationSummaryShown",
-  "A migration report in brief: a rehearsal or the real run, when it read today's data, why the real run would not start on it (after a real run: what of it did not balance), how much of each part there is to page through, the disk it takes and the backup a real run took.",
+  "A migration report in brief: a rehearsal or the real run, when it read today's data, what you said there is no runtime of the previous build for and this user's found all the same (what was found, and what is therefore not carried), why the real run would not start on it (after a real run: what of it did not balance), how much of each part there is to page through, the disk it takes and the backup a real run took.",
   shape.object({
     mode: shape.oneOf("rehearsal", "real run"),
     at: T,
+    disowned: shape.list(T),
     refusals: shape.list(T),
     counts: shape.object({ rows: N, chats: N, items: N, notClassified: N, unreadable: N, differences: N, offRpe: N }),
     disk: shape.object({ backup: N, import: N, total: N, free: nullable(N) }),

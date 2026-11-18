@@ -19,6 +19,8 @@ export interface Sources {
   identifier: string;
   userId: string;
   runtime: RuntimeFolders | null;
+  /** Where the runtime's folders are when `runtime` is null because the run was told there is none (`--no-runtime`): they are looked at, changing nothing, only to say what that leaves out. Absent: not looked at. */
+  ignored?: RuntimeFolders;
   runtimeName?: string;
   /** What the user said of runtime folders no config names, by folder name: this user's (`mine`) or not (`theirs`). */
   runtimeFolders?: Readonly<Record<string, "mine" | "theirs">>;
@@ -45,6 +47,8 @@ export interface Today {
   user: string | null;
   extension: string | null;
   runtime: RuntimeRead;
+  /** What the folders of `Sources.ignored` hold of this user's runtime, read and not used; null where none were given or the run reads a runtime. */
+  disowned: RuntimeRead | null;
   /** The runtime's folders the run was given, where neither is there: a runtime expected and not found. Null where one is, or where the server runs none. */
   runtimeMissing: RuntimeFolders | null;
   /** What the runtime's working copy hasn't sent and today's runtime would send, by user-storage path: a text, or a removal (null). */
@@ -72,7 +76,9 @@ export async function openToday(sources: Sources): Promise<Today> {
     const mark = user === null ? null : await readText(join(user, "harness", "docs", "mirror.json"));
     // Today's extension keeps each user's runtimes' registrations in that user's own storage (LumiAH `extension/backend/registry.ts`, under `harness/`).
     const registry = user === null ? null : await readText(join(user, "harness", "registry.json"));
-    const runtime = sources.runtime === null ? EMPTY_RUNTIME : await readRuntimeFolders(sources.runtime, sources.identifier, { username, registry, named: sources.runtimeName ?? null, ...(sources.runtimeFolders ? { told: sources.runtimeFolders } : {}) }, mark);
+    const owner = { username, registry, named: sources.runtimeName ?? null, ...(sources.runtimeFolders ? { told: sources.runtimeFolders } : {}) };
+    const runtime = sources.runtime === null ? EMPTY_RUNTIME : await readRuntimeFolders(sources.runtime, sources.identifier, owner, mark);
+    const disowned = sources.runtime === null && sources.ignored !== undefined ? await readRuntimeFolders(sources.ignored, sources.identifier, owner, mark) : null;
     const pending = new Map<string, string | null>();
     for (const u of runtime.unsent) if (u.kept) for (const [path, text] of u.files) pending.set(path, text);
     // Today's own readers run over the stand-in: what they write stays in memory, listed in `writes`.
@@ -90,6 +96,7 @@ export async function openToday(sources: Sources): Promise<Today> {
       user,
       extension,
       runtime,
+      disowned,
       runtimeMissing: sources.runtime !== null && !existsSync(sources.runtime.configDir) && !existsSync(sources.runtime.dataDir) ? sources.runtime : null,
       pending,
       writes,

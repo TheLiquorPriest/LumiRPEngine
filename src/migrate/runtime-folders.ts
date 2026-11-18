@@ -189,18 +189,25 @@ function parse(text: string | null): unknown {
 
 /**
  * The runtimes a user has registered with this Lumiverse, as today's extension reads its registry
- * (`registryOf`, LumiAH `extension/backend/registry.ts:53-65`): each registration's id and the
+ * (`registryOf`, LumiAH `extension/backend/registry.ts:53-65`): each registration's id, its runtime's name and the
  * SHA-256 of its secret. Null where there is no registry, or none that today's extension reads.
  */
-function registrations(text: string | null): Map<string, string> | null {
+function relaysOf(text: string | null): { id: string; name: string; secret: string }[] | null {
   const raw = parse(text);
   if (!isRecord(raw) || raw.v !== 1) return null;
-  const out = new Map<string, string>();
-  if (!isRecord(raw.relays)) return out;
-  for (const [id, r] of Object.entries(raw.relays)) {
-    if (isRecord(r) && typeof r.name === "string" && typeof r.secret === "string" && typeof r.port === "number" && Number.isInteger(r.port) && r.port >= 1 && r.port <= 65535) out.set(id, r.secret);
-  }
-  return out;
+  if (!isRecord(raw.relays)) return [];
+  return Object.entries(raw.relays).flatMap(([id, r]) => (isRecord(r) && typeof r.name === "string" && typeof r.secret === "string" && typeof r.port === "number" && Number.isInteger(r.port) && r.port >= 1 && r.port <= 65535 ? [{ id, name: r.name, secret: r.secret }] : []));
+}
+
+/** Each registration's id and the SHA-256 of its secret; null where there is no registry the previous build reads. */
+function registrations(text: string | null): Map<string, string> | null {
+  const relays = relaysOf(text);
+  return relays === null ? null : new Map(relays.map((r) => [r.id, r.secret]));
+}
+
+/** The names of the runtimes this user's registry registers with this Lumiverse; none where it holds none. */
+export function registeredNames(text: string | null): string[] {
+  return (relaysOf(text) ?? []).map((r) => r.name);
 }
 
 async function names(dir: string): Promise<string[]> {

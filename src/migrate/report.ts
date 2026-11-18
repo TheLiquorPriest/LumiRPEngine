@@ -13,6 +13,7 @@ import type { ChatEngine, JournalRead } from "./chats";
 import type { CarriedReport, Place } from "./carry";
 import { goingBack, swapSteps } from "./going-back";
 import type { RuntimeFolders } from "./runtime-folders";
+import { type Disowned, disownedLines } from "./no-runtime";
 import type { Sources } from "./today";
 
 export const REPORT_FORMAT = "rpe-migration-report-v1";
@@ -203,6 +204,8 @@ export interface MigrationReport {
    * Absent from a report kept before runs told runtimes apart.
    */
   runtime?: { taken: { name: string; why: string; unit: string | null; source: string | null } | null; leftAlone: { name: string; why: string }[]; archived?: { name: string; why: string }[] };
+  /** Where `--no-runtime` was said and this user's runtime is found all the same (its registration in Lumiverse's storage, or its folders): what was found, and what the run therefore does not carry. Absent where it was not said, or nothing is found. */
+  disowned?: Disowned;
   /** The rows he gave (`migration.rows`) to what no row names: each with what was found under it. Absent where he gave none. */
   given?: { path: string; fate: "archived" | "attached"; line: string; found: number }[];
   /** What today's readers tried to write, kept in memory by the stand-in; and their log lines, counted by level. */
@@ -451,6 +454,8 @@ function insideWords(r: RowReport): string {
 export function reportText(report: MigrationReport): string {
   const lines: string[] = [];
   lines.push(`Migration ${report.mode}, read at ${report.at}.`);
+  // First, where you said there is no runtime and this user's is found all the same: what that leaves out.
+  if (report.disowned !== undefined) lines.push(...disownedLines(report.disowned));
   lines.push(`Extension installed ${report.layout.scope === "not installed" ? "nowhere Lumiverse knows of" : `per ${report.layout.scope === "user" ? "user" : "extension"}`}; Lumiverse's database opened ${report.database === "locked" ? "read-only, under its own locks" : "as an unchanging file"}.`);
   lines.push(report.refusals.length === 0 ? "The real run may start." : "The real run won't start:");
   for (const r of report.refusals) lines.push(`  - ${r}`);

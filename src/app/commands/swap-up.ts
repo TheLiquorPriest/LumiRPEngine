@@ -152,9 +152,12 @@ export async function swapUp(line: SwapLine, io: CliIO, version: string): Promis
   const answer = await serverAnswer(current, io);
   if (answer !== null && "rpe" in answer && existing === null) return stop(`RPE is running at ${serverUrl(current)}, outside a service: stop it (${runLine(io, paths, "serve")}), then run ${runLine(io, paths, "up")} again. Nothing was stopped or changed.`);
   const found = runtimeFoldersOf(io.env, io.home);
-  const runtime = switches.has("no-runtime") ? null : { configDir: flags["runtime-config"] ?? found.configDir, dataDir: flags["runtime-data"] ?? found.dataDir };
+  const folderPair = { configDir: flags["runtime-config"] ?? found.configDir, dataDir: flags["runtime-data"] ?? found.dataDir };
+  const none = switches.has("no-runtime");
+  const runtime = none ? null : folderPair;
   const swapIo = { out: io.out, fetch: io.fetch, now: io.now, sleep: (ms: number) => Bun.sleep(ms), systemctl: accountSystemctl(io.env, process.getuid?.() ?? null), onStop: stopSignals };
-  const sources = { lumiverse, identifier, userId: user, runtime, ...(flags.runtime !== undefined ? { runtimeName: flags.runtime } : {}) };
+  // Told there is none, the switch reads none; where this user's is found all the same, what it leaves out is said (src/migrate/no-runtime.ts).
+  const sources = { lumiverse, identifier, userId: user, runtime, ...(none ? { ignored: folderPair } : {}), ...(flags.runtime !== undefined ? { runtimeName: flags.runtime } : {}) };
   // A swap that stands already is left as it is: making the migration's run again is `rpe migrate`'s, with RPE's service stopped meanwhile.
   const standing = existing === null ? null : await swapStands({ sources, data: paths.root, rpe: { address: current.address, port: current.port, unit: existing.unit }, waitMs: current.commandLine.waitMs }, swapIo);
   if (standing !== null) {
