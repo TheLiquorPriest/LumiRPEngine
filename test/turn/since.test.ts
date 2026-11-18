@@ -12,8 +12,10 @@ import { type Gate, gate } from "rp-harness/testing/rig";
 import type { StopReply, TurnsReply } from "../../src/shared/api";
 import { textHash } from "../../src/adapter/lumiverse/wire";
 import { keepCarriedRun, NO_SESSION } from "../../src/turn";
+import { STARTER_WORLDS } from "../../src/packs/index";
+import { TIMELAPSE_ACTION } from "../../src/play/state/palette";
 import type { ChatMessage } from "../standin/lumiverse";
-import { CHAT, CONNECTION, GREETING, openTurnBed, PRESET, replying, settledTurn, type TurnBed, type TurnBedOptions, USER } from "./bed";
+import { CHAT, CONNECTION, GREETING, openTurnBed, playsWorld, PRESET, replying, settledTurn, type TurnBed, type TurnBedOptions, USER } from "./bed";
 
 const beds: TurnBed[] = [];
 afterEach(async () => {
@@ -25,6 +27,19 @@ async function bed(options: TurnBedOptions): Promise<TurnBed> {
   beds.push(b);
   return b;
 }
+
+/** A bed whose chat plays a starter world, which a panel's press is of (the palette is the world's). */
+async function worldBed(options: TurnBedOptions): Promise<TurnBed> {
+  const b = await bed(options);
+  await playsWorld(b, STARTER_WORLDS.fantasy_town("w-harbour", "Harbour"));
+  return b;
+}
+
+/** A panel's press that waits for the player's next message, on its own route: the Timelapse, which the palette offers, by its label. */
+const press = (b: TurnBed, label: string) => b.page<{ request: { id: string } | null }>("POST", `/api/v1/chats/${CHAT}/requests/panel`, { action: TIMELAPSE_ACTION, values: { label }, from: "palette" });
+
+/** What a press is told to the Author as, in the notices part's words. */
+const pressedAs = (label: string): string => `From a panel (palette): ${label}, with label: ${label} (action ${TIMELAPSE_ACTION})`;
 
 const CARRIED = "This chat was carried over from the earlier build.";
 
@@ -199,7 +214,7 @@ describe("the turn before, told and kept", () => {
 });
 
 describe("what has happened in the chat since the last turn", () => {
-  test.skip("hardening: another swipe shown on the newest reply is told, and the turn of the swipe shown is the one the next turn follows", async () => {
+  test("another swipe shown on the newest reply is told, and the turn of the swipe shown is the one the next turn follows", async () => {
     const b = await bed({ answers: [replying("The lamp turns."), replying("The lamp gutters."), replying("Wren trims the wick.")] });
     const first = await settledTurn(b, await play(b, "normal", "I climb the stairs."));
     await settledTurn(b, await play(b, "swipe"));
@@ -256,35 +271,35 @@ describe("what has happened in the chat since the last turn", () => {
     expect(open.told).toContain(`The player's message m-aside was edited since your last turn. Before: ${aside} Now: ${changed}`);
   });
 
-  test.skip("hardening: a request from a panel is told, with what it was pressed on, to the turn that answers the next message and to a swipe of it, and to no turn after", async () => {
-    const b = await bed({ answers: [replying("The lamp turns."), replying("Wren points at the steps."), replying("Wren nods at the steps."), replying("Wren waits.")] });
+  test("a request from a panel is told, as what was pressed, to the turn that answers the next message and to a swipe of it, and to no turn after", async () => {
+    const b = await worldBed({ answers: [replying("The lamp turns."), replying("Wren points at the steps."), replying("Wren nods at the steps."), replying("Wren waits.")] });
     await settledTurn(b, await play(b, "normal", "I climb the stairs."));
-    const asked = await b.page<{ request: { id: string } }>("POST", `/api/v1/chats/${CHAT}/requests`, { what: "Walk here", on: "the harbour steps" });
+    const asked = await press(b, "Walk here");
     expect(asked.status).toBe(200);
-    expect((await b.page<{ error: string }>("POST", `/api/v1/chats/${CHAT}/requests`, { on: "the harbour steps" })).status).toBe(400);
+    expect((await b.page<{ error: string }>("POST", `/api/v1/chats/${CHAT}/requests/panel`, { values: {}, from: "palette" })).status).toBe(400);
 
     await settledTurn(b, await play(b, "normal", "I go down."));
     await settledTurn(b, await play(b, "swipe"));
     await settledTurn(b, await play(b, "normal", "I stop."));
-    const told = "From a panel: Walk here, on the harbour steps";
+    const told = pressedAs("Walk here");
     expect(sent(b, 0)).not.toContain(told);
     expect(sent(b, 1)).toContain(told);
     expect(sent(b, 2)).toContain(told);
     expect(sent(b, 3)).not.toContain(told);
   });
 
-  test.skip("hardening: a request from a panel for a chat RPE does not hold is refused, and nothing of it is kept", async () => {
-    const b = await bed({ answers: [replying("The lamp turns.")] });
+  test("a request from a panel for a chat RPE does not hold is refused, and nothing of it is kept", async () => {
+    const b = await worldBed({ answers: [replying("The lamp turns.")] });
     await settledTurn(b, await play(b, "normal", "I climb the stairs."));
-    const refused = await b.page<{ error: string }>("POST", "/api/v1/chats/chat-elsewhere/requests", { what: "Walk here", on: "the harbour steps" });
+    const refused = await b.page<{ error: string }>("POST", "/api/v1/chats/chat-elsewhere/requests/panel", { action: TIMELAPSE_ACTION, values: { label: "Walk here" }, from: "palette" });
     expect(refused.status).toBe(404);
-    expect(b.app.db.query<{ n: number }, [string]>("SELECT count(*) AS n FROM panel_request WHERE chat = ?").get("chat-elsewhere")?.n).toBe(0);
-    expect((await b.page("POST", `/api/v1/chats/${CHAT}/requests`, { what: "Walk here" })).status).toBe(200);
+    expect(b.app.db.query<{ n: number }, [string]>("SELECT count(*) AS n FROM request WHERE chat = ?").get("chat-elsewhere")?.n).toBe(0);
+    expect((await press(b, "Walk here")).status).toBe(200);
   });
 
-  test.skip("hardening: a request made while a reply is written, or after the newest reply flipped to another swipe, reaches the turn that answers the next message", async () => {
+  test("a request made while a reply is written, or after the newest reply flipped to another swipe, reaches the turn that answers the next message", async () => {
     const hold = gate();
-    const b = await bed({
+    const b = await worldBed({
       answers: [
         { pieces: [{ text: "<intent>One exchange.</intent>" }, { text: "<reply>The lamp turns" }, { hold }, { text: ".</reply>" }] },
         replying("Wren points at the steps."),
@@ -293,9 +308,9 @@ describe("what has happened in the chat since the last turn", () => {
       ],
     });
     const ask = async (what: string): Promise<void> => {
-      expect((await b.page("POST", `/api/v1/chats/${CHAT}/requests`, { what })).status).toBe(200);
+      expect((await press(b, what)).status).toBe(200);
     };
-    const told = (n: number): string[] => b.requests[n]!.since.map((s) => s.text);
+    const told = (n: number): string[] => b.requests[n]!.asked ?? [];
 
     b.host.send(CHAT, "I climb the stairs.");
     const generating = b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET });
@@ -309,21 +324,21 @@ describe("what has happened in the chat since the last turn", () => {
     await ask("Ring the bell");
     const third = await settledTurn(b, await play(b, "normal", "I stop."));
 
-    expect(told(1)).toContain("From a panel: Walk here");
-    expect(told(2)).toContain("From a panel: Walk here");
+    expect(told(1)).toContain(pressedAs("Walk here"));
+    expect(told(2)).toContain(pressedAs("Walk here"));
     expect(third.parent).toBe(second.id);
-    expect(told(3)).toContain("From a panel: Ring the bell");
-    expect(told(3)).not.toContain("From a panel: Walk here");
+    expect(told(3)).toContain(pressedAs("Ring the bell"));
+    expect(told(3)).not.toContain(pressedAs("Walk here"));
   });
 
-  test.skip("hardening: a swipe made after a request does not take it from the turn that answers the next message", async () => {
-    const b = await bed({ answers: [replying("The lamp turns."), replying("The lamp gutters."), replying("Wren points at the steps.")] });
+  test("a swipe made after a request does not take it from the turn that answers the next message", async () => {
+    const b = await worldBed({ answers: [replying("The lamp turns."), replying("The lamp gutters."), replying("Wren points at the steps.")] });
     await settledTurn(b, await play(b, "normal", "I climb the stairs."));
-    expect((await b.page("POST", `/api/v1/chats/${CHAT}/requests`, { what: "Walk here" })).status).toBe(200);
+    expect((await press(b, "Walk here")).status).toBe(200);
     await settledTurn(b, await play(b, "swipe"));
     await settledTurn(b, await play(b, "normal", "I go down."));
-    expect(b.requests[1]!.since.map((s) => s.text)).not.toContain("From a panel: Walk here");
-    expect(b.requests[2]!.since.map((s) => s.text)).toContain("From a panel: Walk here");
+    expect(b.requests[1]!.asked ?? []).not.toContain(pressedAs("Walk here"));
+    expect(b.requests[2]!.asked ?? []).toContain(pressedAs("Walk here"));
   });
 
   test("a chat a migration carried is told what was carried in its first briefing on RPE, and not once a turn RPE played is on its path", async () => {
@@ -470,28 +485,29 @@ describe("what a comparison of the path found, kept with the chat", () => {
 });
 
 describe("the kinds of what happened since", () => {
-  test.skip("hardening: each item goes under its kind as the harness's contract has it, so a file the user's config adds for that kind is given to that turn", async () => {
+  test("each item goes under its kind as the harness's contract has it, so a file the user's config adds for that kind is given to that turn", async () => {
     // The user's own files at the global level, each added for one kind by the user's own config.
-    const b = await bed({
-      global: "added:\n  migrated: [CARRIED]\n  swiped: [SHOWN]\n  request: [ASKED]\n",
+    const b = await worldBed({
+      global: "stack:\n  added:\n    migrated: [CARRIED]\n    swiped: [SHOWN]\n",
       answers: [replying("The lamp turns."), replying("The lamp gutters."), replying("Wren trims the wick.")],
     });
-    const files = { CARRIED: "FILE-CARRIED Mind what was carried.", SHOWN: "FILE-SHOWN Mind the swipe the player chose.", ASKED: "FILE-ASKED Mind what was asked from a panel." };
+    const files = { CARRIED: "FILE-CARRIED Mind what was carried.", SHOWN: "FILE-SHOWN Mind the swipe the player chose." };
     for (const [name, text] of Object.entries(files)) await writeFile(join(b.app.paths.files, `${name}.md`), `${text}\n`);
     await carriedOver(b);
 
     const first = await settledTurn(b, await play(b, "normal", "I climb the stairs."));
     await settledTurn(b, await play(b, "swipe"));
     b.host.cycleSwipe(CHAT, first.message!, "left");
-    expect((await b.page("POST", `/api/v1/chats/${CHAT}/requests`, { what: "Walk here" })).status).toBe(200);
+    expect((await press(b, "Walk here")).status).toBe(200);
     await settledTurn(b, await play(b, "normal", "I trim the wick."));
 
-    // The request each turn's run was asked, by kind.
-    expect(b.requests.map((r) => r.since.map((s) => s.kind))).toEqual([["migrated"], ["migrated"], ["swiped", "request"]]);
+    // The request each turn's run was asked, by kind: what a panel's press asked is told as an asked line (09bf9bd68), not as a kind of what happened since.
+    expect(b.requests.map((r) => r.since.map((s) => s.kind))).toEqual([["migrated"], ["migrated"], ["swiped"]]);
+    expect(b.requests.map((r) => r.asked ?? [])).toEqual([[], [], [pressedAs("Walk here")]]);
     // What the Author was given for each turn: the messages after its last answer.
     const given = b.model.requests.map((r) => JSON.stringify(r.messages.slice(r.messages.findLastIndex((m) => m.role === "assistant") + 1)));
     const held = given.map((text) => Object.entries(files).flatMap(([name, line]) => (text.includes(line) ? [name] : [])));
-    expect(held).toEqual([["CARRIED"], ["CARRIED"], ["SHOWN", "ASKED"]]);
+    expect(held).toEqual([["CARRIED"], ["CARRIED"], ["SHOWN"]]);
   });
 });
 
