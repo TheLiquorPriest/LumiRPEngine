@@ -6,6 +6,7 @@ import type { ComponentChildren } from "preact";
 import { useState } from "preact/hooks";
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { Badge, Banner, Button, Disclosure, Pre } from "../frontend/components";
+import { Written } from "./markdown";
 import { errorWords, json } from "./words";
 
 /** One write of an entry, as both records keep it. */
@@ -37,7 +38,7 @@ export function Fields(props: { fields: JsonObject }) {
         return (
           <div key={name} class="rpe-field">
             <dt>{name}</dt>
-            <dd>{text.includes("\n") ? <Pre text={text} mono={typeof value !== "string"} /> : text}</dd>
+            <dd>{typeof value === "string" && text.includes("\n") ? <Written text={text} /> : text.includes("\n") ? <Pre text={text} mono /> : text}</dd>
           </div>
         );
       })}

@@ -6,7 +6,7 @@
 import type { ComponentChildren } from "preact";
 import type { ReleaseForm, ReplyError, RunStatus } from "rp-harness/contract";
 import { Icon, type IconName } from "./icons";
-import { markdown } from "./markdown";
+import { markdown, Written } from "./markdown";
 import type { PromptNotice, ToolResult, TraceRecord, TurnRunKind } from "../shared/api";
 import { Badge, Disclosure, Pre, type Tone } from "../frontend/components";
 import { type AgentNode, type AgentState, agentState, agentUsage, type CallStep, type EventOf, type NoteStep, type RunNode, runTotals, type Step, type ToolStep } from "./live-model";
@@ -281,7 +281,7 @@ function ToolView(props: { step: ToolStep; run: RunNode; now: number; depth: num
       {result === undefined ? null : (
         <div class="lre-stack" data-answer>
           <span class="rpe-caption">Its answer</span>
-          <Pre text={resultText(result)} />
+          {step.agents.length === 0 ? <Pre text={resultText(result)} /> : <Written text={resultText(result)} />}
           {result.reports === undefined || result.reports.length === 0 ? null : (
             <ul class="rpe-reports" aria-label="What it reported">
               {result.reports.map((line, i) => (
@@ -363,7 +363,7 @@ function NoteView(props: { step: NoteStep; notices: NoticeLines }) {
       return (
         <div class="lre-stack">
           <NoteHead icon="flag" title="Wrote its intent record" />
-          <Pre text={event.text} mono={false} />
+          <Written text={event.text} />
         </div>
       );
     case "rule_fired": {
@@ -440,7 +440,7 @@ function NoteView(props: { step: NoteStep; notices: NoticeLines }) {
         <div class="lre-stack">
           <NoteHead icon="briefcase" title={`Job ${event.job.id} (${event.job.agent}): ${JOB_STATE_WORDS[event.job.state].words}`} />
           <p class="rpe-line">{event.job.brief}</p>
-          {event.job.report === undefined ? null : <Pre text={event.job.report} mono={false} />}
+          {event.job.report === undefined ? null : <Written text={event.job.report} />}
         </div>
       );
     case "agent_ended":

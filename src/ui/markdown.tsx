@@ -255,3 +255,8 @@ function blocksView(blocks: readonly MarkdownBlock[]): VNode[] {
 export function markdown(text: string, className: string): VNode {
   return <div class={`lre-md ${className}`}>{blocksView(markdownBlocks(text))}</div>;
 }
+
+/** Text an agent wrote for the person (a job's report, a delegate's or a job's answer, an intent record, a note), drawn as the Markdown it is, as a model's reply is. */
+export function Written(props: { text: string }) {
+  return markdown(props.text, "rpe-written-text");
+}

@@ -6,9 +6,10 @@
 // nothing polls.
 
 import type { JobView } from "../../../shared/api";
-import { Badge, Banner, Button, Pre, Section } from "../../../frontend/components";
+import { Badge, Banner, Button, Section } from "../../../frontend/components";
 import { type RpeClient, walk } from "../../client";
 import type { PageEntry } from "../../page-entry";
+import { Written } from "../../markdown";
 import { errorWords, limitCount, limitName, tokenWords, when } from "../../words";
 import { BootstrapBrief, BootstrapMark, isBootstrapJob } from "./bootstrap-mark";
 import { JobsPage } from "./page";
@@ -91,7 +92,7 @@ function JobItem(props: { job: JobView; shown: JobsShown; withChat: boolean; onC
         {`${job.id} · started by ${job.startedBy === "user" ? "you" : `the ${job.startedBy.definition}`} ${when(job.started)}${job.ended === undefined ? "" : `, ended ${when(job.ended)}`} · ${tokenWords(job.usage)}`}
       </span>
       {job.limit === undefined ? null : <span class="rpe-meta">{`Ended at its limit on ${limitName(job.limit)}: ${limitCount(job.limit)}.`}</span>}
-      {job.report === undefined ? null : <Pre text={job.report} mono={false} />}
+      {job.report === undefined ? null : <Written text={job.report} />}
       {answered === null || answered.refused === null ? null : (
         <Banner tone="neg" icon="alert" title="Not cancelled">
           <span>{answered.refused}</span>

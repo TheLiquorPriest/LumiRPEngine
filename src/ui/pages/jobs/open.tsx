@@ -6,11 +6,12 @@
 import { useState } from "preact/hooks";
 import type { JobLimitsAsk, JobView } from "../../../shared/api";
 import { useApp, useNow } from "../../app";
-import { Badge, Banner, Button, Gated, Pre, Section } from "../../../frontend/components";
+import { Badge, Banner, Button, Gated, Section } from "../../../frontend/components";
 import { applyRecord, EMPTY_LIVE, type LiveModel } from "../../live-model";
 import { useNoticeLines } from "../../notice-words";
 import { useRead } from "../../reading";
 import { useSelect } from "../../store";
+import { Written } from "../../markdown";
 import { AgentTree } from "../../trace-view";
 import { counted, errorWords, limitCount, limitName, num, tokenWords, when } from "../../words";
 import { type AgentWindow, CallsLine, WindowGauge } from "../usage";
@@ -110,7 +111,7 @@ export function JobOpen(props: JobOpenProps) {
           It asked whether to go on at {num(job.asks.tokens)} tokens.
         </p>
       )}
-      {job.report === undefined ? null : <Pre text={job.report} mono={false} />}
+      {job.report === undefined ? null : <Written text={job.report} />}
       {job.wrote === undefined || job.wrote.length === 0 ? null : (
         <Section id="wrote" title={`What it wrote (${job.wrote.length})`}>
           <ul class="rpe-reports">

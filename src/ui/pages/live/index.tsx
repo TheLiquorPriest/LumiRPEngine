@@ -16,7 +16,7 @@ import { useApp, useNow } from "../../app";
 import { replyOf } from "../../client";
 import { LIVE_JOBS } from "../../../shared/api";
 import { JOB_STATE_WORDS } from "../jobs/words";
-import { Banner, Button, Empty, Gated, PageHeader, Pre, Section } from "../../../frontend/components";
+import { Banner, Button, Empty, Gated, PageHeader, Section } from "../../../frontend/components";
 import { type Follow, useFollowNewest } from "../../live-follow";
 import { type RunNode, shownRuns, stopOf } from "../../live-model";
 import { type FailureShown, type LetGo, NOTHING_WATCHED, watchChat, type Watched } from "../../live-watch";
@@ -26,6 +26,7 @@ import { type NoticeLines, useNoticeLines } from "../../notice-words";
 import { AgentTree, ReplyBox, RunHead, runTitle, STATUS_WORDS } from "../../trace-view";
 import type { PageEntry } from "../../page-entry";
 import { useUiSetting } from "../../ui-settings";
+import { Written } from "../../markdown";
 import { counted, errorWords } from "../../words";
 
 /** A Stop pressed on the Live page: the chat and the run (by RPH's own id for it) it was pressed for, and why it did not go through, in RPE's words, once that is known. */
@@ -190,7 +191,7 @@ export function LiveView(props: LiveViewProps) {
                 {runs.length < 2 ? null : <p class="rpe-caption">{runTitle(run)}</p>}
                 {run.intent === null ? null : (
                   <Section id={`intent-${run.run}`} title="Intent record">
-                    <Pre text={run.intent} mono={false} />
+                    <Written text={run.intent} />
                   </Section>
                 )}
                 <Section id={`agents-${run.run}`} title="The agents">

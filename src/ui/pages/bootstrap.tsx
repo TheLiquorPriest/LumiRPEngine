@@ -15,8 +15,9 @@ import type { ComponentChildren } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import type { BootstrapBatchReply, BootstrapChatReply, BootstrapJobShown, BootstrapQuestion, BootstrapStartShown, CarriedBootstrap, DoneEnoughShown, FactNotKnown, JobView, MessageStretch } from "../../shared/api";
 import { type UiApp, useApp } from "../app";
-import { Badge, Banner, Button, Pre, Row, Section } from "../../frontend/components";
+import { Badge, Banner, Button, Row, Section } from "../../frontend/components";
 import type { RpeClient } from "../client";
+import { Written } from "../markdown";
 import { counted, errorWords, limitCount, limitName, num, tokenWords, when } from "../words";
 import { numberWords } from "./settings/model";
 import { useSettingView } from "./settings/names";
@@ -253,7 +254,7 @@ function JobLine(props: { job: BootstrapJobShown }) {
           {`Ended at its limit on ${limitName(view.limit)}: ${limitCount(view.limit)}.`}
         </span>
       )}
-      {view?.report === undefined ? null : <Pre text={view.report} mono={false} />}
+      {view?.report === undefined ? null : <Written text={view.report} />}
     </li>
   );
 }
@@ -366,7 +367,7 @@ export function QuestionView(props: { question: BootstrapQuestion; chat: string;
           It asked at {num(q.at)} tokens, having counted {num(q.tokens)} (tokens sent and written by all its agents, a cached token as {q.cachedWeight} of one). Spent: {tokenWords(q.usage)}.
         </span>
       </Banner>
-      {q.wrote === null ? null : <Pre text={q.wrote} mono={false} />}
+      {q.wrote === null ? null : <Written text={q.wrote} />}
       <FactsView facts={q.facts} onLog={() => openLog(app, props.chat, q.job)} />
       <label class="lre-stack">
         <span class="rpe-caption">Tokens more before it asks again</span>
@@ -472,7 +473,7 @@ function CarriedChat(props: { item: CarriedBootstrap; name: string | null; busy:
         <Badge>{CARRIED_WORDS[item.state]}</Badge>
         {item.job?.view?.limit === undefined ? null : <span class="rpe-meta">{`ended at its limit on ${limitName(item.job.view.limit)}`}</span>}
       </div>
-      {item.job?.view?.report === undefined ? null : <Pre text={item.job.view.report} mono={false} />}
+      {item.job?.view?.report === undefined ? null : <Written text={item.job.view.report} />}
       {item.question === null ? null : <QuestionView question={item.question} chat={item.chat} busy={props.busy} onAnswer={(word) => props.onAnswer(item.question!.job, word)} />}
       {open ? (
         <StartForm start={item.start} underWay={underWay} busy={props.busy} label={`Start a bootstrap job for ${props.name ?? item.chat}`} chat={item.chat} onStart={props.onStart} />

@@ -5,6 +5,7 @@
 
 import type { DiffRow, LayerLevel, TreeFileRow } from "../../../shared/api";
 import { Badge, Banner, Button, Pre } from "../../../frontend/components";
+import { Written } from "../../markdown";
 import { bytesWords, counted, LEVEL_WORDS, when } from "../../words";
 import type { FilesShown, OpenFile, WriteLevel } from "./model";
 import { writeLevels } from "./model";
@@ -212,7 +213,7 @@ export function OpenPanel(props: OpenActions & { chat: string | null; shown: Fil
             {file.lines === undefined ? "" : ` · ${counted(file.lines, "line")}`}
             {file.more === true ? ` · ${bytesWords(file.to ?? 0)} read` : ""}
           </p>
-          <Pre text={file.text} />
+          {file.kind === "notes" ? <Written text={file.text} /> : <Pre text={file.text} />}
           {file.more === true ? (
             <Button size="sm" busy={open.piece} onClick={props.onPiece}>
               Read on
