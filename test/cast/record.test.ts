@@ -7,6 +7,7 @@ import {
   bindSource,
   awayItemId,
   castingItemId,
+  dreamItemId,
   charactersOf,
   chatLine,
   findCharacter,
@@ -33,6 +34,7 @@ function everyRowPart(c: string): CastWrite[] {
     { character: c, part: "memory", item: null, value: { text: "She went pale at my letter and I said nothing.", gist: "Said nothing when she went pale.", weight: 3, who: ["Wren"], about: ["the letter"], from: ["p-1"] } },
     { character: c, part: "away", item: awayItemId(c), value: { whereabouts: "At the docks.", intention: "Find passage north.", place_ref: "place:docks", until: "nightfall" } },
     { character: c, part: "edit", item: null, value: { what: "person", person: "e-9" } },
+    { character: c, part: "dream", item: dreamItemId(c), value: { moved: 1, connections: 0 } },
   ];
 }
 
