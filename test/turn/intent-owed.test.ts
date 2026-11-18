@@ -1,7 +1,8 @@
 // The shipped reminder `intent-owed` (plan §5.4): as the calls of the Author's message come back, while it has written no intent record
 // for the turn and its reply has not gone out, it is told so with its next call, once in the turn, and the record it then writes is
-// taken; a turn whose first message carries the record, and one whose reply is already out, are told nothing. The text counts the
-// turns before that went without one (`turns.without.intent`). Played through the stand-in Lumiverse on the scripted model.
+// taken; a turn whose first message carries the record is told nothing, and one whose reply is already out is not told it (only its
+// twin at the run's end, `intent-owed-end`, asks for the record alone). The text counts the turns before that went without one
+// (`turns.without.intent`). Played through the stand-in Lumiverse on the scripted model.
 
 import { afterEach, expect, test } from "bun:test";
 import type { Answer } from "rp-harness/testing/rig";
@@ -36,9 +37,11 @@ test("the Author is told it has written no intent record before its reply, once,
       // 2: the record heads the first message: nothing is said.
       { pieces: [{ text: "<intent>The player waits; the harbour answers.</intent>" }, { call: "cast_query", args: {} }] },
       { pieces: [{ text: "<reply>A gull answers from the harbour.</reply>" }] },
-      // 3: the reply goes out in the first message with no record: too late to shape it, nothing is said.
+      // 3: the reply goes out in the first message with no record: too late to shape it, `intent-owed` says nothing; at the run's end
+      // its twin asks for the record alone, and the Author ends without one.
       { pieces: [{ text: "<reply>The fog thickens.</reply>" }, { call: "cast_query", args: {} }] },
       { pieces: [{ text: "Nothing more." }] },
+      { pieces: [{ text: "The fog says it." }] },
       // 4: the first message only calls again: told, with the one turn before that went without.
       LOOK,
       { pieces: [{ text: "<intent>The lamp is lit; I show it.</intent><reply>Someone lights the lamp.</reply>" }] },
@@ -58,7 +61,7 @@ test("the Author is told it has written no intent record before its reply, once,
   const second = await play(b, "I wait.");
   expect(fired(b, second)).toEqual([]);
   const third = await play(b, "I look at the fog.");
-  expect(fired(b, third)).toEqual([]);
+  expect(fired(b, third)).toEqual(["intent-owed-end"]);
   expect(reminded(b, seen)).toHaveLength(0);
 
   const fourth = await play(b, "I light the lamp.");

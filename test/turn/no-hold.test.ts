@@ -67,7 +67,9 @@ describe("a turn played through", () => {
   });
 
   test("whether a reply went out before its intent record is counted from the order the two reached RPE; a tool called before the record runs at once, and the record is kept as it arrives", async () => {
+    // A reply with no record is this test's: the reminder that asks for the record at the run's end, a call more, is not.
     const b = await bed({
+      off: ["rules/intent-owed-end"],
       answers: [
         { pieces: [{ text: "<reply>The lamp turns.</reply>" }] },
         { pieces: [{ call: "world_query", args: { at: "world" } }] },

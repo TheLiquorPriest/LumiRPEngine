@@ -107,7 +107,7 @@ describe("stage.unperceived and path.unperceived", () => {
     // Read at a carried turn, no one is owed a perception of it.
     expect((await facts.read({ user: USER, chat: CHAT, session: "s-1", turn: carried[1] }, ["stage.unperceived"]))["stage.unperceived"]?.count).toBe(0);
     // Nor is a carried turn one since the engine lane last changed: only the turn RPE played is counted.
-    const turnSide = turnFacts(b.t.store, { runs: () => [], stopped: () => 0, story: async () => ({ from: "lumiverse", newest: "directive" }) });
+    const turnSide = turnFacts(b.t.store, { runs: () => [], stopped: () => 0, story: async () => ({ from: "lumiverse", newest: "directive" }), told: () => new Set() });
     expect((await turnSide.read({ user: USER, chat: CHAT, session: "s-1", turn: next.id }, ["turns.since.engine.change"]))["turns.since.engine.change"]).toEqual({ count: 1 });
   });
 

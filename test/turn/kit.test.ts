@@ -76,7 +76,7 @@ runKitPart("RPE's turn facts", "facts", async (seed, place) => {
   const { db, close } = database(place, seed.scope.user);
   const facts = new FactsRegistry();
   // The kit's turns have no runs: what a turn recorded is counted whole, and none owes anything.
-  facts.add(turnFacts(openStore({ db, registry: createRegistry(ALL_PACKS), worlds: () => undefined, fingerprint: "turn-kit" }), { runs: () => [], stopped: () => 0, story: async () => ({ from: "lumiverse", newest: "directive" }) }));
+  facts.add(turnFacts(openStore({ db, registry: createRegistry(ALL_PACKS), worlds: () => undefined, fingerprint: "turn-kit" }), { runs: () => [], stopped: () => 0, story: async () => ({ from: "lumiverse", newest: "directive" }), told: () => new Set() }));
   return { facts, close };
 });
 

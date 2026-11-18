@@ -51,7 +51,7 @@ import type { FoldJob, StoreBrief } from "../store/away";
 import { STORY_FACT_SETTING_DEFS, storyFacts, storyTools } from "../story";
 import { type ChatFolders, chatPlacer, CHATS_FOLDER, GeneratedFiles, NO_CHAT, promptMapFields, pruneChat, retentionOf, TREE_SETTING_DEFS, TreeChats, type TreeFiles, treeFiles, TreeNotes, TreeSuggestions, turnFolderName } from "../tree";
 import { Approvals } from "./approvals";
-import { type EventsDeps, givenViews, turnEvents } from "./events";
+import { type EventsDeps, givenViews, toldRows, turnEvents } from "./events";
 import { FactsRegistry, turnFacts } from "./facts";
 import { JOB_KIND } from "./jobs";
 import { kvStore, servedUser, storeUsers, type Writes } from "./kv";
@@ -486,6 +486,8 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
         const s = await turnSettings(files, scope, app.log);
         return { from: s.storyFrom, newest: s.storyNewest };
       },
+      // What the trace told of the run going on, the moment each rule fired, and the firings kept once its agent went on.
+      told: (user, turn, since) => new Set([...(runs.running(user, turn)?.told ?? []), ...toldRows(app.db, user, "rule", { turn }).flatMap((r) => (r.at >= since && r.body.fact !== undefined ? [r.body.fact.name] : []))]),
     }),
   );
   facts.add(loreIndex.facts());

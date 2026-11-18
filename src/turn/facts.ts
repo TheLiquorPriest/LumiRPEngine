@@ -18,8 +18,8 @@
 //                              that owes no reply
 //   turn.last.without.intent   1 when the last reply RPE released on the turn before on that line (a continue's: on its own turn)
 //                              began to go out before any intent record of its run had ended, in the order the two reached RPE; else 0
-//   turn.without.intent        1 while the run owes the player a reply and its lead has no intent record taken (one whose end reached
-//                              RPE); by whether its reply has gone out yet
+//   turn.without.intent        1 while the run owes the player a reply, its lead has no intent record taken (one whose end reached
+//                              RPE), and no rule naming this fact has been said to it in the run; by whether its reply has gone out
 //   turns.without.intent       the turns RPE played on that line before this one, newest back, that took no intent record, up to the
 //                              newest that took one (a turn a migration carried is passed over)
 //   previous.run.stopped       the runs of the turn before that this turn stopped at the wait's limit as it began
@@ -82,8 +82,8 @@ export class FactsRegistry implements FactsPort {
   }
 }
 
-/** A turn's run as the facts read it: where its own writes begin, its kind, when its reply went out, its intent record's time and whether its reply went out before it, and its session (none for the record a migration keeps of a carried turn's run). */
-export type FactsRun = Pick<RunRecord, "mark" | "kind" | "released" | "intent" | "withoutIntent" | "session">;
+/** A turn's run as the facts read it: where its own writes begin, its kind, when it was asked for, when its reply went out, its intent record's time and whether its reply went out before it, and its session (none for the record a migration keeps of a carried turn's run). */
+export type FactsRun = Pick<RunRecord, "mark" | "kind" | "received" | "released" | "intent" | "withoutIntent" | "session">;
 
 /** What the turn lane's facts read beside the store: a turn's runs, the runs a turn stopped as it began, and the chat's story choice. */
 export interface TurnFactsDeps {
@@ -93,6 +93,8 @@ export interface TurnFactsDeps {
   stopped(user: string, turn: string): number;
   /** The chat's story choice, as its levels set it. */
   story(scope: Scope): Promise<{ from: StoryFrom; newest: StoryNewest }>;
+  /** The facts named by the rules said to the turn's lead since `since`: those the trace told of the run going on, and those kept. */
+  told(user: string, turn: string, since: number): ReadonlySet<string>;
 }
 
 /**
@@ -112,7 +114,7 @@ export function turnFacts(store: Store, deps: TurnFactsDeps): FactSource {
       { name: "turn.last.without.intent", counts: "1 when the last reply released on the turn before this one on its line (for a continue, on the turn it goes on with) went out with no intent record taken before it; 0 otherwise, and where no reply was released on that turn." },
       {
         name: "turn.without.intent",
-        counts: "1 while this run owes the player a reply and its lead has written no intent record the reply contract took (one is taken when its end reaches RPE); 0 once it has, and for a run that owes no reply (a Settle now run). By whether its reply has gone out yet.",
+        counts: "1 while this run owes the player a reply, its lead has written no intent record the reply contract took (one is taken when its end reaches RPE), and no rule that names this fact has been said to it in this run; 0 once it has, or once one has, and for a run that owes no reply (a Settle now run). By whether its reply has gone out yet.",
         by: ["unreleased", "released"],
       },
       { name: "turns.without.intent", counts: "Turns RPE played on this turn's own line before this one, counting back from the newest, that took no intent record, up to the newest that took one; a turn a migration carried is passed over." },
@@ -165,7 +167,8 @@ export function turnFacts(store: Store, deps: TurnFactsDeps): FactSource {
         out["turn.last.without.intent"] = { count: last?.withoutIntent === true ? 1 : 0 };
       }
       if (names.includes("turn.without.intent")) {
-        const without = owes && !intended(runNow) ? 1 : 0;
+        // Said once in a run, by whichever rule names it first: a rule at another moment is not said the same thing again.
+        const without = owes && turn !== null && !intended(runNow) && !deps.told(scope.user, turn, runNow.received).has("turn.without.intent") ? 1 : 0;
         const released = runNow?.released != null;
         out["turn.without.intent"] = { count: without, by: { unreleased: released ? 0 : without, released: released ? without : 0 } };
       }

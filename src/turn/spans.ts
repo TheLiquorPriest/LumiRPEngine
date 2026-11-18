@@ -52,6 +52,8 @@ export class RunTimes {
     // The record's first token (`intent_began`) opens its span, which stays open (`to` null) until the record ends (`intent`).
     if (event.kind === "intent_began") run.intent = { from: run.intent?.from ?? record.at, to: null };
     else if (event.kind === "intent") run.intent = { from: run.intent?.from ?? record.at, to: record.at };
+    // The fact a rule said to the lead named, the moment it fired: a fact read later in the run can tell it was said.
+    else if (event.kind === "rule_fired" && event.firing.fact !== undefined) (run.told ??= new Set()).add(event.firing.fact.name);
     else if (event.kind === "call_started") {
       run.firstCall ??= record.at;
       run.leadCall.open = { heard: false };

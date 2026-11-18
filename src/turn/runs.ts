@@ -194,6 +194,11 @@ export interface Run extends RunRecord {
   firstCall: number | null;
   /** The lead's model call as it stands now, for the words of a stop at the hold of a reply asked for whole. Kept nowhere. */
   leadCall: LeadCall;
+  /**
+   * The facts named by the rules said to its lead, as RPH's trace told each the moment it fired (`rule_fired`); absent before any.
+   * Kept nowhere: the rule firings RPE is told once the agent has gone on (`rule_firing`) keep them for good.
+   */
+  told?: Set<string>;
 }
 
 interface RunRow {
