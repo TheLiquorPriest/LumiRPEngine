@@ -14,6 +14,7 @@ import type { EntityId } from "../shared/ids";
 import type { ActionDef, ParamDef } from "../shared/world";
 import { calendarOf, dateAt } from "../engine/calendar";
 import { own } from "../engine/pack-kit";
+import { paramChoices } from "../engine/param-words";
 import { companionCandidates, findAction, paramCandidates, resolveAction } from "../engine/resolve";
 import { createRng } from "../engine/rng";
 import { isGone, kindIs } from "../engine/scope";
@@ -30,7 +31,7 @@ import { textOf } from "./texts";
  * A value of one of an action's arguments, as an answer that says what the action takes shows it (`act`'s `explain`): the one the
  * action declares (`ParamDef.example`); else, for a reference, the first the actor could pick as things stand (as the palette offers
  * them), else the first of its kind the actor knows of, by name; a count of one, half an hour, ten of the main coin, yes, today's date,
- * the first row of its table. None for words the action gives no example of: its own words say what they are.
+ * the first of the values a text argument takes from a list (its table's rows, or its game system's: `paramChoices`). None for words the action gives no example of: its own words say what they are.
  */
 function exampleOf(reading: Reading, action: ActionDef, name: string, def: ParamDef, actor: EntityId): JsonValue | undefined {
   if (def.example !== undefined) return def.example;
@@ -65,7 +66,7 @@ function exampleOf(reading: Reading, action: ActionDef, name: string, def: Param
       return `${String(d.year).padStart(4, "0")}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")}`;
     }
     case "text":
-      return def.table === undefined ? undefined : Object.keys(own(world.tables, def.table)?.rows ?? {})[0];
+      return paramChoices(reading.ctx, def, actor)[0]?.value;
     default:
       return undefined;
   }
@@ -232,7 +233,9 @@ const act: OpDef = {
     const takes: string[] = [];
     const example: JsonObject = {};
     for (const [name, def] of Object.entries(action.params)) {
-      takes.push(reading.lines.line("act_param", { name, optional: def.optional === true, says: def.label ?? "" }) ?? "");
+      // A parameter that takes one of a list is told with each value it takes and the name a person is shown for it (`paramChoices`).
+      const choices = paramChoices(reading.ctx, def, actor).map((c) => `${c.value} (${c.label})`);
+      takes.push(reading.lines.line("act_param", { name, optional: def.optional === true, says: def.label ?? "", ...(choices.length > 0 ? { choices: choices.join(", ") } : {}) }) ?? "");
       const value = exampleOf(reading, action, name, def, actor);
       if (value !== undefined && (def.optional !== true || def.example !== undefined)) example[name] = value;
     }

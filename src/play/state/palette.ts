@@ -1,11 +1,10 @@
 // The palette the player picks from: each action's options, priced and judged now, and the
 // timelapse's. Pure, over a world, its state and the registry.
 
-import { paramLabel } from "../../engine/action-words";
 import { checkView, policyOf } from "../../engine/adjudication";
 import { identifiers } from "../../engine/expr";
 import { actsFor } from "../../engine/org";
-import { optionalQuery, own } from "../../engine/pack-kit";
+import { optionalQuery } from "../../engine/pack-kit";
 import type { Registry } from "../../engine/registry-impl";
 import { actionOdds, companionCandidates, paramCandidates } from "../../engine/resolve";
 import { kindIs, scopeEnv } from "../../engine/scope";
@@ -17,7 +16,7 @@ import type { EntityId } from "../../shared/ids";
 import type { JsonObject } from "../../shared/json";
 import { routineSettingsOf } from "../../shared/routines";
 import type { PaletteEntry, PaletteOption, PaletteView, TimelapseView } from "../../shared/state-view";
-import { tableChoices } from "../../shared/tables";
+import { paramChoices, paramLabel } from "../../engine/param-words";
 import { playsOffstage } from "../../shared/offstage";
 import { type ActionDef, requirementExpr, type WorldDoc } from "../../shared/world";
 
@@ -83,11 +82,12 @@ export function palette(world: WorldDoc, state: WorldState, registry: Registry):
         ...(odds.available ? {} : { disabled: unavailable(odds.failed) }),
       });
     }
-    // A text param naming a table row (Use a skill, Make a save): one option per row, with its odds.
-    const rowParam = refParam === undefined ? Object.entries(action.params).find(([, p]) => p.type === "text" && !p.optional && p.table !== undefined) : undefined;
-    const rows = rowParam ? tableChoices(own(world.tables, rowParam[1].table ?? "")).slice(0, 24) : [];
+    // A text param that takes one of a list (a table's rows: Use a skill, Make a save; or a game system's: Apply for credit's products):
+    // one option per choice, by the name a person is shown for it (`paramChoices`, which a press that leaves it out is told too), with its odds.
+    const rowParam = refParam === undefined ? Object.entries(action.params).find(([, p]) => p.type === "text" && !p.optional && (p.table !== undefined || p.choices !== undefined)) : undefined;
+    const rows = rowParam ? paramChoices(ctx, rowParam[1], world.pov).slice(0, 24) : [];
     for (const row of rows) {
-      const params: JsonObject = { [rowParam?.[0] ?? ""]: row.key };
+      const params: JsonObject = { [rowParam?.[0] ?? ""]: row.value };
       const odds = actionOdds(registry, world, state, { action, params });
       options.push({
         label: row.label,

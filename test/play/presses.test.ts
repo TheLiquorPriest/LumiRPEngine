@@ -10,8 +10,12 @@ import type { LvMessage } from "../../src/adapter/lumiverse/rows";
 import type { Writes } from "../../src/adapter/lumiverse/writes";
 import { pressedLine } from "../../src/play/view";
 import type { JsonObject } from "../../src/shared/json";
-import type { PanelAsk } from "../../src/turn/requests";
 import { type Bed, CHAT, makeBed, USER, words } from "./bed";
+import { actionOdds, findAction } from "../../src/engine/resolve";
+import { neededWords, paramChoices } from "../../src/engine/param-words";
+import { creditProducts } from "../../src/packs/economy/core/credit";
+import { headOf } from "../../src/play/owner-edits";
+import { orOf } from "../../src/shared/lines";
 
 /** A press of the starter world's palette that waits for the next message, as the taps route takes it. */
 async function pressThatWaits(bed: Bed): Promise<{ kind: "action"; action: string; params: JsonObject; source: string }> {
@@ -87,6 +91,29 @@ describe("a press that manages", () => {
     expect(answer.asked).toBeUndefined();
     if (answer.reports.length > 0) expect(answer.words).toBe(words("applied_advised", { reports: answer.reports.join(" ") }));
     else expect(answer.words).toStartWith(`Done: ${pay.label}, on ${option.label}`);
+  });
+});
+
+describe("what a press needs, in words", () => {
+  test("a parameter left out is said by its label, and one that takes one of a list by the names the Money panel's offers show, never an id", async () => {
+    const bed = makeBed();
+    await bed.plays("modern_slice_of_life");
+    const { registry, world, state } = headOf(bed.store, USER, CHAT);
+    const ctx = registry.context(world, state);
+    const products = creditProducts(ctx);
+    const apply = findAction(registry, world, "apply_credit");
+    if (apply === undefined) throw new Error("no Apply for credit");
+    // The actions sheet offers each product by its name, as the Money panel's credit offers do, and sends its id.
+    const entry = (await bed.state()).palette?.entries.find((e) => e.action === "apply_credit");
+    expect(entry?.options.map((o) => [o.label, o.params.product])).toEqual(products.map((p) => [p.label, p.product]));
+    // Left out, it is said by the same names.
+    const failed = actionOdds(registry, world, state, { action: apply, params: {} }).failed;
+    expect(failed?.reason).toBe(`Apply for credit needs you to choose the product: ${orOf(products.map((p) => p.label))}.`);
+    expect(failed?.reason).not.toMatch(/_/);
+    // A parameter that takes free words is said by its label, as a person gives it.
+    const answer = findAction(registry, world, "answer");
+    if (answer === undefined) throw new Error("no Answer");
+    expect(neededWords(registry, world, answer, "answer", paramChoices(ctx, answer.params.answer, world.pov))).toBe("Answer needs the answer in your own words: say it in your message.");
   });
 });
 

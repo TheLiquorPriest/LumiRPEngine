@@ -481,6 +481,12 @@ export interface ParamDef {
    */
   table?: TableId;
   /**
+   * A `text` param that takes one of a list a game system keeps (the economy's credit products): the name of the query that gives each
+   * value it takes with the name a person is shown for it (`ParamChoicesQuery`, `engine/param-words.ts`). The palette offers one option per
+   * choice, labelled by that name; a press that leaves it out is told the names; the Author is told each value with its name.
+   */
+  choices?: string;
+  /**
    * A ref param a thing the player says they have may fill when the world doesn't have it, as the POV
    * sees it (DESIGN §9.4 player claims): it is made where the action expects it, in the actor's
    * hands (`held`) or where the actor is (`here`), under the chat's claims policy.

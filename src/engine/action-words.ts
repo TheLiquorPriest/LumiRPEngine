@@ -16,6 +16,7 @@ import { findAction, outsideOf, type Resolution } from "./resolve";
 import type { WorldState } from "./state";
 import { canSeeEntity, canSeePlace, findLeaks, playerTrack, unrevealedSecrets } from "./visibility";
 import { listOf, say } from "../shared/lines";
+import { COUNT_PARAM, paramLabel } from "./param-words";
 
 /** A game-time span in words: "45 min", "2.5 hours", "30 days". */
 export function spanText(minutes: number): string {
@@ -33,20 +34,6 @@ export function compactSpan(minutes: number): string {
   const rest = total % 60;
   if (days > 0) return hours > 0 ? say("span_compact_d_h", { d: days, h: hours }) : say("span_compact_d", { d: days });
   return rest > 0 ? say("span_compact_h_min", { h: hours, min: rest }) : say("span_compact_h", { h: hours });
-}
-
-/** The param that counts an action's thing (Buy's, a holding's sale): it reads with that thing. */
-const COUNT_PARAM = "qty";
-
-/** A param's label for a palette step: its own, else its ref kind's ("Person"), else a count's "How many", else its name in words ("Days"). */
-export function paramLabel(action: ActionDef, name: string, world: WorldDoc, registry: Registry): string {
-  const def = action.params[name];
-  if (def?.label) return def.label;
-  const kind = def?.ref ? (world.kinds[def.ref] ?? registry.kinds.get(def.ref)) : undefined;
-  if (kind?.label) return kind.label;
-  if (name === COUNT_PARAM) return say("action_how_many");
-  const words = name.replace(/_/g, " ");
-  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 /**

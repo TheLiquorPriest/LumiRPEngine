@@ -29,6 +29,18 @@ export function creditAccounts(ctx: ReadContext, person: EntityId): EntityId[] {
   });
 }
 
+/**
+ * The credit one may apply for, each by its id and the name the Money panel's offers show for it: a credit card, a line of credit and a
+ * loan, and the world's own credit products, but a mortgage, which comes with a property. The offers list them, and Apply for credit
+ * takes one (`economy.credit_products`).
+ */
+export function creditProducts(ctx: Pick<ReadContext, "world">): { product: string; label: string; class: AccountClass }[] {
+  const products = { ...Object.fromEntries((["credit_card", "line_of_credit", "loan"] as const).map((c) => [c, { label: CLASS_TRAITS[c].label, class: c as AccountClass }])), ...Object.fromEntries(Object.entries(worldProducts(ctx.world)).map(([id, p]) => [id, { label: p.label, class: p.class }])) };
+  return Object.entries(products)
+    .filter(([, p]) => isCredit(p.class) && p.class !== "mortgage")
+    .map(([product, p]) => ({ product, label: p.label, class: p.class }));
+}
+
 /** An account's age in months, from its `opened` date (the start of the chat when it doesn't say). */
 function ageMonths(ctx: ReadContext, account: EntityId): number {
   const opened = strOf(own(ctx.state.entities, account)?.fields.opened);
@@ -212,10 +224,7 @@ export function creditReport(ctx: ReadContext, person: EntityId): CreditReport {
   });
   const ages = accounts.map((id) => ageMonths(ctx, id));
   const when = (at: number): string => formatClock(cal, at).split(",")[0] ?? "";
-  const products = { ...Object.fromEntries((["credit_card", "line_of_credit", "loan"] as const).map((c) => [c, { label: CLASS_TRAITS[c].label, class: c }])), ...Object.fromEntries(Object.entries(worldProducts(ctx.world)).map(([id, p]) => [id, { label: p.label, class: p.class }])) };
-  const offers = Object.entries(products)
-    .filter(([, p]) => isCredit(p.class) && p.class !== "mortgage")
-    .map(([product, p]) => ({ product, label: p.label, class: p.class, aprPct: aprFor(ctx, p.class, score), limit: limitFor(ctx, p.class, score, CREDIT_SCORE_ASSUMED) }));
+  const offers = creditProducts(ctx).map((p) => ({ product: p.product, label: p.label, class: p.class, aprPct: aprFor(ctx, p.class, score), limit: limitFor(ctx, p.class, score, CREDIT_SCORE_ASSUMED) }));
   return {
     person,
     score,

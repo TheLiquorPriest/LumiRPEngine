@@ -35,6 +35,7 @@ import { labelOf, optionalService, own } from "./pack-kit";
 import type { ToldAction } from "./action-words";
 import type { Needs } from "./steps";
 import { say } from "../shared/lines";
+import { neededWords, paramChoices } from "./param-words";
 
 export interface ActionRequest {
   action: ActionId | ActionDef;
@@ -135,7 +136,8 @@ function prepare(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, re
   for (const [name, def] of Object.entries(action.params)) {
     const raw: JsonValue | undefined = own(given, name);
     if (raw === undefined || raw === null || raw === "") {
-      if (!def.optional) return { code: "missing_param", reason: say("why_type_needs_k", { type: action.label, k: def.label ?? name }) };
+      // Said to a person in words: the parameter by its label and, where it takes one of a list, the names of the list (`param-words.ts`).
+      if (!def.optional) return { code: "missing_param", reason: neededWords(reg, world, action, name, paramChoices(reg.context(world, state), def, actor)) };
       continue;
     }
     if (def.type === "ref") {

@@ -49,7 +49,8 @@ import type { FinanceApi, FinanceHooks, FinanceKind, FinanceRegistry, OpenAccoun
 import { ASK_PARAM } from "../../../shared/org-motions";
 import { actAs, asParam, mayAs, moneyWords, namedOrgSource, partyOf } from "./acting";
 import { applyForCredit, closeAccount, createFlow, creditApplication, deposit, editFlow, interestsOf, landsInReach, openAccount, paysFor, releaseHold, replaceCard, setAutopay, setCardState, setFlowStatus, setPayPrefs, setStatus, updateFlow, withdraw } from "./actions";
-import { currentScore } from "./credit";
+import { creditProducts, currentScore } from "./credit";
+import type { ParamChoicesQuery } from "../../../engine/param-words";
 import { allFlows, businessDay, livingCost, occurrences, splitAmount } from "./flows";
 import { EVENTS, isOpened, reject } from "./journal";
 import { financeKinds } from "./kinds";
@@ -276,6 +277,8 @@ declare module "../../../engine/registry" {
     "economy.offers": (ctx: ReadContext, who: EntityId) => Offer[];
     /** What a place sells, quoted there: `economy.offers` for a place, not a person. */
     "economy.offers_at": (ctx: ReadContext, place: string) => Offer[];
+    /** The credit `who` may apply for (Apply for credit's product), each its id and the name the Money panel's offers show for it. */
+    "economy.credit_products": ParamChoicesQuery;
     /** The range a Buy recorded as "Bought `name`" can be charged for `qty` where `who` is: its catalog row's (else its category's) regional band. Null for an item neither prices. */
     "economy.bought_band": (ctx: ReadContext, name: string, qty: number, who: EntityId) => { min: number; max: number } | null;
     /** Catalog items to pick for a purchase nothing priced: rows sharing a word with `item` first, then what `who` can buy where they are; at most 12, quoted where `who` is. */
@@ -646,6 +649,7 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
     return price ? { min: price.band.min * qty, max: price.band.max * qty } : null;
   });
   r.query("economy.offers", (ctx, who) => offersAtPlace(ctx, placeOfEntity(ctx.state, who)));
+  r.query("economy.credit_products", (ctx) => creditProducts(ctx).map((p) => ({ value: p.product, label: p.label })));
   r.query("economy.offers_at", (ctx, place) => offersAtPlace(ctx, place));
   r.query("economy.item_choices", (ctx, text, who) => {
     const place = placeOfEntity(ctx.state, who);
@@ -1210,7 +1214,7 @@ function registerActions(r: CoreRegistry): void {
   r.action({ id: "flow_pause", pack: "economy", params: flowOnly, requires: flowsRun, outcomes: { default: [{ type: "economy.flow_status", args: { flow: "flow", status: "paused", who: "self", by: "actor" } }] }, lexicon: ["pause the standing order"], ...phone });
   r.action({ id: "flow_resume", pack: "economy", params: flowOnly, requires: flowsRun, outcomes: { default: [{ type: "economy.flow_status", args: { flow: "flow", status: "active", who: "self", by: "actor" } }] }, lexicon: ["resume the standing order"], ...phone });
   r.action({ id: "flow_delete", pack: "economy", params: flowOnly, requires: flowsRun, outcomes: { default: [{ type: "economy.flow_status", args: { flow: "flow", status: "ended", who: "self", by: "actor" } }] }, lexicon: ["cancel the standing order", "stop the recurring payment"], ...phone });
-  r.action({ id: "apply_credit", pack: "economy", params: { product: { type: "text" }, amount: { type: "money", optional: true }, term: { type: "number", optional: true }, as: asParam("money.borrow", "param_borrowing_as") }, requires: ["level.money >= 3", mayAs("money.borrow")], outcomes: { default: [{ type: "economy.apply_credit", args: { product: "=params.product", cents: "=params.amount", term: "=params.term", who: "self", by: "actor" } }] }, duration: "15", lexicon: ["apply for a credit card", "apply for a loan", "take out a loan"], observable: "fills in an application" });
+  r.action({ id: "apply_credit", pack: "economy", params: { product: { type: "text", choices: "economy.credit_products" }, amount: { type: "money", optional: true }, term: { type: "number", optional: true }, as: asParam("money.borrow", "param_borrowing_as") }, requires: ["level.money >= 3", mayAs("money.borrow")], outcomes: { default: [{ type: "economy.apply_credit", args: { product: "=params.product", cents: "=params.amount", term: "=params.term", who: "self", by: "actor" } }] }, duration: "15", lexicon: ["apply for a credit card", "apply for a loan", "take out a loan"], observable: "fills in an application" });
   r.action({ id: "set_pay_prefs", pack: "economy", params: { tiers: { type: "text", example: [{ use: "debit", max: 100 }, { use: "cash" }] } }, requires: ["money_feature('payment_prefs', self)"], outcomes: { default: [{ type: "economy.set_pay_prefs", args: { tiers: "=params.tiers", who: "self" } }] }, lexicon: ["i'd rather pay with"], ...phone });
 }
 
