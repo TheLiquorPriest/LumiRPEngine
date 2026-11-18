@@ -79,7 +79,7 @@ function ModelSection(props: { agent: ListedDefinition; connections: readonly Co
         </p>
       )}
       <p class="rpe-line" data-effort>
-        Thinks at {run.effort === null ? "its provider's own default" : <strong>{run.effort}</strong>}
+        {run.effort === null ? "Its effort is left to its provider's own default" : <>It is set to think at <strong>{run.effort}</strong>. A model that has no level so high is sent the nearest level it has, which the turn's record names for each run (its “effort”)</>}
         {agent.effort === undefined ? ". Its definition sets none." : `. Its definition says ${agent.effort}.`} An effort set for its connection on the Settings page stands over its definition's, and one set below, for every chat or this one, over both.
       </p>
     </Section>
