@@ -95,7 +95,7 @@ Its words come from `guidance/.prompts/play-answers.md` and `request-answers.md`
 
 ## RPE holds more memory than you expect
 
-To see what RPE's memory is made of as a chat is played, run `bun scripts/perf/memory.ts` from RPE's source folder. It starts RPE's own application on a scratch data folder, with a stand-in Lumiverse and a scripted model, plays turns of tens of thousands of tokens with tool calls, a delegate and jobs, and prints RPE's resident size, its heap and what its allocator holds every few turns, so you see what grows with the number of turns and what levels off. `--turns`, `--chats` (chats played at once), `--prompt` (tokens a prompt holds) and `--rest` (seconds to wait after the last turn before measuring again) change what it plays; the file's first lines list the rest.
+To see what RPE's memory is made of as a chat is played, run `bun scripts/perf/memory.ts` from RPE's source folder. It starts RPE's own application on a scratch data folder, with a stand-in Lumiverse and a scripted model, plays turns of tens of thousands of tokens with tool calls, a delegate and jobs, and prints RPE's resident size, its heap and what its allocator holds every few turns, so you see what grows with the number of turns and what levels off. `bun scripts/perf/memory.ts --turns 100 --chats 5 --prompt 50000 --rest 20` plays a hundred turns in five chats at once, each prompt about 50,000 tokens, and measures again 20 seconds after the last turn; the file's first lines list what else it takes.
 
 ## After an update
 
