@@ -8,7 +8,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { SHIPPED_GUIDANCE } from "rp-harness/helpers";
 import type { JsonValue } from "rp-harness/contract";
 import { configFacts, renderSettingsDoc, settingsRegistry } from "../../scripts/settings/generate";
@@ -119,6 +119,9 @@ function settingMatches(key: string): boolean {
 /** config.json's keys: the install's facts. */
 const CONFIG_KEYS = new Set(configFacts().map((fact) => fact.key));
 
+/** The facts RPH keeps that a rule can name (a dotted name in the docs that is no setting). */
+const RULE_FACTS: Record<string, true> = { "limits.left": true };
+
 /** Every leaf of a YAML mapping, as a dotted key. */
 function leaves(value: unknown, prefix = ""): string[] {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return [prefix];
@@ -182,7 +185,7 @@ describe("the standalone docs", () => {
     for (const { path, span } of SPANS) {
       const key = span.replace(/:.*$/, "").trim();
       if (!/^[a-z][A-Za-z]*(\.([A-Za-z]+|<connection>))+$/.test(key) || /\.(json|db|js|md|yml|yaml|ts|service)$/.test(key)) continue;
-      if (!settingMatches(key) && !CONFIG_KEYS.has(key) && !treeKey(key)) wrong.push(`${path}: ${key}`);
+      if (!settingMatches(key) && !CONFIG_KEYS.has(key) && !Object.hasOwn(RULE_FACTS, key) && !treeKey(key)) wrong.push(`${path}: ${key}`);
     }
     // A YAML example sets only settings a reader takes, each to a value it takes.
     for (const page of PAGES) {
@@ -203,7 +206,8 @@ describe("the standalone docs", () => {
       const below = path.slice("files/defaults/".length);
       return [join(ROOT, "guidance", below), join(ROOT, "guidance", CHAT_DEFAULTS, below), join(SHIPPED_GUIDANCE, below)];
     };
-    const missing = named.filter(({ span }) => !places(span).some((at) => existsSync(at)));
+    const exists = (at: string): boolean => (at.includes("*") ? [...new Bun.Glob(basename(at)).scanSync({ cwd: dirname(at), dot: true })].length > 0 : existsSync(at));
+    const missing = named.filter(({ span }) => !places(span).some(exists));
     expect(missing.map(({ path, span }) => `${path}: ${span}`)).toEqual([]);
   });
 
@@ -248,8 +252,8 @@ describe("the standalone docs", () => {
       "map.printRows": ["World state: the map", 30],
       "lore.index.bound": ["Lore map, bound entries not in the prompt", 12],
       "lore.index.entriesPerCall": ["Lore indexing, entries per call", 20],
-      "limits.turn.calls": ["Calls in a turn across all agents", 40],
-      "limits.previousRunSeconds": ["Wait for the previous turn's run", 20],
+      "limits.turn.calls": ["Calls in a turn across all agents", null],
+      "limits.previousRunSeconds": ["Wait for the previous turn's run", null],
       "reply.heldSentences": ["Reply held back when a rule that interrupts covers it", 1],
       "rules.judge": ["The model that answers a `question:` rule", null],
       "reply.form": ["How a connection marks its reply", "tags"],

@@ -88,8 +88,8 @@ describe("dist/, as built", () => {
     // The pages are left out of a build made with --no-pages.
     for (const name of SERVER) if (existsSync(join(DIST, name))) cpSync(join(DIST, name), join(server, name), { recursive: true });
     const data = folder("rpe-data-");
-    // Nothing of this machine's environment: no Lumiverse to reach, no data folder but the one given, any free port.
-    const proc = Bun.spawn([process.execPath, join(server, OUT.app), "serve", "--data", data], { cwd: server, env: { PATH: process.env.PATH ?? "", HOME: data, RPE_PORT: "0" }, stdout: "pipe", stderr: "pipe" });
+    // Nothing of this machine's environment: no Lumiverse to reach, no data folder but the one given, any free port, and the user the install names (RPE writes nothing before it has one).
+    const proc = Bun.spawn([process.execPath, join(server, OUT.app), "serve", "--data", data], { cwd: server, env: { PATH: process.env.PATH ?? "", HOME: data, RPE_PORT: "0", RPE_LUMIVERSE_USER: "build-test-user" }, stdout: "pipe", stderr: "pipe" });
     try {
       const listening = await said(proc.stdout, /listens on (http:\/\/\S+) \(/, START_MS);
       expect({ listening: listening !== null, err: listening === null ? await new Response(proc.stderr).text() : "" }).toEqual({ listening: true, err: "" });
