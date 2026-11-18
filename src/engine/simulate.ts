@@ -196,7 +196,7 @@ export function interruptPolicy(state: Readonly<WorldState>, overrides: Partial<
 /** Every class at `note`: the policy of an applied `time.advance` and its catch-up. */
 export const ALL_NOTE: Record<InterruptClass, InterruptPolicy> = Object.fromEntries(INTERRUPT_CLASSES.map((c) => [c, "note"])) as Record<InterruptClass, InterruptPolicy>;
 
-function rngFactory(runSeed: string, process: string, slot: number): (entity: EntityId) => Rng {
+export function rngFactory(runSeed: string, process: string, slot: number): (entity: EntityId) => Rng {
   return (entity) => createRng(processSeed(runSeed, process, entity, slot));
 }
 

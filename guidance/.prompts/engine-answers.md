@@ -138,9 +138,12 @@ time_back: Operation {{n}} ({{op}}): the clock was set back from {{from}} to {{t
 time_left_out: Operation {{n}} ({{op}}): {{field}} cannot be read, you sent {{value}}, so it was left out and {{used}} was applied.{{#wants}} It takes {{wants}}.{{/wants}}
 time_differs: Operation {{n}} ({{op}}): {{field}} reads as {{other}} and {{used}} as {{to}}; the clock was set by {{used}}.
 clock_paused: Operation {{n}} ({{op}}): the clock was paused for this scene, and it was moved as given; the pause still holds.
+standing_cut: Operation {{n}} ({{op}}): the clock stopped at {{reached}}, short of {{asked}}: what the world's own records arrange (pay, bills, standing payments) runs over a year at most, and over so many changes at most, in one go, so it ran as far as that and no further. Pass the rest of the time with another pass_time.
 before_start: Operation {{n}} ({{op}}): the story starts at {{start}}, and the clock was set back to a time before it.
 due_more: {{#n}}Operation {{n}} ({{op}}): {{/n}}only the first {{listed}} of what this span brings due are listed; {{more}} more fall due later in it.
 due_more_uncounted: {{#n}}Operation {{n}} ({{op}}): {{/n}}only the first {{listed}} of what this span brings due are listed; more fall due later in it.
+ran_said: Operation {{n}} ({{op}}): what the world's own records arrange over this span (pay, bills, standing payments, interest and the rest of what an account or a job sets going) happened in its order, and {{total}} {{#one}}change is{{/one}}{{^one}}changes are{{/one}} recorded. ran says what they were, with times where one happened more than once. None of it needs a decision from you.
+ran_more: Operation {{n}} ({{op}}): only the first {{listed}} lines of what happened are in ran; {{more}} more lines are recorded all the same.
 no_map: {{at}} has no map to show.
 none_found: Nothing found for {{words}}.
 more_found: Only the first {{shown}} of what {{words}} matches are listed; {{more}} more were found. Narrower words, or a kind, find them.

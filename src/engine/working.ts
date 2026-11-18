@@ -3,6 +3,7 @@
 // event is validated against exactly the state it will see on re-fold, then applied.
 
 import type { LedgerEvent } from "../shared/ledger";
+import { clockOfSeconds, clockSeconds } from "./calendar";
 import type { WorldDoc } from "../shared/world";
 import { adviseEvent, applyEvent, validateEvent } from "./events";
 import type { Advice, ReadContext, Rejection } from "./registry";
@@ -86,6 +87,28 @@ export class Working {
       const e = this.events[i];
       if (e) this.events[i] = { ...e, group };
     }
+  }
+
+  /**
+   * Joins each run of clock moves among the events applied since index `from` into one move, as long as no other event comes between
+   * them. The state already stands where they left it, so only the record is shorter (a replay folds to the same state at every
+   * event that stays). Marks taken since `from` are void: the checkpoint they rebuild from is dropped.
+   */
+  joinClockMoves(from: number): void {
+    const kept: { event: LedgerEvent; advice: Advice | null }[] = [];
+    for (let i = from; i < this.events.length; i++) {
+      const event = this.events[i] as LedgerEvent;
+      const last = kept[kept.length - 1];
+      if (event.type === "clock" && last?.event.type === "clock") last.event = { ...last.event, minutes: clockOfSeconds(clockSeconds(last.event.minutes) + clockSeconds(event.minutes)) };
+      else kept.push({ event, advice: this.advice[i] ?? null });
+    }
+    this.events.length = from;
+    this.advice.length = from;
+    for (const k of kept) {
+      this.events.push(k.event);
+      this.advice.push(k.advice);
+    }
+    this.checkpoint = null;
   }
 
   /** A state snapshot plus the event counts, for an all-or-nothing step. */

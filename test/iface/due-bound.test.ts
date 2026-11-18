@@ -1,7 +1,8 @@
 // What a span of time brings due is listed up to a setting, soonest first, and the answer says how
 // many more fall in the span: a skip of a year over a world whose weather turns four times a day
-// answers with a page and a count, not with every turn of the year, and a skip of a thousand years
-// over the store's own list costs what its page does. Every name here is made up.
+// answers with a page and a count, not with every turn of the year, and a thousand years asked ahead
+// over the store's own list costs what its page does; a thousand years passed runs the world's own
+// records over a year at most and stops there, saying so. Every name here is made up.
 
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
@@ -71,7 +72,7 @@ describe("what falls due, listed up to a setting", () => {
     wordsFromFiles(r);
   });
 
-  test("a thousand years passed over the store's own list answers with a page and the count of the rest, in well under a second", async () => {
+  test("a thousand years asked ahead over the store's own list answers with a page and the count of the rest, in well under a second", async () => {
     const doc = world();
     const daily = (id: string, ...slots: [string, string][]): ScheduleDef => ({ id, target: "activity", recurrence: { every: "day" }, slots: slots.map(([start, end]) => ({ start, end, value: id })) });
     doc.schedules = Object.fromEntries(
@@ -85,14 +86,27 @@ describe("what falls due, listed up to a setting", () => {
     Bun.gc(true);
     const heap = process.memoryUsage().heapUsed;
     const started = performance.now();
-    const r = await t.call("world_apply", { operations: [{ op: "pass_time", minutes: days * 24 * 60, source: { from: "prose", message: "m-1" } }] });
+    const r = await t.call("world_query", { at: "thornbury", due: `${days} days` });
     const took = performance.now() - started;
     const grew = process.memoryUsage().heapUsed - heap;
     expect(r.error).toBeUndefined();
-    expect(((dataOf(r).operations as JsonObject[])[0] as JsonObject).due).toHaveLength(IFACE_DEFAULTS.dueItems);
+    expect(dataOf(r).due).toHaveLength(IFACE_DEFAULTS.dueItems);
     // Twenty routines of two slots and the weather's four, each starting once a day, and the point-of-view character's four needs, each crossing its line once.
-    expect(texts(r)).toContain(lines.line("due_more", { n: 1, op: "pass_time", listed: IFACE_DEFAULTS.dueItems, more: days * 44 + 4 - IFACE_DEFAULTS.dueItems }) ?? "");
+    expect(texts(r)).toContain(lines.line("due_more", { listed: IFACE_DEFAULTS.dueItems, more: days * 44 + 4 - IFACE_DEFAULTS.dueItems }) ?? "");
     expect(took).toBeLessThan(1000);
     expect(grew).toBeLessThan(64 * 1024 * 1024);
+  });
+
+  test("a thousand years passed runs the world's own records over a year at most, and the clock stops there and says so", async () => {
+    const t = await rig({});
+    const before = t.s.stateAt(t.turn.id).state.world.clock;
+    const started = performance.now();
+    const r = await t.call("world_apply", { operations: [{ op: "pass_time", minutes: 365_243 * 24 * 60, source: { from: "prose", message: "m-1" } }] });
+    const took = performance.now() - started;
+    expect(r.error).toBeUndefined();
+    expect(t.s.stateAt(t.turn.id).state.world.clock).toBe(before + 366 * 24 * 60);
+    expect(r.reports).toEqual([expect.stringContaining("the clock stopped at")]);
+    wordsFromFiles(r);
+    expect(took).toBeLessThan(1000);
   });
 });

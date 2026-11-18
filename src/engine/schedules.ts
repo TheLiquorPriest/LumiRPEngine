@@ -373,6 +373,16 @@ export function ownerRank(reg: Registry, world: WorldDoc, state: Readonly<WorldS
 }
 
 /**
+ * Whether the clock's passing applies a schedule's edges (`standingRun`): one that sets a thing's own value on an owner it names (a
+ * business's hours). Not a routine (`place`, `activity`: where a person is and what they do are the Author's to decide) and not a
+ * world process's (weather, prices), which no owner has: those are listed as due.
+ */
+export function appliedInPlay(schedule: ScheduleDef): boolean {
+  const owner = schedule.owner;
+  return schedule.target !== "place" && schedule.target !== "activity" && (isRecord(owner) || (typeof owner === "string" && owner !== ""));
+}
+
+/**
  * Entities a schedule applies to: the owner entity; a group's members that aren't groups
  * themselves (through member groups too); every entity of the owner kind; or what a selector
  * matches. Ownerless schedules apply to none, and a removed entity keeps no schedule (a removed

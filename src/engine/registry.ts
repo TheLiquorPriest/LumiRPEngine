@@ -293,6 +293,13 @@ export interface ProcessDef {
   /** Lowest effective level at which the process runs for an entity. */
   minLevel: Level;
   scope?: "world" | "agent";
+  /**
+   * A world process that carries out what a record of the world arranges: a payroll, a bill, a standing payment, an invoice, a
+   * plan to pay. When the clock moves in play, the engine runs these over the span (`standingRun`) and records what they did,
+   * where no one decides it: what they leave to a person, where people went, what they did, the weather, a price's drift, is
+   * listed as due for the Author to decide.
+   */
+  standing?: true;
   step(slot: SlotInfo, ctx: ReadContext, rng: (entity: EntityId) => Rng, agent?: EntityId): LedgerEvent[];
   /**
    * An agent process's moments strictly inside a slot (DESIGN §8): the blocks of a character's day

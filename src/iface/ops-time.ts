@@ -1,7 +1,8 @@
 // Time (the time skill): `pass_time` moves the clock and answers with what the span brings due, from
-// the store's list (`src/store/due.ts`); it applies none of it, and runs nothing of today's
-// simulation across the span (plan §6.1: code lists what is due when time passes, and never decides
-// what it did). A time is read as it is written (`writtenTime`, `src/engine/time.ts`): a date and time of the
+// the store's list (`src/store/due.ts`), and with what the world's own records did over it (`ran`): pay,
+// bills, standing payments and the rest of what a record arranges happen in their order as the clock passes
+// them (`standingRun`, `src/engine/standing.ts`). The list itself is applied by no one (plan §6.1, §6.4: what
+// it holds is for the Author to decide). A time is read as it is written (`writtenTime`, `src/engine/time.ts`): a date and time of the
 // world's calendar, a clock time or a part of the world's own day by its name ("22:00", "midnight", "evening") as the next
 // time the clock shows it, or a counted span ("two hours"). Nothing else is a time: a vague span or a turn of the day the
 // calendar does not name is refused, naming what a time takes. A move to a time named as a date and time
@@ -10,6 +11,7 @@
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { calendarOf, clockOfSeconds, clockOfStamp, clockPlus, clockSeconds, formatClock, placeOffset } from "../engine/calendar";
+import { authorLines } from "../engine/player-events";
 import { ENGINE_EVENTS } from "../engine/engine-pack";
 import { placeOfEntity } from "../engine/scope";
 import { clockPaused, writtenTime } from "../engine/time";
@@ -114,8 +116,11 @@ export function setClock(o: OpContext, to: number): Unread | undefined {
     return undefined;
   }
   if (to > now) {
-    const move: LedgerEvent = { type: "clock", minutes: clockOfSeconds(clockSeconds(to) - clockSeconds(now)), cause: "advance" };
-    return done([sets ? settingClock(move) : move]);
+    // The clock moves, and what the world's own records arrange over the span happens in its order and is recorded with it (`standingRun`).
+    const ran = o.draft.runStanding(o.n, to, sets ? settingClock : undefined);
+    if ("code" in ran) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: ran.code } };
+    if (ran.cut) o.reply.report("standing_cut", { n: o.n, op: o.op, reached: clockText(o, ran.to), asked: clockText(o, to) });
+    return undefined;
   }
   const world = w.ctx.world;
   const start = minutesBetween(world.calendar.epoch, world.start.at);
@@ -123,6 +128,25 @@ export function setClock(o: OpContext, to: number): Unread | undefined {
   if (to < start) o.reply.report("before_start", { n: o.n, op: o.op, start: clockText(o, start) });
   const rewind: LedgerEvent = { type: ENGINE_EVENTS.rewind, data: { minutes: clockOfSeconds(clockSeconds(now) - clockSeconds(to)) } };
   return done([sets ? settingClock(rewind) : rewind]);
+}
+
+/**
+ * What the world's own records did over a span, as the GM view words a change (`authorLines`): each line once, with how many times it
+ * happened where more than once (four paydays are one line, four times); the first `dueItems` of them, how many more there were, and
+ * how many changes were worded in all.
+ */
+function ranOver(o: OpContext, made: readonly LedgerEvent[]): { lines: JsonObject[]; total: number; more: number } {
+  const said = new Map<string, number>();
+  let total = 0;
+  for (const e of made) {
+    const text = authorLines(o.reading.registry, o.reading.doc, o.draft.w.state, [e], 1)[0];
+    if (text === undefined) continue;
+    total++;
+    said.set(text, (said.get(text) ?? 0) + 1);
+  }
+  const all = [...said].map(([line, times]): JsonObject => (times === 1 ? { line } : { line, times }));
+  const most = o.call.settings.dueItems;
+  return { lines: all.slice(0, most), total, more: Math.max(0, all.length - most) };
 }
 
 const passTime: OpDef = {
@@ -167,12 +191,17 @@ const passTime: OpDef = {
     const failed = setClock(o, to);
     if (failed) return failed;
     o.draft.record(o.n, o.op, "engine", o.prov, from);
+    const reached = w.state.clock;
+    // What the world's own records did over the span, in the words the GM view words a change in; the Author is told, and decides none of it.
+    const ran = ranOver(o, w.events.slice(from).filter((e) => e.type !== "clock"));
+    if (ran.total > 0) o.reply.line("ran_said", { n: o.n, op: o.op, total: ran.total, one: ran.total === 1 });
+    if (ran.more > 0) o.reply.line("ran_more", { n: o.n, op: o.op, listed: ran.lines.length, more: ran.more });
     const due = o.call.deps.due;
     // Told of the state as recorded: once this has set the clock, its times are dates.
     o.after((state): JsonObject => {
-      const span: JsonObject = { from: clockText(o, Math.min(now, to), state), to: clockText(o, Math.max(now, to), state) };
-      const listing = due.due(state, { from: Math.min(now, to), to: Math.max(now, to) }, at?.ref ?? null, o.call.settings.dueItems);
-      return { span, due: listDue(o, listing, { n: o.n, op: o.op }, state) };
+      const span: JsonObject = { from: clockText(o, Math.min(now, reached), state), to: clockText(o, Math.max(now, reached), state) };
+      const listing = due.due(state, { from: Math.min(now, reached), to: Math.max(now, reached) }, at?.ref ?? null, o.call.settings.dueItems);
+      return { span, ...(ran.lines.length > 0 ? { ran: ran.lines } : {}), due: listDue(o, listing, { n: o.n, op: o.op }, state) };
     });
     return undefined;
   },

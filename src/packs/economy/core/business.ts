@@ -757,7 +757,7 @@ export function registerBusiness(r: FinanceRegistry): void {
     const d = distribution(ctx, api, business, undistributed(api, ctx, business, period.from, period.to, numOf(f.distribution_pct)));
     return d ? { cents: d.paid, lines: d.lines, memo: say("memo_profit_distribution"), kind: "income", category: "distribution", extra: d.extra } : null;
   });
-  core.process({ id: "economy.invoices", domain: "money", minLevel: 3, step: (slot, ctx) => lateInvoices(slot, ctx, api) });
+  core.process({ id: "economy.invoices", domain: "money", minLevel: 3, standing: true, step: (slot, ctx) => lateInvoices(slot, ctx, api) });
 
   core.effect({ type: "economy.invoice_issue", args: ["business", "customer?", "customer_name?", "cents", "memo?", "days?", "by?"], resolve: (args, ctx) => issueInvoice(ctx, api, args) });
   core.effect({ type: "economy.invoice_pay", args: ["invoice", "by?"], resolve: (args, ctx) => payInvoice(ctx, api, args) });

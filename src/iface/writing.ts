@@ -8,7 +8,7 @@ import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { hashParts } from "../shared/hash";
 import type { DomainId, EntityId } from "../shared/ids";
 import { isRecord } from "../shared/json";
-import type { LedgerEvent } from "../shared/ledger";
+import type { ClockEvent, LedgerEvent } from "../shared/ledger";
 import { FINANCE_EVENTS } from "../shared/finance";
 import { formatMoney, type PlaceDef, type WorldDoc } from "../shared/world";
 import { calendarOf, formatClock } from "../engine/calendar";
@@ -16,6 +16,7 @@ import { materializeIfNeeded } from "../engine/materialize";
 import { own } from "../engine/pack-kit";
 import { playedWorld } from "../engine/places-in-play";
 import type { Advice, Rejection } from "../engine/registry";
+import { standingRun, type StandingResult } from "../engine/standing";
 import type { EntityState, WorldState } from "../engine/state";
 import { Working } from "../engine/working";
 import { followOf } from "../packs/castlife/core/routines";
@@ -97,6 +98,22 @@ export class Draft {
   /** A reading over the draft as it stands: names made by an earlier operation are found by a later one. */
   reading(): Reading {
     return this.base.over({ ...this.base.state, world: this.w.state }, this.w.ctx);
+  }
+
+  /**
+   * Moves the clock to `to` on the working copy and runs over the span what the world's own records arrange (`standingRun`): pay,
+   * bills, standing payments and the rest that a record of the world carries out. A handler that throws is met as in `applyAll`: the copy
+   * is put back and the rejection carries only the code `failed`. `first` marks the first clock move (a move that sets the date).
+   */
+  runStanding(n: number, to: number, first?: (move: ClockEvent) => LedgerEvent): StandingResult | Rejection {
+    const mark = this.w.lightMark();
+    try {
+      return standingRun(this.base.registry, this.w, to, { runSeed: this.seed(n), cause: "advance", ...(first !== undefined ? { first } : {}) });
+    } catch (error) {
+      this.w.restore(mark);
+      this.broke("standing", error);
+      return { code: "failed", reason: "" };
+    }
   }
 
   /** An error of the engine's own, met as a handler ran: logged by the store's sink, and kept so the call is answered as a fault. */

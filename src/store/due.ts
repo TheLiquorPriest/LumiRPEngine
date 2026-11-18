@@ -1,13 +1,15 @@
 // What time brings due (plan §6.4; §6.1: code lists what is due when time passes, and never decides
 // what the passing of time did). For a span and a part of the tree, every kind there is: each slot that
 // starts in the span on a schedule today's engine keeps (a routine or a shift, which puts someone
-// somewhere or at something; the world's own processes, such as weather, prices or bills, which concern
+// somewhere or at something; the world's own processes, such as weather or prices, which concern
 // everyone), each future the Author scheduled whose due falls in it (an arrival among them: today's
 // engine records no journey under way, so one is a future that names it), each need that crosses the
 // line it alerts at, each effect that ends (a loan, a grant, a permission), and each regard a world's
 // half-life halves; every one with who it concerns and where. A list only: nothing in it is applied,
-// and a slot whose value is left to chance is listed by its schedule, its chance never drawn. The
-// list stops at the bound the caller gives, soonest first, and the rest is counted, not made: a span
+// and a slot whose value is left to chance is listed by its schedule, its chance never drawn. What the
+// clock's passing does by itself is not in it: pay, bills and standing payments, and a schedule that sets
+// a thing's own value, happen as the clock passes them (`standingRun`) and are told as what happened.
+// The list stops at the bound the caller gives, soonest first, and the rest is counted, not made: a span
 // of years costs what its first page does.
 
 import type { JsonValue } from "../shared/json";
@@ -17,12 +19,27 @@ import { NEED_IDS, needsSettingsOf } from "../shared/needs";
 import { chatWorld } from "../engine/holidays";
 import { optionalQuery, own } from "../engine/pack-kit";
 import type { ReadContext } from "../engine/registry";
-import { chatSchedulesIn, scheduleOwners, slotStarts } from "../engine/schedules";
+import { appliedInPlay, chatSchedulesIn, scheduleOwners, slotStarts } from "../engine/schedules";
 import { needDueWords, needValue } from "../packs/castlife/core";
 import type { TreeView } from "./view";
 import type { Store } from "./store";
-import type { StoreState } from "./types";
+import type { ChangeRow, StoreState } from "./types";
 import type { DueEntry, DueSource } from "./world-state";
+
+/**
+ * Whether one change of a turn answers a thing that fell due. A routine's place or activity is answered by the same field set on someone
+ * it concerns; what has no field of its own (an arrival, an ending, a need, a future, a regard) by an applied change that names whom or
+ * where it concerns. What the clock's passing did by itself (the clock, the books) answers no one's item.
+ */
+export function answers(entry: DueEntry, change: ChangeRow): boolean {
+  if (!change.applied || change.op === "clock" || change.op === "post" || change.op.startsWith("economy.")) return false;
+  const who = entry.who ?? [];
+  const value = change.value;
+  if (entry.kind === "place" || entry.kind === "activity") return change.op === "set" && isRecord(value) && value.field === entry.kind && typeof value.entity === "string" && who.includes(value.entity);
+  const names = who.length > 0 ? who : entry.where === undefined ? [] : [entry.where.replace(/^place:/, "")];
+  const text = JSON.stringify(value);
+  return names.some((name) => text.includes(JSON.stringify(name)));
+}
 
 /** What a future of the story's record gives the list: the story area's read of the open futures that have a due time. */
 interface FutureDue {
@@ -161,6 +178,8 @@ export function timeDue(store: Store): DueSource {
         if (!slots) {
           const who = scheduleOwners(store.env.registry, world, state.world, schedule);
           slots = schedule.slots.map((s) => {
+            // What the clock's passing applies (a thing's own value on an owner it names) is not a thing to decide.
+            if (appliedInPlay(schedule)) return null;
             const place = schedule.target === "place" && typeof s.value === "string" && own(world.places, s.value) ? `place:${s.value}` : null;
             // A person's schedule outside the part asked about is not listed; the world's own processes concern every part.
             const here = root === null ? who : who.filter((id) => inside(`entity:${id}`) || (place !== null && inside(place)));
@@ -195,6 +214,7 @@ export function timeDue(store: Store): DueSource {
       const all: { refs: (string | null)[] | null; at: number; kind: string; n: number | null }[] = [];
       const calendar = chatWorld(ctx);
       for (const schedule of chatSchedulesIn(ctx)) {
+        if (appliedInPlay(schedule)) continue;
         const who = scheduleOwners(store.env.registry, world, state.world, schedule);
         schedule.slots.forEach((s, slot) => {
           const { starts, more } = slotStarts(calendar, [schedule], span.from, span.to, 1, (_, i) => i === slot);
@@ -205,7 +225,7 @@ export function timeDue(store: Store): DueSource {
         });
       }
       for (const o of otherDue(store, ctx, state, view, span.from, span.to)) all.push({ refs: o.refs, at: o.entry.at, kind: o.entry.kind, n: 1 });
-      // Summed under each level each concerns and every level above it, the soonest kept (`due(state, span, level, 1)`, at once).
+      // Summed under each level each concerns and every level above it, the soonest kept.
       type Under = { n: number | null; at: number; rank: number; kind: string };
       const join = (a: Under | undefined, b: Under): Under => {
         if (a === undefined) return b;

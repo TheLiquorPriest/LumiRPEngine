@@ -9,7 +9,7 @@ export { factStore, standing, type FactInput } from "./facts";
 export { BLANK_REVISION, blankWorld, clockRecorded } from "./blank";
 export { moveWorldFiles, sha256Of, storedWorlds, readWorldDoc, UserWorlds, WORLD_DOCS_DEFAULTS, type DraftRead, type DraftWrite, type KeptPart, type WorldChange, type WorldFilesMoved, type WorldRevisionRow } from "./worlds";
 export { StateIndex, STATE_SEARCH_DEFAULTS, type Found, type FoundKind, type StateIndexOptions, type StateIndexPort, type StateIndexStore } from "./search";
-export { timeDue } from "./due";
+export { answers, timeDue } from "./due";
 export {
   worldState,
   openScenePlaceOf,

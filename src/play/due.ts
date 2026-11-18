@@ -14,7 +14,7 @@ import type { Registry } from "../engine/registry-impl";
 import type { WorldState } from "../engine/state";
 import { isRecord, type JsonValue } from "../shared/json";
 import type { WorldDoc } from "../shared/world";
-import { type ChangeRow, clockRecorded, type Store, type StoreState, timeDue } from "../store";
+import { answers, type ChangeRow, clockRecorded, type Store, type StoreState, timeDue } from "../store";
 import { eventOf } from "../store/fold";
 import type { DueEntry } from "../store/world-state";
 
@@ -93,12 +93,11 @@ export function changeLine(registry: Registry, world: WorldDoc, state: WorldStat
   return line === undefined || line === "" ? undefined : line;
 }
 
-/** The turn's applied changes of the world that name what an item concerns (whose it is, or its place where it is no one's), in the order recorded, each as its own line in the GM view's words; a change worded twice reads once. */
-function changesFor(store: Store, world: WorldDoc, state: StoreState, changes: readonly ChangeRow[], names: readonly string[]): string[] {
-  if (names.length === 0) return [];
+/** The turn's applied changes of the world that answer what fell due (`answers`: whose it is, or its place where it is no one's), in the order recorded, each as its own line in the GM view's words; a change worded twice reads once. */
+function changesFor(store: Store, world: WorldDoc, state: StoreState, changes: readonly ChangeRow[], entry: DueEntry): string[] {
   const lines = new Set<string>();
   for (const c of changes) {
-    if (!c.applied || !names.some((name) => JSON.stringify(c.value).includes(JSON.stringify(name)))) continue;
+    if (!answers(entry, c)) continue;
     const line = changeLine(store.env.registry, world, state.world, c.op, c.value);
     if (line !== undefined) lines.add(line);
   }
@@ -128,7 +127,7 @@ export function turnDue(store: Store, user: string, turn: string, most: number, 
         words: world === undefined ? plain(item.kind) : dueWords(item, world, start, schedules, say),
         when: printed(world, start, item.at, from),
         at: where ?? (who[0] === undefined ? null : `entity:${who[0]}`),
-        changes: world === undefined ? [] : changesFor(store, world, end, changes, who.length > 0 ? who : where === null ? [] : [where.replace(/^place:/, "")]),
+        changes: world === undefined ? [] : changesFor(store, world, end, changes, item),
       };
     }),
     more: listing.more,

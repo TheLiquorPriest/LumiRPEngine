@@ -1217,7 +1217,7 @@ export function registerEmployment(r: FinanceRegistry): void {
   for (const def of [PAYSLIP, TIMESHEET, COMMISSION]) core.event(def);
   r.flows({ id: "job", flows: (ctx) => allJobs(ctx).flatMap((job) => payrollFlow(ctx, api, job) ?? []) });
   r.amount("payroll", (ctx, flow, at) => payrollPosting(ctx, api, flow, at));
-  core.process({ id: "economy.timesheet", domain: "money", minLevel: 3, step: (slot, ctx) => timesheet(slot, ctx) });
+  core.process({ id: "economy.timesheet", domain: "money", minLevel: 3, standing: true, step: (slot, ctx) => timesheet(slot, ctx) });
   // Whoever works for an organization is on its people's list (ORG-SPEC §3.2): every group kind's, a trust's among them.
   core.membership(GROUP_KIND, staffRows);
   // Hiring, letting go and pay are GM effects too (ORG-SPEC §7.2): with no `by`, the GM's, which ask for no power.

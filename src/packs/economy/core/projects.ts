@@ -1164,7 +1164,7 @@ export function registerProjects(r: FinanceRegistry): void {
   core.effect({ type: PROJECT_EFFECTS.drop, args: ["project", "org?", "text?", "by?"], gm: true, resolve: (a, ctx) => dropEffect(api, a, ctx) });
   core.effect({ type: PROJECT_EFFECTS.note, args: ["project", "org?", "step?", "days?", "cents?", "text", "source?", "by?"], gm: true, resolve: (a, ctx) => noteEffect(api, a, ctx) });
   for (const def of ACTIONS) core.action(def);
-  core.process({ id: "economy.projects", domain: "money", minLevel: 3, step: (slot, ctx) => stepProjects(api, slot, ctx) });
+  core.process({ id: "economy.projects", domain: "money", minLevel: 3, standing: true, step: (slot, ctx) => stepProjects(api, slot, ctx) });
   core.proposal(PROJECT_NOTE_CHANNEL);
   core.orgSection({ id: PROJECTS_SECTION, label: "Projects", power: "money.view", build: (ctx, org, viewer) => buildProjectsView(api, ctx, org, viewer) as unknown as JsonValue | null });
   core.renderer({ slot: "quest", source: "projects", label: "Projects under way", render: (ctx) => projectNarratorLines(api, ctx) });

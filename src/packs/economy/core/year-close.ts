@@ -476,7 +476,7 @@ function consentEvents(api: FinanceApi, deps: YearCloseDeps, ctx: EffectContext,
 export function registerYearClose(r: FinanceRegistry, deps: YearCloseDeps): void {
   const { api, core } = r;
   for (const ev of [YEAR_CLOSE_EVENT, FOUNDATION_MARK_EVENT, DIVIDEND_RECEIVED_EVENT, CONSENT_DIVIDEND_EVENT, PENALTY_TAX_EVENT, FOUNDATION_TAX_EVENT]) core.event(ev);
-  core.process({ id: "economy.year_close", domain: "money", minLevel: 3, step: (slot, ctx) => closeStep(api, deps, ctx, slot) });
+  core.process({ id: "economy.year_close", domain: "money", minLevel: 3, standing: true, step: (slot, ctx) => closeStep(api, deps, ctx, slot) });
   r.flows({
     id: "year_close",
     flows: (ctx) => {

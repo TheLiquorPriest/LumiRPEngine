@@ -308,7 +308,7 @@ Worked example:
 
 ### pass_time
 
-the clock moves on; lists what falls due, applies none
+the clock moves on; what accounts and jobs arrange for the span, pay and bills, happens and is recorded, and the rest that falls due is listed for you to decide
 
 Lane: engine. Takes its provenance.
 
@@ -321,7 +321,7 @@ Lane: engine. Takes its provenance.
 | `until` | text | give: when a loan ends. pass_time: until when: YYYY-MM-DD HH:MM, a time of day (22:00, noon), or words (two days). |
 | `at` | text | place, spawn: the place (a place made with place: the place it is inside). set: someone, something, a place, or world for the time. |
 
-Reports its code (`src/iface/ops-time.ts`) can give: `before_start`, `clock_paused`, `time_back`, `time_differs`, `time_left_out`.
+Reports its code (`src/iface/ops-time.ts`) can give: `before_start`, `clock_paused`, `standing_cut`, `time_back`, `time_differs`, `time_left_out`.
 
 Worked example:
 
@@ -3074,7 +3074,7 @@ For each domain skill: the everyday operations and engine tools its text names i
 
 ### time
 
-- Names: `world_apply`, `pass_time`, `move`, `set`, `pay`, `fact`, `act`, `world_query`, `time_totals`.
+- Names: `world_apply`, `pass_time`, `pay`, `move`, `set`, `fact`, `act`, `world_query`, `time_totals`.
 - Actions it names, carried out by `act`: `eat`, `sleep`, `chat_with`, `rest`, `get_up`, `accept_invitation`.
 - Names with no engine tool, operation or action of that name: `tool_search`.
 - Its families' tools it does not name: `gm_routine_edit`, `weather_set`, `weather_clear`, `time_day`, `calendar_read`, `holiday_set`, `holiday_remove`.
