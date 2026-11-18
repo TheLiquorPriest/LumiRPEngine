@@ -1,6 +1,7 @@
 // The framing line as RPH sends it (PlanGates-4-fix1 item 8; plan §10.2 l.1160): the text of
-// `.prompts/prompt-frame.md` that applies to the chat, rendered by RPH's own guidance code as `rp-harness`
-// exports it (`loadGuidance`, its part's `render()`), never parsed or rendered a second time here. RPH
+// `.prompts/prompt-frame.md` that applies to the chat, read by RPE's own guidance reader (`src/app/guidance.ts`, which reads the
+// levels as RPH does, its part's `render()` through RPH's one template renderer), since RPH's root no longer exports its guidance
+// reader (RPH `0bab2e2`), never parsed or rendered a second time here. RPH
 // sends `joined([template(frame)?.render().text ?? ""])` (RPH `src/harness/turn.ts:405-407`), and its
 // `joined` trims each text's end and drops one left empty (`turn.ts:109-114`): that trimming, and the
 // rule that an empty frame is not sent, are the only steps taken here.
@@ -8,15 +9,16 @@
 // Where a provider will not take a system message in place, RPH's model layer sends it as a marked note:
 // RPH's own `.prompts/system-note.md`, read from its shipped folder with no chat in view and rendered
 // with the message's text (RPH `src/harness/index.ts:45-66`, `src/harness/shipped.ts:21-25`). `noteOf`
-// renders that file through the same exported guidance code, from the installed `rp-harness`'s own
-// shipped folder (`SHIPPED_GUIDANCE`); the one step taken here is RPH's own: the file's last line break
+// renders that file through the same guidance reader, from the installed `rp-harness`'s own
+// shipped folder (`SHIPPED_GUIDANCE`, from `rp-harness/helpers`); the one step taken here is RPH's own: the file's last line break
 // is not part of the template (`shipped.ts:24`).
 //
 // Each file is handed to RPH's loader through a file port holding only that one file, at a level of its
 // own, so nothing else of a tree can change what RPH makes of it.
 
-import { loadGuidance, SHIPPED_GUIDANCE, type TemplatePart } from "rp-harness";
 import type { FileRead, FilesPort, Found, Layer, Refused, Scope } from "rp-harness/contract";
+import { SHIPPED_GUIDANCE } from "rp-harness/helpers";
+import { loadGuidance, type TemplatePart } from "../../../src/app/guidance";
 import { sha256 } from "./record";
 
 const SCOPE: Scope = { user: "floor", chat: "floor", session: "floor" };
