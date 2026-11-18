@@ -11,6 +11,7 @@ import type { CheckDef } from "../shared/world";
 import { checkOf, readyCheck, rollCheck } from "../engine/checks";
 import { DiceError, rollDice } from "../engine/dice";
 import { ENGINE_EVENTS } from "../engine/engine-pack";
+import { offeredActions } from "../engine/offered";
 import { createRng } from "../engine/rng";
 import { WORLD_STATE_DEFAULTS } from "../store/world-state";
 import type { ViewLine } from "../store/words";
@@ -65,8 +66,8 @@ export const WORLD_QUERY: ToolSpec = {
     const reply = call.reply();
     const reading = readingOr(call, reply);
     if (reading === null) return reply;
-    // Every action the world plays, the packs' and its own, by id: what `act` carries out and `checks_odds` reads.
-    if (args.at === RULESET_POINT) return reply.data({ ruleset: rulesetData(reading.doc, [...new Set([...reading.registry.actions.keys(), ...Object.keys(reading.doc.actions)])].sort()) });
+    // Every action the world plays, the packs' (the tabletop rules' only while they are on in this chat) and its own, by id: what `act` carries out and `checks_odds` reads.
+    if (args.at === RULESET_POINT) return reply.data({ ruleset: rulesetData(reading.doc, [...offeredActions(reading.registry, reading.ctx).keys()].sort()) });
     // (S17Story, quests) The quests' level, or a quest by name, id or ref: its record whole.
     const quest = queryQuests(call, reading, reply, args.at);
     if (quest !== null) return quest;

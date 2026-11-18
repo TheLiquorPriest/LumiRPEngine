@@ -10,6 +10,7 @@ import { isRecord } from "../../shared/json";
 import { parseMoneyInput } from "../../shared/money";
 import type { ActionDef, ParamDef } from "../../shared/world";
 import { policyFor } from "../../engine/adjudication";
+import { offeredActions } from "../../engine/offered";
 import { own } from "../../engine/pack-kit";
 import { actionOdds } from "../../engine/resolve";
 import { OBJECT, TEXT, type ToolSpec } from "../kit";
@@ -25,11 +26,9 @@ function percent(p: number): number {
   return Math.round(p * 1000) / 10;
 }
 
-/** Every action a call may name: the packs', and the world's own over a pack's of the same id. */
+/** Every action a call may name: the packs', less the tabletop rules' while they are off in this chat, and the world's own over a pack's of the same id. */
 function actionsOf(r: Reading): Map<string, ActionDef> {
-  const all = new Map<string, ActionDef>(r.registry.actions);
-  for (const [id, a] of Object.entries(r.world.actions)) all.set(id, a);
-  return all;
+  return offeredActions(r.registry, r.ctx);
 }
 
 /**

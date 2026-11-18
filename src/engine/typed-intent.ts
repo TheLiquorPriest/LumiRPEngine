@@ -20,6 +20,7 @@ import { hasOwn } from "../shared/json";
 import type { ActionDef, WorldCurrency, WorldDoc } from "../shared/world";
 import { offersAction } from "../shared/world";
 import { FINANCE_ACTIONS } from "../shared/finance";
+import { offeredActions } from "./offered";
 import { optionalQuery } from "./pack-kit";
 import type { Registry } from "./registry-impl";
 import { isGone, kindIs } from "./scope";
@@ -240,9 +241,8 @@ function phraseAt(tokens: readonly string[], phrase: readonly string[], acts: (s
 export function typedIntent(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, text: string): InterpretOutput | null {
   const said = tokenize(text);
   const tokens = said.map((t) => t.word);
-  const actions = new Map<string, ActionDef>();
-  for (const [id, a] of reg.actions) actions.set(id, a);
-  for (const [id, a] of Object.entries(world.actions)) actions.set(id, a);
+  const ctx = reg.context(world, state);
+  const actions = offeredActions(reg, ctx);
   const named = new Set(words(text));
   const pov = world.pov;
   const people = new Set<string>();
@@ -250,7 +250,6 @@ export function typedIntent(reg: Registry, world: WorldDoc, state: Readonly<Worl
   const acts = (start: number) => playerActs(said, start, people);
   // Only what fits the fight's state for the POV, as interpret and the Combat tab offer it: a start
   // outside a fight, any other combat action in one the POV is in.
-  const ctx = reg.context(world, state);
   const fits = optionalQuery(ctx, "combat.offers");
   const holders = optionalQuery(ctx, "economy.holders");
   const candidates: { action: ActionDef; params: JsonObject; skipped: number; length: number }[] = [];

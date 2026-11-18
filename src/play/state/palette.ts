@@ -4,6 +4,7 @@
 import { checkView, policyOf } from "../../engine/adjudication";
 import { identifiers } from "../../engine/expr";
 import { actsFor } from "../../engine/org";
+import { offeredActions } from "../../engine/offered";
 import { optionalQuery } from "../../engine/pack-kit";
 import type { Registry } from "../../engine/registry-impl";
 import { actionOdds, companionCandidates, paramCandidates } from "../../engine/resolve";
@@ -37,11 +38,9 @@ function unavailable(failed: { code: string; reason: string; words?: string } | 
 }
 
 export function palette(world: WorldDoc, state: WorldState, registry: Registry): PaletteView {
-  const actions = new Map<string, ActionDef>();
-  for (const [id, a] of registry.actions) actions.set(id, a);
-  for (const [id, a] of Object.entries(world.actions)) actions.set(id, a);
   const entries: PaletteEntry[] = [];
   const ctx = registry.context(world, state);
+  const actions = offeredActions(registry, ctx);
   const env = scopeEnv({ reg: registry, ctx, bindings: { self: world.pov, actor: world.pov } });
   const retry = policyOf(world, state).retry;
   // Paying as (ORG-SPEC §3.6): the organizations the POV may spend for, worked out once, for Pay and Buy.
