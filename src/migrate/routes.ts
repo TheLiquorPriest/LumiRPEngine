@@ -17,7 +17,7 @@ import { answerPaused, NotPaused } from "./answers";
 import { rowsGiven } from "./migrate";
 import { oldRecord, oldRecords } from "./old-records";
 import { IMPORTED, IMPORTED_AGENTS } from "./own-files";
-import { chatOne, chatsOf, differencesOf, itemsOf, migrationPage, type MigrationPageInput, reportFor, type ReportOf, rowsOf, summaryOf, textFor } from "./page";
+import { chatOne, chatsOf, differencesOf, itemsOf, migrationPage, type MigrationPageInput, offRpeNow, reportFor, type ReportOf, rowsOf, summaryOf, textFor } from "./page";
 import { RehearsalRunning, type Rehearsals } from "./rehearse-job";
 import { type MigrationReport, reportText } from "./report";
 import { runtimeFoldersOf } from "./runtime-folders";
@@ -262,13 +262,13 @@ export function migrateRoutes(deps: MigrateRoutesDeps) {
       path: `${MIGRATION_PATH}/:of/chats`,
       access: "page",
       group: "migration",
-      does: "A page of a report's chats, each by its name in Lumiverse: what today's readers found, what the real run did with it and its check, and whether it is still off RPE. `q` keeps those whose name or id holds it.",
+      does: "A page of a report's chats, each by its name in Lumiverse: what today's readers found, what the real run did with it and its check, and, for a chat the report found off RPE, where it stands now (the same read as the list at the head of the Migration page). `q` keeps those whose name or id holds it.",
       query: { q: shape.optional(shape.text(), "Words a chat's name or id holds, any case; all chats when left out.") },
       reply: migrationChatsReply,
       paged: { sizes },
       handle: ({ user, params, query }) => {
         const r = report(user, params.of);
-        return pageAfter(chatsOf(r, names(user, r), query.q ?? null), (c) => c.chat, query.after, query.limit);
+        return pageAfter(chatsOf(r, names(user, r), query.q ?? null, offRpeNow(page(user), r)), (c) => c.chat, query.after, query.limit);
       },
     }),
     route({
@@ -281,7 +281,7 @@ export function migrateRoutes(deps: MigrateRoutesDeps) {
       handle: ({ user, params }) => {
         const which = reportOf(params.of);
         const r = report(user, which);
-        const one = chatOne(page(user), r, names(user, r), params.chat, which);
+        const one = chatOne(page(user), r, names(user, r), params.chat, which, offRpeNow(page(user), r));
         if (one === null) throw new RouteError(404, `The report names no chat ${params.chat}.`);
         const { read, carried, ...chat } = one;
         // What today's readers found of it and what was carried of it are documents the migration made; they are carried as they are.

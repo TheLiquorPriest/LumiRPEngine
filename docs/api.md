@@ -3134,7 +3134,7 @@ The Migration page's summary: the last real run and the page's rehearsal in brie
 
 ### `GET /api/v1/migration/:of/chats`
 
-A page of a report's chats, each by its name in Lumiverse: what today's readers found, what the real run did with it and its check, and whether it is still off RPE. `q` keeps those whose name or id holds it.
+A page of a report's chats, each by its name in Lumiverse: what today's readers found, what the real run did with it and its check, and, for a chat the report found off RPE, where it stands now (the same read as the list at the head of the Migration page). `q` keeps those whose name or id holds it.
 
 | | |
 |---|---|
@@ -6492,7 +6492,7 @@ export interface MigrationChatReply {
 
 ### `MigrationChatShown`
 
-One chat of a report: its name in Lumiverse (null where Lumiverse's database can't be read), what today's readers found of it, what the real run did with it and why, its own turns imported, the messages it shares with the chat it was made from, its check (matched at the head and at how many swipes, where its swipes were placed, how many differences), and whether it is still off RPE.
+One chat of a report: its name in Lumiverse (null where Lumiverse's database can't be read), what today's readers found of it, what the real run did with it and why, its own turns imported, the messages it shares with the chat it was made from, its check (matched at the head and at how many swipes, where its swipes were placed, how many differences), and, where the report found it off RPE, where it stands now (the same read as the list at the head of the page; null where the report did not find it off RPE).
 
 ```ts
 export interface MigrationChatShown {
@@ -6508,7 +6508,7 @@ export interface MigrationChatShown {
   imported: number;
   shares: { chat: string; messages: number } | null;
   check: { matched: { head: boolean; swipes: number; of: number }; placed: { own: number; shown: number; lost: number }; differences: number } | null;
-  offRpe: boolean;
+  offRpe: OffRpeShown | null;
 }
 ```
 

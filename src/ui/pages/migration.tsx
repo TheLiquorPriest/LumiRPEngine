@@ -398,7 +398,11 @@ function ChatLine(props: { chat: MigrationChatShown; of: Of; names: ChatNames; o
           )}
         </p>
       )}
-      {c.offRpe ? <p class="rpe-line">Still off RPE: in Lumiverse, choose one of RPE's connections for this chat, and it is on RPE. RPE changes nothing in it.</p> : null}
+      {c.offRpe === null ? null : (
+        <p class="rpe-line" data-off-rpe={c.offRpe.done ? "on" : "off"}>
+          {`When the run read it, this chat was off RPE. Now it is ${offRpeWords(c.offRpe)}`}
+        </p>
+      )}
       {c.check !== null && c.check.differences > 0 ? (
         <>
           <Button size="sm" variant="ghost" current={open} onClick={() => setOpen(!open)}>

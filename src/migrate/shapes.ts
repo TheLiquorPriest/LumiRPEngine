@@ -137,7 +137,7 @@ export const migrationRowsReply = shape.named("MigrationRowsReply", "A page of a
 
 const chatShown = shape.named(
   "MigrationChatShown",
-  "One chat of a report: its name in Lumiverse (null where Lumiverse's database can't be read), what today's readers found of it, what the real run did with it and why, its own turns imported, the messages it shares with the chat it was made from, its check (matched at the head and at how many swipes, where its swipes were placed, how many differences), and whether it is still off RPE.",
+  "One chat of a report: its name in Lumiverse (null where Lumiverse's database can't be read), what today's readers found of it, what the real run did with it and why, its own turns imported, the messages it shares with the chat it was made from, its check (matched at the head and at how many swipes, where its swipes were placed, how many differences), and, where the report found it off RPE, where it stands now (the same read as the list at the head of the page; null where the report did not find it off RPE).",
   shape.object({
     chat: T,
     name: nullable(T),
@@ -151,7 +151,7 @@ const chatShown = shape.named(
     imported: N,
     shares: nullable(shape.object({ chat: T, messages: N })),
     check: nullable(shape.object({ matched: shape.object({ head: shape.yesNo(), swipes: N, of: N }), placed: shape.object({ own: N, shown: N, lost: N }), differences: N })),
-    offRpe: shape.yesNo(),
+    offRpe: nullable(offRpe),
   }),
 );
 export const migrationChatsReply = shape.named("MigrationChatsReply", "A page of a report's chats, in the order the report holds them.", shape.page(chatShown));

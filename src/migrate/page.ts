@@ -243,6 +243,7 @@ export function migrationPage(input: MigrationPageInput): MigrationPage {
   }
   // The chats the run found off RPE, as Lumiverse and RPE hold them now.
   out.offRpe.push(...offRpeNow(input, report));
+  if (out.run !== null) out.run.counts.offRpe = out.offRpe.filter((c) => !c.done).length;
   const tree = input.tree;
   const at = (path: string): boolean => tree !== undefined && existsSync(join(tree.files, path));
   const own = report.carried?.ownFiles ?? null;
@@ -313,8 +314,8 @@ export interface PageChat {
   imported: number;
   shares: ChatImportReport["shares"];
   check: { matched: ChatImportReport["matched"]; placed: ChatImportReport["placed"]; differences: number } | null;
-  /** Whether it was on today and is on none of RPE's connections once swapped: his to put on RPE. */
-  offRpe: boolean;
+  /** Where it stands now, if the report found it off RPE (`offRpeOf`, the same read as the list at the head of the page); null where it did not. */
+  offRpe: OffRpe | null;
 }
 
 /** Every chat a report names: those today's readers read, then those only the import names. */
@@ -325,11 +326,14 @@ function chatIds(report: MigrationReport): string[] {
   return ids;
 }
 
-/** Each chat of a report, by its name where Lumiverse holds one, and those `q` finds (in its name or its id, any case). */
-export function chatsOf(report: MigrationReport, names: ReadonlyMap<string, string>, q: string | null): PageChat[] {
+/** A placing that read nothing: where a report is shown alone, each chat off RPE as the run read it. */
+const AS_RUN: Placing = { now: null, rpe: new Set(), played: () => false };
+
+/** Each chat of a report, by its name where Lumiverse holds one, and those `q` finds (in its name or its id, any case); `off` is where the chats found off RPE stand now. */
+export function chatsOf(report: MigrationReport, names: ReadonlyMap<string, string>, q: string | null, off: readonly OffRpe[] = offRpeOf(report, AS_RUN)): PageChat[] {
   const read = new Map(report.chats.map((c) => [c.chatId, c]));
   const imports = new Map((report.imports ?? []).map((c) => [c.chatId, c]));
-  const off = new Set((report.offRpe ?? []).map((c) => c.chat));
+  const standing = new Map(off.map((o) => [o.chat, o]));
   const find = q === null || q.trim() === "" ? null : q.trim().toLowerCase();
   return chatIds(report).flatMap((id) => {
     const name = names.get(id) ?? null;
@@ -350,7 +354,7 @@ export function chatsOf(report: MigrationReport, names: ReadonlyMap<string, stri
         imported: c?.turns ?? 0,
         shares: c?.shares ?? null,
         check: c === undefined || (c.outcome !== "imported" && c.outcome !== "replaced") ? null : { matched: c.matched, placed: c.placed, differences: c.differences.length },
-        offRpe: off.has(id),
+        offRpe: standing.get(id) ?? null,
       },
     ];
   });
@@ -362,8 +366,8 @@ export interface PageChatOne extends PageChat {
   carried: ChatCarried | null;
 }
 
-export function chatOne(input: Pick<MigrationPageInput, "db" | "user">, report: MigrationReport, names: ReadonlyMap<string, string>, chat: string, of: ReportOf): PageChatOne | null {
-  const listed = chatsOf(report, names, null).find((c) => c.chat === chat);
+export function chatOne(input: Pick<MigrationPageInput, "db" | "user">, report: MigrationReport, names: ReadonlyMap<string, string>, chat: string, of: ReportOf, off?: readonly OffRpe[]): PageChatOne | null {
+  const listed = chatsOf(report, names, null, off).find((c) => c.chat === chat);
   if (listed === undefined) return null;
   return { ...listed, read: report.chats.find((c) => c.chatId === chat) ?? null, carried: of === "run" ? (chatRecord(input.db, input.user, chat)?.carried ?? null) : null };
 }

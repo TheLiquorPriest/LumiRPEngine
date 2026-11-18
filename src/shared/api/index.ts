@@ -1822,7 +1822,7 @@ export interface MigrationChatReply {
   carried: JsonValue | null;
 }
 
-/** One chat of a report: its name in Lumiverse (null where Lumiverse's database can't be read), what today's readers found of it, what the real run did with it and why, its own turns imported, the messages it shares with the chat it was made from, its check (matched at the head and at how many swipes, where its swipes were placed, how many differences), and whether it is still off RPE. */
+/** One chat of a report: its name in Lumiverse (null where Lumiverse's database can't be read), what today's readers found of it, what the real run did with it and why, its own turns imported, the messages it shares with the chat it was made from, its check (matched at the head and at how many swipes, where its swipes were placed, how many differences), and, where the report found it off RPE, where it stands now (the same read as the list at the head of the page; null where the report did not find it off RPE). */
 export interface MigrationChatShown {
   chat: string;
   name: string | null;
@@ -1836,7 +1836,7 @@ export interface MigrationChatShown {
   imported: number;
   shares: { chat: string; messages: number } | null;
   check: { matched: { head: boolean; swipes: number; of: number }; placed: { own: number; shown: number; lost: number }; differences: number } | null;
-  offRpe: boolean;
+  offRpe: OffRpeShown | null;
 }
 
 /** A page of a report's chats, in the order the report holds them. */
@@ -5982,7 +5982,7 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
-  /** A page of a report's chats, each by its name in Lumiverse: what today's readers found, what the real run did with it and its check, and whether it is still off RPE. `q` keeps those whose name or id holds it. */
+  /** A page of a report's chats, each by its name in Lumiverse: what today's readers found, what the real run did with it and its check, and, for a chat the report found off RPE, where it stands now (the same read as the list at the head of the Migration page). `q` keeps those whose name or id holds it. */
   "GET /api/v1/migration/:of/chats": {
     params: { of: string };
     query: { q?: string; limit?: number; cursor?: string };
