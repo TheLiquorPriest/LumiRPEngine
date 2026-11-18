@@ -137,7 +137,7 @@ export function GoingBack() {
           </li>
         ))}
       </ul>
-      <p class="rpe-meta">What today's build put in Lumiverse, left as it is{shown.said === null ? " until you say you will not go back" : ""}:</p>
+      <p class="rpe-meta">What the previous build put in Lumiverse, left as it is{shown.said === null ? " until you say you will not go back" : ""}:</p>
       {left.length === 0 ? (
         <p class="lre-muted rpe-line">No real run has counted it yet.</p>
       ) : (
@@ -153,7 +153,7 @@ export function GoingBack() {
         </p>
       ) : asking ? (
         <div class="lre-stack" data-confirm="true">
-          <p class="rpe-line">Once you say it, this page offers to remove the books today's build made for its worlds, one book per press. Going back's steps still hold, but a book you remove is gone, and the previous build would play without it. Say you will not go back?</p>
+          <p class="rpe-line">Once you say it, this page offers to remove the books the previous build made for its worlds, one book per press. Going back's steps still hold, but a book you remove is gone, and the previous build would play without it. Say you will not go back?</p>
           <div class="lre-row">
             <Button variant="danger" size="sm" busy={busy} onClick={say}>
               I will not go back
@@ -172,7 +172,7 @@ export function GoingBack() {
       {shown.said === null ? null : shown.books === null ? (
         <p class="lre-muted rpe-line">{shown.booksWhy ?? "No engine book is listed."}</p>
       ) : shown.books.length === 0 ? (
-        <p class="lre-muted rpe-line">Lumiverse holds no book today's build made.</p>
+        <p class="lre-muted rpe-line">Lumiverse holds no book the previous build made.</p>
       ) : (
         <ul class="lre-stack rpe-plain" data-books="true">
           {shown.books.map((b) => (

@@ -38,7 +38,7 @@ export type CarriedRow = CarriedTurnsReply["turns"][number];
 /** What the migration kept of one carried turn, in a line: the engine that played it, why no turn was played, how many lines say something against it. */
 export function carriedWords(row: CarriedRow): string {
   const engine = row.engine === null ? "engine not read" : ENGINE_WORDS[row.engine];
-  return `carried from today's build, played by ${engine}${row.unplayed === null ? "" : `; no turn was played: ${row.unplayed}`}${row.departures === 0 ? "" : `; ${counted(row.departures, "line")} say something against its turn`}`;
+  return `carried from the previous build, played by ${engine}${row.unplayed === null ? "" : `; no turn was played: ${row.unplayed}`}${row.departures === 0 ? "" : `; ${counted(row.departures, "line")} say something against its turn`}`;
 }
 
 function TurnLine(props: { turn: TurnRow; carried?: CarriedRow | undefined; onOpen: () => void }) {
@@ -209,7 +209,7 @@ export function TurnsView(props: TurnsViewProps) {
         ) : props.problem === null ? (
           <Empty icon="list" title="No turn played on RPE yet">
             <span>A turn shows here once RPE plays a reply in this chat.</span>
-            {carried === null ? null : <span>The migration carried {counted(carried, "turn")} of it from today's build: they made its world, cast and story as they stand{unlisted.length > 0 ? ", and each is listed below." : ", and are not runs of RPE's, so none is listed here."}</span>}
+            {carried === null ? null : <span>The migration carried {counted(carried, "turn")} of it from the previous build: they made its world, cast and story as they stand{unlisted.length > 0 ? ", and each is listed below." : ", and are not runs of RPE's, so none is listed here."}</span>}
           </Empty>
         ) : null
       ) : (
@@ -222,7 +222,7 @@ export function TurnsView(props: TurnsViewProps) {
         </div>
       )}
       {unlisted.length === 0 ? null : (
-        <Section id="carried" title="Carried from today's build">
+        <Section id="carried" title="Carried from the previous build">
           <p class="rpe-meta">Turns the migration carried that RPE holds no run of: each opens to what the old engine recorded of it.</p>
           <ul class="lre-rowlist" data-carried-turns>
             {unlisted.map((row) => (

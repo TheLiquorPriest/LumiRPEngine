@@ -16,6 +16,7 @@ import { type PagedReading, usePaged, useRead } from "../reading";
 import { bytesWords, counted, errorWords } from "../words";
 import { CarriedOffer } from "./bootstrap";
 import { GoingBack } from "./migration-going-back";
+import { ChatLabel, ChatName, type ChatNames, NO_NAMES, useChatNames } from "./chat-names";
 
 /** Which report the lists read: the last real run's, or the rehearsal started from this page. */
 type Of = "run" | "rehearsal";
@@ -26,37 +27,45 @@ function andList(parts: readonly string[]): string {
 }
 
 const REASONS: Readonly<Record<string, string>> = {
-  missing_placeholder: "a placeholder today's build needs is missing from it",
+  missing_placeholder: "a placeholder the previous build needs is missing from it",
   blank: "it is blank where a text may not be",
   unknown_id: "no build had a text of that id",
 };
 
-/** One thing waiting on the user, in words. */
-export function waitingWords(w: WaitingOnUser): string {
+/** One thing waiting on the user, in words, with the chat it is about (where it is about one) set apart: what comes before its name, the chat, and what follows it. */
+function waitingSplit(w: WaitingOnUser): { before: string; chat: string | null; after: string } {
+  const plain = (words: string) => ({ before: words, chat: null, after: "" });
+  const about = (chat: string, after: string) => ({ before: "Chat ", chat, after });
   switch (w.kind) {
     case "guidance":
-      return `Your GUIDANCE.md is at ${w.path}, switched off: one press puts it in force as AGENTS.md at the same level, or copy from it.`;
+      return plain(`Your GUIDANCE.md is at ${w.path}, switched off: one press puts it in force as AGENTS.md at the same level, or copy from it.`);
     case "agent":
-      return `Your agent ${w.id} is at ${w.path}, switched off.${w.pins.length > 0 ? ` ${counted(w.pins.length, "pin")} carried for it wait until it is on: ${w.pins.join(", ")}.` : ""}${w.deadTools.length > 0 ? ` Tools it names that no longer exist: ${w.deadTools.join(", ")}.` : ""}`;
+      return plain(`Your agent ${w.id} is at ${w.path}, switched off.${w.pins.length > 0 ? ` ${counted(w.pins.length, "pin")} carried for it wait until it is on: ${w.pins.join(", ")}.` : ""}${w.deadTools.length > 0 ? ` Tools it names that no longer exist: ${w.deadTools.join(", ")}.` : ""}`);
     case "skill":
-      return `Your skill ${w.id} is at ${w.path}, switched off.`;
+      return plain(`Your skill ${w.id} is at ${w.path}, switched off.`);
     case "connection":
-      return w.agent === null ? `${w.where} named ${w.connection}, a connection in Lumiverse: RPE has no place for that work, which its default connection does.` : `${w.where} named ${w.connection}, a connection in Lumiverse: pick one of RPE's for your agent ${w.agent}; until you do, its default connection does that work.`;
+      return plain(w.agent === null ? `${w.where} named ${w.connection}, a connection in Lumiverse: RPE has no place for that work, which its default connection does.` : `${w.where} named ${w.connection}, a connection in Lumiverse: pick one of RPE's for your agent ${w.agent}; until you do, its default connection does that work.`);
     case "paused":
-      return `Chat ${w.chat} was paused on ${counted(w.questions, "edit", "edits")} waiting on keep or discard${w.answered === null ? "." : `: you answered ${w.answered}.`}`;
+      return about(w.chat, ` was paused on ${counted(w.questions, "edit", "edits")} waiting on keep or discard${w.answered === null ? "." : `: you answered ${w.answered}.`}`);
     case "staged":
-      return `Chat ${w.chat}: ${counted(w.staged, "staged change")} waiting for your next message, held as a request: keep it held, or drop it.`;
+      return about(w.chat, `: ${counted(w.staged, "staged change")} waiting for your next message, held as a request: keep it held, or drop it.`);
     case "chat":
-      return `Chat ${w.chat}: ${andList([w.chips > 0 ? counted(w.chips, "chip") : "", w.reviewCards > 0 ? counted(w.reviewCards, "review card") : "", w.rollback ? "a rollback never applied, archived" : ""].filter((p) => p !== ""))}, on its turns.`;
+      return about(w.chat, `: ${andList([w.chips > 0 ? counted(w.chips, "chip") : "", w.reviewCards > 0 ? counted(w.reviewCards, "review card") : "", w.rollback ? "a rollback never applied, archived" : ""].filter((p) => p !== ""))}, on its turns.`);
     case "filing":
-      return `Chat ${w.chat}: the mind files of ${counted(w.characters, "character")}${w.notes ? ", and its notes," : ""} are attached and not yet filed.`;
+      return about(w.chat, `: the mind files of ${counted(w.characters, "character")}${w.notes ? ", and its notes," : ""} are attached and not yet filed.`);
     case "row":
-      return `${w.path} is found and no row names it: give it a row, and the next rehearsal uses it.`;
+      return plain(`${w.path} is found and no row names it: give it a row, and the next rehearsal uses it.`);
     case "pin":
-      return `${w.file} was pinned for ${w.role}, which has no agent in RPE: it is pinned for the Author now. Pin and unpin it on the Files page.`;
+      return plain(`${w.file} was pinned for ${w.role}, which has no agent in RPE: it is pinned for the Author now. Pin and unpin it on the Files page.`);
     case "text":
-      return `Your text ${w.id} is set apart: ${REASONS[w.reason] ?? w.reason}${w.missing.length > 0 ? ` (${w.missing.join(", ")})` : ""}.`;
+      return plain(`Your text ${w.id} is set apart: ${REASONS[w.reason] ?? w.reason}${w.missing.length > 0 ? ` (${w.missing.join(", ")})` : ""}.`);
   }
+}
+
+/** One thing waiting on the user, in words; a chat it is about is named as `name` gives it, else by its id. */
+export function waitingWords(w: WaitingOnUser, name: ChatNames = NO_NAMES): string {
+  const { before, chat, after } = waitingSplit(w);
+  return chat === null ? before : `${before}${name(chat) ?? chat}${after}`;
 }
 
 /** A press on the waiting list: its words, busy while it runs, and what came of it. */
@@ -175,11 +184,18 @@ function GiveRow(props: { path: string; given: MigrationReply["given"]; onDone()
 }
 
 /** One waiting line with its press; a done line struck. */
-function WaitingLine(props: { w: WaitingOnUser; given: MigrationReply["given"]; onDone(): void }) {
+function WaitingLine(props: { w: WaitingOnUser; given: MigrationReply["given"]; onDone(): void; names?: ChatNames; open?(chat: string): void }) {
   const app = useApp();
   const { w } = props;
   const [open, setOpen] = useState(false);
-  const words = <span class="rpe-line">{waitingWords(w)}</span>;
+  const split = waitingSplit(w);
+  const words = (
+    <span class="rpe-line">
+      {split.before}
+      {split.chat === null ? null : <ChatName chat={split.chat} name={(props.names ?? NO_NAMES)(split.chat)} {...(props.open === undefined ? {} : { onOpen: props.open })} />}
+      {split.after}
+    </span>
+  );
   let press: ComponentChildren = null;
   const switchOn = (path: string): Promise<string> =>
     app.client.call("POST /api/v1/migration/switch-on", {}, { body: { path } }).then((r) => {
@@ -192,7 +208,7 @@ function WaitingLine(props: { w: WaitingOnUser; given: MigrationReply["given"]; 
     const answer = (choice: "keep" | "discard") => async (): Promise<string> => {
       const done = await app.client.call("POST /api/v1/migration/chats/:chat/answer", { chat: w.chat }, { body: { choice } });
       props.onDone();
-      return done.held ? `${choice === "keep" ? "Kept" : "Discarded"}, and held as today's build holds it while a reply is under way in that chat: it lands at the run after that reply is finished.` : `${choice === "keep" ? "Kept" : "Discarded"}: ${counted(done.turns.length, "turn")} took the held changes.`;
+      return done.held ? `${choice === "keep" ? "Kept" : "Discarded"}, and held as the previous build holds it while a reply is under way in that chat: it lands at the run after that reply is finished.` : `${choice === "keep" ? "Kept" : "Discarded"}: ${counted(done.turns.length, "turn")} took the held changes.`;
     };
     press = (
       <span class="lre-inline">
@@ -258,7 +274,7 @@ function SummaryView(props: { summary: MigrationSummaryShown; onSave(): void; sa
           ))}
         </ul>
       )}
-      <Row k="Found" v={`${counted(s.counts.items, "thing")} in ${counted(s.counts.rows, "row")}, ${counted(s.counts.chats, "chat")}`} sub={`${s.counts.notClassified} found, not classified; ${s.counts.unreadable} could not be read; ${s.counts.differences} difference(s) from today's fold; ${s.counts.offRpe} chat(s) still off RPE`} />
+      <Row k="Found" v={`${counted(s.counts.items, "thing")} in ${counted(s.counts.rows, "row")}, ${counted(s.counts.chats, "chat")}`} sub={`${s.counts.notClassified} found, not classified; ${s.counts.unreadable} could not be read; ${s.counts.differences} difference(s) from the previous build's fold; ${s.counts.offRpe} chat(s) still off RPE`} />
       <Row k="Disk" v={`${bytesWords(s.disk.total)} in all`} sub={`the backup ${bytesWords(s.disk.backup)}, the import ${bytesWords(s.disk.import)}${s.disk.free === null ? "" : `; ${bytesWords(s.disk.free)} free`}`} />
       {s.backup === null ? null : <Row k="Backup" v={s.backup.path} sub={<code class="rpe-hash">{s.backup.sha256}</code>} />}
       <div class="lre-inline">
@@ -325,11 +341,11 @@ function DifferenceLine(props: { d: FoldDifference }) {
 function Differences(props: { of: Of; chat: string }) {
   const app = useApp();
   const read = usePaged<FoldDifference>((cursor) => app.client.call("GET /api/v1/migration/:of/chats/:chat/differences", { of: props.of, chat: props.chat }, { query: cursor === undefined ? {} : { cursor } }), [props.of, props.chat]);
-  return <PagedList read={read} label="differences" empty="It matched today's fold everywhere." item={(d) => <DifferenceLine key={`${d.turn}${d.at === "head" ? "" : `${d.at.message}:${d.at.swipe}`}`} d={d} />} />;
+  return <PagedList read={read} label="differences" empty="It matched the previous build's fold everywhere." item={(d) => <DifferenceLine key={`${d.turn}${d.at === "head" ? "" : `${d.at.message}:${d.at.swipe}`}`} d={d} />} />;
 }
 
 /** One chat by its name in Lumiverse: what came of it, its check, and the one step that puts it on RPE where it is still off it. */
-function ChatLine(props: { chat: MigrationChatShown; of: Of }) {
+function ChatLine(props: { chat: MigrationChatShown; of: Of; names: ChatNames; open(chat: string): void }) {
   const c = props.chat;
   const [open, setOpen] = useState(false);
   const imported = c.outcome === "imported" || c.outcome === "replaced";
@@ -337,17 +353,21 @@ function ChatLine(props: { chat: MigrationChatShown; of: Of }) {
   const clean = m !== null && m.head && c.check?.differences === 0;
   return (
     <li class="lre-stack rpe-migrated" data-chat={c.chat} key={c.chat}>
-      <div class="lre-inline">
-        <span class="rpe-strong">{c.name ?? c.chat}</span>
+      <div class="lre-inline rpe-wrap">
+        <ChatLabel chat={c.chat} name={c.name} {...(imported ? { onOpen: props.open } : {})} />
         {c.outcome === null ? null : <Badge tone={imported ? (clean ? "pos" : "warn") : undefined}>{c.outcome}</Badge>}
       </div>
-      {c.name === null ? null : <p class="rpe-meta">{c.chat}</p>}
       <p class="rpe-line">{`${counted(c.turns, "turn")} over ${counted(c.replies, "reply", "replies")}${c.engine === null ? "" : ` on the ${c.engine} engine`}${c.journal === null ? "" : `; journal ${c.journal}`}`}</p>
       {c.why === null ? null : <p class="rpe-meta">{c.why}</p>}
       {m === null || c.check === null ? null : (
         <p class="rpe-line">
           {counted(c.imported, "turn")} imported · matched at the head: {m.head ? "yes" : "no"}, at {m.swipes} of {m.of} swipes
-          {c.shares === null ? "" : ` · shares ${counted(c.shares.messages, "message")} with ${c.shares.chat}`}
+          {c.shares === null ? null : (
+            <>
+              {` · shares ${counted(c.shares.messages, "message")} with `}
+              <ChatName chat={c.shares.chat} name={props.names(c.shares.chat)} onOpen={props.open} />
+            </>
+          )}
         </p>
       )}
       {c.offRpe ? <p class="rpe-line">Still off RPE: in Lumiverse, choose one of RPE's connections for this chat, and it is on RPE. RPE changes nothing in it.</p> : null}
@@ -363,14 +383,14 @@ function ChatLine(props: { chat: MigrationChatShown; of: Of }) {
   );
 }
 
-function Chats(props: { of: Of }) {
+function Chats(props: { of: Of; names: ChatNames; open(chat: string): void }) {
   const app = useApp();
   const [q, setQ] = useState("");
   const read = usePaged<MigrationChatShown>((cursor) => app.client.call("GET /api/v1/migration/:of/chats", { of: props.of }, { query: { ...(q.trim() === "" ? {} : { q }), ...(cursor === undefined ? {} : { cursor }) } }), [props.of, q]);
   return (
     <div class="lre-stack">
       <input class="lre-input" type="search" value={q} placeholder="a chat's name or id" onInput={(event) => setQ((event.currentTarget as HTMLInputElement).value)} />
-      <PagedList read={read} label="chats" empty={q === "" ? "The report names no chat." : "No chat's name or id holds that."} item={(c) => <ChatLine key={c.chat} chat={c} of={props.of} />} />
+      <PagedList read={read} label="chats" empty={q === "" ? "The report names no chat." : "No chat's name or id holds that."} item={(c) => <ChatLine key={c.chat} chat={c} of={props.of} names={props.names} open={props.open} />} />
     </div>
   );
 }
@@ -420,14 +440,14 @@ function PrintedText(props: { of: Of }) {
 }
 
 /** The report the lists read, a page at a time. */
-function ReportLists(props: { of: Of }) {
+function ReportLists(props: { of: Of; names: ChatNames; open(chat: string): void }) {
   return (
     <>
       <Section title="Rows" id="rows">
         <Rows of={props.of} />
       </Section>
       <Section title="Chats" id="chats">
-        <Chats of={props.of} />
+        <Chats of={props.of} names={props.names} open={props.open} />
       </Section>
       <Section title="What was found" id="items">
         <Items of={props.of} />
@@ -458,23 +478,33 @@ export function MigrationView(props: {
   line?: (w: WaitingOnUser) => ComponentChildren;
   /** Going back as its own part of the page draws it; left out, the steps and the permissions. */
   goingBack?: ComponentChildren;
+  /** The name the Chats page gives a chat, where the lists show one; left out, each chat is shown by its id. */
+  names?: ChatNames;
+  /** Opens a chat, as the Chats page does; left out, a chat's name does not open it. */
+  open?(chat: string): void;
 }) {
   const { shown } = props;
+  const names = props.names ?? NO_NAMES;
   const lumiverse = props.folder ?? shown.sources.lumiverse ?? "";
   const rehearsal = shown.rehearsal;
   const both = shown.run !== null && rehearsal.state === "ready";
   return (
     <div class="lre-stack rpe-page" data-page="migration">
-      <PageHeader title="Migration" subtitle="A rehearsal over today's data, the last real run, what waits on you, the swap and going back." />
+      <PageHeader title="Migration" subtitle="A rehearsal over the previous build's data, the last real run, what waits on you, the switch and going back." />
       {shown.offRpe.length === 0 ? null : (
         <Section title={`Chats still off RPE (${shown.offRpe.filter((c) => !c.done).length})`} id="off-rpe">
-          <p class="rpe-meta">Each was on today and is on none of RPE's connections. In Lumiverse, choose one of RPE's connections for it, and it is on RPE. RPE changes nothing in your chats.</p>
+          <p class="rpe-meta">Each chat was on the previous build and is on none of RPE's connections. In Lumiverse, choose one of RPE's connections for it, and it is on RPE. RPE changes nothing in your chats.</p>
           <ul class="lre-stack rpe-plain">
             {shown.offRpe.map((c) => {
-              const words = `Chat ${c.chat}: ${c.pinned === null ? "pinned to no connection, so it follows the one active for you" : `pinned to connection ${c.pinned}`}.`;
+              const line = (
+                <>
+                  <ChatLabel chat={c.chat} name={names(c.chat)} {...(props.open === undefined ? {} : { onOpen: props.open })} />
+                  {`: ${c.pinned === null ? "pinned to no connection, so it follows the one active for you" : `pinned to connection ${c.pinned}`}.`}
+                </>
+              );
               return (
                 <li key={c.chat} class="rpe-line" data-chat={c.chat} data-done={c.done ? "true" : undefined}>
-                  {c.done ? <s>{words}</s> : words}
+                  {c.done ? <s>{line}</s> : line}
                 </li>
               );
             })}
@@ -482,17 +512,17 @@ export function MigrationView(props: {
         </Section>
       )}
       <Section title="A rehearsal" id="rehearsal">
-        <p class="rpe-meta">Reads today's data as rpe migrate --rehearse does. It writes nothing: not today's data, not RPE's database. Its report is held here until the next one, or until RPE stops.</p>
+        <p class="rpe-meta">Reads the previous build's data as rpe migrate --rehearse does. It writes nothing: not the previous build's data, not RPE's database. Its report is held here until the next one, or until RPE stops.</p>
         <label class="lre-stack">
           <span class="rpe-meta">Lumiverse's data folder (the one holding lumiverse.db)</span>
           <input class="lre-input" value={lumiverse} placeholder="the folder" onInput={(event) => props.onFolder((event.currentTarget as HTMLInputElement).value)} />
         </label>
-        {shown.sources.runtime === null ? <p class="rpe-meta">No runtime of today's build is read.</p> : <p class="rpe-meta">{`Today's runtime is read from ${shown.sources.runtime.configDir} and ${shown.sources.runtime.dataDir}.`}</p>}
+        {shown.sources.runtime === null ? <p class="rpe-meta">No runtime of the previous build is read.</p> : <p class="rpe-meta">{`The previous runtime is read from ${shown.sources.runtime.configDir} and ${shown.sources.runtime.dataDir}.`}</p>}
         <Button busy={props.starting || rehearsal.state === "running"} onClick={() => props.onRehearse(lumiverse.trim() === "" ? null : lumiverse.trim())}>
           Start a rehearsal
         </Button>
         {props.said === null ? null : <p class="rpe-line">{props.said}</p>}
-        {rehearsal.state === "running" ? <p class="lre-muted rpe-line">Reading today's data…</p> : null}
+        {rehearsal.state === "running" ? <p class="lre-muted rpe-line">Reading the previous build's data…</p> : null}
         {rehearsal.state === "failed" ? <p class="rpe-line">{`The last rehearsal stopped: ${rehearsal.why}`}</p> : null}
         {rehearsal.state === "ready" ? <SummaryView summary={rehearsal.summary} saving={props.saving === "rehearsal"} onSave={() => props.onSave("rehearsal")} /> : null}
       </Section>
@@ -530,7 +560,7 @@ export function MigrationView(props: {
             {shown.waiting.map((w, i) =>
               props.line === undefined ? (
                 <li key={i} data-waiting={w.kind} data-done={w.done ? "true" : undefined}>
-                  {w.done ? <s>{waitingWords(w)}</s> : waitingWords(w)}
+                  {w.done ? <s>{waitingWords(w, names)}</s> : waitingWords(w, names)}
                 </li>
               ) : (
                 <Fragment key={i}>{props.line(w)}</Fragment>
@@ -540,7 +570,7 @@ export function MigrationView(props: {
         )}
         {props.offer}
       </Section>
-      <Section title="The swap" id="swap">
+      <Section title="The switch" id="swap">
         <ul class="lre-stack rpe-plain">
           {shown.swap.map((step, i) => (
             <li key={i} class="rpe-line">
@@ -582,11 +612,13 @@ export function MigrationPage() {
   const [saving, setSaving] = useState<Of | null>(null);
   const [chosen, setChosen] = useState<Of>("run");
   const [folder, setFolder] = useState<string | null>(null);
+  const names = useChatNames();
+  const open = (chat: string): void => app.go({ page: "live", chat });
   const shown = summary.value;
   if (shown === null) {
     return (
       <div class="lre-stack rpe-page" data-page="migration">
-        <PageHeader title="Migration" subtitle="A rehearsal over today's data, the last real run, what waits on you, the swap and going back." />
+        <PageHeader title="Migration" subtitle="A rehearsal over the previous build's data, the last real run, what waits on you, the switch and going back." />
         {summary.problem === null ? (
           <p class="lre-muted rpe-line">Reading the migration's summary…</p>
         ) : (
@@ -641,9 +673,11 @@ export function MigrationPage() {
       onSave={save}
       folder={folder}
       onFolder={setFolder}
-      lists={has ? <ReportLists key={of} of={of} /> : null}
+      lists={has ? <ReportLists key={of} of={of} names={names} open={open} /> : null}
       offer={shown.run === null ? null : <CarriedOffer />}
-      line={(w) => <WaitingLine w={w} given={shown.given} onDone={summary.again} />}
+      line={(w) => <WaitingLine w={w} given={shown.given} onDone={summary.again} names={names} open={open} />}
+      names={names}
+      open={open}
       goingBack={<GoingBack />}
     />
   );

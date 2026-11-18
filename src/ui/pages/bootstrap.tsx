@@ -20,6 +20,7 @@ import type { RpeClient } from "../client";
 import { counted, errorWords, num, tokenWords, when } from "../words";
 import { JOB_STATE_WORDS } from "./jobs";
 import { logAt } from "./runtime/logs";
+import { ChatLabel, type ChatNames, NO_NAMES, useChatNames } from "./chat-names";
 
 /** What he asks of a start: how much to relive (null: as the skill decides), and his own token limit for the job (null: the setting's). */
 export interface StartChoice {
@@ -441,21 +442,21 @@ const CARRIED_WORDS: Readonly<Record<CarriedBootstrap["state"], string>> = {
 };
 
 /** One carried chat on the Migration page: how its bootstrap stands, its newest job, its question, and its own start. */
-function CarriedChat(props: { item: CarriedBootstrap; busy: boolean; onStart(choice: StartChoice): void; onAnswer(job: string, word: AnswerWord): void }) {
+function CarriedChat(props: { item: CarriedBootstrap; name: string | null; busy: boolean; onOpen?(chat: string): void; onStart(choice: StartChoice): void; onAnswer(job: string, word: AnswerWord): void }) {
   const { item } = props;
   const [open, setOpen] = useState(false);
   const underWay = item.job !== null && item.state !== "none" && item.state !== "ended" ? [item.job] : [];
   return (
     <li class="rpe-entry lre-stack" data-carried={item.chat}>
       <div class="lre-inline rpe-wrap">
-        <span class="rpe-strong">{item.chat}</span>
+        <ChatLabel chat={item.chat} name={props.name} {...(props.onOpen === undefined ? {} : { onOpen: props.onOpen })} />
         <Badge>{CARRIED_WORDS[item.state]}</Badge>
         {item.job?.view?.limit === undefined ? null : <span class="rpe-meta">ended at its {item.job.view.limit.limit} limit</span>}
       </div>
       {item.job?.view?.report === undefined ? null : <Pre text={item.job.view.report} mono={false} />}
       {item.question === null ? null : <QuestionView question={item.question} chat={item.chat} busy={props.busy} onAnswer={(word) => props.onAnswer(item.question!.job, word)} />}
       {open ? (
-        <StartForm start={item.start} underWay={underWay} busy={props.busy} label={`Start a bootstrap job for ${item.chat}`} onStart={props.onStart} />
+        <StartForm start={item.start} underWay={underWay} busy={props.busy} label={`Start a bootstrap job for ${props.name ?? item.chat}`} onStart={props.onStart} />
       ) : (
         <Button size="sm" variant="ghost" onClick={() => setOpen(true)}>
           Start one for this chat
@@ -481,6 +482,7 @@ const NO_OFFER: OfferShown = { items: [], next: null, loading: true, problem: nu
 /** The offer on the Migration page, reading itself: the carried chats with how each bootstrap stands, read again when a job changes. */
 export function CarriedOffer() {
   const app = useApp();
+  const names = useChatNames();
   const [shown, setShown] = useState<OfferShown>(NO_OFFER);
   const [stamp, setStamp] = useState(0);
   const set = (next: Partial<OfferShown>): void => setShown((s) => ({ ...s, ...next }));
@@ -513,7 +515,7 @@ export function CarriedOffer() {
     set({ busy: true, said: null });
     app.client.call("POST /api/v1/chats/:chat/bootstrap", { chat }, { body: startBody(choice) }).then(
       (job) => {
-        set({ busy: false, said: `Started job ${job.id} for ${chat}.` });
+        set({ busy: false, said: `Started job ${job.id} for ${names(chat) ?? chat}.` });
         setStamp((n) => n + 1);
       },
       (error: unknown) => set({ busy: false, said: errorWords(error) }),
@@ -539,12 +541,13 @@ export function CarriedOffer() {
       (error: unknown) => set({ busy: false, said: errorWords(error) }),
     );
   };
-  return <OfferView shown={shown} onMore={more} onStartOne={startOne} onStartAll={startAll} onAnswer={answer} />;
+  return <OfferView shown={shown} names={names} open={(chat) => app.go({ page: "live", chat })} onMore={more} onStartOne={startOne} onStartAll={startAll} onAnswer={answer} />;
 }
 
 /** The offer as drawn: every carried chat with its state, its start and its question, and the start for all of them. */
-export function OfferView(props: { shown: OfferShown; onMore(): void; onStartOne(chat: string, choice: StartChoice): void; onStartAll(choice: StartChoice): void; onAnswer(chat: string, job: string, word: AnswerWord): void }) {
+export function OfferView(props: { shown: OfferShown; names?: ChatNames; open?(chat: string): void; onMore(): void; onStartOne(chat: string, choice: StartChoice): void; onStartAll(choice: StartChoice): void; onAnswer(chat: string, job: string, word: AnswerWord): void }) {
   const { shown } = props;
+  const names = props.names ?? NO_NAMES;
   const first = shown.items[0];
   let body: ComponentChildren;
   if (shown.loading) body = <p class="lre-muted rpe-line">Reading the carried chats…</p>;
@@ -554,7 +557,7 @@ export function OfferView(props: { shown: OfferShown; onMore(): void; onStartOne
       <>
         <ul class="lre-stack rpe-plain">
           {shown.items.map((item) => (
-            <CarriedChat key={item.chat} item={item} busy={shown.busy} onStart={(choice) => props.onStartOne(item.chat, choice)} onAnswer={(job, word) => props.onAnswer(item.chat, job, word)} />
+            <CarriedChat key={item.chat} item={item} name={names(item.chat)} busy={shown.busy} {...(props.open === undefined ? {} : { onOpen: props.open })} onStart={(choice) => props.onStartOne(item.chat, choice)} onAnswer={(job, word) => props.onAnswer(item.chat, job, word)} />
           ))}
         </ul>
         {shown.next === null ? null : (
@@ -578,11 +581,11 @@ export function OfferView(props: { shown: OfferShown; onMore(): void; onStartOne
         <div class="lre-stack" data-batch="true">
           <span class="rpe-caption">Started ({shown.batch.started.length})</span>
           {shown.batch.started.map((s) => (
-            <Row key={s.chat} k={s.chat} v={`job ${s.job.id}, ${JOB_STATE_WORDS[s.job.state].words}`} />
+            <Row key={s.chat} k={<ChatLabel chat={s.chat} name={names(s.chat)} {...(props.open === undefined ? {} : { onOpen: props.open })} />} v={`job ${s.job.id}, ${JOB_STATE_WORDS[s.job.state].words}`} />
           ))}
           <span class="rpe-caption">Refused ({shown.batch.refused.length})</span>
           {shown.batch.refused.map((r) => (
-            <Row key={r.chat} k={r.chat} v={r.why} />
+            <Row key={r.chat} k={<ChatLabel chat={r.chat} name={names(r.chat)} {...(props.open === undefined ? {} : { onOpen: props.open })} />} v={r.why} />
           ))}
         </div>
       )}

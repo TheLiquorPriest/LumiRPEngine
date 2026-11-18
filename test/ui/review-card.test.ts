@@ -42,6 +42,6 @@ describe("the review card", () => {
     expect(shown).toContain("the agents engine");
     expect(shown).toContain("it was stopped");
     expect(shown).toContain("Old words.");
-    expect(shown).toContain("Today's clean-up had removed this text.");
+    expect(shown).toContain("The previous build's clean-up had removed this text.");
   });
 });

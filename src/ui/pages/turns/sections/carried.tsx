@@ -36,7 +36,7 @@ export function CarriedRecord(props: { carried: CarriedTurnReply }) {
           <span class="rpe-caption">
             {t.part}: {t.path}
           </span>
-          {t.text === null ? <p class="lre-muted rpe-line">Today's clean-up had removed this text.</p> : <Pre text={t.text} mono={false} />}
+          {t.text === null ? <p class="lre-muted rpe-line">The previous build's clean-up had removed this text.</p> : <Pre text={t.text} mono={false} />}
         </div>
       ))}
     </div>

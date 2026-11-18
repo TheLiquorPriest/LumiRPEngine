@@ -113,7 +113,7 @@ describe("Settle now", () => {
   test("a chat with no run of RPE's that a migration carried turns of says so, and still offers Settle now", () => {
     const carried = turns({ turns: [], carried: 5 });
     expect(carried.text).toContain("No turn played on RPE yet");
-    expect(carried.text).toContain("The migration carried 5 turns of it from today's build");
+    expect(carried.text).toContain("The migration carried 5 turns of it from the previous build");
     expect(button(carried.tree, "Settle now")).toBeDefined();
     const none = turns({ turns: [], carried: null });
     expect(none.text).not.toContain("migration carried");
