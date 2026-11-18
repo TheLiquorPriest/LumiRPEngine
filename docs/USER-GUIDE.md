@@ -161,7 +161,7 @@ A press in the play views (here, in the HUD, in the actions sheet or on the map 
 
 **When the world's rules say no.** The world's rules advise. Where a press does not add up by them (a requirement not met, someone who is not there), it is done all the same, and the notice says "Done, though the world's rules say: …". It is refused only where it names someone, somewhere or something your character does not know ("Rena isn't anyone you know"), where it would change nothing ("That changes nothing."), or where the world cannot do it at all, and then the notice says why and nothing changes. The words are in `.prompts/play-answers.md`, yours to change.
 
-**Undo** takes back everything the change did. Where something has changed part of it since, Undo takes back the rest and says which part stays and why ("… stays as it is, because something has changed it since"). It undoes nothing once the turn it was kept with is no longer part of the chat's story (a swipe or a rewind took that turn away).
+**Undo** takes back what it still can of a change. Every kind of change a press, a fix or a turn makes has its Undo, but a roll you have seen ("… stays as it is, because you have seen how the roll fell"). Where something has changed part of it since, Undo takes back the rest and says which part stays and why ("… stays as it is, because something has changed it since"); where it took back only some, it says "Undone, but not all of it.". It undoes nothing once the turn it was kept with is no longer part of the chat's story (a swipe or a rewind took that turn away), and nothing of a turn that has not finished yet.
 
 **While a turn runs**, Now says **A turn is running**: "A change you make now applies at once, and the running turn goes on from where it began", with **Watch it work**, which opens Live. While a turn is held on Live, Now says **Paused**, with **Open Live**.
 
@@ -381,7 +381,7 @@ A turn's own page has its sections, those behind the spoiler gate shown once you
 - **The prompt's front, and what changed in it**, and **A reply asked for whole**, where one was;
 - **Intent record**, **The Author's record of the turn**, **Tokens by agent** and **The run, step by step** (gated);
 - **Changes by lane**, and **The changes, lane by lane** (gated), each with who made it, how sure it is and where it came from;
-- **The review card** (gated), for writes that waited for your word (see [Who may write what](#who-may-write-what));
+- **The review card** (gated): every change the turn made, under **The story's changes** and **The engine's changes**, each told in words (what changed, who made it and how sure it is, what it reported), with **Undo it** and a line saying what an Undo takes back and what it would leave; **The record as written** is closed under each, for whoever is looking for a fault. **Questions asked on it** holds the writes that wait for your word (see [Who may write what](#who-may-write-what));
 - **Who perceived the turn**;
 - **Quests it touched**, **Threads it left open**, **What is still open** and **Unsettled**, what did not add up (gated);
 - **Gap checks, consents and what it was told** (gated): each gap check and what came back, each consent, each rule that fired.
@@ -413,7 +413,7 @@ What the records hold can give away what comes next: secrets, the Author's plans
 
 **Places** lists every place of the chat, the world's own and those made in play, searchable a page at a time. A place opened shows its record, now or as it stood at a turn, in nine parts: **What defines it** (the lore entries bound to it), **Its base** (which you can write over with **Write it as your base**), **What the story changed there since**, **Its features**, who and what is here, its ways, who may enter and its doors, its history and who knows of it. Its grid, where it has one, shows everyone and everything on it: pick a person or a thing, then tap a square, to move them there at once, with Undo. A grid the chat made has **Keep in the world**. The records are read only while the gate is open.
 
-**Quests** shows every quest, secret, puzzle and agenda as the Author keeps it, behind the gate: what it is, its stages with what moves each on, who and where, its stakes and rewards, how much of it you are shown, and its history. Outside the gate, **What you see in your journal** shows each quest as far as it lets you see: the whole quest, only its name and the stages named, or nothing.
+**Quests** shows every quest, secret, puzzle and agenda as the Author keeps it, behind the gate: what it is, its stages with what moves each on and, for each stage the story has moved it past, how that stage ended (done or failed) and why, who and where, its stakes and rewards, how much of it you are shown, how it closed, and its history, each move with its turn. A quest standing on an end stage reads closed, as that stage ended it. Outside the gate, **What you see in your journal** shows each quest as far as it lets you see: the whole quest, only its name and the stages named, or nothing.
 
 ### Cast
 
