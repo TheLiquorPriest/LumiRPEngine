@@ -340,6 +340,68 @@ A **check** is the dice an action of the world rolls: a stat or a skill against 
 
 **What you see.** The actions sheet shows each action's odds before you pick it, and what the world's rules will make of it. After the turn, the turn's page lists every roll and ruling in its engine lane, behind the spoiler gate.
 
+## Swipes, edits, deletes and branches
+
+A **turn** is one reply attempt. Every change RPE records belongs to the turn that made it, and RPE's record of the chat follows the messages Lumiverse shows. At the start of every turn, RPE compares the chat as Lumiverse has it (which messages, which swipe shows, what each says) with its own record, and tells the Author what it found.
+
+### Swipes and regenerates
+
+A swipe or a regenerate is another attempt at the same turn: a new turn beside the earlier one, which starts from the record as it was before the earlier attempt. The Author reads `SWIPE.md` with `TURN.md`. As shipped, it keeps what was decided (the outcomes, the rolls, what the characters did) and tells it differently, and does not repeat the earlier attempt's opening, structure or key images. The earlier attempts are in the turn's folder, under `previous-attempts/`, each with its reply, its intent record and anything you typed about why.
+
+- The composer's **Swipe** control asks for one way: **another-telling** or **afresh** (the turn run again from the start, with new rolls), with a line of what was wrong (see [The composer](#the-composer-depth-and-swipe)).
+- What you asked for with the turn you swipe (its depth, a press in the play views) is asked again of the new attempt.
+- What you record belongs to the attempt you keep. Show another swipe on the newest reply, and that attempt's record is the chat's, its own changes intact.
+- Flip an earlier reply to another of its swipes, with later replies still after it, and the later turns are kept and their changes applied again on top of the swipe now showing. A change that no longer applies there is listed, never dropped silently: the next briefing tells the Author which stretch to look over, and the world state lists what no longer applies.
+
+### Edits
+
+- **A reply you edit** in Lumiverse: the turn is marked **edited**, and at the next turn the Author is told the text before and after. The text that stands is what happened, and the Author settles both lanes against it. **Settle now** has it do that at once (below).
+- **A message of yours you edit**, with turns after it: the later turns are marked "an earlier message edited", and the next briefing names the stretch after it, for the Author to look over.
+- **A reply Lumiverse saved differently** from what RPE released is marked **saved otherwise**.
+
+How much the briefing gives of edited replies is **Edited replies in the briefing** (`briefing.editedTokens`): every one in full, as shipped.
+
+### Deletes
+
+Delete a message and its turns leave the chat's story: everything they recorded goes with them (the world's changes, perceptions, memories, beats, the Author's records and notes), and the record is as it was before them. The next turn's briefing names the turns that are gone, and the Author reads `DELETE.md`: it does not refer to what was deleted, checks the scene, and takes your new message on its own terms.
+
+A deleted turn stays on the Turns page, marked **off the path**, as does an attempt you swiped away from.
+
+### Continue and impersonate
+
+**Continue** extends the same turn: the Author adds to what it recorded and does not start over. The Turns page shows the turn as continued, and **Where a continue went on from**. **Impersonate** has the Author write as your character, briefly, in their voice, and change nothing in the record.
+
+### Branches
+
+A branch in Lumiverse is a new chat whose turns point back into the chat it was branched from, so the history they share is shared, not copied. Turns played in the branch are its own. Until the branch has a turn of its own, what would write to its newest turn (a strike on the Cast page, Settle now) is refused, because it would go into the other chat's history too.
+
+### A stretch played without RPE
+
+Replies written while the chat was on another connection, after RPE's first turn in it, are a stretch played without RPE: the Author is told the range, and as shipped it records what matters of it, in passing or as a job. The line under each of those replies says **Made without RPE.**
+
+### The Turns page
+
+**Turns** lists every turn RPE has played in the chat, newest first: what it was (**New reply**, **Swipe**, **Regenerate**, **Continue**, **Impersonation**, **Settle run**), when, how long it took, its calls and tokens, its marks, and how it ended (**Reply released**, **No reply**, **Stopped**, **Stopped at a limit**, **Failed**). A turn the migration carried is marked **carried**, and opens to what the old engine recorded.
+
+A turn's own page has its sections, those behind the spoiler gate shown once you open it:
+
+- **Marks on this turn**, **Timings**, **Tokens**, **Its runs** and **What went to the chat**;
+- **What you asked for**: your depth, your swipe's way and feedback, what you pressed in the play views;
+- **What the Author was given** (gated): the prompt by part, its lore, the turn's files, and what each agent's first call was sent;
+- **The prompt's front, and what changed in it**, and **A reply asked for whole**, where one was;
+- **Intent record**, **The Author's record of the turn**, **Tokens by agent** and **The run, step by step** (gated);
+- **Changes by lane**, and **The changes, lane by lane** (gated), each with who made it, how sure it is and where it came from;
+- **The review card** (gated), for writes that waited for your word (see [Who may write what](#who-may-write-what));
+- **Who perceived the turn**;
+- **Quests it touched**, **Threads it left open**, **What is still open** and **Unsettled**, what did not add up (gated);
+- **Gap checks, consents and what it was told** (gated): each gap check and what came back, each consent, each rule that fired.
+
+A turn whose reply ended empty says **Its empty reply is still in your chat**, with the setting that would take such replies away.
+
+### Settle now
+
+**Settle now**, on the Turns page, on the page of the chat's newest turn, and under a reply whose record was not finished, runs the Author on the chat's newest turn against the chat as it reads now. Use it after you edit a reply, or when a turn's run stopped before it recorded everything. It writes no reply and adds nothing to your chat; its run shows on the turn's page as a **Settle run**. It waits while a turn of the chat runs ("Settle it once that turn is over"), and is refused where the chat has no turn of RPE's, or where its newest turn is shared with the chat it was branched from.
+
 ## GM mode
 
 **GM** mode shows everything the engine knows, including secrets, truths you haven't discovered and people who were removed, and lets you change any of it. It wears a gold frame, so you can tell at a glance that you're behind the curtain. Looking never changes your chat; only the edits you save do. In RPE its places are the World, Places, Quests, Cast and Story pages, each behind its own spoiler gate.
@@ -502,85 +564,6 @@ Two sections are new, both on unless the world or the GM switches them off, and 
 - **Property**: the property your character holds a part in and knows of (his own, or his family's), where it is, and who holds it, each with their role and share. It is told as his ("yours") only when he owns it outright or jointly; when he only uses, keeps or benefits from it (an authorized user, a custodian, a trustee, a beneficiary), its holders come first and then his role, so the narrator never takes it for his. A holder he doesn't know of reads "someone".
 
 People also tells what each person with your character visibly wears and carries (never what is in a bag or a pocket), every thing of it, with whose it is when it isn't theirs ("Danny Okafor carries Toolbox (yours)."). The **Gear** section sorts your character's things by who has them, never by whose they are, one line each with its details (a count, its condition from Gear 3, its description): **On you** (worn, in a pocket, in hand, or what it's in: "On you: Debit card (in Wallet): …"), **Holding for** someone (theirs, with why you have it), **Borrowed from** someone (until when, or overdue), **Lent out**, and **Not with you**: your own everyday things that aren't with you now, with where ("Not with you: Smartphone (at 114 Harbor Street)."), up to the world's *Not with you* lines (3; **Build → Sections → Gear**). At Gear 1 it lists only things in play: the world's notable ones and anything that changed hands or the story brought in. The guidance at the head of Gear, Place and People tells the narrator that having a thing isn't owning it, that a thing not with you is elsewhere and used only once fetched, and that furniture stays put. Each is a text you can reword, in **Settings → Agents → Prompts → Final output**.
-
-## Swipes, edits and branches
-
-A world chat survives all the ways people mess with a chat. Here is exactly what each one does.
-
-### Re-run and Re-narrate
-
-There are two ways to retry a reply:
-
-- **Re-narrate** keeps everything the engine decided (the same dice, the same outcome, the same events) and only asks for **new prose**: the narrator tells the same turn again. Nothing before the reply runs again, and the reply's read reads the new telling. This is the default.
-- **Re-run** plays the turn again with the engine, with a **fresh roll**. Your typed text keeps the reading it was given, but the engine draws new dice, so a failed check can succeed.
-
-**Settings → Swipes** has three rows, each with **Changed** and **Default**:
-
-- **What a swipe does**: *Re-narrate* (the default) or *Re-run*. A *Re-run* default stored before this build is moved to *Re-narrate* once.
-- **Ask what should change on each swipe** (off): when on, every plain swipe opens the **What should change?** field before its reply starts.
-- **Swipe with**: *The turn's texts* (the default) or *My current texts* (below).
-
-**Swipe as…**, under the latest reply, offers **Re-narrate…** and **Re-run the turn with the engine**. Each opens an optional **What should change?** field; leave it empty to swipe as is. What you write (trimmed, up to 600 characters, no macros) reaches only the narrator, for that one telling. It ends the narrator rules, and no record, hash, prompt set or role ever holds it. A second swipe has none unless you give it again. A **Retry** of a failed reply keeps it.
-
-Anything you fixed by hand (✎) or changed in GM mode, a workspace note included, carries over to the new swipe either way, made again after everything the new reply tells, so it still says what you said: Re-narrate after the same outcome, and Re-run after the new turn and everything the new roll did. It carries what the swipe showing when you asked had: Lumiverse puts a regenerated reply after all its swipes, but one made while an earlier swipe shows is made from that swipe, keeps its fixes, and Undo takes each back on the new swipe as on the old. Cash you set is that amount whatever the new roll spent, and a quest you moved on with **Stage** moves on from wherever the new reply leaves it, or stays as it is when the new reply takes it there too. One that can't be made at all (the thing it changed was only in the old reply) is dropped with a **Not carried** note in the Journal, and a correction you undid stays undone. With Re-narrate, any detail you opened on the original reply carries over too, and anything that depended on results of the original narration is dropped with a note in the Journal.
-
-A Re-narrate is sent the texts its turn was made with: your narrator rules and section guidance as they were then (**Settings → Agents → Prompts**), so only the prose changes. A Re-run is sent the texts of the reply it plays again, so it differs by its roll and not by an edit you made since. To see an edit of yours on an older turn, set **Settings → Swipes → Swipe with** to *My current texts*, which both then use. A turn from before LumiRPEngine kept its texts was made with the shipped ones.
-
-### Your own prompts
-
-**Settings → Agents → Prompts** holds every text LumiRPEngine sends to a model. It opens on its pages, grouped (**The narrator**, **Agents**, **Turn roles**), each with how many texts it has and how many are your own; a page with a text that needs a fix says so. **Find a text** searches all of them at once, by name, by any words in them (yours or the shipped ones) or by id, and lists what it finds by page; the chips under it show **All**, only **Yours**, or only those that **Need a fix** (a text of yours longer than **Longest text of your own** since you lowered it, or with a placeholder the text no longer has), each with its count. On a page, a heading with more than 12 texts is folded: **Show all** opens it, **Fold** closes it. Open a text to edit it: one is open at a time, and a text you've changed without saving keeps your words, marked **Not saved**, while you open another. **Compare with shipped**, under the text, shows what your text takes out of the shipped one and what it adds, line by line. Escape clears the search, or takes you from a page back to all of them.
-
-**Final output** is what goes into the narrator's prompt: the narrator rules (where they come from, the order of authority, what a marked fact means, and what leads your preset's own rules), how a secret is marked (**Secret marks**: a secret known to some, kept from some, or both, the word for everyone, and **What a mark means**, the narrator rules' sentence that explains every form your marks take; the sections, the narrator rules and your World Info entries in the prompt all mark a secret in these words), the guidance that leads each section's lines, the line that tells the narrator what you did off screen before a turn (**Out-of-play actions** → **Done off screen**, for each action you chose to tell; it must keep `{{what}}`), and the line that ends the Scene with how long the turn took (**Elapsed time**: no time passed, how long it took, and how long from when to when where the Scene tells the time of day; an agent turn's director is told the same line). A wording of a secret's mark you set on Settings → Narrator before it moved here is among your texts here, as you wrote it; a Re-narrate or a Re-run of a turn from before then marks secrets in it too, as that turn did, and an earlier LumiRPEngine you go back to still finds your wording. **GM agent** holds the game master's assistant's own texts: its **Instructions**, the assistant's system prompt and role instructions, and **The conversation**, the note it is sent when older messages of a long conversation are left out (**History tokens**). Each text starts as the shipped one: open it, write your own and **Save**; it is sent from the next turn, or the assistant's next message, and **Reset to the default** brings the shipped text back. A text may use only its own placeholders, listed beside it (a section's guidance must keep `{{lines}}`, where its lines go; each form of a secret's mark keeps `{{text}}` and the names it gives, `{{known}}`, `{{kept}}` or both; **What a mark means** keeps `{{forms}}`, where every form of your mark goes; and the elapsed-time lines that tell how long keep `{{span}}`); anything else in double braces is flagged and can't be saved, and so is a text longer than **Longest text of your own**, or an empty secret's mark. A world that words a section its own way (**Build → Sections**) keeps its wording in its chats.
-
-After **Main agent**, **Every agent** holds what any agent is told besides its own texts: its built-in **scratch_read** tool, the notes on tool results, tools offered as text, and how your system instructions (AGENTS.md and roles/<role>.md, see [Workspace](#workspace)) are framed, with what an agent is told when some of them didn't fit. It also holds what every agent with tools is told of them (the GM assistant, the main agent and each role alike): under **Tools**, what each tool does and what each of its arguments means, one text for every tool and every argument, so the page lists exactly the tools there are; under **Tool answers**, what a tool answers when a name finds no one ("No such person here: …"), when a name fits several, or when an argument is missing or not one the tool takes; and under **Lore index**, how the index of your lore entries is worded. These were on **GM agent** before; a text you wrote there is still yours. The pages after it are the agent turn's roles: **Every role** holds what every role is told besides its own texts (the perspective it works from, a hint in its system prompt, since its tools read everything, secrets marked, whatever its perspective; how your preset's guidance leads in; how its pinned files come; and how the sections it starts with are framed), and each role has a page of its own with its **System prompt**, its **Role instructions** and, for each of its tasks, the task's text and the description of its answer. While a chat is open, each role's text has **Test**: it runs the role once on that chat's latest exchange (its last reply and your message before it, as that turn left the story) with the text as you've written it, saved or not, one model call with no tools, and says **Passed** when the role's answer kept the form the engine reads (the role's contract), or, in words, how it didn't; a text with a problem can't be tested until you fix it. The role gets the task a turn would give it there: the intent reads your message, the read reads the reply, and a memory is the first one that reply would make. A task only a turn under way has (judging your approach, a puzzle's answer, a person's decision, a time skip) runs on the role's texts alone, and Test says so under **Left out of its task**, as it says what else your chat couldn't give (no reply yet, the step turned off, no one there to remember). Test changes nothing in the chat, and shows no part of the answer, which may hold what this page shouldn't; Diagnostics keeps the call, behind the GM curtain.
-
-### Switching to an earlier swipe
-
-Swipe back to an earlier version of a reply, or delete or add a swipe on an earlier message, and the turns after it are **automatically rebased**: the engine re-checks each of their results against the new situation. Something that no longer makes sense (an item you never bought, a payment under a different balance) is dropped, with a note. A purchase or payment is one unit, so the money and the item are kept or dropped together. So is a quest's step, with what it pays: a later turn's step is kept only where the quest still stands at the stage that step began from, so one the new version has already taken is dropped whole, and its rewards are never paid twice. Nothing pauses and nothing is erased.
-
-A **Keep report (n)** chip lists what was dropped. For each entry you can **Convert** it (keep the effect as a fixed correction; it is your own adjustment, so it is kept even if it leaves an account short). It also lists anything that was done on a different branch of the story as "made on another branch", and shows converted entries as "kept".
-
-Everything is reversible: switch back to the original swipe and the world is exactly as it was. Anything you do while you are on a different swipe, such as a fix, a chip confirmation or a new turn, counts only while you stay on that version of the story. A new turn on a rebased path builds on the rebased version.
-
-### Editing the AI's reply
-
-Fixing a typo, a name or a trimmed line is routine, and the world doesn't care. **When you edit an AI reply, the world stays as it was**: nothing pauses and nothing is re-read. If the edit changes what *happened*, tap **Re-read edit** on that reply and the engine re-reads the new text, replacing what it had read from the old one. A change you had already applied from the old read's chips is undone with it and offered again from the new text, if the new text still tells it, so nothing is charged twice. While the chat is paused, or when the message is a switched-away view, the read is refused without calling a model and the chips stay as they were; Keep or Discard, or switch back, first. Keeping is the default.
-
-Re-read edit, Retry read and **Undo** run only on a reply that is on its own timeline. If you have swiped away from the timeline the reply was made on, they are refused and ask you to switch back first. One case can't be fixed by switching back: if an earlier message or swipe the reply depended on changed while the reply was written (deleted, or its text replaced), the reply was read without it, so Re-read edit, Retry read and Undo are always refused on it. If it is the latest reply, **Re-run** it to play the turn again; an older reply can't be changed this way.
-
-### Editing an earlier message of yours
-
-If you change what *you* wrote earlier in the chat, every turn after it was built on something that no longer exists, so the chat **pauses**: a **Paused** banner appears at the top of **Play → Now**, and a card under your edited message asks "Edited message: keep or discard later turns?" (the same card sits inside the banner):
-
-- **Keep**: the later turns are re-checked against the edited message, as in the swipe case above, with a Keep report.
-- **Discard**: the later turns' records are removed for good. Their messages stay in the chat as plain text, and the world forgets what happened in them. This cannot be restored, not even after a restart.
-
-While the chat is paused, a new turn is written but gets no simulation (it is marked *degraded*), and fixes and confirmations are refused until you choose. If the edit lands while a reply is streaming, that reply is left unread. A swipe that finishes while the chat is paused carries none of the fixes and GM edits of the swipe it replaced: each gets a **Not carried** note in the Journal.
-
-**Edit and Send** on an earlier message works in a world chat as a branch: Lumiverse makes a new chat from the edited message, and its reply is that chat's latest. In place, the reply would be written onto the older message after yours, which the engine can't prepare, because Lumiverse can start only the last reply again. So an in-place Edit and Send on an earlier message stops with **The engine didn't finish, so nothing was generated**, and nothing is written: your edit stays and pauses the chat as above. Instead, use Edit and Send as a branch (Lumiverse's setting to branch on Edit and Send), or regenerate the last reply.
-
-### Continue
-
-When you use Lumiverse's Continue on the latest reply, the engine reads only the new text and applies what it says, as one more step of that turn. Continue always continues the latest reply: when the engine has run first, it starts the Continue again with Lumiverse's own, which knows only the latest. Some Continues can't be read that way: a Continue on an older message (only possible through Lumiverse's API, and only where Lumiverse can't stop a reply), on a message the engine never simulated (a greeting), one you stopped half-way, or one where Lumiverse re-rendered the earlier text. These are accepted as they are, like an edit. The world stays as it was until you tap **Re-read edit** (or **Retry read** for a stopped Continue). Before the reply starts, a Continue shows the world as it was, because the engine learns which message you're continuing only when the reply ends.
-
-### Undo, retry and what lapses
-
-- **Undo** covers the latest reply. Earlier changes go through Keep or Discard. Each ✎ fix and GM edit on the latest reply has its own **Undo**, on its **Corrected** or **GM edit** chip (and, for a GM edit, in GM mode too).
-- **Apply / No chips** from a reply expire when you send your next message, and nothing is applied.
-- **Timelapse chips** (offers and Continue), **suggested choices** and **your other action** lapse at the next send as well.
-- A reply that fails or comes back empty keeps the engine's work for its turn: **Retry the reply** (or Lumiverse's own Regenerate of that reply, or its Continue for a Continue) writes it again from that turn, and **Re-run the engine** runs the turn again first; a new reply after a reply that failed before writing anything goes out again when you press **Send** with nothing typed (see **The reply failed** in [Under each reply](#under-each-reply)). An empty reply the engine didn't prepare is *degraded* and shows **Retry**. The engine never regenerates on its own.
-
-### Changes while a turn runs
-
-A change you make while a reply is being written (a ✎ fix, a chip you answer, detail you open, a settings change for this chat, Keep or Discard) waits for that reply and lands once it is in, over whatever it changed; until then it shows as **pending**.
-
-Before the reply starts, the engine works on the turn: it reads your message, plans what happens and writes the turn's sections. A change you make then (a ✎ fix, a GM edit, a chip, paying with a card, opening detail, an Undo; the GM assistant's changes and workspace saves too) waits for the turn, as it does during the reply: the reply starts as planned, and your change lands once the reply is in, or as soon as the turn stops without a reply (it failed, you cancelled it, or it waits on a question). A setting you save or a GM → This chat choice you change (the engine among them) applies from the next turn; the turn under way finishes as it started. Editing or deleting a message still stops the turn's reply: the chat says so (**The reply didn't start, so nothing was generated**), and **Retry** runs the engine again.
-
-**Writes during a turn.** An out-of-play action, a ✎ fix or a GM edit made while the engine is running a turn answers at once with "Queued — lands after the turn". It lands when the turn is over, with its Undo. The page no longer waits on the turn, so there is no 5-minute request timeout.
-
-### Branches
-
-A Lumiverse chat branch carries the world with it. Records that belong to the branch you're on apply; changes made on another branch stay stored but do nothing until you go back. When you delete a reply, the settings changes recorded on it (realism, time controls, Upgrade) move to the nearest earlier reply, and its other-branch changes are dropped with it.
 
 ## Model use
 
