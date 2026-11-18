@@ -7,12 +7,12 @@
 // A press is matched to the one that waits by its action and values, an amount of money as the world
 // prints it, as RPE keeps it.
 
-import type { JsonObject } from "../shared/json";
-import type { StagedPress, StateView } from "../shared/state-view";
-import { DEFAULT_CURRENCY, formatMoney, type WorldCurrency } from "../shared/world";
-import { errorWords } from "../ui/words";
-import { useApp } from "./app";
-import { Button, IconButton, useBusy } from "./components";
+import { useApp } from "../../frontend/app";
+import { Button, IconButton, useBusy } from "../../frontend/components";
+import type { JsonObject } from "../../shared/json";
+import type { StagedPress, StateView } from "../../shared/state-view";
+import { DEFAULT_CURRENCY, formatMoney, type WorldCurrency } from "../../shared/world";
+import { errorWords } from "../words";
 
 /** What Send now says once its line is in the chat: the reply comes there. */
 export const SENT_NOW = "Sent as your message: the reply is on its way in the chat.";

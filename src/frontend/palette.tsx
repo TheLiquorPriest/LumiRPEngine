@@ -26,7 +26,7 @@ import { formatCents, formatMinutes, formatOdds, humanize } from "./format";
 import { Icon } from "../ui/icons";
 import { MoneyInput } from "./money-input";
 import { paletteRequest, type Req, timelapseRequest, timeMarker } from "./requests";
-import { holdsPick, isStaged, SENT_NOW, TURN_RUNS, turnRuns, WaitingPress } from "./waiting";
+import { holdsPick, isStaged, SENT_NOW, TURN_RUNS, turnRuns, WaitingPress } from "../ui/kept/waiting";
 
 // Combat leads while it's there: in a fight its actions are what the player wants first.
 const GROUP_LABEL: Record<PaletteEntry["group"], string> = { combat: "Combat", action: "Actions", buy: "Buy", pay: "Pay", transfer: "Transfer", drive: "Drive", lend: "Lend" };

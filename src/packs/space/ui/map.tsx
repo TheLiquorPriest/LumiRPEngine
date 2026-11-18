@@ -14,7 +14,7 @@ import type { Cell } from "../../../shared/grid";
 import type { MapDisplay } from "../../../shared/world";
 import { PLACE_MARK_LABEL, PLACE_MARKS } from "../../../shared/maps";
 import { pushSheet, useApp, useView } from "../../../frontend/app";
-import { WaitingPress } from "../../../frontend/waiting";
+import { WaitingPress } from "../../../ui/kept/waiting";
 import { Empty, IconButton, JsonView, List, ListRow, Section, Seg, useBusy } from "../../../frontend/components";
 import { formatMinutes } from "../../../frontend/format";
 import { isRecord } from "../../../shared/json";

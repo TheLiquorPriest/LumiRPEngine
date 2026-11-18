@@ -16,7 +16,7 @@ import { formatCents, formatMinutes, humanize } from "./format";
 import { Icon } from "../ui/icons";
 import { hudMode, isMobile } from "./layout";
 import { timeMarker } from "./requests";
-import { WaitingPress } from "./waiting";
+import { WaitingPress } from "../ui/kept/waiting";
 import { useSelect } from "../ui/store";
 
 type FixKey = "time" | "place" | "weather" | "cash" | "scene";
