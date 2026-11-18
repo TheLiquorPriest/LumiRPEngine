@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { answerPaused } from "../../src/migrate/answers";
 import { migrate } from "../../src/migrate/migrate";
-import { answersOf } from "../../src/migrate/tables";
+import { answersOf, importedTurns } from "../../src/migrate/tables";
 import { ALL_PACKS } from "../../src/packs/index";
 import { openStore } from "../../src/store";
 import { CAST_STORE_AREA } from "../../src/cast";
@@ -42,8 +42,15 @@ describe("a paused chat answered from RPE", () => {
       const store = openStore({ db, registry, worlds: () => undefined, areas: [CAST_STORE_AREA, STORY_STORE_AREA] });
       const done = await answerPaused({ db, s: store.user(USER), registry, sources: fixture.sources, chat: CHAT.classic, choice: "keep", now: 1, write: async (work) => work() });
       expect(done.answer.choice).toBe("keep");
-      expect(answersOf(db, USER)).toEqual([{ chat: CHAT.classic, message: done.answer.message, choice: "keep", at: 1 }]);
+      const first = answersOf(db, USER);
+      expect(first).toEqual([{ chat: CHAT.classic, message: done.answer.message, choice: "keep", at: 1 }]);
       held = done.held;
+      // An answer is given once: the other answer to the same question is refused, says what was chosen, and lays nothing on.
+      const lay = () => importedTurns(db, USER, CHAT.classic).reduce((n, t) => n + store.user(USER).changes(t.turn).length, 0);
+      const laid = lay();
+      await expect(answerPaused({ db, s: store.user(USER), registry, sources: fixture.sources, chat: CHAT.classic, choice: "discard", now: 2, write: async (work) => work() })).rejects.toThrow(/answered this question already: you chose Keep/);
+      expect(lay()).toBe(laid);
+      expect(answersOf(db, USER)).toEqual(first);
     } finally {
       db.close();
     }

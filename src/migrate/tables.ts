@@ -278,9 +278,9 @@ export function answersOf(db: Database, user: string): { chat: string; message: 
     .map((r) => ({ ...r, choice: r.choice === "discard" ? "discard" : "keep" }));
 }
 
-/** Keeps his answer to the question a chat was paused on, over any he gave before to that question. Inside the caller's write. */
+/** Keeps his answer to the question a chat was paused on: the first is the only one, and a second to the same question is refused by the table itself. Inside the caller's write. */
 export function keepAnswer(db: Database, user: string, answer: { chat: string; message: string; choice: "keep" | "discard"; at: number }): void {
-  db.run("INSERT OR REPLACE INTO migration_answer (user, chat, message, choice, at) VALUES (?, ?, ?, ?, ?)", [user, answer.chat, answer.message, answer.choice, answer.at]);
+  db.run("INSERT INTO migration_answer (user, chat, message, choice, at) VALUES (?, ?, ?, ?, ?)", [user, answer.chat, answer.message, answer.choice, answer.at]);
 }
 
 /** The turns a run imported for a chat, each with the message and swipe it is tied to, from the records kept beside them. */
