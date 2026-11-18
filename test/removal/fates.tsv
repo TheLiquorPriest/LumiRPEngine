@@ -301,6 +301,7 @@ src/engine/narration-channels.ts	kept	engine
 src/engine/org.ts	kept	engine
 src/engine/outputs.ts	kept	engine
 src/engine/pack-kit.ts	kept	engine
+src/engine/param-words.ts	kept	engine
 src/engine/place-lore.ts	kept	engine
 src/engine/place-names.ts	kept	engine
 src/engine/places-in-play.ts	kept	engine
