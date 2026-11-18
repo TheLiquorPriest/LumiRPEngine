@@ -132,6 +132,34 @@ Withdraws a request that waits; one kept with a turn already stays, and the answ
 | Reply | [`RequestWithdrawnReply`](#requestwithdrawnreply) |
 | The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
+### `POST /api/v1/chats/:chat/requests/:request/again`
+
+Holds a panel's press a turn was told and did not carry out again for the next message, in place of a press that waited; the press told is dropped.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat`, `request` |
+| Query | none |
+| Body | none |
+| Reply | [`RequestHeldReply`](#requestheldreply) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
+
+### `POST /api/v1/chats/:chat/requests/:request/drop`
+
+Drops a panel's press a turn was told and did not carry out: it is shown no more, nor owed by a run of a turn told it.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat`, `request` |
+| Query | none |
+| Body | none |
+| Reply | [`RequestDroppedReply`](#requestdroppedreply) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
+
 ### `GET /api/v1/chats/:chat/window`
 
 What the chat's history window is now, for its marker: whether it is on, the first history message it keeps on the chat's current path (with the step and the hold as the chat's settings set them), the message just above it, how many messages lie above, and how many of those the story does not cover yet; only the signed-in user's own chats.
@@ -8036,6 +8064,16 @@ export interface RequestAsk {
   choice: string;
   /** Words typed with it; left out, null or blank, none. */
   words?: string | null;
+}
+```
+
+### `RequestDroppedReply`
+
+The press a turn did not carry out was dropped: it is shown no more, nor owed.
+
+```ts
+export interface RequestDroppedReply {
+  dropped: true;
 }
 ```
 

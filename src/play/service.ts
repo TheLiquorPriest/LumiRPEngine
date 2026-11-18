@@ -52,7 +52,7 @@ import type { StateView } from "../shared/state-view";
 import type { MapConfig } from "../shared/map-config";
 import { type ItemFix, parseItemFix } from "../shared/things";
 import { formatMoney, type ParamDef, type WorldDoc } from "../shared/world";
-import { type ChangeRow, factStore, JoinedTurnError, type Part, readPart, type Report, type Store } from "../store";
+import { type ChangeRow, factStore, JoinedTurnError, type Part, readPart, type Report, type Store, type UserStore } from "../store";
 import { FACT_ABOUT } from "../store/facts";
 import { STORE_OPS } from "../store/types";
 import { type DueRead, type Say, turnDue } from "./due";
@@ -68,7 +68,7 @@ import { playerReason } from "./state/requirement-words";
 import { unfitRef } from "./state/unfit-ref";
 import { unfitWords } from "./unfit";
 import { missingWords } from "../engine/param-words";
-import { chatView, headTurn, pressedLine, stagedOf } from "./view";
+import { chatView, headTurn, pressedLine, pressOf, stagedOf } from "./view";
 
 /** The prompt part this area's words are in, under the guidance folder's `.prompts/`. */
 export const PLAY_ANSWERS = "play-answers";
@@ -241,6 +241,12 @@ function tapFrom(source: string): TapFrom {
   return source === "palette" || source === "map" || source === "panel" || source === "send-now" || source === "command" ? source : "chip";
 }
 
+/** The turns of the chat's path, oldest first; the newest left out where `turning` (a run of the chat goes on). */
+function pathTurns(s: UserStore, chat: string, turning: boolean): string[] {
+  const turns = s.path(chat).flatMap((e) => (e.turn === null ? [] : [e.turn]));
+  return turning ? turns.slice(0, -1) : turns;
+}
+
 /** Who an action names: the one acting, and whoever its references name, as today's resolver takes them in. */
 function partiesOf(params: Readonly<Record<string, ParamDef>>, actor: string, given: JsonObject): string[] {
   return [
@@ -320,6 +326,9 @@ export class PlayService {
       clocksMost: taps.clocksMost,
       // What waits for his next message from a panel: one at a time, the turn lane's held request; a turn of the past shows none.
       staged: turn === null ? (this.deps.requests.waiting(user, chat).map(stagedOf).findLast((s) => s !== null) ?? null) : null,
+      // What a turn of the path was told from a panel and did not carry out, until he sends it again or drops it; the newest turn is left
+      // out while a run of the chat goes on, for it may still act. A turn of the past shows none.
+      notCarried: turn === null ? this.deps.requests.notCarried(user, chat, pathTurns(s, chat, turning)).flatMap((r) => pressOf(r) ?? []) : [],
     });
   }
 

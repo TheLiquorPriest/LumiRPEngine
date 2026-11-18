@@ -1,6 +1,7 @@
 // The routes of what the player asks for beside his words (`requests.ts`; plan §10.10, §14): what waits
-// in a chat, listed; a composer control's ask held for the next message; one that waits, withdrawn; and
-// what a turn was told and keeps. A panel's tap is held by the panel's own route. An ask longer than
+// in a chat, listed; a composer control's ask held for the next message; one that waits, withdrawn; a
+// press a turn was told and did not carry out, held again for the next message or dropped; and what a
+// turn was told and keeps. A panel's tap is held by the panel's own route. An ask longer than
 // `turn.maxRequestChars` is not kept, and each refusal is said in the words of `.prompts/request-answers.md`.
 
 import { loadGuidance } from "../app/guidance";
@@ -9,7 +10,7 @@ import { JoinedTurnError } from "../store";
 import type { Turns } from "./lane";
 import { requestText } from "./requests";
 import { turnSettings } from "./settings";
-import { requestAsk, requestHeldReply, requestsReply, requestWithdrawnReply } from "./shapes";
+import { requestAsk, requestDroppedReply, requestHeldReply, requestsReply, requestWithdrawnReply } from "./shapes";
 import { NO_SESSION } from "./turns";
 
 /** The prompt part the request routes answer in. */
@@ -60,6 +61,31 @@ export function requestRoutes(turns: Turns) {
         if (out === null) return await refused(user, params.chat, 404, "not_found", { request: params.request });
         if ("kept" in out) return await refused(user, params.chat, 409, "kept", { turn: out.kept });
         return out;
+      },
+    }),
+    route({
+      method: "POST",
+      path: "/api/v1/chats/:chat/requests/:request/again",
+      access: "page",
+      group: "chats",
+      does: "Holds a panel's press a turn was told and did not carry out again for the next message, in place of a press that waited; the press told is dropped.",
+      reply: requestHeldReply,
+      handle: async ({ user, params }) => {
+        const request = await turns.requests.again(user, params.chat, params.request, Date.now());
+        if (request === null) return await refused(user, params.chat, 404, "not_told", { request: params.request });
+        return { request };
+      },
+    }),
+    route({
+      method: "POST",
+      path: "/api/v1/chats/:chat/requests/:request/drop",
+      access: "page",
+      group: "chats",
+      does: "Drops a panel's press a turn was told and did not carry out: it is shown no more, nor owed by a run of a turn told it.",
+      reply: requestDroppedReply,
+      handle: async ({ user, params }) => {
+        if (!(await turns.requests.drop(user, params.chat, params.request))) return await refused(user, params.chat, 404, "not_told", { request: params.request });
+        return { dropped: true as const };
       },
     }),
     route({

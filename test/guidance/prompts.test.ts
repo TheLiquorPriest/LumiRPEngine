@@ -380,8 +380,8 @@ describe("a row each of E.6: present, laid out as its row says, asking for nothi
 
   test("request-answers.md words why a request from a panel cannot be kept or withdrawn, and a panel's request is told with what was pressed, on what, from where and with which values", async () => {
     const part = await lines("request-answers");
-    expect([...part.names].sort()).toEqual(["kept", "not_found", "too_long"]);
-    for (const [name, fields] of Object.entries({ too_long: { length: 9000, most: 4000 }, kept: { turn: "t-3" }, not_found: { request: "r-9" } })) {
+    expect([...part.names].sort()).toEqual(["kept", "not_found", "not_told", "too_long"]);
+    for (const [name, fields] of Object.entries({ too_long: { length: 9000, most: 4000 }, kept: { turn: "t-3" }, not_found: { request: "r-9" }, not_told: { request: "r-9" } })) {
       const said = part.line(name, fields as never) ?? "";
       expect({ name, said: said.trim().length > 0, unfilled: said.includes("{{"), asks: ASKS.test(said) }).toEqual({ name, said: true, unfilled: false, asks: false });
     }

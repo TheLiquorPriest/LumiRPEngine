@@ -197,6 +197,7 @@ export const requestAsk = shape.named(
 );
 export const requestHeldReply = shape.named("RequestHeldReply", "The request held: it waits for the next message, in place of one of its kind that waited.", shape.object({ request: requestShown }));
 export const requestWithdrawnReply = shape.named("RequestWithdrawnReply", "The request was withdrawn.", shape.object({ withdrawn: shape.literal(true) }));
+export const requestDroppedReply = shape.named("RequestDroppedReply", "The press a turn did not carry out was dropped: it is shown no more, nor owed.", shape.object({ dropped: shape.literal(true) }));
 
 const sliceAt = shape.object({ message: field(N, "The prompt's message, by place from 0."), start: N, end: N });
 const sliceKind = shape.named("SliceKind", "A slice's kind, from the prompt map's fixed list.", shape.oneOf("instructions", "style", "character", "persona", "world", "note", "lore", "history", "other"));

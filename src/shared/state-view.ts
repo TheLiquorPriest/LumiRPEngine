@@ -457,6 +457,12 @@ export interface StateView {
    * pressed and on what, the words the next briefing gives the Author (`what`, `on`), joined as one line (`label`). Absent or null: none.
    */
   staged?: StagedPress | null;
+  /**
+   * The panel's presses a turn of the chat's path was told and did not carry out, nor had refused, oldest first, each as `staged` gives
+   * one: shown as not carried out until you send it again (`POST …/requests/:request/again`) or drop it (`…/drop`). A turn whose run
+   * goes on shows none yet. Absent or empty: none.
+   */
+  notCarried?: StagedPress[];
   controls: ControlsView | null;
   meter: CallMeterView | null;
   packs: Record<PackId, number>;

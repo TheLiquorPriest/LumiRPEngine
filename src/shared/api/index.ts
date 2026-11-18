@@ -2684,6 +2684,11 @@ export interface RequestAsk {
   words?: string | null;
 }
 
+/** The press a turn did not carry out was dropped: it is shown no more, nor owed. */
+export interface RequestDroppedReply {
+  dropped: true;
+}
+
 /** The request held: it waits for the next message, in place of one of its kind that waited. */
 export interface RequestHeldReply {
   request: RequestShown;
@@ -5135,6 +5140,26 @@ export interface ApiRoutes {
     query: Record<string, never>;
     body: undefined;
     reply: RequestWithdrawnReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Holds a panel's press a turn was told and did not carry out again for the next message, in place of a press that waited; the press told is dropped. */
+  "POST /api/v1/chats/:chat/requests/:request/again": {
+    params: { chat: string; request: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: RequestHeldReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Drops a panel's press a turn was told and did not carry out: it is shown no more, nor owed by a run of a turn told it. */
+  "POST /api/v1/chats/:chat/requests/:request/drop": {
+    params: { chat: string; request: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: RequestDroppedReply;
     paged: false;
     long: false;
     joined: false;

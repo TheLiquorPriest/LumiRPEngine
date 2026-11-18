@@ -57,6 +57,8 @@ export interface ChatViewInput {
   clocksMost: number;
   /** What waits for his next message from a panel: the request the turn lane holds (`requests.ts`); null for none, and at a turn of the past. */
   staged: StagedPress | null;
+  /** The presses a turn of the chat's path was told and did not carry out (`Requests.notCarried`); none at a turn of the past. */
+  notCarried: StagedPress[];
 }
 
 /** A press as its view shows it: what was pressed, then on what, as the next briefing gives the Author each (`notices.md`, `panel_request`). */
@@ -64,11 +66,16 @@ export function pressedLine(asked: { what: string; on: string | null }): string 
   return asked.on === null ? asked.what : `${asked.what}, on ${asked.on}`;
 }
 
-/** A panel's request that waits, as the state view shows it; null for one that is no panel's. */
-export function stagedOf(r: RequestRecord): StagedPress | null {
-  if (r.kind !== "panel" || r.played || !("what" in r.asked)) return null;
+/** A panel's press, as the state view shows it, played now as his message or not; null for a request that is no panel's. */
+export function pressOf(r: RequestRecord): StagedPress | null {
+  if (r.kind !== "panel" || !("what" in r.asked)) return null;
   const { action, values, from, what, on } = r.asked;
   return { request: r.id, action, values, from, what, on, label: pressedLine(r.asked) };
+}
+
+/** A panel's request that waits, as the state view shows it; null for one that is no panel's, or was played now as his message. */
+export function stagedOf(r: RequestRecord): StagedPress | null {
+  return r.played ? null : pressOf(r);
 }
 
 /** The turn at the head of a chat's path; null before its first. */
@@ -128,6 +135,7 @@ export function chatView(input: ChatViewInput): StateView {
       keepReport: [],
       pending: input.pending,
       staged: input.staged,
+      notCarried: input.notCarried,
       panels,
       palette: palette(world, state, registry),
       controls: controls(world, state, shown.sceneType, registry, input.knowledge, input.offstage),

@@ -16,7 +16,7 @@ import { formatCents, formatMinutes, humanize } from "./format";
 import { Icon } from "../ui/icons";
 import { hudMode, isMobile } from "./layout";
 import { timeMarker } from "./requests";
-import { WaitingPress } from "../ui/kept/waiting";
+import { NotCarriedPresses, WaitingPress } from "../ui/kept/waiting";
 import { useSelect } from "../ui/store";
 
 type FixKey = "time" | "place" | "weather" | "cash" | "scene";
@@ -64,7 +64,7 @@ export function Hud(props: { resize(size: HudSize): void }) {
     const observer = new ResizeObserver(measure);
     observer.observe(target);
     return () => observer.disconnect();
-  }, [open, mode, viewport.width, viewport.height, hud, activity?.state, activity?.label, view?.staged?.label]);
+  }, [open, mode, viewport.width, viewport.height, hud, activity?.state, activity?.label, view?.staged?.label, view?.notCarried?.length]);
 
   // Closing the details hands focus back to the pill instead of dropping it on the page. When they
   // closed for Map or Actions, that opens now, from the pill, so closing it returns focus there.
@@ -144,6 +144,7 @@ export function Hud(props: { resize(size: HudSize): void }) {
       )}
       {activity ? <ActivityLine compact={mode !== "full"} /> : view.status === "in_flight" ? <span class="lre-chat-pulse" role="img" aria-label="A turn is in progress" title="A turn is in progress" /> : null}
       {view.status === "paused" ? <Badge tone="warn">Paused</Badge> : null}
+      <NotCarriedPresses view={view} />
       <WaitingPress view={view} />
     </div>
   );
@@ -355,6 +356,7 @@ export function StatusLine() {
         {view.status === "paused" ? <Badge tone="warn">Paused</Badge> : null}
       </button>
       {activity?.state === "failed" ? <ActivityLine compact /> : null}
+      <NotCarriedPresses view={view} />
       <WaitingPress view={view} />
       <Button variant="primary" size="sm" icon="bolt" title="Actions" onClick={() => void app.overlays.openPalette("actions")}>
         Act

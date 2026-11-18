@@ -359,11 +359,15 @@ export interface MapHand {
 /**
  * What waits for his next message from a panel (plan §10.10), where the App is taken to RPE's typed routes: sent now, its line put in
  * the chat as his message and a reply started (`POST /api/v1/chats/:chat/plays`), or taken back (`DELETE /api/v1/chats/:chat/requests/
- * :request`), each by the request's id the state view gives (`StateView.staged`). A refusal is thrown with RPE's words.
+ * :request`), each by the request's id the state view gives (`StateView.staged`); and a press a turn did not carry out
+ * (`StateView.notCarried`), held again for his next message (`POST …/requests/:request/again`) or dropped (`…/drop`). A refusal is
+ * thrown with RPE's words.
  */
 export interface NextMessage {
   sendNow(chat: ChatId, request: string): Promise<void>;
   takeBack(chat: ChatId, request: string): Promise<void>;
+  again(chat: ChatId, request: string): Promise<void>;
+  drop(chat: ChatId, request: string): Promise<void>;
 }
 
 export interface App {

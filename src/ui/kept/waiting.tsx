@@ -5,7 +5,9 @@
 // the map's square as marked): what waits, in the words the briefing gives the Author (`StateView.staged`),
 // with Send now, which puts its line in the chat as your message and starts the reply, and Take it back.
 // A press is matched to the one that waits by its action and values, an amount of money as the world
-// prints it, as RPE keeps it.
+// prints it, as RPE keeps it. A press a turn was told and did not carry out (`StateView.notCarried`) is
+// shown where you play as not carried out, with Send again, which holds it for your next message once
+// more, and Drop, until you choose one.
 
 import { useApp } from "../../frontend/app";
 import { Button, IconButton, useBusy } from "../../frontend/components";
@@ -78,5 +80,46 @@ export function WaitingPress(props: { view: StateView; block?: boolean }) {
         </>
       )}
     </span>
+  );
+}
+
+/**
+ * Each press a turn was told and did not carry out, with Send again (held for your next message once more, in place of one that
+ * waits) and Drop; nothing while none is.
+ */
+export function NotCarriedPresses(props: { view: StateView }) {
+  const app = useApp();
+  const [busy, run] = useBusy();
+  const missed = props.view.notCarried ?? [];
+  if (missed.length === 0) return null;
+  const next = app.next;
+  const press = (request: string, again: boolean): void =>
+    run(async () => {
+      if (next === undefined) return;
+      try {
+        if (again) await next.again(props.view.chatId, request);
+        else await next.drop(props.view.chatId, request);
+      } catch (error) {
+        app.toast(errorWords(error), "error");
+      }
+    });
+  return (
+    <>
+      {missed.map((p) => (
+        <span key={p.request} class="lre-chat-staged lre-chat-staged-missed" data-lre-not-carried={p.request} role="group" aria-label="Not carried out">
+          <span class="lre-chat-staged-text" title={`Not carried out: ${p.label}. The turn you pressed it for did not carry it out, nor had the world refuse it.`}>
+            Not carried out: {p.label}
+          </span>
+          {next === undefined ? null : (
+            <>
+              <Button variant="secondary" size="sm" icon="send" busy={busy} title="Hold it for your next message once more" onClick={() => press(p.request, true)}>
+                Send again
+              </Button>
+              <IconButton icon="close" label="Drop it" disabled={busy} onClick={() => press(p.request, false)} />
+            </>
+          )}
+        </span>
+      ))}
+    </>
   );
 }

@@ -92,6 +92,9 @@ const recordOf = (r: RequestRow): RequestRecord => ({ id: r.id, chat: r.chat, ki
 /** A request waits while it is kept with no turn, or with one dropped with nothing saved, or one the store no longer holds. */
 const WAITS = "(r.turn IS NULL OR NOT EXISTS (SELECT 1 FROM turn t WHERE t.user = r.user AND t.id = r.turn AND t.status <> 'dropped'))";
 
+/** A request was told to a turn (`request_told`): one that waits, or a press only carried from the previous build, was not. */
+const TOLD = "EXISTS (SELECT 1 FROM request_told t WHERE t.user = r.user AND t.request = r.id)";
+
 /** What withdrawing a request came to: withdrawn; kept with a turn already, which it names; or no such request of the chat's. */
 export type Withdrawn = { withdrawn: true } | { kept: string } | null;
 
@@ -134,11 +137,50 @@ export class Requests {
    */
   async hold(user: string, chat: string, ask: { kind: RequestKind; asked: PanelAsk | ComposerAsk; played?: boolean; message?: string | null }, at: number): Promise<RequestRecord> {
     const request: RequestRecord = { id: crypto.randomUUID(), chat, kind: ask.kind, asked: ask.asked, played: ask.played === true, message: ask.message ?? null, turn: null, at };
-    await this.writes.run((db) => {
-      if (!request.played) db.run(`DELETE FROM request WHERE user = ? AND chat = ? AND kind = ? AND played = 0 AND rowid IN (SELECT r.rowid FROM request r WHERE r.user = ? AND r.chat = ? AND ${WAITS})`, [user, chat, ask.kind, user, chat]);
-      db.run("INSERT INTO request (user, id, chat, kind, asked, played, message, turn, at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)", [user, request.id, chat, request.kind, JSON.stringify(request.asked), request.played ? 1 : 0, request.message, at]);
-    }, "holding what you asked for");
+    await this.writes.run((db) => holdIn(db, user, request), "holding what you asked for");
     this.changed(user, chat);
+    return request;
+  }
+
+  /**
+   * The panel's presses of an action that a turn of the chat's path was told and none of its turns there answered, and he did not drop,
+   * oldest first: `path`, the turns the chat's path holds now (one whose run goes on left out, for it may still act). A swipe of the
+   * turn shown in its place follows: a press is read by the attempt the path holds.
+   */
+  notCarried(user: string, chat: string, path: readonly string[]): RequestRecord[] {
+    if (path.length === 0) return [];
+    return this.db
+      .query<RequestRow, [string, string, string]>(
+        "SELECT r.* FROM request r WHERE r.user = ?1 AND r.chat = ?2 AND r.kind = 'panel' AND json_extract(r.asked, '$.action') IS NOT NULL AND r.dropped = 0 AND EXISTS (SELECT 1 FROM request_told t WHERE t.user = r.user AND t.request = r.id AND t.turn IN (SELECT value FROM json_each(?3))) AND NOT EXISTS (SELECT 1 FROM request_told t WHERE t.user = r.user AND t.request = r.id AND t.answered = 1 AND t.turn IN (SELECT value FROM json_each(?3))) ORDER BY r.at, r.rowid",
+      )
+      .all(user, chat, JSON.stringify(path))
+      .map(recordOf);
+  }
+
+  /** Drops a panel's press told to a turn: it is shown no more as not carried out, nor owed by a run of a turn told it. False where the chat holds no such press. */
+  async drop(user: string, chat: string, id: string): Promise<boolean> {
+    const dropped = await this.writes.run(
+      (db) => db.run(`UPDATE request SET dropped = 1 WHERE rowid IN (SELECT r.rowid FROM request r WHERE r.user = ? AND r.chat = ? AND r.id = ? AND r.kind = 'panel' AND r.dropped = 0 AND ${TOLD})`, [user, chat, id]).changes > 0,
+      "dropping a press a turn did not carry out",
+    );
+    if (dropped) this.changed(user, chat);
+    return dropped;
+  }
+
+  /**
+   * A panel's press told to a turn, held again for his next message: the press is dropped, and a new one asking the same waits in
+   * place of any press that waited. Null where the chat holds no such press.
+   */
+  async again(user: string, chat: string, id: string, at: number): Promise<RequestRecord | null> {
+    const request = await this.writes.run((db): RequestRecord | null => {
+      const row = db.query<RequestRow, [string, string, string]>(`SELECT r.* FROM request r WHERE r.user = ? AND r.chat = ? AND r.id = ? AND r.kind = 'panel' AND r.dropped = 0 AND ${TOLD}`).get(user, chat, id);
+      if (row === null) return null;
+      db.run("UPDATE request SET dropped = 1 WHERE user = ? AND id = ?", [user, id]);
+      const again: RequestRecord = { id: crypto.randomUUID(), chat, kind: "panel", asked: recordOf(row).asked, played: false, message: null, turn: null, at };
+      holdIn(db, user, again);
+      return again;
+    }, "holding a press again for your next message");
+    if (request !== null) this.changed(user, chat);
     return request;
   }
 
@@ -222,6 +264,12 @@ export class Requests {
       .all(user, turn)
       .map(recordOf);
   }
+}
+
+/** A request held, inside the caller's write: one that waits replaces one of its kind that waited; one played now replaces nothing. */
+function holdIn(db: Database, user: string, request: RequestRecord): void {
+  if (!request.played) db.run(`DELETE FROM request WHERE user = ? AND chat = ? AND kind = ? AND played = 0 AND rowid IN (SELECT r.rowid FROM request r WHERE r.user = ? AND r.chat = ? AND ${WAITS})`, [user, request.chat, request.kind, user, request.chat]);
+  db.run("INSERT INTO request (user, id, chat, kind, asked, played, message, turn, at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)", [user, request.id, request.chat, request.kind, JSON.stringify(request.asked), request.played ? 1 : 0, request.message, request.at]);
 }
 
 /** The carrier's writer (PlanCarry): a request put onto a given turn, inside the carrier's own write; told to no turn after it. */
