@@ -306,6 +306,40 @@ They are defaults, never a script. They show what someone would usually do: on a
 
 An agent can change one character's routine in a chat (the tool `gm_routine_edit`), as a change of that turn, without touching the world.
 
+## Realism
+
+Realism is how closely a world keeps each part of life. It is set per **domain**, each at a level from 0 to 4: **Off**, **Narrative**, **Simple**, **Detailed** or **Simulation**. The domains are **Money**, **Gear**, **Vehicles**, **Cast life**, **Relationships**, **Space & travel**, **Calendar & time**, **Weather** and **Sheets & checks**.
+
+A higher level keeps a domain more exactly, and the play views show and list more of it: Money 1 is a wealth band, Money 4 the full books; Space 2 is places and routes, Space 3 adds grids and positions. A level never decides whether a change is applied: every write is applied, and every report made, at every level. The world state the Author is given each turn opens with the chat's realism, level by level.
+
+**Presets.** A world's realism starts from a preset:
+
+| Preset | Money | Gear | Vehicles | Cast life | Relationships | Space | Calendar | Weather | Sheets | Band caps (Leads / Supporting / Background) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| **Story** | 1 | 1 | 1 | 1 | 1 | 2 | 2 | 1 | 1 | none |
+| **Grounded** | 2 | 2 | 2 | 2 | 2 | 2 | 3 | 2 | 2 | none / none / 1 |
+| **Simulation** | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 3 | 3 | 4 / 3 / 2 |
+
+Moving any level yourself makes it **Custom**.
+
+**Tiers and bands.** Not everyone is kept as closely as your own character. Every character has a **tier**, one of the world's own (**Build → Tiers**), and each tier belongs to a **band**: **Leads**, **Supporting** or **Background**. A band can cap each domain, and a character is kept at the lower of the domain's level and their band's cap. Your own character is never capped.
+
+**Where it is set.** A world sets its realism in **Build → Realism defaults**, and a chat takes its realism from its world as it starts. This build has no control that changes one running chat's levels.
+
+**Things you say you have.** The world's claims policy (**Build → Realism defaults**, **Player claims**, once **This world sets what new chats make of them** is on) decides what the play views offer when you add something: **Make it real** adds it at once, **Ask first** asks before it is added, and **Hold me to the world** hides **+ Add**. **Ask first above the world's claim cap** makes something priced over the cap ask first under Make it real. In what you type, a thing you say you have is the Author's to weigh, with `SIMULATION.md` and the lore.
+
+## How checks are decided
+
+A **check** is the dice an action of the world rolls: a stat or a skill against a difficulty, with outcomes such as success and failure (see [Checks, pools, progression and sheets](#checks-pools-progression-and-sheets)). In RPE the game master rules by the world's actions and checks. They are what it rules with, not gates in code.
+
+- **Who rolls.** As shipped, the GM rolls when an outcome is uncertain and it matters, so that chance decides it, and says what was rolled and why (`SIMULATION.md`, "Dice"). The Author asks the GM when something is contested, costly or risky.
+- **How.** The GM carries out one of the world's actions with the operation `act`, naming the outcome it ruled, or leaving it out: then an action of one outcome takes it, and an action with a check has its check rolled by the world's rules. The tool `roll` rolls dice or one of the world's checks for someone, records the roll with what it was for, and gives its id, which a later change can cite as its source. `checks_odds` reads an action's odds and changes nothing.
+- **Requirements advise.** An action whose requirement does not hold (you would need something you do not have) is carried out all the same, and the answer says which requirement did not hold. What to do about it is written in `SIMULATION.md`: as shipped, apply it and let the report stand, so that it can be put right later. To make the rules bind, change that paragraph.
+
+**The world's rules for checks.** A world can set how its checks are decided in **Build → Ruleset**, under **How checks are decided**: when a check rolls (every check, only risky ones, only where marked, or never), whether sure things pass and hopeless tries fail without a roll, who settles a check (the roll, the roll with close calls, or the story), and when a failed check may be retried. Its presets are **Narrative-first**, **Balanced** and **Crunchy**; **Custom** sets each value. These rules apply wherever a check is rolled by the world's rules: an `act` with no outcome, and the odds the actions sheet shows.
+
+**What you see.** The actions sheet shows each action's odds before you pick it, and what the world's rules will make of it. After the turn, the turn's page lists every roll and ruling in its engine lane, behind the spoiler gate.
+
 ## GM mode
 
 **GM** mode shows everything the engine knows, including secrets, truths you haven't discovered and people who were removed, and lets you change any of it. It wears a gold frame, so you can tell at a glance that you're behind the curtain. Looking never changes your chat; only the edits you save do. In RPE its places are the World, Places, Quests, Cast and Story pages, each behind its own spoiler gate.
@@ -547,190 +581,6 @@ Before the reply starts, the engine works on the turn: it reads your message, pl
 ### Branches
 
 A Lumiverse chat branch carries the world with it. Records that belong to the branch you're on apply; changes made on another branch stay stored but do nothing until you go back. When you delete a reply, the settings changes recorded on it (realism, time controls, Upgrade) move to the nearest earlier reply, and its other-branch changes are dropped with it.
-
-## Realism
-
-Realism is how much of life the engine keeps track of. It is set **per domain**, from level 0 (off) to level 4 (simulation), and the story never needs it: quests and secrets work at any setting. Use as much or as little as your story enjoys.
-
-| Domain | 1 Narrative | 2 Simple | 3 Detailed | 4 Simulation |
-|---|---|---|---|---|
-| **Money** | A wealth band | Cash plus one account | Accounts, cards (with autopay), recurring income and bills, interest and APR | Statements, minimum payments, fees, credit, investments, withholding by tax bracket |
-| **Gear** | Notable items: those the world marks notable, and anything found, bought, handed over, made or claimed; what people carry every day (a wallet, keys, a phone) | Items, containers, cash in a wallet | Worn and equipped slots, kits, condition; other people's things put away off screen | Wear per use, consumables |
-| **Vehicles** | "Runs fine" | Fuel %, location, owner, your family's vehicles | Specs, consumption, odometer, loans and vehicles assigned or lent to you, home base | Maintenance intervals, breakdowns, registration and insurance, marine and off-road specifics |
-| **Cast life** | Day-part routines, agendas | Commitments set the day | A day planner | Needs and drives, invitations, NPC-to-NPC encounters, knowledge spreading |
-| **Relationships** | One band per pair | One number per pair | Several axes plus appraisal rules | Decay, history, group standing |
-| **Space and travel** | Named places | Places, routes and travel times | Grids and positions | Terrain multipliers, mode-specific routes |
-| **Calendar and time** | Day parts | Clock and dates | Recurrence and time zones | Holidays, school terms, exceptions |
-| **Weather** | Season mood | Climate states | Regional climates | Microclimate effects on travel and rules |
-| **Sheets and checks** | Bands as words | Stats plus one check | Skills and derived fields | The full sheet |
-
-The time controls and Timelapse need Calendar at level 1 or higher. At level 1, Timelapse targets round to parts of the day.
-
-**What the narrator is told of vehicles.** The Vehicles section lists what your character may use, each saying whose it is: his own at Vehicles 1, his family's and his company's from 2 (with their fuel and range; a company's is the company's, even when he runs it), and those assigned or lent to him from 3 (a loan with when it's due). An owner he doesn't know of reads "someone". Each one comes with everything the world keeps of it that he may know, in its fields' own names: its class, make, model, year, colour and plate when it has them (the vehicle kind has a field for each, in **Build**), its odometer or engine hours and condition from Vehicles 3, when its next service is due from Vehicles 4, and its description; for one where he is, also who is aboard and its cargo by name (what a bag in it holds only when the vehicle or the bag is his, or he knows what is in it). Its specs are told only for one at his place or the one he is aboard, the first four ("and 2 more" for the rest); the Curator reads them all (`items_read`) and sets them with `item_label` or a make's details, and the GM and **Build** edit them on the vehicle's page under **Specs**. A trailer has no tank, so it shows no fuel. Then other people's vehicles at the same site (a house with its garage and driveway, a marina; not the whole town) that he can see, every one, with whose they are and what anyone can see of them (class, make, model, colour, description). The ones he may use that are away from where he is come last, each named with where it is, so on a tight budget they are the first lines left out.
-
-**Money detail.** Below the top Money level the money hub keeps the books simple, and at the top level it shows them all (see [Your money](#your-money)). Under any preset, a world can turn single money features on or off in **Build → Packs → economy** (**Money features** → **Feature switches**). Each runs from its usual level. Switched on, it runs from the lowest level it can (statements from Money 3, cash machines and daily card limits from Money 2), and the hub shows that feature's own detail there and nothing more of the full books. Switched off, it doesn't run at any level, and its detail is gone from the hub at the top level too: with interest off, nothing earns or charges interest and no account shows an Interest block. **Unemployment taxes on payroll (FUTA and SUTA)** is one: on at Money 4, it can run from Money 3, and switched off no paycheck adds to them.
-
-### Presets
-
-| Preset | Money | Gear | Vehicles | Cast life | Relationships | Space | Calendar | Weather | Sheets | Band caps (Leads / Supporting / Background) |
-|---|---|---|---|---|---|---|---|---|---|---|
-| **Story** (the default) | 1 | 1 | 1 | 1 | 1 | 2 | 2 | 1 | 1 | none; every domain level applies to everyone |
-| **Grounded** | 2 | 2 | 2 | 2 | 2 | 2 | 3 | 2 | 2 | no cap / no cap / 1 |
-| **Simulation** | 4 | 4 | 4 | 4 | 4 | 4 | 4 | 3 | 3 | 4 / 3 / 2 |
-| **Custom** | any | any | any | any | any | any | any | any | any | any |
-
-Moving any dial yourself makes the preset *Custom*.
-
-### Player claims
-
-When you type that your character does something with a thing the world doesn't have, as far as your character knows ("I light a cigarette with my Zippo", "I hand Rosie a coffee"), the **Player claims** setting decides what happens:
-
-- **Make it real**: the thing is added where your action needs it, in your hands or where you are, and the action plays. With **Ask first above the world's claim cap** on, something whose price is over the world's claim cap asks first instead.
-- **Ask first**: the turn waits for your answer, **Add** or **Not an action**, before anything is generated.
-- **Hold me to the world**: the action doesn't play; your words play as plain roleplay, and a receipt says why.
-
-Money you say you have and don't carry asks first, under any setting but **Hold me to the world**, and only for what you lack: saying you hand Danny $100 with $85 on you asks whether to add the other $15 to your cash and pay him the $100 in cash. Cash you carry is no claim: it's handed over as it is. Each preset carries its own setting: **Story** makes it real at any price, **Grounded** makes it real up to the claim cap, and **Simulation** asks first.
-
-It is set in three places, each with the same control (the three modes, and the cap switch, which only Make it real uses):
-
-- **Settings → Realism → Player claims**: yours, for chats you start from now on. Picking a preset there sets it, and changing it makes the preset *Custom*. Like the rest of Settings → Realism, it fills in for a world that sets none, or replaces the world's with **Use my settings instead of a world's defaults for new chats** on.
-- **GM → This chat → Realism → Player claims**: the chat you have open, from its next turn; earlier turns keep what theirs did. A chat started before player claims existed plays by its world's, else by what its realism preset carries (a Simulation chat asks first, a Grounded one keeps the cap), and by Story's when its realism is *Custom*.
-- **Build → Realism defaults → Player claims**: the world's own, for new chats. **This world sets what new chats make of them** switches it on, starting from what the world's realism preset plays; off, a new chat takes the player's own setting. Check flags one the engine can't read.
-
-**The claim cap** is about the price of a meal: twice the typical price of a meal out in the world's categories table ($23 in Port Alder), or 25 in the world's currency when it has none. A world can set its own as **Claim cap** in **Build → Packs → economy**, typed in the world's currency; left empty, the field shows the default it uses. A cap that isn't a whole amount above zero gets a warning, and the engine then rounds a fraction or uses the default.
-
-In GM mode, **World** marks each claimed thing **Claimed** and lists them under **Claimed by the player** with who holds each, so you can find one and remove it (see [The GM bar](#the-gm-bar)).
-
-**Your own things kept elsewhere.** When the world has something of yours somewhere else ("I put on my clothes" while it keeps them at home), the action doesn't fail and stop the rest of your message. A thing close by (the same building or site, within the world's fetch minutes on foot) is fetched, whatever the setting, and the minutes are added to the action's time. One farther away goes by the same setting: Make it real brings that very thing to you, never a second one; Ask first asks, in words such as "Your phone is at 114 Harbor Street. Have it with you anyway?"; Hold me to the world leaves the action out with a receipt, your words play as plain roleplay, and the rest still plays. A thing too big to carry (a sofa, a fridge) never comes along. When the reply has you use something of yours that was elsewhere, it is brought along, with a **Brought along** receipt saying where it was.
-
-### Finding things
-
-Some things are hidden until you look: a world can mark a thing **Discoverable** (in its editor's **Visibility**). The **Search** action (typed as "I search the room", "I look through the drawer", "I open the chest") finds the hidden things lying loose where you stand, or, when you name a container, what is directly in it; anything in a container stays hidden until you search or open that container. What you find stays known. A container the world stocks also holds a few things of its kind the first time it's opened, beside what the world put in it. A world can make searching roll a check by giving its own **Search** action one.
-
-**What can't be picked up.** **Take** (and **Wear or equip**) never offers or takes a vehicle, a part built into one or a thing fixed in place, whether you tap it, type it or the reply tells it: a part is a container whose catalog row in the world's Containers table is a fixed vehicle part (a truck bed, a glovebox, an ATV's racks, a boat's lockers), and a thing is fixed when its editor's **Fixed in place** is on (a mill stone, an installed relay). What lies in such a part can still be taken. Nor does anything bigger than a person carries (an **Armful** by default: a fridge, a sofa, a TV) end up on anyone: told into someone's hands, it lands where they stand instead, and bought, it goes to the buyer's home. See [Things: who has what, and whose](#things-who-has-what-and-whose).
-
-**What the reply does with things.** The engine reads the reply for things handed over, picked up or found, put down, put into something or somewhere, shown in someone's hands, used up (eaten, drunk, spent), put on or taken off, lost or stolen, damaged or mended, and a stated change of owner. It finds the thing the reply's words mean (one your character can see first; **Which one?** when several fit), and when the story acts on a thing the world doesn't have yet, it makes it where the story has it, never a second of one that's there. Moves and handovers apply with an **Undo**; a change of owner and a loss ask first (each type's mode is set like the others, see [Extraction modes](#extraction-modes)). Something your character can't see is never named. On an agent chat, the **Curator** does this reading instead (see [Settings → Agents](#settings--agents)).
-
-**Stacks.** Buying something you already carry, or being handed another of it, adds to the one you have (its quantity goes up) instead of making a second.
-
-**Changes you apply from a chip** count at once: a quest that waits on the thing you just took moves on that same turn, and the world's rules about it run.
-
-### Things: who has what, and whose
-
-The engine keeps four facts about every thing apart, so none is guessed from another:
-
-- **Where it is**: one place or one holder (a person, a bag, a car), never both.
-- **Who has it**: whoever carries it, up the chain of what holds it.
-- **Whose it is**: its owner, a person, a household, a business or a group. A thing nobody owns is taken to be whoever's it plausibly is: on someone, theirs; in a holder, the holder's owner's; at a place, the business trading there, else the household living there, else nobody's. GM mode shows that as "the household's (presumed)".
-- **Who may use it**: its owner, anyone they hand it to or lend it to, anyone they let use their things, and, as the world says, their household, housemates, partners, staff at a business's own places and customers where a business is open (a booth, a washroom). This guides the actions and the narrator; it never stops the story: taking what isn't yours is recorded as taken.
-
-**A handover isn't a gift.** When the reply has Danny toss you his truck keys so you can move the truck, you hold them for him: they are with you and still Danny's. Only giving words ("keep it", "it's yours", a present), food or drink handed over to have, a sale or a trade change whose it is, and those ask first. Handing it back to its owner ends the holding.
-
-**Sizes.** Every thing has a size: **Pocket**, **Hand**, **Armful**, **Heavy**, **Furniture** or **Built-in** (vehicles apart). A person carries up to Armful, nothing goes into something smaller, and a built-in thing moves only when you confirm it. A thing's size comes from the world's catalogs when it isn't set.
-
-**Kept at.** Every thing has a place it's kept (its rest): one the world gives it, else on its owner for everyday things, where it stands for furniture, at the buyer's home for something bought, else where it was made. **Put away** takes it there. Off screen, other people's things lying about drift back to where they're kept: something of an NPC's, or their household's, left loose away from its rest, out of your sight and untouched for a day (the world's setting), goes back. Your own things never move by themselves, and nothing lent, held for someone or lost does.
-
-**Everyday carry.** The first time the story meets someone, from Gear 1, they get what people carry every day if they don't have it yet: by default a wallet, keys and a phone, theirs and on them. The world can change who carries what, in **Build → Packs → gear → Everyday carry**.
-
-**Places made in play.** When the story puts someone in a room, a spot or a new place the world doesn't have ("Jordan slides into the back booth at the Rusty Anchor"), the engine makes it under the place it's in, so the next "the booth" is that booth. A new venue in town asks first. A world sets how many a reply and a chat may make (**Build → World**, 2 and 64 by default); GM → Things → **Keep in the world** copies the ones you like into the world.
-
-**Old chats, and every turn.** Every turn, before the story goes on, anything someone carries that is too big to carry (a fridge bought into Jordan's hands) goes to the buyer's home when it was bought, else to where they stand, as **Things tidied** with **Undo**; something worn but lying elsewhere is taken off its wearer the same way. The chip lists every move, a line each: past its first eight lines the rest fold under **+N more**, which opens them. A thing whose tidy you undid stays while its holder keeps it, and a finding you left in Tidy up is left alone. Everything else waits in GM → Things → **Tidy up**. An older chat's fridges and TVs, bought by an older build onto the buyer, go home on its next turn under one **Things tidied** chip. A world can turn this off (Build → Packs → gear → Tidy up), and a chat can have its own setting over the world's (GM → This chat → **Things**: *Tidy impossible holds every turn in this chat*).
-
-### Tiers and bands
-
-Not everyone needs to be simulated in depth. Every character has a **tier**, one of the world's own (a new world has **Leads**, **Supporting** and **Background**; an author can rename them, add more and reorder them in **Build → Tiers**). Each tier belongs to one of three **bands**, Leads, Supporting or Background, and each band has a cap per domain. A character's **effective level** is the lower of the domain level and its band's cap, unless you set a per-character override (**Level overrides** in the character's editor), which can never go above the domain level. Your own character is never capped. In Simulation, Leads run at level 4 while a Background shopkeeper runs at 2.
-
-A tier can make its people **live their own day (agendas and plans) by default**, and a world names the tier **new people join** (by default its first Background tier): people the story introduces, and anything spawned without a tier. How many people the story may introduce in one chat is the world's **People replies may introduce in a chat**, in **Build → World**: 24 unless you set another, up to 500, and 0 for none.
-
-People you mark as **Lives their own day (agendas and plans)** in their entity editor get goals and agendas that feed their choices, even on Story. They are consulted by the AI only on close calls or invitations. Everyone else follows schedules and seeded incidents. Only they live their plans (from Cast life 3): someone else with a mind still thinks, but their plans are never lived, never ask you along, and are dropped once their time has passed.
-
-**Life and death.** Everyone is **Alive**, **Dying**, **Dead**, or in a state the world adds in **Build → World → Life states** (a label, whether someone in it still acts, and how the narrator reads it, such as "lies unconscious"); an entity's editor sets the state it starts in. Someone who doesn't act keeps no routine or day plan, makes no choices and takes no turn in a fight, and their body stays where it lies, still there to find, unless the story moves it. You learn of it by seeing it happen, by walking in on it, or by being told (the story, a rule or the GM); until then People, Now and the narrator show what you last knew. Rules change it with the `life` effect, and a world's combat can send the fallen into a state of its own (**down** → life state).
-A death reaches the Journal on the turn it happened only if you saw it; otherwise it appears when you hear of it. Other people's comings and goings stay out of the Journal (Now and People show who is around), and a body goes wherever a reply carries it, as the story tells. An entity's editor can also say **Who knows how it starts**: everyone else takes it for alive until they find out.
-
-### Promote and demote
-
-A new chat starts from its world's own realism and time defaults, and **Settings → Realism** fills in only what a world leaves out; turn on **Use my settings instead of a world's defaults for new chats** there (it is also in **Settings → Time**) if you always want your own levels, say Story everywhere. A change in Settings saves at once and touches no running chat. To change the chat you have open, use **GM → This chat → Realism**: **Applies to** picks **Everyone** or just the **Leads**, **Supporting** or **Background** band (it names the world's tiers in that band), and each domain has a slider. Before the chat's first turn it shows the levels that turn will use. A single character's level is set on the character in the Build editors (**Level overrides**).
-
-- **Promoting** switches processes on. Anything the character lacks is generated on demand, inside what is already known.
-- **Demoting** switches processes off and trims what is shown. The data stays; nothing goes dormant, so promoting again never brings back stale detail. Money is conserved either way.
-
-When you move a slider there, a **migration preview** opens and comes into view, naming the domain the way the rest of the drawer does and saying whose level it is: "*Cast life for supporting characters* drops from level 4 to 2: processes above level 2 stop and their inputs freeze; detail stays stored.", "*Money* rises from level 2 to 4: detail is filled in when first shown." (followed by "People without money detail get it from the pinned tables when you open them."), or "… stays at level 3." Each line is marked with what it does: freezes, rises, gains detail, or a note. The levels it names are the ones the chat plays at: where the world's rules set a minimum level for a domain, a setting below it reads as that minimum. It also lists conditions in your world's rules that depend on something that will stop updating. The buttons are **Apply to this chat**, which has the focus, and **Cancel**, and a toast confirms ("*Money* is now *Simulation*."). The change is recorded like any other and applies from the next turn forward.
-
-### Mixed levels
-
-A character at a low level can still deal with one at a high level: each side records at its own level, and the low-level side's money is represented by an *external economy* account, so the books always balance.
-
-### Other people's money
-
-From Money level 3, the people in the world live on their money as you do. They are paid, they pay their bills, and every Monday they pay a week of living costs that follows their wealth band (a world can set its own amounts; the Modern US data prices them from a weekly grocery basket), so their balances go down as well as up. A bill paid to someone in the world, like your rent to your landlord, lands in that person's own account. The first morning their bills run, the engine opens their accounts with the balances the world gives them. You see all of this only in [GM mode](#everyone-elses-money).
-
-## How checks are decided
-
-A check is the dice an action rolls (see [Checks, pools, progression and sheets](#checks-pools-progression-and-sheets)). How much those dice matter, against how you describe what your character does, is up to the world and to you. A world can set its own rules for checks in **Build → Ruleset**, under **How checks are decided**. A world that sets none rolls every check and lets the roll settle it, exactly as before.
-
-### The presets
-
-| Preset | When checks roll | Your described approach | Who settles it | Retrying a failed check |
-|---|---|---|---|---|
-| **Narrative-first** | Only risky ones (under 75% to succeed); likelier actions just succeed | The judge reads it as it picks the outcome | The story: a helper picks the outcome, with the exact odds as guidance; the dice when nothing judged it | Needs a change |
-| **Balanced** | Every check, except that sure things (95% or more) pass and hopeless ones (5% or less) fail without a roll | Adds up to +2 | The roll; a roll within 2 of another result is a close call, and the narrator may add a cost or partial progress | Needs a change |
-| **Crunchy** | Every check | Doesn't count | The roll | Any time |
-
-Crunchy is how the engine has always played. **Custom** lets you set each value, and changing any value of a preset makes it Custom. A world's rules that name a preset but set some values their own way play as Custom with those values, the preset's filling in the rest, so a world's own values always apply; Build's lint says so ("This names the Balanced preset but sets checks, riskyAt and description.max its own way, so it plays as Custom with them"). The values:
-
-- **When checks roll**: every check; only risky ones, below a chance you set; only where marked (an action marked **Its check always rolls**, a place marked **Checks roll here** and the places inside it, or a quest marked **Checks roll while it's in progress** while it is under way and you can see it in your quests, so a secret quest never shows by making the dice roll); or never. A check that isn't asked for succeeds.
-- **Sure things pass without a roll** and **Hopeless tries fail without a roll**, each from a chance you set.
-- **How the player's approach counts**: not at all, as a bonus up to **The most it counts**, as advantage from a rating you set, or as a DC lower by up to the most it counts (a check without a DC takes it as a bonus). It shifts a check that rolls; the Actions sheet shows the odds before it.
-- **Who settles a check**: the roll; the roll, with close calls within the points you set; or the story.
-- **Retrying a failed check**: any time; after a change (the minutes you set passing, a new round of a fight, better or worse odds, another way of doing it such as another stat, tool or target, or going somewhere else; rewording the same thing isn't a change); or once per scene (until you leave and come back).
-
-A chance is a check's exact chance of success, as the Actions sheet shows it: the dice's equally likely results that succeed, counted, out of all of them. A chance exactly at a line counts as at it, so on a d20 19 faces of 20 are a 95% sure thing, and 15 of 20 are 75%, not risky under a 75% line. Success is the outcomes a check lists as success, else its `success` band and every band after it. A check that names no success has no success to give without a roll, so it rolls whenever its action runs, whatever the rules say about when checks happen (when the story decides, it still does, and the dice do when it can't), and a failed try at it isn't remembered.
-
-When nothing is rolled, the check passes as `success` (when the action and the check have none, as the check's **Outcome when not rolled**, else its likeliest passing band); a hopeless try fails as `failure` (else its likeliest failing band); and a retry that needs a change fails the way it failed before.
-
-### Your approach and the judge
-
-When the rules weigh your words, or leave the check to the story, the **Judge your approach** step reads what you wrote before the reply. It rates your approach from 0 up to the most it counts, with one line on why, and when the story decides it also gives each outcome's odds, which the engine draws from with the turn's seed. It takes one call from the before-the-reply budget, ahead of NPC choices, runs only for your own action with a check the rules would roll or leave to the story, only when you described what you do (an action picked in the Actions sheet with nothing typed isn't judged), and is off in the Lean preset. Its answer is kept in memory with the reading of your message's text (the last 64 per chat, until a restart): a Re-narrate keeps the outcome, and a Re-run of the same message reads the same judgement with a fresh draw while it is kept, or asks again. Without a judgement (the step is off, out of budget or fails), a rolled check rolls as the Actions sheet showed, and a check the story would decide is rolled with the dice instead, and the **Roll** chip says nothing judged your approach. Other people's actions always roll.
-
-### What you see
-
-The Actions sheet says what the rules will do before you commit: **No roll needed**, **Too hard to try**, **Retry needs a change** (or **Retry needs a new scene**), or **The story decides (odds 35%)**, with the odds bar as the guidance. After the turn, the **Roll** chip says what was rolled, or "No roll:" and why, with how your approach was rated when it counted and the close call when there was one. The narrator is told the same: to narrate the result, that a close success may come at a cost or a close failure leave partial progress, or what the story decided.
-
-An inferred check (see [Typed text](#typed-text)) shows the same way, with what it was for, and with how each companion did. When someone it went up against set how hard it was, neither the chip nor the narrator gets their numbers, nor the odds, the margin or the difficulty that would give them away, unless the chat's rules show others' numbers. Whatever the rules, no panel shows them, the Journal and the Context inspector included: their rolls are recorded as hidden checks.
-
-### New chats and this chat
-
-**Settings → Checks** holds your own rules for new chats: a new chat in a world that sets none uses them, and **Use my check rules instead of a world's for new chats** makes every new chat use them. A change there saves at once, and a chat keeps the rules it started with, whatever you change later: a chat started before a world's own values over a named preset applied keeps playing that preset, until you set them in **GM → This chat → Checks**. **GM → This chat → Checks** shows the rules in force in the chat you have open; change them and tap **Apply to this chat**, or **Cancel**. The change applies from the next turn, and it is recorded like a realism change, so it follows swipes and branches.
-
-### Inferred checks
-
-A typed attempt that no action covers ("I try to talk the bouncer into letting me in", "I keep my face blank while Marcus lies", "we sneak past the guard") can be read as a check of the world's own sheet, rolled and recorded like any check, so the reply follows the dice. How is set beside the rules above, in the same three places and layered the same way:
-
-- **Build → Ruleset → How checks are decided**, under **Inferred checks**: the world's default. Turn on **This world sets how typed attempts are read as checks** to set it, starting from what the world's realism defaults play; leave it off and new chats take the player's own setting.
-- **Settings → Checks**, under **Inferred checks**: yours, for new chats. **By the chat's realism** (the default) leaves each new chat to its realism preset; **My own** sets your own, starting from what your realism defaults play. It fills in for a world that sets none, and **Use my check rules instead of a world's for new chats** makes it replace a world's too. A change saves at once.
-- **GM → This chat → Checks**, under the rules in force: the chat you have open. Change any value and tap **Review the change** to see what it does, then **Apply to this chat** (or **Keep editing**); **Cancel** drops the edits. It applies from the next turn, earlier turns keep how theirs were read, and it is recorded like a realism change, so it follows swipes and branches.
-
-A chat nobody set one for, a chat started before inferred checks among them, plays by its realism preset at its Sheets level:
-
-| Preset | Read typed attempts | Which attempts | Who rolls | Difficulty | The narrator is told | Others' numbers | Most rolls a turn |
-|---|---|---|---|---|---|---|---|
-| **Story** | Roll automatically | Only when the message says it tries | The player character only | Easy to Hard | The result | Hidden | 1 |
-| **Grounded** | Roll automatically | Only risky attempts | With companions | Easy to Very hard | The result | Hidden | 3 |
-| **Simulation** | Roll automatically | Every uncertain attempt | Everyone involved | Easy to Heroic | The result and margin | Hidden | 6 |
-
-Story rolls by itself rather than asking, so a Story chat never stops to wait on a **Roll** card unless you pick **Suggest a roll**; it rolls only what your message says your character tries, so other messages play as they always did. At Sheets 0 there is no sheet to roll with, so it is off; at Sheets 1 the narrator is told the result alone, and at Sheets 2 the margin at most. A Custom realism takes the preset its Sheets level matches (1 Story, 2 Grounded, 3 and up Simulation).
-
-The values, the same in each place:
-
-- **Read typed attempts as checks**: **Off** (typed text is read as it was before inferred checks: a message that says it uses a skill reads as the world's own skill action, such as **Use a skill** or **Attempt**, and rolls its check, and an attempt no action covers plays as roleplay, the narrator deciding how it goes), **Suggest a roll** (a chip offers the roll, which happens only when you take it) or **Roll automatically**. Suggest and Roll automatically read such a message as **Try something** in place of those actions, so it is never rolled twice. Under Off the other values are greyed out and keep what they were, for when you turn it back on.
-- **Which attempts**: **Every uncertain attempt**, **Only risky attempts** (below the risky line of the rules above) or **Only when the message says it tries**.
-- **Who rolls**: **The player character only**; **With companions**, each companion who joins in rolling their own; or **Everyone involved**, the people the attempt opposes or targets rolling against it too.
-- **Every skill the sheet has**, or turn it off and pick the skills an attempt may roll. Each place lists the skills its world's sheet has: Build the draft's sheet as you edit it, GM the chat's world's, and Settings the world of the chat you have open (with none open there is nothing to pick from). A picked skill a sheet doesn't have stays listed, marked so, until you take it off; a world whose sheet has none of the picked skills reads no attempt as a check.
-- **Easiest difficulty** and **Hardest difficulty**: the bands the difficulty is read from, from the attempt and its scene: **Trivial** (DC 5), **Easy** (8), **Moderate** (10), **Tricky** (12), **Hard** (15), **Very hard** (20), **Heroic** (25) and **Nearly impossible** (30). One outside the range is moved to the nearest band in it, and moving one bound past the other takes the other along.
-- **What the narrator is told**: **The result** (passed or failed), **The result and margin** (by how much) or **The whole roll** (the dice, the modifier and the total).
-- **Others' numbers**: **Hidden** or **Shown**: whether an opponent's or a companion's dice, modifier, total or score reach the narrator and the **Roll** chip. Hidden keeps a hidden stat hidden.
-- **After a success, tell the narrator** and **After a failure, tell the narrator**: the line the narrator is given after each result, up to 240 characters. `{who}` reads as who rolled, `{skill}` as the skill, `{attempt}` as what they tried and `{against}` as who or what it was against. A line left empty is the default's ("Narrate it succeeding.", "Narrate it failing."), and **Reset the lines** puts both back.
-- **Most rolls a turn**: 1 to 12. Your character's roll comes first, then companions', then opponents'; past the most, an opponent sets the difficulty without a roll.
 
 ## Model use
 
