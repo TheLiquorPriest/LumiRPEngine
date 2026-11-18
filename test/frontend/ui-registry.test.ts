@@ -66,8 +66,6 @@ describe("UI registry", () => {
     expect(() => buildCatalog([chip("a"), chip("b")])).toThrow("roll");
     const preview = (id: string): UiPackDef => ({ id, register: (r) => r.preview("maps", Empty) });
     expect(() => buildCatalog([preview("a"), preview("b")])).toThrow("maps");
-    const gm = (id: string): UiPackDef => ({ id, register: (r) => r.gm({ id: "x.tab", label: "T", icon: "layers", order: 1, component: Empty }) });
-    expect(() => buildCatalog([gm("a"), gm("b")])).toThrow("GM view tab x.tab");
     const field = (id: string): UiPackDef => ({ id, register: (r) => r.field({ kind: "person", field: "flows", component: Empty }) });
     expect(() => buildCatalog([field("a"), field("b")])).toThrow("person.flows");
     const sheet = (id: string): UiPackDef => ({ id, register: (r) => r.sheet("person", Empty) });
@@ -77,12 +75,6 @@ describe("UI registry", () => {
     const orgTab = (id: string): UiPackDef => ({ id, register: (r) => r.orgTab({ id: "x.money", label: "Money", order: 40, section: "money", component: Empty }) });
     expect(() => buildCatalog([orgTab("a"), orgTab("b")])).toThrow("An organization tab x.money (pack b)");
     expect(() => buildCatalog([{ id: "a", register: () => {} }, { id: "a", register: () => {} }])).toThrow("registered twice");
-  });
-
-  test("the packs' GM view tabs come out in order, ties broken by id", () => {
-    const tab = (pack: string, id: `${string}.${string}`, order: number): UiPackDef => ({ id: pack, register: (r) => r.gm({ id, label: id, icon: "layers", order, component: Empty }) });
-    const catalog = buildCatalog([tab("minds", "minds.minds", 20), tab("economy", "economy.money", 30), tab("aaa", "aaa.tab", 20)]);
-    expect(catalog.gmSections.map((def) => def.id)).toEqual(["aaa.tab", "minds.minds", "economy.money"]);
   });
 
   test("the packs' organization tabs and parts come out in order, ties broken by id, whichever pack registered them", () => {

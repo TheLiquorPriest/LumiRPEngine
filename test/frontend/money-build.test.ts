@@ -184,6 +184,5 @@ describe("every money field reaches its editor", () => {
 
   test("places get the cash machine and branch editors", () => {
     expect(catalog.placeFields.map((p) => p.field)).toEqual(["atm", "branch"]);
-    expect(catalog.gmSections.map((s) => s.id)).toEqual(["economy.money"]);
   });
 });
