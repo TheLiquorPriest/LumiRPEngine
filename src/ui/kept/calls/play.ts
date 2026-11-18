@@ -3,7 +3,8 @@
 // property") go to `POST /api/v1/chats/:chat/taps` as typed calls carrying the panel's Tell choice. RPE
 // tells what each is: one that manages is his own edit, recorded at once; one that goes with his next
 // message is held as his request (or taken back, where the same tap is pressed again); one with words, a
-// chip or Send now is played now. An Undo goes by the id the answer gave, to
+// chip or Send now is played now; and its answer says which, given back as today's `{staged}` or
+// `{messageId}`. An Undo goes by the id the answer gave, to
 // `POST /api/v1/chats/:chat/edits/:edit/undo`, not as today's Undo chip. RPE answers a tap it turns down
 // with `applied: false` and its words, which come back as the refusal they are. His word on a question a
 // lane set to Confirm waits on (the chip under its reply) goes to the question's answer route. The chat's
@@ -85,8 +86,10 @@ export const calls: CallFile = {
     switch (request.type) {
       case "lre.action": {
         const chat = chatOf(request, ctx);
-        const { undo } = await tap(ctx, chat, { kind: "action", action: request.action, params: request.params, source: request.source, ...(request.text === undefined ? {} : { text: request.text }), ...(request.now === true ? { now: true } : {}), ...(request.tell === undefined ? {} : { tell: request.tell }) });
-        return { applied: true, pending: false, undo };
+        const reply = await tap(ctx, chat, { kind: "action", action: request.action, params: request.params, source: request.source, ...(request.text === undefined ? {} : { text: request.text }), ...(request.now === true ? { now: true } : {}), ...(request.tell === undefined ? {} : { tell: request.tell }) });
+        // A press that does not manage: held for his next message (false: the same press again took it back), or played now as his message.
+        if (reply.asked !== undefined) return "held" in reply.asked ? { staged: reply.asked.held !== null } : { messageId: reply.asked.message };
+        return { applied: true, pending: false, undo: reply.undo };
       }
       case "lre.fix": {
         const chat = chatOf(request, ctx);

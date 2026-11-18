@@ -4,7 +4,9 @@
 // from today's pure builders, which live in `state/` as today's backend built them (`buildView`). The
 // Journal's notes are read from the chat's turns (`journal.ts`); the chips under the replies, the HUD's
 // meter and the pending marks from RPE's own records (`panel-reads.ts`), each newest reply's clock from
-// its turn's story time; the controls' knowledge choices from the chat's settings. The Keep report only
+// its turn's story time; the controls' knowledge choices from the chat's settings; and what waits for his
+// next message from a panel (`staged`) from the request the turn lane holds for it, in the words the next
+// briefing gives the Author. The Keep report only
 // today's ledger held, and is present and empty. Which of today's engines plays the chat is left out:
 // none of them does, RPE does. A chat RPE plays on no world is answered as today answers a chat that is
 // not a world's.
@@ -17,7 +19,8 @@ import type { JsonValue } from "../shared/json";
 import type { MapConfig } from "../shared/map-config";
 import type { JournalNote } from "../shared/ledger";
 import type { OffstageSettings } from "../shared/offstage";
-import type { CallMeterView, Chip, PendingMark, StateView } from "../shared/state-view";
+import type { CallMeterView, Chip, PendingMark, StagedPress, StateView } from "../shared/state-view";
+import type { RequestRecord } from "../turn/requests";
 import type { Store, UserStore } from "../store";
 import { questSliceOf, questViews } from "../quests/record";
 import { trailsOf, withPast, withTrails } from "../quests/trail";
@@ -52,6 +55,20 @@ export interface ChatViewInput {
   pending: PendingMark[];
   /** The newest replies whose clock the view carries. */
   clocksMost: number;
+  /** What waits for his next message from a panel: the request the turn lane holds (`requests.ts`); null for none, and at a turn of the past. */
+  staged: StagedPress | null;
+}
+
+/** A press as its view shows it: what was pressed, then on what, as the next briefing gives the Author each (`notices.md`, `panel_request`). */
+export function pressedLine(asked: { what: string; on: string | null }): string {
+  return asked.on === null ? asked.what : `${asked.what}, on ${asked.on}`;
+}
+
+/** A panel's request that waits, as the state view shows it; null for one that is no panel's. */
+export function stagedOf(r: RequestRecord): StagedPress | null {
+  if (r.kind !== "panel" || r.played || !("what" in r.asked)) return null;
+  const { action, values, from, what, on } = r.asked;
+  return { request: r.id, action, values, from, what, on, label: pressedLine(r.asked) };
 }
 
 /** The turn at the head of a chat's path; null before its first. */
@@ -110,6 +127,7 @@ export function chatView(input: ChatViewInput): StateView {
       journal: input.journal,
       keepReport: [],
       pending: input.pending,
+      staged: input.staged,
       panels,
       palette: palette(world, state, registry),
       controls: controls(world, state, shown.sceneType, registry, input.knowledge, input.offstage),

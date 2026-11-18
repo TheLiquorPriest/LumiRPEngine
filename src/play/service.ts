@@ -66,7 +66,7 @@ import { TIMELAPSE_ACTION } from "./state/palette";
 import { playerReason } from "./state/requirement-words";
 import { unfitRef } from "./state/unfit-ref";
 import { unfitWords } from "./unfit";
-import { chatView, headTurn } from "./view";
+import { chatView, headTurn, stagedOf } from "./view";
 
 /** The prompt part this area's words are in, under the guidance folder's `.prompts/`. */
 export const PLAY_ANSWERS = "play-answers";
@@ -190,12 +190,17 @@ export type TapAsk =
   | { kind: "edit"; ops: EditOpAsk[]; tell?: boolean }
   | { kind: "ops"; ops: JsonValue[]; tell?: boolean };
 
-/** What a tap on the typed route came to: applied or not, what the world's rules reported, the id its Undo takes, and the answer's words. */
+/**
+ * What a tap on the typed route came to: applied or not, what the world's rules reported, the id its Undo takes, and the answer's words;
+ * and, for a tap that is no tap that manages (plan §10.10), what became of it: held for his next message (null: the same tap again took
+ * the one that waited back), or played now.
+ */
 export interface TapAnswer {
   applied: boolean;
   reports: string[];
   undo: string | null;
   words: string;
+  asked?: { held: RequestRecord | null } | Played;
 }
 
 /** A tap of his alone, which opens nothing of the world's. */
@@ -311,6 +316,8 @@ export class PlayService {
       meter: meterOf(db, user, chat, taps.meterTurns),
       pending: turning ? pendingOf(db, s, user, chat) : [],
       clocksMost: taps.clocksMost,
+      // What waits for his next message from a panel: one at a time, the turn lane's held request; a turn of the past shows none.
+      staged: turn === null ? (this.deps.requests.waiting(user, chat).map(stagedOf).findLast((s) => s !== null) ?? null) : null,
     });
   }
 
@@ -330,8 +337,11 @@ export class PlayService {
   /** A tap on the typed route, recorded as his own edit; a refusal answered in words with nothing changed. */
   async tap(user: string, chat: string, ask: TapAsk): Promise<TapAnswer> {
     try {
-      // A tap of an action that does not manage is a request of his to the Author: held, taken back, or played now.
-      if (ask.kind === "action" && (await this.requested(user, chat, ask)) !== undefined) return { applied: true, reports: [], undo: null, words: "" };
+      // A tap of an action that does not manage is a request of his to the Author: held, taken back, or played now; the answer says which.
+      if (ask.kind === "action") {
+        const asked = await this.requested(user, chat, ask);
+        if (asked !== undefined) return { applied: true, reports: [], undo: null, words: "", asked };
+      }
       const settings = await this.deps.settings(user, chat);
       const tell = ask.tell ?? null;
       const { kind: _kind, tell: _tell, ...request } = ask;

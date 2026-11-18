@@ -51,12 +51,6 @@ const tapAsk = shape.named(
     shape.object({ kind: shape.literal("ops"), ops: shape.list(shape.json()), tell }),
   ),
 );
-const tapReply = shape.named(
-  "TapReply",
-  "What a tap or its Undo came to: whether it was applied, what the world's rules reported of it (kept with it, listed under unsettled), the id its Undo takes (null where nothing was recorded), and the answer in words.",
-  shape.object({ applied: shape.yesNo(), reports: shape.list(T), undo: shape.nullable(T), words: T }),
-);
-
 const values = shape.record(shape.json());
 const panelTapAsk = shape.named(
   "PanelTapAsk",
@@ -80,6 +74,16 @@ const playedReply = shape.named(
   "PlayedReply",
   "The tap played: the message its line went into the chat as, the generation Lumiverse started to answer it, and the request kept with it as played now.",
   shape.object({ message: T, generation: T, request: T }),
+);
+const tapAsked = shape.named(
+  "TapAsked",
+  "What became of a tap that is no tap that manages: held for his next message (the request that waits; null where the same tap again took the one that waited back), or played now.",
+  shape.union(shape.object({ held: shape.nullable(requestShown) }), playedReply),
+);
+const tapReply = shape.named(
+  "TapReply",
+  "What a tap or its Undo came to: whether it was applied, what the world's rules reported of it (kept with it, listed under unsettled), the id its Undo takes (null where nothing was recorded), the answer in words, and, for a tap that is no tap that manages, what became of it.",
+  shape.object({ applied: shape.yesNo(), reports: shape.list(T), undo: shape.nullable(T), words: T, asked: opt(tapAsked, "Held for his next message or played now; left out for a tap that manages, an Undo and a time control.") }),
 );
 
 const dueShown = shape.named(
@@ -137,7 +141,7 @@ export function playRoutes(play: PlayService) {
       path: TAPS_PATH,
       access: "page",
       group: "state",
-      does: "A tap that manages, or a correction from any page, recorded at once as his own edit; what the world's rules turn down is applied with its report; a refusal is answered in words with nothing changed.",
+      does: "A tap that manages, or a correction from any page, recorded at once as his own edit; what the world's rules turn down is applied with its report; a refusal is answered in words with nothing changed. A tap of one of the world's actions that does not manage is held for his next message, taken back, or played now, as the panel's own routes do it, and the answer says which.",
       body: tapAsk,
       reply: tapReply,
       handle: ({ user, params, body }) => play.tap(user, params.chat, body),

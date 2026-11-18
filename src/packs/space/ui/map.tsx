@@ -3,7 +3,8 @@
 // (`frontend/map-math`). Breadcrumbs lead out to the places around it. In the drawer (Play →
 // Places) a tapped place opens its place sheet (place.tsx); in the map overlay, which has no sheet
 // stack, the same details dock over the map. With the grid system on, tap a cell of the grid you
-// stand on to walk there (`step`), or one with things lying in it to see them. Known shows what
+// stand on to walk there with your next message (`step`): the square stays marked while the walk
+// waits, and Walk here on it again takes it back; or tap one with things lying in it to see them. Known shows what
 // the POV knows, places only heard of dashed; Fog fogs what it hasn't seen; the choice is the
 // chat's (`lre.map`), and the backend builds the view for it, so what the display hides never
 // reaches the page. A list gives the scope's known places; Full screen opens the map overlay.
@@ -12,7 +13,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/ho
 import type { Cell } from "../../../shared/grid";
 import type { MapDisplay } from "../../../shared/world";
 import { PLACE_MARK_LABEL, PLACE_MARKS } from "../../../shared/maps";
-import { pushSheet, useApp } from "../../../frontend/app";
+import { pushSheet, useApp, useView } from "../../../frontend/app";
+import { WaitingPress } from "../../../frontend/waiting";
 import { Empty, IconButton, JsonView, List, ListRow, Section, Seg, useBusy } from "../../../frontend/components";
 import { formatMinutes } from "../../../frontend/format";
 import { isRecord } from "../../../shared/json";
@@ -365,6 +367,11 @@ function MapCanvas(props: { view: MapView; chatId: string }) {
       live = false;
     };
   }, [cell?.x, cell?.y, walkable, pov?.x, pov?.y, props.chatId]);
+  // The walk that waits for the next message, on the grid the POV stands on: its square stays outlined, and Walk here on it takes it back.
+  const state = useView();
+  const staged = state?.staged ?? null;
+  const waiting: Cell | null = walkable && staged?.action === "step" && typeof staged.values.x === "number" && typeof staged.values.y === "number" ? { x: staged.values.x, y: staged.values.y } : null;
+  const walksHere = waiting !== null && cell !== null && cell.x === waiting.x && cell.y === waiting.y;
   // A dock that opens takes focus, so Escape closes it before the overlay and assistive tech lands on it.
   const dockKey = cell ? `cell:${cell.x},${cell.y}` : selected !== null && (overlay || !app.catalog.sheets.has("place")) ? `place:${selected}` : null;
   useEffect(() => {
@@ -515,7 +522,7 @@ function MapCanvas(props: { view: MapView; chatId: string }) {
               }
         }
         onMove={hand && placeId !== null && !editing ? move : undefined}
-        cell={cell ?? anchor}
+        cell={cell ?? anchor ?? (editing ? null : waiting)}
         display={display}
         top={top}
         hideZoom={listing || dockedPlace !== null || cell !== null || editing}
@@ -576,6 +583,11 @@ function MapCanvas(props: { view: MapView; chatId: string }) {
               ))}
             </ul>
           ) : null}
+          {waiting !== null && state !== null ? (
+            <div data-lre-map-waits={`${waiting.x},${waiting.y}`}>
+              <WaitingPress view={state} block />
+            </div>
+          ) : null}
         </div>
       ) : null}
       {cell ? (
@@ -608,17 +620,17 @@ function MapCanvas(props: { view: MapView; chatId: string }) {
             <div data-lre-map-walk>
               <List>
                 <ListRow
-                  icon={MODE_ICON.walk}
-                  title="Walk here"
-                  subtitle={walk === null ? "…" : (walk.disabled ?? formatMinutes(walk.minutes))}
-                  disabled={busy || walk === null || walk.disabled !== undefined}
+                  icon={walksHere ? "close" : MODE_ICON.walk}
+                  title={walksHere ? "Take back Walk here" : "Walk here"}
+                  subtitle={walksHere ? "It waits for your next message; pressed again, it no longer does." : walk === null ? "…" : (walk.disabled ?? `${formatMinutes(walk.minutes)}, with your next message`)}
+                  disabled={busy || (!walksHere && (walk === null || walk.disabled !== undefined))}
                   onClick={() =>
                     run(async () => {
                       const result = await app.request(travelRequest("step", { x: cell.x, y: cell.y }, props.chatId));
-                      if (result) {
-                        setCell(null);
-                        app.overlays.closeMap();
-                      }
+                      if (result === null) return;
+                      setCell(null);
+                      // Held for the next message, the HUD says so where you play; taken back, the square's mark goes as you watch.
+                      if (!("staged" in result) || result.staged) app.overlays.closeMap();
                     })
                   }
                 />

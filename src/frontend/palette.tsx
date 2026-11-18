@@ -24,6 +24,7 @@ import { formatCents, formatMinutes, formatOdds, humanize } from "./format";
 import { Icon } from "../ui/icons";
 import { MoneyInput } from "./money-input";
 import { paletteRequest, timelapseRequest, timeMarker } from "./requests";
+import { holdsPick, isStaged, WaitingPress } from "./waiting";
 
 // Combat leads while it's there: in a fight its actions are what the player wants first.
 const GROUP_LABEL: Record<PaletteEntry["group"], string> = { combat: "Combat", action: "Actions", buy: "Buy", pay: "Pay", transfer: "Transfer", drive: "Drive", lend: "Lend" };
@@ -192,15 +193,19 @@ function OptionOdds(props: { odds: readonly OutcomeOdds[] }) {
 /**
  * An option: its label, its time and what the check reads, one odds bar, the price, and why it
  * can't be taken now. One that can't stays readable, so its reason does too: it is marked
- * unavailable rather than disabled, and a tap does nothing.
+ * unavailable rather than disabled, and a tap does nothing. One pressed for your next message is
+ * marked so while it waits.
  */
-function OptionRow(props: { option: PaletteOption; current: boolean; onPick(): void }) {
+function OptionRow(props: { option: PaletteOption; current: boolean; waits?: boolean; onPick(): void }) {
   const { option } = props;
   const blocked = option.disabled !== undefined;
   return (
-    <button type="button" class="lre-item lre-chat-option" aria-current={props.current} aria-disabled={blocked || undefined} onClick={() => (blocked ? undefined : props.onPick())}>
+    <button type="button" class="lre-item lre-chat-option" aria-current={props.current} aria-disabled={blocked || undefined} data-lre-waits={props.waits ? "" : undefined} onClick={() => (blocked ? undefined : props.onPick())}>
       <span class="grow">
-        <span class="title">{option.label}</span>
+        <span class="title">
+          {option.label}
+          {props.waits ? <Badge tone="accent">With your next message</Badge> : null}
+        </span>
         {option.minutes !== undefined || option.detail ? (
           <span class="lre-chat-meta">
             {option.minutes !== undefined ? (
@@ -246,7 +251,7 @@ export function picksFor(entry: PaletteEntry, params: JsonObject): PaletteOption
 }
 
 /** One `next` step under the pick it follows; scrolls itself into view when it opens. */
-function NextStep(props: { after: PaletteOption; step: NextStepView; chosen: PaletteOption | undefined; onPick(option: PaletteOption): void }) {
+function NextStep(props: { after: PaletteOption; step: NextStepView; chosen: PaletteOption | undefined; waits(params: JsonObject): boolean; onPick(option: PaletteOption): void }) {
   const ref = useRef<HTMLDivElement>(null);
   const after = JSON.stringify(props.after.params);
   useEffect(() => ref.current?.scrollIntoView({ block: "nearest", behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }), [after]);
@@ -263,7 +268,7 @@ function NextStep(props: { after: PaletteOption; step: NextStepView; chosen: Pal
       ) : (
         <div class="lre-list">
           {props.step.options.map((option) => (
-            <OptionRow key={JSON.stringify(option.params)} option={option} current={samePick(props.chosen, option)} onPick={() => props.onPick(option)} />
+            <OptionRow key={JSON.stringify(option.params)} option={option} current={samePick(props.chosen, option)} waits={props.waits({ ...props.after.params, ...option.params })} onPick={() => props.onPick(option)} />
           ))}
         </div>
       )}
@@ -347,12 +352,18 @@ function ActionList(props: { view: StateView; head: ComponentChildren; entries: 
   const payer = selected?.entry.acting?.options.find((o) => o.id === payingAs)?.name;
   const named = !selected ? "" : chain.length > 0 ? `${selected.entry.label}: ${chain.join(" → ")}` : selected.entry.label;
   const what = !selected ? "Choose an action" : pending ? `Choose ${pending.label.toLowerCase()}` : payer ? `${named}, as ${payer}` : named;
-  const label = props.edit && selected && !pending ? `Play ${what}` : what;
+  // What waits for the next message shows chosen; the same press again takes it back, and the button says so.
+  const staged = props.view.staged ?? null;
+  const asking = selected && !pending && amountOk && countOk && !props.edit ? paletteRequest(selected.entry, selected.picks, props.view.chatId, range ? amountCents ?? undefined : undefined, countValue ?? undefined, people, payingAs === "" ? undefined : payingAs) : null;
+  const waits = asking !== null && isStaged(staged, asking.action, asking.params, props.view.currency);
+  const label = props.edit && selected && !pending ? `Play ${what}` : waits ? `Take back ${what}` : what;
+  const held = (entry: PaletteEntry) => (params: JsonObject) => holdsPick(staged, entry.action, params);
   const span = range ? `${formatMoney(range.min, currency)}${range.max !== null ? `–${formatMoney(range.max, currency)}` : " or more"}` : "";
   return (
     <>
       <div {...props.panel} class="body" data-lre-palette-list>
         {props.head}
+        {props.edit ? null : <WaitingPress view={props.view} block />}
         {props.entries.map((entry) => (
           <section key={entry.action} class="lre-chat-entry">
             <div class="lre-chat-entry-head">
@@ -361,11 +372,11 @@ function ActionList(props: { view: StateView; head: ComponentChildren; entries: 
             </div>
             <div class="lre-list">
               {entry.options.map((option) => (
-                <OptionRow key={JSON.stringify(option.params)} option={option} current={selected?.entry.action === entry.action && samePick(selected.picks[0], option)} onPick={() => pick(entry, 0, option)} />
+                <OptionRow key={JSON.stringify(option.params)} option={option} current={selected?.entry.action === entry.action && samePick(selected.picks[0], option)} waits={held(entry)(option.params)} onPick={() => pick(entry, 0, option)} />
               ))}
             </div>
             {selected?.entry.action === entry.action
-              ? selected.picks.map((chosen, depth) => (chosen.next ? <NextStep key={`${depth}:${JSON.stringify(chosen.params)}`} after={chosen} step={chosen.next} chosen={selected.picks[depth + 1]} onPick={(option) => pick(entry, depth + 1, option)} /> : null))
+              ? selected.picks.map((chosen, depth) => (chosen.next ? <NextStep key={`${depth}:${JSON.stringify(chosen.params)}`} after={chosen} step={chosen.next} chosen={selected.picks[depth + 1]} waits={held(entry)} onPick={(option) => pick(entry, depth + 1, option)} /> : null))
               : null}
             {selected?.entry.action === entry.action && entry.people ? (
               <div class="lre-chat-next" data-lre-palette-people={entry.people.param}>
@@ -410,8 +421,14 @@ function ActionList(props: { view: StateView; head: ComponentChildren; entries: 
             <span>{number.label}</span>
           </label>
         ) : null}
+        {selected && !pending && !props.edit && selected.entry.atOnce !== true ? (
+          <span class="lre-chat-hint" data-lre-palette-waits>
+            <Icon name="info" size={14} />
+            {waits ? "It waits for your next message; pressed again, it no longer does." : "It waits for your next message, and the Author is told then what you pressed and on what."}
+          </span>
+        ) : null}
         <button type="button" class="lre-btn primary lre-chat-go" disabled={!selected || pending !== undefined || !amountOk || !countOk || busy} aria-busy={busy || undefined} onClick={go} data-lre-go>
-          {selected && !pending ? <Icon name="check" /> : null}
+          {selected && !pending ? <Icon name={waits ? "close" : "check"} /> : null}
           {label}
         </button>
       </footer>
@@ -461,6 +478,10 @@ function TimelapsePanel(props: { view: StateView; timelapse: TimelapseView; edit
   const chosen: TimelapseTarget | null = customMinutes !== null && customMinutes > 0 ? { type: "duration", minutes: customMinutes } : target;
   const sameTarget = (a: TimelapseTarget | null, b: TimelapseTarget) => a !== null && JSON.stringify(a) === JSON.stringify(b);
   const changed = Object.entries(overrides).filter(([cls, policy]) => timelapse.interrupts[cls as InterruptClass] !== policy).length;
+  // The sheet's words for the skip, which RPE keeps as what was pressed; the skip that waits for the next message shows so, and the same press again takes it back.
+  const named = chosen ? `Timelapse ${chosen.type === "duration" ? formatMinutes(chosen.minutes) : (timelapse.until.find((entry) => sameTarget(chosen, entry.target))?.label ?? (chosen.type === "at" ? "to the time you said" : "")).toLowerCase()}` : null;
+  const asking = chosen && named !== null ? timelapseRequest(timelapse, chosen, overrides, props.view.chatId, follow, named) : null;
+  const waits = !edit && asking !== null && isStaged(props.view.staged, asking.action, asking.params, props.view.currency);
   return (
     <>
       <div {...props.panel} class="body" data-lre-timelapse>
@@ -468,7 +489,9 @@ function TimelapsePanel(props: { view: StateView; timelapse: TimelapseView; edit
           <p class="lre-chat-hint" data-lre-palette-edit>
             Change how long your message's time skip runs. It plays this instead of what was read.
           </p>
-        ) : null}
+        ) : (
+          <WaitingPress view={props.view} block />
+        )}
         {timelapse.blocked ? (
           <Banner tone="warn" icon="pause">
             {timelapse.blocked}
@@ -552,6 +575,12 @@ function TimelapsePanel(props: { view: StateView; timelapse: TimelapseView; edit
         </Section>
       </div>
       <footer>
+        {named !== null && !edit ? (
+          <span class="lre-chat-hint" data-lre-palette-waits>
+            <Icon name="info" size={14} />
+            {waits ? "It waits for your next message; pressed again, it no longer does." : "It waits for your next message, and the Author is told then how long, and plays the stretch of time."}
+          </span>
+        ) : null}
         <button
           type="button"
           class="lre-btn primary block"
@@ -559,16 +588,15 @@ function TimelapsePanel(props: { view: StateView; timelapse: TimelapseView; edit
           disabled={!chosen || timelapse.blocked !== null || busy}
           aria-busy={busy || undefined}
           onClick={() => {
-            if (!chosen) return;
+            if (asking === null) return;
             run(async () => {
-              const request = timelapseRequest(timelapse, chosen, overrides, props.view.chatId, follow);
               // From an intent gate's Edit, the skip as set here plays through the chip, in place of the read (DESIGN §5.1).
-              if (edit ? await sendChipChoice(app, edit.chip, "edit", edit.chatId, { params: request.params }) : await app.request(request)) props.onSent();
+              if (edit ? await sendChipChoice(app, edit.chip, "edit", edit.chatId, { params: asking.params }) : await app.request(asking)) props.onSent();
             });
           }}
         >
-          <Icon name="fast-forward" />
-          {chosen ? `${edit ? "Play " : ""}Timelapse ${chosen.type === "duration" ? formatMinutes(chosen.minutes) : (timelapse.until.find((entry) => sameTarget(chosen, entry.target))?.label ?? (chosen.type === "at" ? "to the time you said" : "")).toLowerCase()}` : "Choose how long"}
+          <Icon name={waits ? "close" : "fast-forward"} />
+          {named === null ? "Choose how long" : edit ? `Play ${named}` : waits ? `Take back ${named}` : named}
         </button>
       </footer>
     </>

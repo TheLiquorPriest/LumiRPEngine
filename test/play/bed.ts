@@ -13,7 +13,7 @@ import { type LiveEvent, LiveHub, WriteQueue } from "../../src/app";
 import { createRegistry, type Registry } from "../../src/engine/registry-impl";
 import { engineTools, gridMoves, mapView, mapWording, shippedTexts, stateScan } from "../../src/iface/index";
 import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
-import { playRoutes, PlayService } from "../../src/play";
+import { type PlayDeps, playRoutes, PlayService } from "../../src/play";
 import { TAP_DEFAULTS } from "../../src/play/settings";
 import { hashJson } from "../../src/shared/hash";
 import type { ErrorMessage, ResultBodies, ResultMessage } from "../../src/shared/protocol";
@@ -57,6 +57,9 @@ export function keyed(code: string): string {
 
 export interface Bed {
   store: Store;
+  /** The play panels' service the routes stand on, and the turn lane's requests it holds a press in. */
+  service: PlayService;
+  requests: Requests;
   writes: WriteQueue;
   live: LiveHub;
   /** Chats a turn runs in now, as the turn lane would say. */
@@ -80,7 +83,13 @@ export interface Bed {
 let replies = 0;
 let asked = 0;
 
-export function makeBed(): Bed {
+/** The bed's Lumiverse where a test gives none: there is no chat to put a message in. */
+function noLumiverse(): never {
+  throw new Error("The play bed has no Lumiverse to put a message in.");
+}
+
+/** `lumiverse`: what puts a message in the chat and starts a reply as him; left out, the bed has no Lumiverse and says so. */
+export function makeBed(lumiverse: PlayDeps["lumiverse"] = noLumiverse): Bed {
   const db = new Database(":memory:");
   migrateStore(db);
   // The turn lane's own tables (requests, runs and their usage, questions, carried chips), as the application has them.
@@ -93,17 +102,16 @@ export function makeBed(): Bed {
   const heard: LiveEvent[] = [];
   const logged: string[] = [];
   const log = (level: string) => (message: string) => void logged.push(`${level} ${message}`);
-  // The bed has no Lumiverse to put a message in.
+  // The bed's requests tell nobody when what waits changed.
   const requests = new Requests(db, writes, () => undefined);
-  const lumiverse = () => {
-    throw new Error("The play bed has no Lumiverse to put a message in.");
-  };
   const service = new PlayService({ store, writes, live, db, guidance: GUIDANCE, texts: () => shippedTexts(), turning: (_user, chat) => running.has(chat), settings: async () => ({ dueItems: 50, editOps: 64, taps: TAP_DEFAULTS, map: MAP_DEFAULTS }), requests, lumiverse, writeChatSetting: async () => {}, log: { debug: log("debug"), info: log("info"), warn: log("warn"), error: log("error") } });
   const [stateRoute] = playRoutes(service);
   const call = { query: new URLSearchParams(), request: new Request("http://rpe.test/"), signal: new AbortController().signal };
 
   return {
     store,
+    service,
+    requests,
     writes,
     live,
     running,

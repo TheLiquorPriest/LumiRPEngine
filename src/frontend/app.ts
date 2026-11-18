@@ -354,6 +354,16 @@ export interface MapHand {
   display(chat: ChatId, display: "knowledge" | "fog"): Promise<void>;
 }
 
+/**
+ * What waits for his next message from a panel (plan §10.10), where the App is taken to RPE's typed routes: sent now, its line put in
+ * the chat as his message and a reply started (`POST /api/v1/chats/:chat/plays`), or taken back (`DELETE /api/v1/chats/:chat/requests/
+ * :request`), each by the request's id the state view gives (`StateView.staged`). A refusal is thrown with RPE's words.
+ */
+export interface NextMessage {
+  sendNow(chat: ChatId, request: string): Promise<void>;
+  takeBack(chat: ChatId, request: string): Promise<void>;
+}
+
 export interface App {
   client: ProtocolClient;
   send: Send;
@@ -371,6 +381,8 @@ export interface App {
   open?(route: { page: string; chat?: string | null; at?: readonly string[] }): void;
   /** The owner's hand on a chat's map, where the App is taken to RPE's typed routes; absent where it is not, and the map panel then shows no tools. */
   maps?: MapHand;
+  /** What waits for his next message, sent now or taken back, where the App is taken to RPE's typed routes; absent where it is not. */
+  next?: NextMessage;
 }
 
 export const AppContext = createContext<App | null>(null);

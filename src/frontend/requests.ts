@@ -91,13 +91,14 @@ export function paletteRequest(entry: PaletteEntry, picks: readonly PaletteOptio
  * A timelapse: only the overrides that differ from the current policy travel in the intent.
  * `followRoutine` travels only when given (the palette always gives it): true lets the POV live its
  * routine through the skip, false holds it where the story has it; absent, the world's default decides.
+ * `label`, the sheet's words for it ("Timelapse 3 h"), is what was pressed, as RPE tells the Author.
  */
-export function timelapseRequest(view: TimelapseView, target: TimelapseTarget, overrides: Partial<Record<InterruptClass, InterruptPolicy>>, chatId: ChatId, followRoutine?: boolean, source: "palette" | "command" = "palette"): Req<"lre.action"> {
+export function timelapseRequest(view: TimelapseView, target: TimelapseTarget, overrides: Partial<Record<InterruptClass, InterruptPolicy>>, chatId: ChatId, followRoutine?: boolean, label?: string): Req<"lre.action"> {
   const changed: JsonObject = {};
   for (const [cls, policy] of Object.entries(overrides)) {
     if (policy !== undefined && view.interrupts[cls as InterruptClass] !== policy) changed[cls] = policy;
   }
-  return { type: "lre.action", chatId, action: view.action, params: { target: { ...target }, overrides: changed, ...(followRoutine === undefined ? {} : { followRoutine }) }, source };
+  return { type: "lre.action", chatId, action: view.action, params: { target: { ...target }, overrides: changed, ...(followRoutine === undefined ? {} : { followRoutine }), ...(label === undefined ? {} : { label }) }, source: "palette" };
 }
 
 /** A map tap on a travel option (move or drive). */
@@ -118,11 +119,6 @@ export function thingsRequest(worldId: WorldId, read: ThingsRead): Req<"lre.thin
 /** GM → Things' read of the chat's head (ITEMS-SPEC §10.2), behind the GM gate: Build's reads, and Tidy up, Leave it, what was made in play and Keep in the world. */
 export function gmThingsRequest(chatId: ChatId, read: GmThingsRead): Req<"lre.things"> {
   return { type: "lre.things", scope: "gm", chatId, ...read };
-}
-
-/** The staged action sent again (DESIGN §11): as tapped, which clears it, or with `now`, which plays it at once. */
-export function stagedRequest(chatId: ChatId, staged: NonNullable<StateView["staged"]>, now: boolean): Req<"lre.action"> {
-  return { type: "lre.action", chatId, action: staged.action, params: { ...staged.params }, source: staged.source, ...(now ? { now: true } : {}) };
 }
 
 export function fixRequest(target: FieldFixTarget, value: JsonValue, chatId: ChatId): Req<"lre.fix"> {

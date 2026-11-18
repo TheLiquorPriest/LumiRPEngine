@@ -18,6 +18,7 @@ import type { JsonObject } from "../../shared/json";
 import { routineSettingsOf } from "../../shared/routines";
 import type { PaletteEntry, PaletteOption, PaletteView, TimelapseView } from "../../shared/state-view";
 import { tableChoices } from "../../shared/tables";
+import { playsOffstage } from "../../shared/offstage";
 import { type ActionDef, requirementExpr, type WorldDoc } from "../../shared/world";
 
 /** The palette's timelapse action; its params are `{target, overrides}`. */
@@ -160,6 +161,8 @@ export function palette(world: WorldDoc, state: WorldState, registry: Registry):
       ...(numberParam ? { number: { param: numberParam, label: paramLabel(action, numberParam, world, registry), min: 1, max: null, default: 1 } } : {}),
       ...(peopleParam && company.length > 0 ? { people: { param: peopleParam, label: paramLabel(action, peopleParam, world, registry), options: company } } : {}),
       ...(actingParam && acting.length > 0 ? { acting: { param: actingParam, label: "Paying as", options: acting } } : {}),
+      // A press with no words of one that manages is done at once, as the taps route does it (`playsOffstage`); any other waits for his next message.
+      ...(playsOffstage(action.id, {}, action.mechanical === true) ? { atOnce: true as const } : {}),
     });
   }
   entries.push(...combatEntries(ctx));

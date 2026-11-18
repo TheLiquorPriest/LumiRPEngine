@@ -3543,12 +3543,17 @@ export type Takes = SettingTakes | { type: "table"; of: SettingTakes; whole?: tr
 /** A tap that manages, recorded at once as his own edit: one of the world's actions done at once (money, a group, gear, a vehicle); one ✎ form (a hint, the time, a thing, things with a label, or a field); the World page's edit of values and facts; or an edit of operations ("Make this a property"). */
 export type TapAsk = { kind: "action"; action: string; params: { [key: string]: JsonValue }; source: string; text?: string; now?: boolean; tell?: boolean } | { kind: "fix"; fix: { hint: string } | { time: string } | { thing: JsonValue } | { things: JsonValue[]; label: string } | { entity: string; field: string; value: JsonValue }; tell?: boolean } | { kind: "edit"; ops: EditOpAsk[]; tell?: boolean } | { kind: "ops"; ops: JsonValue[]; tell?: boolean };
 
-/** What a tap or its Undo came to: whether it was applied, what the world's rules reported of it (kept with it, listed under unsettled), the id its Undo takes (null where nothing was recorded), and the answer in words. */
+/** What became of a tap that is no tap that manages: held for his next message (the request that waits; null where the same tap again took the one that waited back), or played now. */
+export type TapAsked = { held: RequestShown | null } | PlayedReply;
+
+/** What a tap or its Undo came to: whether it was applied, what the world's rules reported of it (kept with it, listed under unsettled), the id its Undo takes (null where nothing was recorded), the answer in words, and, for a tap that is no tap that manages, what became of it. */
 export interface TapReply {
   applied: boolean;
   reports: string[];
   undo: string | null;
   words: string;
+  /** Held for his next message or played now; left out for a tap that manages, an Undo and a time control. */
+  asked?: TapAsked;
 }
 
 /** A tool call a model made: the model's id for it, the tool, its arguments, and when the model began writing it, where the provider gave it in pieces. */
@@ -5244,7 +5249,7 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
-  /** A tap that manages, or a correction from any page, recorded at once as his own edit; what the world's rules turn down is applied with its report; a refusal is answered in words with nothing changed. */
+  /** A tap that manages, or a correction from any page, recorded at once as his own edit; what the world's rules turn down is applied with its report; a refusal is answered in words with nothing changed. A tap of one of the world's actions that does not manage is held for his next message, taken back, or played now, as the panel's own routes do it, and the answer says which. */
   "POST /api/v1/chats/:chat/taps": {
     params: { chat: string };
     query: Record<string, never>;

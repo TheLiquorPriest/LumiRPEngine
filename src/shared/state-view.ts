@@ -312,6 +312,25 @@ export interface PaletteEntry {
    * is merged into params under `param`. Absent when the POV may spend for none.
    */
   acting?: { param: string; label: string; options: { id: EntityId; name: string }[] };
+  /** Done at once as your own edit, with its Undo, when pressed with no words (a tap that manages, plan §10.10); absent, it waits for your next message. */
+  atOnce?: true;
+}
+
+/** A panel's press that waits for your next message, as the state view shows it (`StateView.staged`). */
+export interface StagedPress {
+  /** The request RPE holds for it. */
+  request: string;
+  /** The world's action pressed; null for a press of none. */
+  action: string | null;
+  /** Its values as the request keeps them (an amount of money as the world prints it). */
+  values: JsonObject;
+  /** Where it was pressed: the palette, the map or a panel. */
+  from: string;
+  /** What was pressed, and on what (null: on nothing), as the briefing gives them to the Author. */
+  what: string;
+  on: string | null;
+  /** Both as one line: what was pressed, then on what. */
+  label: string;
 }
 
 /**
@@ -438,8 +457,12 @@ export interface StateView {
   /** Pack panel views keyed by `<packId>.<panel>`; each pack's `core/view.ts` owns the shape. */
   panels: Record<PanelId, JsonValue>;
   palette: PaletteView | null;
-  /** The action staged for the player's next message (DESIGN §11): its request as tapped, so ✕ and Send now resend it, and its words. Absent or null: none. */
-  staged?: { action: string; params: JsonObject; source: "palette" | "map" | "command" | "chip"; label: string } | null;
+  /**
+   * What waits for your next message from a panel (plan §10.10, "A panel action"): the request RPE holds (its id, which Send now and
+   * Take it back name), the press as it was made (its action, its values as the request keeps them, where it was made), and what was
+   * pressed and on what, the words the next briefing gives the Author (`what`, `on`), joined as one line (`label`). Absent or null: none.
+   */
+  staged?: StagedPress | null;
   controls: ControlsView | null;
   meter: CallMeterView | null;
   packs: Record<PackId, number>;

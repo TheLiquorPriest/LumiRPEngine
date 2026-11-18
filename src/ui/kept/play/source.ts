@@ -2,7 +2,8 @@
 // the `StateView` today's state sync put in `App.sync`; here it is read from RPE's state route for one
 // chat and put in the same place. It is read again whenever the chat's live view says the state may
 // have changed: RPE says so (its `state` kind, which it publishes after a change made from a panel,
-// when a run of the chat ends, and when a turn joins the chat), events were lost on the way, or
+// when a run of the chat ends, and when a turn joins the chat; its `requests` kind, when what waits for
+// his next message changed, which the view's `staged` shows), events were lost on the way, or
 // following the chat began (again); and when today's page asks for the chat's view afresh, as it does
 // once it attached a world. Nothing is read on a timer, and at most one read is out at a time: what
 // asks meanwhile is answered by one read after it. A read that fails, or live updates RPE stops, is
@@ -18,6 +19,9 @@ import { foldRun, NO_RUN, type RunLine } from "./activity";
 
 /** The live kind RPE publishes on a chat once its state changed (`src/play/live.ts`), with no data of its own. */
 export const STATE_CHANGED = "state";
+
+/** The live kind RPE publishes on a chat when what waits there for his next message changed (`src/turn/requests.ts`): the view's `staged` with it. */
+export const REQUESTS_CHANGED = "requests";
 
 export interface ChatState extends Readable<SyncState> {
   /** Reads the chat's state again. */
@@ -77,7 +81,7 @@ export function chatState(client: Pick<RpeClient, "call" | "follow">, chat: stri
         run = next;
         state.update((held) => ({ ...held, activity: run.activity, view: shown(base) }));
       }
-      if (missed !== null || events.some((event) => event.kind === STATE_CHANGED)) read();
+      if (missed !== null || events.some((event) => event.kind === STATE_CHANGED || event.kind === REQUESTS_CHANGED)) read();
     },
     reset: read,
     refused(words) {

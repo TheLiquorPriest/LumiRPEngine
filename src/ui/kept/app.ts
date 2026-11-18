@@ -26,6 +26,7 @@ import { openChatState } from "./chat-state";
 import { type CallFile, keptTransport } from "./client";
 import type { KeptHost } from "./host";
 import { keptMapHand } from "./maps";
+import { keptNextMessage } from "./next-message";
 import type { ChatState } from "./play/source";
 
 /** What the toasts read of the page's settings, at each toast: how many show at once and for how long (`pages.toastsShown`, `pages.errorToastMs`, `pages.toastMs`). */
@@ -298,6 +299,7 @@ export function keptApp(deps: KeptDeps): Kept {
     toast,
     request,
     maps: keptMapHand(deps.client, () => state.read()),
+    next: keptNextMessage(deps.client, () => state.read()),
     ...(deps.open === undefined ? {} : { open: deps.open }),
   };
   // A push that the draft moved past the one Build holds has it read again (DESIGN §23).
