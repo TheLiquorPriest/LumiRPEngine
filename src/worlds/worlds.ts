@@ -807,8 +807,9 @@ function setPart(doc: WorldDoc, part: WorldPart, value: JsonValue): void {
     if (value.seedMode === "fresh" || value.seedMode === "same_roll") doc.seedMode = value.seedMode;
     if (typeof value.lenientPricing === "boolean") doc.lenientPricing = value.lenientPricing;
     if (isRecord(value.start) && typeof value.start.place === "string" && typeof value.start.at === "string") doc.start = { place: value.start.place, at: value.start.at };
+    // The form shows five of the currency's fields: what the world's currency holds besides (a starter's denominations and note) stays, and a save never loses it.
     const currency = currencyOf(value.currency);
-    if (currency) doc.currency = currency;
+    if (currency) doc.currency = { ...doc.currency, ...currency };
     // The spawn cap as the editor sends it (lint checks its range); the default is no cap set, so a world saved untouched stays as it was.
     if (typeof value.spawnCap === "number") {
       if (value.spawnCap === DEFAULT_SPAWN_CAP) delete doc.spawnCap;

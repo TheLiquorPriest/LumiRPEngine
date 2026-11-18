@@ -3,7 +3,7 @@
 // Designer's preview. Pure and deterministic: no packages, no host, no clock.
 
 import type { EntityId, WorldId } from "../shared/ids";
-import { hasOwn, isRecord } from "../shared/json";
+import { hasOwn, isRecord, safeKey } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
 import { macroHazards } from "../shared/macros";
 import type { LintIssue } from "../shared/lint";
@@ -173,8 +173,14 @@ function isCurrency(v: unknown): v is WorldCurrency {
   return isRecord(v) && typeof v.code === "string" && typeof v.symbol === "string" && typeof v.minorUnit === "string" && typeof v.decimals === "number" && typeof v.format === "string";
 }
 
+/**
+ * The money display as a write sends it, its five fields checked; null where one is missing or of the wrong kind. Every other key it holds
+ * (a starter's id, label, base unit, denominations and note) goes with them as sent, since the document keeps them though nothing reads them.
+ */
 export function currencyOf(v: unknown): WorldCurrency | null {
-  return isCurrency(v) ? { code: v.code, symbol: v.symbol, minorUnit: v.minorUnit, decimals: v.decimals, format: v.format } : null;
+  if (!isCurrency(v)) return null;
+  const held = Object.fromEntries(Object.entries(v).filter(([key]) => safeKey(key)));
+  return { ...held, code: v.code, symbol: v.symbol, minorUnit: v.minorUnit, decimals: v.decimals, format: v.format };
 }
 
 /** Step purposes earlier builds had: `select` (lore selection) and `contradiction` (the check of a reply against the engine's facts, retired when the story and the user's directives came to win, DESIGN D36). */
