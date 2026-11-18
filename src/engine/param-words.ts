@@ -46,9 +46,20 @@ export function paramChoices(ctx: ReadContext, def: ParamDef | undefined, actor:
 
 /**
  * Why an action cannot be done while a parameter it needs is left out, in a person's words: the action by its label, the parameter by
- * its own, and, where it takes one of a list, the names of the list (`why_action_needs_param`).
+ * its own as the palette shows it, and, where it takes one of a list, the names of the list (`why_action_needs_param`).
  */
 export function neededWords(registry: Registry, world: WorldDoc, action: ActionDef, name: string, choices: readonly ParamChoice[]): string {
-  const param = paramLabel(action, name, world, registry).toLowerCase();
-  return say("why_action_needs_param", { action: action.label, param, ...(choices.length > 0 ? { choices: orOf(choices.map((c) => c.label)) } : {}) });
+  return say("why_action_needs_param", { action: action.label, param: paramLabel(action, name, world, registry), ...(choices.length > 0 ? { choices: orOf(choices.map((c) => c.label)) } : {}) });
+}
+
+/**
+ * Why an action cannot be done with `params` as given: the first parameter it needs that they leave out (absent, null or empty), in
+ * `neededWords`; null when none is. The engine's resolver and every press of a play view ask this one question, so each says the same.
+ */
+export function missingWords(ctx: ReadContext, action: ActionDef, params: Readonly<Record<string, unknown>>, actor: EntityId): string | null {
+  for (const [name, def] of Object.entries(action.params)) {
+    const given = Object.hasOwn(params, name) ? params[name] : undefined;
+    if (def.optional !== true && (given === undefined || given === null || given === "")) return neededWords(ctx.registry, ctx.world, action, name, paramChoices(ctx, def, actor));
+  }
+  return null;
 }

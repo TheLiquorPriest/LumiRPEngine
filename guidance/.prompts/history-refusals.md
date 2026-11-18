@@ -170,7 +170,7 @@ why_the_clock_already_reads_that_time: the clock already reads that time
 why_a_section_override_names_its_section: a section override names its section
 why_a_section_override_is_enabled_maxtokens_maxlines: a section override is enabled, maxTokens, maxLines, include or scope
 why_type_needs_k: {{type}} needs {{k}}
-why_action_needs_param: {{action}} needs {{#choices}}you to choose the {{param}}: {{choices}}{{/choices}}{{^choices}}the {{param}} in your own words: say it in your message{{/choices}}.
+why_action_needs_param: {{action}} needs {{param}}{{#choices}}: one of {{choices}}{{/choices}}.
 why_signal_needs_a_known_class: signal needs a known class
 why_caught_needs_an_agent_and_a_slot: caught needs an agent and a slot
 why_cursor_needs_rr: cursor needs rr

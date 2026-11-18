@@ -109,12 +109,24 @@ describe("what a press needs, in words", () => {
     expect(entry?.options.map((o) => [o.label, o.params.product])).toEqual(products.map((p) => [p.label, p.product]));
     // Left out, it is said by the same names.
     const failed = actionOdds(registry, world, state, { action: apply, params: {} }).failed;
-    expect(failed?.reason).toBe(`Apply for credit needs you to choose the product: ${orOf(products.map((p) => p.label))}.`);
+    expect(failed?.reason).toBe(`Apply for credit needs Product: one of ${orOf(products.map((p) => p.label))}.`);
     expect(failed?.reason).not.toMatch(/_/);
     // A parameter that takes free words is said by its label, as a person gives it.
     const answer = findAction(registry, world, "answer");
     if (answer === undefined) throw new Error("no Answer");
-    expect(neededWords(registry, world, answer, "answer", paramChoices(ctx, answer.params.answer, world.pov))).toBe("Answer needs the answer in your own words: say it in your message.");
+    expect(neededWords(registry, world, answer, "answer", paramChoices(ctx, answer.params.answer, world.pov))).toBe("Answer needs Answer.");
+  });
+
+  test("a press held for the next message, played now or done at once, that leaves out what its action needs is refused naming it, as the palette names it", async () => {
+    const bed = makeBed();
+    await bed.plays("modern_slice_of_life");
+    const refused = async (action: string, extra: JsonObject = {}): Promise<{ status: number; words: string }> => refusedWith(bed.service.holdTap(USER, CHAT, { action, values: {}, from: "palette", ...extra }));
+    expect(await refused("buy")).toEqual({ status: 422, words: "Buy needs Item or category." });
+    expect(await refused("attempt")).toEqual({ status: 422, words: "Attempt needs Stat." });
+    expect(await refused("give")).toEqual({ status: 422, words: "Give needs Item." });
+    // Done at once (Transfer between accounts manages), the same words.
+    const once = await bed.service.tap(USER, CHAT, { kind: "action", action: "move_money", params: {}, source: "palette" });
+    expect(once.words).toBe("Transfer between accounts needs Account.");
   });
 });
 

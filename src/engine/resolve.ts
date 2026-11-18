@@ -35,7 +35,7 @@ import { labelOf, optionalService, own } from "./pack-kit";
 import type { ToldAction } from "./action-words";
 import type { Needs } from "./steps";
 import { say } from "../shared/lines";
-import { neededWords, paramChoices } from "./param-words";
+import { missingWords } from "./param-words";
 
 export interface ActionRequest {
   action: ActionId | ActionDef;
@@ -133,13 +133,12 @@ function prepare(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, re
   const bindings: Record<string, EntityId> = { self: actor, actor };
   const params: Record<string, Value> = {};
   const given = req.params ?? {};
+  // Said to a person in words: the parameter by its label and, where it takes one of a list, the names of the list (`param-words.ts`).
+  const missing = missingWords(reg.context(world, state), action, given, actor);
+  if (missing !== null) return { code: "missing_param", reason: missing };
   for (const [name, def] of Object.entries(action.params)) {
     const raw: JsonValue | undefined = own(given, name);
-    if (raw === undefined || raw === null || raw === "") {
-      // Said to a person in words: the parameter by its label and, where it takes one of a list, the names of the list (`param-words.ts`).
-      if (!def.optional) return { code: "missing_param", reason: neededWords(reg, world, action, name, paramChoices(reg.context(world, state), def, actor)) };
-      continue;
-    }
+    if (raw === undefined || raw === null || raw === "") continue;
     if (def.type === "ref") {
       const id = String(raw);
       // The outside account a param pays for a receiver the story hasn't established, as the read put it (`outsideOf`).

@@ -1,7 +1,8 @@
 // Which reason a tap that picks what does not fit gets (plan §6.1: only an id that does not exist, or
 // that his character cannot know of, and input that cannot be parsed are refused), case by case, as
 // the first build's `unfitReason` gave it. The code picks the case and the names; the words are the
-// lines of `.prompts/play-answers.md`. Nothing picked: it needs someone, a place or something. A person,
+// lines of `.prompts/play-answers.md`. (A tap that picks nothing for what the action needs is told so
+// before, by name: `missingWords`.) A person,
 // place or thing he knows, of a kind the action cannot take: that it is not that kind, or, for a
 // payment, not someone to pay. A payment that pays no one for a reason of its own: that reason.
 // Anyone or anything else, unknown, made up or hidden alike: that it names no one, no place or nothing
@@ -29,7 +30,6 @@ export function unfitWords(reg: Registry, world: WorldDoc, state: Readonly<World
   const place = def.ref === "place";
   const person = !place && (def.ref !== undefined ? kindIs(reg, world, def.ref, "person") : def.outside !== undefined || (def.of?.kind ?? []).some((k) => kindIs(reg, world, k, "person")));
   const what = place ? "place" : person ? "someone" : "something";
-  if (value === undefined || value === null || value === "") return { line: `needs_${what}`, fields: {} };
   const none: UnfitWords = { line: place ? "names_no_place" : person ? "names_no_one" : "names_nothing", fields: {} };
   if (unfit.reason !== undefined) return findLeaks(unfit.reason, secrets).length > 0 ? none : { line: "pays_no_one", fields: { why: unfit.reason } };
   const id = typeof value === "string" ? value : "";

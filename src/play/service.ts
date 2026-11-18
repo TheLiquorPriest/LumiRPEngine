@@ -67,6 +67,7 @@ import { TIMELAPSE_ACTION } from "./state/palette";
 import { playerReason } from "./state/requirement-words";
 import { unfitRef } from "./state/unfit-ref";
 import { unfitWords } from "./unfit";
+import { missingWords } from "../engine/param-words";
 import { chatView, headTurn, pressedLine, stagedOf } from "./view";
 
 /** The prompt part this area's words are in, under the guidance folder's `.prompts/`. */
@@ -496,6 +497,10 @@ export class PlayService {
     }
     const action = own(world.actions, tap.action) ?? registry.actions.get(tap.action);
     if (action === undefined) throw new Refused("not_found", { line: "unknown_action", fields: { action: tap.action } });
+    // A press that leaves out what the action needs is told it by name, as the palette and the engine tell it (`missingWords`): held for
+    // his next message or played now, it asks what the at-once route asks.
+    const missing = missingWords(registry.context(world, state), action, tap.values, world.pov);
+    if (missing !== null) throw new Refused("validation", { words: missing });
     // A request plays no id the player character can't know of, so a guessed id of someone hidden reads as one that names no one.
     const mayKnow = (id: string): boolean => id === world.pov || canSeeEntity(registry, world, state, world.pov, id);
     const unfit = unfitRef(registry, action, tap.values, world, state, mayKnow, undefined, false);
@@ -525,6 +530,8 @@ export class PlayService {
   private action({ registry, world, state, seed }: Head, r: ActionAsk, settings: PlaySettings): Resolved {
     const action = own(world.actions, r.action) ?? registry.actions.get(r.action);
     if (action === undefined) throw new Refused("not_found", { line: "unknown_action", fields: { action: r.action } });
+    const missing = missingWords(registry.context(world, state), action, r.params, world.pov);
+    if (missing !== null) throw new Refused("validation", { words: missing });
     // A request plays no id the player character can't know of, so a guessed id of someone hidden reads as one that names no one.
     const mayKnow = (id: string): boolean => id === world.pov || canSeeEntity(registry, world, state, world.pov, id);
     const unfit = unfitRef(registry, action, r.params, world, state, mayKnow, undefined, false);

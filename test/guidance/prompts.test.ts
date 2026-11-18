@@ -439,7 +439,7 @@ describe("a row each of E.6: present, laid out as its row says, asking for nothi
 
   test("play-answers.md says case by case why a tap's pick is refused, that a tap the world's rules advise against is applied with their reports, and what an edit of the world cannot do", () => {
     const said = (split(SHIPPED.get(".prompts/play-answers.md") ?? "").header?.["lines"] ?? {}) as Record<string, string>;
-    const keys = ["needs_someone", "needs_place", "needs_something", "names_no_one", "names_no_place", "names_nothing", "not_known_someone", "not_known_place", "not_known_something", "not_kind", "not_payee", "pays_no_one", "applied_advised", "edit_at", "fact_remove", "edit_ops_count", "things_count", "no_request"];
+    const keys = ["names_no_one", "names_no_place", "names_nothing", "not_known_someone", "not_known_place", "not_known_something", "not_kind", "not_payee", "pays_no_one", "applied_advised", "edit_at", "fact_remove", "edit_ops_count", "things_count", "no_request"];
     expect(keys.filter((key) => typeof said[key] !== "string" || said[key] === "")).toEqual([]);
     expect(keys.filter((key) => ASKS.test(said[key] ?? ""))).toEqual([]);
     expect(["not_known", "not_payable", "next_message", "plays_now"].filter((key) => key in said)).toEqual([]);
