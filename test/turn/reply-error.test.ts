@@ -27,6 +27,14 @@ test("a provider that fails before the reply: the notice carries the provider's 
   expect(out.messageId).toBeDefined();
   const kept = b.db.rows("SELECT content, extra FROM messages WHERE id = ?", out.messageId!)[0]!;
   expect(kept.content).toBe("");
+  // RPE's log answers why: one line at warn with the turn, the chat and the kind, in the line the player is shown.
+  const told = await b.until("the run's end to be told in the log", () => {
+    const lines = b.logged.filter((l) => l.level === "warn" && l.message.startsWith("A turn's run ended failed"));
+    return lines.length > 0 ? lines : undefined;
+  });
+  expect(told).toHaveLength(1);
+  expect(told[0]!.message).toContain("UPSTREAM-WORDS");
+  expect(told[0]!.fields).toMatchObject({ chat: CHAT, kind: "new" });
   const extra = JSON.parse(String(kept.extra)) as { reasoningBySwipe: string[]; generationOutcomeBySwipe: { error: string }[] };
   expect(extra.reasoningBySwipe[0]).toContain("The model's provider failed before a reply was written.");
   expect(extra.reasoningBySwipe[0]).not.toContain("UPSTREAM-WORDS");

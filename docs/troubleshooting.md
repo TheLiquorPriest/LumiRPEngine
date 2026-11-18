@@ -63,6 +63,8 @@ RPE played the turn, and it ended with no reply. The chat shows one plain line, 
 
 Lumiverse ends a generation that has shown nothing for ten minutes. RPE shows a progress line in the thinking block to keep a turn alive (`progress.silenceSeconds`); a reply asked for whole holds at `lumiverse.reply.holdSeconds`, under that cut.
 
+RPE's log (`journalctl --user -u rpe-<name>.service`) says why for every run that ends without a reply, or fails after one: a `warn` line, "A turn's run ended failed: …" (or "at a limit", "with no reply", "stopped where it stood"), with the turn, the run, the chat, the kind and the generation, in the line the chat showed. A job that fails or reaches a limit gets a `warn` line of its own, with its id, its chat and its agent. A run that ended well leaves no line above `debug`.
+
 ## A turn shows as running after RPE was stopped
 
 RPE stopped (a restart, a crash, the machine going down) while a turn's run was going on. At its next start RPE closes every run still kept as running: the Turns page and the turn's page then show it failed, in the words of `stopped_mid_run` in `guidance/.prompts/turn-errors.md` ("RPE stopped while this run was going on."). Where its reply had already been saved, the turn stays in the chat as it is. To have the agents record what the stopped run did not, use **Settle now** on the Turns page or on the Turn page of the chat's newest turn: it runs the Author on that turn against the chat as it reads now, writes no reply, and adds nothing to the chat.

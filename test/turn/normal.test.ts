@@ -53,6 +53,8 @@ describe("one normal turn, end to end", () => {
     const turnId = await b.until("the turn tied to the saved message", () => store.path(CHAT).find((e) => e.message === message)?.turn);
     expect(store.turn(turnId)).toMatchObject({ kind: "new", status: "done", message, generation: out.generationId!, hash: textHash(REPLY), intent: INTENT });
     await b.until("the turn's run to be over", () => b.turns.runs.ofChat(USER, CHAT).length === 0);
+    // A run that ended well leaves nothing above debug in RPE's log.
+    expect(b.logged.filter((l) => l.message.startsWith("A turn's run ended"))).toEqual([]);
     await b.until("the turn's spending to be kept", () => store.turn(turnId)?.tokensIn !== null);
     expect(store.turn(turnId)).toMatchObject({ tokensIn: 900, tokensOut: 40 });
 

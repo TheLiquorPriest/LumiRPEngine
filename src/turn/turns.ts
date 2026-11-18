@@ -501,6 +501,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       this.#taking.delete(tag.generation);
       if (this.#lateLore.get(chatKey)?.generation === tag.generation) this.#lateLore.delete(chatKey);
     };
+    let held = false;
     try {
       if (intake.waiting) {
         // The player is shown that this request waits for another of the chat's, in the words of the progress part.
@@ -652,6 +653,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
           throw error;
         });
       admitted();
+      held = true;
       lap("begin");
       // The chat's PROMPT-MAP.md follows the preset this turn's prompt came from and its map, written only where its text changed.
       void this.#d.prompts.mapFile(user, chat);
@@ -743,6 +745,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         run.status = "failed";
         run.error = { code: "failed", detail: words(error) };
         run.ended = this.#d.clock.now();
+        this.#runEnded(run, lines(errors));
         run.intake = took;
         run.wait = waits;
         await this.#d.runs.save(run, "keeping a turn's run that never began").catch((e: unknown) => this.#d.log.error("A turn's run could not be kept.", { turn: run.turn, error: words(e) }));
@@ -788,6 +791,10 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         this.#early.delete(tag.generation);
         this.changed(early);
       }
+    } catch (error) {
+      // A turn that fails before its run is held has no run to tell it by: told here, once, as the run that ends is (`#runEnded`).
+      if (!held) this.#d.log.warn(`A turn was not begun: ${words(error)}`, { chat, kind: tag.kind, generation: tag.generation });
+      throw error;
     } finally {
       admitted();
       this.#early.delete(tag.generation);
@@ -1113,6 +1120,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         run.status = "failed";
         run.error = { code: "failed", detail: words(error) };
         run.ended = this.#d.clock.now();
+        this.#runEnded(run, lines(errors));
         await this.#d.runs.save(run, "keeping a Settle now run that never began").catch((e: unknown) => this.#d.log.error("A turn's run could not be kept.", { turn: run.turn, error: words(e) }));
         over.resolve();
         throw error;
@@ -2003,6 +2011,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         signal.removeEventListener("abort", onAbort);
         if (holding !== undefined) clock.clearTimeout(holding);
         run.ended ??= clock.now();
+        this.#runEnded(run, ending.errors);
         replied.resolve();
         try {
           await this.#d.runs.save(run, "keeping a turn's run");
@@ -2043,6 +2052,21 @@ export class TurnLane implements TurnPlayer, ChatChanges {
   #errorWords(e: ReplyError, errors: LinesPart | undefined): string {
     const fields = { ...(e.detail !== undefined ? { detail: e.detail } : {}), ...(e.limit !== undefined ? { limit: e.limit.limit, per: e.limit.per, max: e.limit.max, value: e.limit.value } : {}) };
     return errors?.line(e.code, fields) ?? "";
+  }
+
+  /**
+   * A run that ended is told once in RPE's log, so the log answers why a reply failed: at warn where it failed, reached a limit or
+   * released no reply, with the turn, the run, the chat, its kind and the reason in the words the player is shown (or the error's own, where
+   * that part has none); at info where it was stopped; a run that released its reply and ended well is told in no line above debug.
+   */
+  #runEnded(run: Run, errors: LinesPart | undefined): void {
+    if (run.status === "released" && run.stoppedBy === null) return;
+    const e = run.error;
+    const why = e === null ? `no reason was given (the run's status is ${run.status})` : this.#errorWords(e, errors) || `${e.code}${e.detail !== undefined ? `: ${e.detail}` : ""}`;
+    const how = run.stoppedBy !== null ? "stopped where it stood" : run.status === "limit" ? "at a limit" : run.status === "no-reply" ? "with no reply" : run.status === "stopped" ? "stopped" : "failed";
+    const fields = { turn: run.turn, run: run.id, chat: run.chat, kind: run.kind, generation: run.generation, status: run.status };
+    if (run.status === "stopped" && run.stoppedBy === null) this.#d.log.info(`A turn's run ended ${how}: ${why}`, fields);
+    else this.#d.log.warn(`A turn's run ended ${how}: ${why}`, fields);
   }
 
   // ---------------------------------------------------------------- commit

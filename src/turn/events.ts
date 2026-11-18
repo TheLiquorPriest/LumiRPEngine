@@ -470,6 +470,25 @@ export function turnEvents(deps: EventsDeps): TurnEvents {
           deps.log.error("A job's end could not be recorded, so what it changed does not take effect.", { job: job.id, error: error instanceof Error ? error.message : String(error) });
           return;
         }
+        // Told once, as it ends: a job that failed or hit a limit at warn, any other that did not end done at info; one that ended done, in no line above debug.
+        const hit = job.limit;
+        if (job.state !== "done" || hit !== undefined) {
+          const why =
+            job.state === "failed"
+              ? "its agent could not go on; the harness's line with this job's id, just before this one, says why"
+              : hit !== undefined
+                ? `it reached the limit ${hit.limit} per ${hit.per}: ${hit.value} against ${hit.max}`
+                : job.state === "cancelled"
+                  ? "it was cancelled"
+                  : job.state === "off-path"
+                    ? "its turn left the chat's path"
+                    : job.state === "interrupted"
+                      ? "RPE stopped while it ran"
+                      : `it ended as ${job.state}`;
+          const fields = { job: job.id, chat: scope.chat ?? null, turn: scope.turn ?? null, kind: job.check !== undefined ? "tag-check" : "job", agent: job.agent, state: job.state };
+          if (job.state === "failed" || hit !== undefined) deps.log.warn(`A job ended ${hit !== undefined ? "at a limit" : job.state}: ${why}`, fields);
+          else deps.log.info(`A job ended ${job.state}: ${why}`, fields);
+        }
       }
       deps.jobTold(job);
       // What the lore handed the job that it never wrote is given back once it ended.
