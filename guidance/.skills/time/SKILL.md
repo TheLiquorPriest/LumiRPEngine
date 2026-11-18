@@ -44,13 +44,15 @@ world_apply {"operations": [{"op": "act", "action": "eat", "who": "Mara", "param
 world_apply {"operations": [{"op": "act", "action": "sleep", "who": "Mara", "source": {"from": "prose", "message": "m-0415"}}, {"op": "pass_time", "until": "07:00", "source": {"from": "prose", "message": "m-0415"}}]}
 ```
 
+A principal who sleeps dreams: the perceptions rule says when its agent is asked to.
+
 ## A long skip
 
 When the story jumps days or weeks:
 
 1. Ask ahead first: what will come due in the span? (`world_query` with the span.)
 2. Split the span where something due would change what comes after it: a deadline, an arrival, a season turning. Pass the time one stretch at a time.
-3. For people off stage, the Author says what they did meanwhile. Record where they ended up and anything that changed for them.
+3. For people off stage, the Author says what they did meanwhile. Record where they ended up and anything that changed for them. A principal for whom days pass dreams: the perceptions rule says when.
 4. For the routine remainder (meals, wages, rent), record totals for the stretch, not every instance. `time_totals` (found with `tool_search`) gives a person's totals for a span, from the engine run on a copy of the world, and records nothing.
 
 ## Setting the clock
