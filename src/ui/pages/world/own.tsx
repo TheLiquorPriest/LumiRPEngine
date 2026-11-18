@@ -9,7 +9,7 @@ import { BANDS, DOMAIN_LABEL, DOMAINS, LEVEL_LABEL, type Level } from "../../../
 import { BAND_LABEL } from "../../../shared/tiers";
 import { type CheckRules, CheckRulesForm } from "../../../frontend/adjudication-form";
 import { Banner, Button, Disclosure } from "../../../frontend/components";
-import { ClaimsControl } from "../../../frontend/build/world-policies";
+import { ClaimsControl } from "../../../frontend/claims-control";
 import { useApp } from "../../app";
 import { useRead } from "../../reading";
 import { errorWords } from "../../words";

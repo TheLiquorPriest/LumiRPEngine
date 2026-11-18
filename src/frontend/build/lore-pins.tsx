@@ -5,7 +5,7 @@
 import { lorePinsOf } from "../../shared/lore";
 import { useApp } from "../app";
 import { useSelect } from "../../ui/store";
-import { KeptUnused } from "./form-kit";
+import { KeptUnused } from "../kept-unused";
 
 /** The closed line at the foot of a character's or a place's page: the lore pinned to it, which the world's file keeps and nothing reads. */
 export function LorePinsKept(props: { target: "characters" | "places"; id: string }) {

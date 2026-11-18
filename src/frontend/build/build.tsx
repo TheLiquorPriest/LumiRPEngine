@@ -48,7 +48,7 @@ import { RoutineEditor, RoutineList } from "./routine-editor";
 import { RoutineSettingsEditor } from "./routine-settings";
 import { RulesetEditor } from "./ruleset-editor";
 import { COLLECTION_SPECS, newItem, PART_SPECS } from "./schema";
-import { KeptUnused } from "./form-kit";
+import { KeptUnused } from "../kept-unused";
 import { lintAt, SchemaFields, worldIdentifiers } from "./schema-form";
 import { TableEditor } from "./table-editor";
 import { TiersEditor } from "./tiers-editor";

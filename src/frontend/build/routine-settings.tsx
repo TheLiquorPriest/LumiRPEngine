@@ -26,7 +26,8 @@ import type { Req } from "../requests";
 import { useSelect } from "../../ui/store";
 import { PART_INFO } from "./chrome";
 import { draftSend } from "./draft";
-import { FormGroup, Issues, KeptUnused } from "./form-kit";
+import { FormGroup, Issues } from "./form-kit";
+import { KeptUnused } from "../kept-unused";
 import { useHeld } from "./held";
 import { lintAt } from "./schema-form";
 

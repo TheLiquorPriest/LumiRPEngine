@@ -8,7 +8,7 @@
 import { ADJUDICATION_PRESET_LABEL, presetAdjudication } from "../shared/adjudication";
 import type { AdjudicationDef, AdjudicationPresetId, CheckTiming, RetryRule } from "../shared/world";
 import { HostSwitch, NumberStepper, Seg } from "./components";
-import { KeptUnused } from "./build/form-kit";
+import { KeptUnused } from "./kept-unused";
 
 const TIMING: Record<CheckTiming, string> = { every: "Every check", risky: "Only risky ones", marked: "Only where marked", never: "Never" };
 const RETRY: Record<RetryRule, string> = { free: "Any time", changed: "After a change", once: "Once per scene" };

@@ -1456,6 +1456,8 @@ src/engine/whereabouts.ts	kept	engine
 src/engine/word-tables.ts	kept	engine
 src/frontend/build/history.tsx	kept	builder
 src/frontend/build/upgrade.tsx	kept	builder
+src/frontend/claims-control.tsx	kept	builder
+src/frontend/kept-unused.tsx	kept	builder
 src/frontend/form-sheet.tsx	kept	hud
 src/frontend/play/activity.tsx	kept	hud
 src/packs/combat/core/bestiary.ts	kept	packs
