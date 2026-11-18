@@ -45,9 +45,9 @@ test("a config.json that holds limits is read once: its limits stand in RPE-glob
   expect(logged.filter((line) => line.includes("config.json's limits are settings in RPE-global.yml now"))).toHaveLength(1);
   expect(await json(paths.config)).toEqual(FACTS);
   expect(await yaml(paths.globalConfig)).toEqual({
-    server: { address: "0.0.0.0", origins: ["https://rpe.example"], bodyBytes: 2_097_152 },
+    server: { address: "0.0.0.0", origins: ["https://rpe.example"], maxBodyBytes: 2_097_152 },
     auth: { webKeyDays: 30 },
-    liveSocket: { follows: 9 },
+    liveSocket: { maxFollows: 9 },
     database: { busyMs: 7000 },
     commandLine: { waitMs: 4000 },
   });
