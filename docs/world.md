@@ -11,13 +11,13 @@ A world is the setting a chat plays in: its places, people, belongings, money, r
 
 ## Building a world: the Build page
 
-**Build** is the page for it, in the drawer tab and in the web app: the worlds RPE keeps, each opened, edited (the map editor among them), checked and committed as a new revision. RPE checks a world as you edit and lists what is wrong with it before a commit. What Build cannot do in this build is on [the install page](install.md#the-pages).
+**Build** is the page for it, in the drawer tab and in the web app: the worlds RPE keeps, each opened, edited (the map editor among them), checked and committed as a new revision. RPE checks a world as you edit and lists what is wrong with it before a commit. Build also has model jobs that read, index, refine, describe a map or propose routines for a world: each runs as an agent that proposes and holds no tool that writes, so you apply what you want ([how they are worded](behaviour.md#agent-definitions)); and lore and secrecy tools for the books a world reads. **Attach** gives the open chat a world.
 
 Worlds you had in the previous build are carried by the migration into Build (see [Moving from the previous build](migration.md)).
 
 ## Playing in a world
 
-- On the **Play** page, a chat with no world shows the world picker: **Attach** gives the chat a world from Build, and the chat plays its head revision from then on.
-- The **World** page shows the world's state as one tree at the chat's head or at any turn, with where each value comes from. The **Cast** and **Story** pages show the people and the story record RPE keeps beside it.
+- On the **Play** page, a chat with no world shows the world picker, and Build has the same **Attach**: it gives the chat a world from Build, and the chat plays its head revision from then on.
+- The **World** page shows the world's state as one tree at the chat's head or at any turn, with where each value comes from; the **Places** page shows each place and its grid with everyone and everything on it, and **Quests** the quests and the journal. The **Cast** and **Story** pages show the people and the story record RPE keeps beside it.
 - The Author reads the world state at the start of each turn, and changes it only through the engine's operations ([The engine's operations](operations.md)); each change is recorded with the turn that made it, so a swipe, an edit or a branch rewinds the world with the story.
-- A tap on Play that manages something (taking a thing off, paying, moving the clock) is your own change, kept on the chat's newest turn with an **Undo**.
+- A tap on Play that manages something (taking a thing off, paying, moving the clock) is your own change, kept on the chat's newest turn with an **Undo**. The HUD, the composer's world actions and the map sheet in the chat do the same from Lumiverse's own chat.
