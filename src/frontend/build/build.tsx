@@ -185,7 +185,12 @@ function WithDraft(props: { worldId: WorldId; children: ComponentChildren }) {
     if (draft?.worldId === props.worldId) return;
     load();
   }, [props.worldId]);
+  // Neither panel outlives what it is about: another world's, or a draft with nothing uncommitted left (committed, discarded, or committed elsewhere).
   useEffect(() => setPanel(null), [props.worldId]);
+  const dirty = draft?.dirty === true;
+  useEffect(() => {
+    if (!dirty) setPanel(null);
+  }, [dirty]);
   if (!draft || draft.worldId !== props.worldId) {
     return (
       <div class="lre-build-page" data-lre-section="build">
