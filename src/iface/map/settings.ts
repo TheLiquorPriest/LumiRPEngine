@@ -96,7 +96,7 @@ export const MAP_SETTING_DEFS = {
     takes: { type: "oneOf", values: AREA_STARTS },
     perConnection: false,
     name: "Where an area starts",
-    about: "corner: at a point where squares meet, as D&D's grid rule has it; middle: at the middle of a square. Every area (a radius, a cone, a line, a cube) follows it. A world's ruleset that says otherwise wins.",
+    about: "corner: at a point where squares meet, as the classic tabletop grid rule has it; middle: at the middle of a square. Every area (a radius, a cone, a line, a cube) follows it. A world's ruleset that says otherwise wins.",
     effect: "turn",
   },
   areaShare: {
@@ -106,7 +106,7 @@ export const MAP_SETTING_DEFS = {
     takes: { type: "number", least: 0, most: 1 },
     perConnection: false,
     name: "Share of a square an area must cover",
-    about: "From 0 to 1: the share of a square an area must cover for the square to count; 0.5 is D&D's half, and 0 counts any square the area covers any of. A world's ruleset that says otherwise wins.",
+    about: "From 0 to 1: the share of a square an area must cover for the square to count; 0.5 is the classic rule's half, and 0 counts any square the area covers any of. A world's ruleset that says otherwise wins.",
     effect: "turn",
   },
   coverHalf: {
@@ -116,7 +116,7 @@ export const MAP_SETTING_DEFS = {
     takes: { type: "whole", least: 1, most: 4 },
     perConnection: false,
     name: "Lines blocked for half cover",
-    about: "Of the four lines from a corner of the attacker's square to the corners of the target's, how many blocked give half cover (D&D: one or two). A world's ruleset that says otherwise wins.",
+    about: "Of the four lines from a corner of the attacker's square to the corners of the target's, how many blocked give half cover (the classic rule: one or two). A world's ruleset that says otherwise wins.",
     effect: "turn",
   },
   coverThreeQuarters: {
@@ -126,7 +126,7 @@ export const MAP_SETTING_DEFS = {
     takes: { type: "whole", least: 1, most: 4 },
     perConnection: false,
     name: "Lines blocked for three-quarters cover",
-    about: "How many of the four lines, blocked, give three-quarters cover (D&D: three). A world's ruleset that says otherwise wins.",
+    about: "How many of the four lines, blocked, give three-quarters cover (the classic rule: three). A world's ruleset that says otherwise wins.",
     effect: "turn",
   },
   coverTotal: {
@@ -136,7 +136,7 @@ export const MAP_SETTING_DEFS = {
     takes: { type: "whole", least: 1, most: 4 },
     perConnection: false,
     name: "Lines blocked for total cover",
-    about: "How many of the four lines, blocked, give total cover (D&D: four). A world's ruleset that says otherwise wins.",
+    about: "How many of the four lines, blocked, give total cover (the classic rule: four). A world's ruleset that says otherwise wins.",
     effect: "turn",
   },
   coverCreatures: {
@@ -145,7 +145,7 @@ export const MAP_SETTING_DEFS = {
     takes: { type: "yesNo" },
     perConnection: false,
     name: "Creatures give cover",
-    about: "Whether other people and things standing between an attacker and a target obstruct the lines, as D&D has it. A world's ruleset that says otherwise wins.",
+    about: "Whether other people and things standing between an attacker and a target obstruct the lines, as the classic rule has it. A world's ruleset that says otherwise wins.",
     effect: "turn",
   },
   lightUnset: {

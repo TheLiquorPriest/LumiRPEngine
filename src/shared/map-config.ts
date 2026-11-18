@@ -78,14 +78,14 @@ export interface MapConfig {
 export const MAP_DEFAULTS: Readonly<MapConfig> = Object.freeze({
   laidFeet: 5,
   roundSeconds: 6,
-  // D.1 names rounds of 6 seconds and not the feet: 30 ft a round is the D&D walking speed.
+  // D.1 names rounds of 6 seconds and not the feet: 30 ft a round is the classic tabletop walking speed.
   roundFeet: 30,
   printColumns: 40,
   printRows: 30,
   diagonal: "one",
   distances: "feet",
   picture: true,
-  // R-160: D&D's grid rules. An area starts where squares meet and counts a square it covers by half; one or two lines blocked of four are half cover, three three-quarters, four total, and creatures obstruct.
+  // R-160: the classic tabletop grid rules. An area starts where squares meet and counts a square it covers by half; one or two lines blocked of four are half cover, three three-quarters, four total, and creatures obstruct.
   areaStart: "corner",
   areaShare: 0.5,
   coverHalf: 1,
