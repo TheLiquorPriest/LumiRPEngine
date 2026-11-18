@@ -207,8 +207,10 @@ function violationsOf(planted: ReadonlyMap<string, string> = new Map()): string[
         const to = zoneOf(target);
         const targetRel = relative(SRC, target).split("\\").join("/");
         if (to.kind === "outside") {
-          // The CLI bundles the docs, the schemas and its package version as text and data.
-          if (!(from.kind === "cli" && CLI_BUNDLED.test(relative(ROOT, target).split("\\").join("/")))) violations.push(`${rel}: imports outside today's layers (${edge.spec})`);
+          // The CLI bundles the docs, the schemas and its package version as text and data; the kept frontend takes the kept UI's request and answer types from their home (fates.tsv: PlanSwap-13 item 1 names `src/frontend/` among their importers).
+          const bundled = from.kind === "cli" && CLI_BUNDLED.test(relative(ROOT, target).split("\\").join("/"));
+          const keptTypes = from.kind === "frontend" && edge.typeOnly && targetRel === "ui/kept/protocol.ts";
+          if (!bundled && !keptTypes) violations.push(`${rel}: imports outside today's layers (${edge.spec})`);
         } else if (!allowedLocal(from, to, edge.typeOnly, targetRel) && !MOVED_OUT.has(targetRel)) violations.push(`${rel} (${from.kind}) → ${targetRel} (${to.kind})${edge.typeOnly ? " [type]" : ""}`);
       } else if (edge.spec.startsWith("node:") || edge.spec.startsWith("bun:")) {
         // The CLI's entry is the one file that touches the disk, the terminal and the process.
