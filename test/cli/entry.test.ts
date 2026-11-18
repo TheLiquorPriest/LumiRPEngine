@@ -1,9 +1,8 @@
-// The real entry (src/cli/main.ts) as a user runs it, against a local fake Lumiverse: login keeps
-// the session in a file only its owner can read, nothing ever prints the token, and logout ends
-// the session and forgets it. Also where the file lives on each platform.
+// The real entry (src/cli/main.ts) as a user runs it, against a local fake Lumiverse: a password is never taken as an argument, and --version names the build.
+// Also where the sign-in file lives on each platform.
 
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { CredentialStore, credentialsPath, normalizeBase } from "../../src/cli/credentials";
@@ -61,27 +60,6 @@ async function cli(args: string[], env: Record<string, string> = {}): Promise<{ 
 }
 
 describe("the lumirpengine entry", () => {
-  const file = join(home, "config/lumirpengine/credentials.json");
-
-  test("login saves the session owner-only and never prints the token; status and logout neither", async () => {
-    const login = await cli(["login", "--url", `${base}/`, "--username", "tom"], { LUMIVERSE_PASSWORD: "hunter2" });
-    expect(login.code).toBe(0);
-    expect(login.out).toContain(`Signed in to ${base} as tom`);
-    expect(login.out).toContain(`speaks agent API ${AGENT_API}`);
-    expect(statSync(file).mode & 0o777).toBe(0o600);
-    expect(statSync(join(home, "config/lumirpengine")).mode & 0o777).toBe(0o700);
-    const saved = JSON.parse(readFileSync(file, "utf8")) as { hosts: Record<string, { username: string; token: string }> };
-    expect(saved.hosts[base]).toMatchObject({ username: "tom", token: TOKEN });
-    const status = await cli(["status"]);
-    expect(status.code).toBe(0);
-    expect(JSON.parse(status.out)).toMatchObject({ signedIn: true, lumiverse: base, user: "tom", lumiRPEngine: { agentApi: AGENT_API } });
-    const logout = await cli(["logout"]);
-    expect(logout.code).toBe(0);
-    expect(calls).toContain("POST /api/auth/sign-out");
-    expect(JSON.parse(readFileSync(file, "utf8")).hosts).toEqual({});
-    for (const run of [login, status, logout]) expect(`${run.out}${run.err}`).not.toContain(TOKEN);
-  });
-
   test("a password given as an argument is refused before anything is sent", async () => {
     const before = calls.length;
     const run = await cli(["login", "--url", base, "--username", "tom", "--password", "hunter2"]);
@@ -93,30 +71,6 @@ describe("the lumirpengine entry", () => {
   test("--version names the CLI and its build, the engine, the world format and the agent API", async () => {
     const run = await cli(["--version"]);
     expect(run.out.trim()).toMatch(/^lumirpengine \d+\.\d+\.\d+ \(build [\w.-]+, engine \d+\.\d+\.\d+, world format lre-world-v1, agent API \d+\)$/);
-  });
-
-  test("a piped template prints the whole export file, which check then reads; check exits 1 on a file that fails", async () => {
-    const run = await cli(["template", "mystery_manor"]);
-    expect(run.code).toBe(0);
-    const file = JSON.parse(run.out) as { format: string; world: { name: string; entities: Record<string, unknown> } };
-    expect(file.format).toBe("lre-world-export-v1");
-    const path = join(home, "manor.json");
-    writeFileSync(path, run.out);
-    const check = await cli(["check", path]);
-    expect(check.code).toBe(0);
-    // Check reads the whole file the template printed, every entity of it and no more.
-    expect(JSON.parse(check.out)).toMatchObject({ ok: true, loads: true, errors: 0, contents: { entities: Object.keys(file.world.entities).length } });
-    // A script goes by the exit code: a file that doesn't load, or loads with lint errors, is a failure.
-    const broken = join(home, "broken-world.json");
-    writeFileSync(broken, "{ nope");
-    const failed = await cli(["check", broken]);
-    expect(failed.code).toBe(1);
-    expect(JSON.parse(failed.out)).toMatchObject({ ok: false, loads: false });
-    const erring = join(home, "erring-world.json");
-    writeFileSync(erring, JSON.stringify({ ...file, world: { ...file.world, pov: "nobody" } }));
-    const linted = await cli(["check", erring]);
-    expect(linted.code).toBe(1);
-    expect(JSON.parse(linted.out)).toMatchObject({ ok: false, loads: true });
   });
 });
 

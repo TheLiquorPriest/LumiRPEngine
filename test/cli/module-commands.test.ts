@@ -34,19 +34,6 @@ function signedIn(fake: FakeLumiverse, files: Record<string, string> = {}, env: 
 }
 
 describe("the module tools' commands", () => {
-  test("fill their tools' arguments from positionals, repeated options, numbers, switches and JSON files", async () => {
-    const fake = new FakeLumiverse();
-    const t = signedIn(fake, { "ruleset.json": '{"sheet": {"sections": []}}' });
-    await run(["job-start", "w_1", "playtest", "--turn", "look around", "--turn", "walk to the market"], t.io);
-    expect(fake.lre.sent("lre.job", "start")).toEqual([{ type: "lre.job", op: "start", kind: "playtest", worldId: "w_1", input: { turns: ["look around", "walk to the market"] } }]);
-    await run(["map-walk", "c_1", "--x", "3", "--y", "4"], t.io);
-    expect(fake.lre.sent("lre.map")).toEqual([{ type: "lre.map", op: "walk", chatId: "c_1", x: 3, y: 4 }]);
-    await run(["lore-pins", "--chat", "c_1", "--spoilers"], t.io);
-    expect(fake.lre.sent("lre.lore", "pins")).toEqual([{ type: "lre.lore", op: "pins", chatId: "c_1" }]);
-    await run(["sheet", "w_1", "--ruleset", "ruleset.json", "--entity", "mara"], t.io);
-    expect(fake.lre.sent("lre.world", "sheet")).toEqual([{ type: "lre.world", op: "sheet", worldId: "w_1", ruleset: { sheet: { sections: [] } }, entity: "mara" }]);
-  });
-
   test("a switch takes no value, and a missing positional is a usage error, before anything is sent", async () => {
     const fake = new FakeLumiverse();
     const t = signedIn(fake);

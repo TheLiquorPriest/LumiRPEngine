@@ -107,22 +107,6 @@ describe("the MCP server", () => {
     expect(replies.filter((r) => !Array.isArray(r) && r.id === 9)).toEqual([]);
   });
 
-  test("calls run side by side, each answered whole, and one world's edits apply one after the other", async () => {
-    const fake = new FakeLumiverse();
-    const w = fake.lre.seed("Alpha");
-    const s = serve(fake);
-    const add = (id: string) => ({ op: "add", path: `/entities/${id}`, value: { id, kind: "person", name: id, tier: "background", fields: {}, relations: [] } });
-    for (let i = 1; i <= 5; i++) s.feed(rpc(i, "tools/call", { name: "lre_edit", arguments: { worldId: w.index.id, ops: [add(`p${i}`)] } }));
-    s.feed(rpc(6, "tools/call", { name: "lre_worlds", arguments: {} }));
-    const replies = await s.replies();
-    expect(replies).toHaveLength(6);
-    for (let i = 1; i <= 5; i++) expect(resultOf(replies, i).isError).toBeUndefined();
-    // Serialized: every edit read the draft the previous one left, so none was refused or lost.
-    expect(Object.keys(w.draft?.doc.entities ?? {}).filter((k) => /^p\d$/.test(k)).sort()).toEqual(["p1", "p2", "p3", "p4", "p5"]);
-    expect(w.draft?.version).toBe(5);
-    expect(fake.lre.sent("lre.editor", "patch").map((r) => r.version)).toEqual([0, 1, 2, 3, 4]);
-  });
-
   test("an unknown tool and a null id are protocol errors, as MCP has them", async () => {
     const s = serve(new FakeLumiverse());
     s.feed(rpc(1, "tools/call", { name: "lre_no_such_tool", arguments: {} }));

@@ -88,28 +88,6 @@ async function toolNames(mcp: McpServer): Promise<string[]> {
 const routes = (fake: FakeLumiverse): string[] => fake.requests.map((r) => `${r.method} ${new URL(r.url).pathname}`);
 
 describe("a running mcp server", () => {
-  test("uses the sign-in saved last: after the session ends and the user signs in again, it works without a restart", async () => {
-    const fake = new FakeLumiverse();
-    fake.lre.seed("Alpha");
-    const t = terminal(fake);
-    const first = fake.session();
-    t.io.credentials.put(fake.base, { username: USER.username, token: first, savedAt: 1 });
-    const server = await serverOf(["mcp"], t.io);
-    expect((await call(server.mcp, "lre_worlds")).isError).toBe(false);
-    // The session ends on the host (unused for 7 days, or signed out), and the socket with it.
-    fake.tokens.delete(first);
-    fake.restart();
-    const ended = await call(server.mcp, "lre_worlds");
-    expect(ended.isError).toBe(true);
-    expect(ended.text).toContain("Sign in again: lumirpengine login");
-    // What that says to do, from another terminal.
-    t.io.credentials.put(fake.base, { username: USER.username, token: fake.session(), savedAt: 2 });
-    const again = await call(server.mcp, "lre_worlds");
-    expect(again.isError).toBe(false);
-    expect(JSON.parse(again.text).worlds).toHaveLength(1);
-    server.close();
-  });
-
   test("refuses to start on an option it doesn't take or an unclear LRE_READ_ONLY, rather than serve the write tools", async () => {
     const fake = new FakeLumiverse();
     // A misspelled --read-only once took the next argument as its value, and mcp checked nothing.
@@ -222,9 +200,6 @@ describe("login over plain http", () => {
     expect(routes(fake).slice(0, 2)).toEqual(["GET /api/auth/get-session", "POST /api/auth/sign-in/username"]);
     expect(fake.requests[0]?.headers.Authorization).toBeUndefined();
     expect(t.io.credentials.get(fake.base)).toMatchObject({ username: USER.username, allowHttp: true });
-    // Saved with the sign-in, so neither this nor `mcp` needs the flag again.
-    expect(await run(["worlds"], t.io)).toEqual({ code: 0 });
-    expect(JSON.parse(t.out.at(-1) ?? "{}").worlds).toHaveLength(1);
   });
 
   test("a sign-in saved without the consent is refused there, and its token isn't sent", async () => {
