@@ -7,7 +7,10 @@ import type { WorldDoc } from "../../src/shared/world";
 import { needValue } from "../../src/packs/castlife/core/index";
 import { fightsOf } from "../../src/packs/combat/core/model";
 import { regardAxes } from "../../src/packs/relationships/core/index";
-import { POV } from "../store/fixtures";
+import { ownersIn } from "../../src/shared/finance";
+import { entryInPlay } from "../../src/engine/org";
+import { requestsOf } from "../../src/packs/orgs/core/approvals";
+import { engine, POV } from "../store/fixtures";
 import { familyRig, SRC } from "./families/kit";
 import { dataOf, type Rig, registry, world as rigWorld, wordsFromFiles } from "./rig";
 
@@ -144,5 +147,66 @@ describe("act", () => {
     expect(r.error).toBeDefined();
     expect(JSON.stringify(r.content)).toContain("eat");
     expect(t.s.changes(t.turn.id).length).toBe(changes);
+  });
+});
+
+/** Money followed closely, a bank account each for Wren and Bram, Bram owning the Lamplighters, and a cottage nobody owns. */
+const dealings = (w: WorldDoc): void => {
+  w.realism.levels.money = 3;
+  const guild = w.entities.lamplighters;
+  if (guild === undefined) throw new Error("no guild");
+  guild.fields = { ...guild.fields, owners: [{ party: "bram", role: "owner" }] };
+  w.entities.acct_bank = { id: "acct_bank", kind: "account", name: "Wren's bank", tier: "background", fields: { owners: [{ party: POV, role: "owner" }], product: "checking", opening: 50000 }, relations: [] };
+  w.entities.acct_bram = { id: "acct_bram", kind: "account", name: "Bram's bank", tier: "background", fields: { owners: [{ party: "bram", role: "owner" }], product: "checking", opening: 10000 }, relations: [] };
+  w.places.rose_cottage = { id: "rose_cottage", name: "Rose Cottage", parent: "thornbury", fields: {} };
+};
+
+/** Odile's request that the guild be renamed, waiting for Bram's approval. */
+async function asked(t: Rig): Promise<void> {
+  const at = stateOf(t).clock;
+  const request = { id: "r_name", by: "odile", power: "org.govern", text: "rename the guild", why: "Odile may not", what: { type: "orgs.rename", args: { org: "lamplighters", name: "The Lamp Guild" } }, approvers: ["bram"], at, until: at + 7 * 1440, status: "asked" };
+  await t.writes.run(() => t.s.addChanges(t.turn.id, engine({ type: "orgs.ask", data: { org: "lamplighters", request, visibility: "public" } })));
+}
+
+describe("act: the actions a play view's press did not reach", () => {
+  test("property_buy: a cottage bought by its name is Wren's property", async () => {
+    const { t } = await rigOf(dealings);
+    await apply(t, { op: "act", action: "property_buy", params: { property: "Rose Cottage", price: 5 } });
+    const bought = Object.values(stateOf(t).entities).find((e) => e.kind === "property" && e.fields.place === "rose_cottage");
+    expect(ownersIn(bought?.fields ?? {}).some((o) => o.party === POV)).toBe(true);
+  });
+
+  test("withdraw_cash and deposit_cash: cash out of the bank and some of it back", async () => {
+    const { t } = await rigOf(dealings);
+    await apply(t, { op: "act", action: "withdraw_cash", params: { account: "Wren's bank", amount: 20 } });
+    expect(stateOf(t).accounts).toMatchObject({ acct_bank: 48000, acct_wren: 3200 });
+    await apply(t, { op: "act", action: "deposit_cash", params: { account: "Wren's bank", amount: 5 } });
+    expect(stateOf(t).accounts).toMatchObject({ acct_bank: 48500, acct_wren: 2700 });
+  });
+
+  test("org_leave: a member who leaves is no longer one", async () => {
+    const { t } = await rigOf(dealings);
+    await apply(t, { op: "act", action: "org_leave", who: "Odile", params: { org: "The Lamplighters" } });
+    expect(stateOf(t).entities.odile?.relations.some((x) => x.type === "member_of" && x.to === "lamplighters")).toBe(false);
+  });
+
+  test("org_entry: the cellar is for members, said by its owner's guild", async () => {
+    const { t } = await rigOf(dealings);
+    await apply(t, { op: "act", action: "org_entry", who: "Bram", params: { org: "The Lamplighters", place: "The Cellar", entry: "members" } });
+    expect(entryInPlay(stateOf(t), "cellar").entry).toBe("members");
+  });
+
+  test("org_approve and org_deny: a waiting request approved is carried out, and one denied is closed", async () => {
+    const { t } = await rigOf(dealings);
+    await asked(t);
+    await apply(t, { op: "act", action: "org_approve", who: "Bram", params: { org: "The Lamplighters", request: "r_name" } });
+    expect(stateOf(t).entities.lamplighters?.name).toBe("The Lamp Guild");
+    expect(requestsOf(stateOf(t), "lamplighters")[0]?.status).toBe("approved");
+
+    const { t: other } = await rigOf(dealings);
+    await asked(other);
+    await apply(other, { op: "act", action: "org_deny", who: "Bram", params: { org: "The Lamplighters", request: "r_name", why: "not this year" } });
+    expect(stateOf(other).entities.lamplighters?.name).toBe("The Lamplighters");
+    expect(requestsOf(stateOf(other), "lamplighters")[0]?.status).toBe("denied");
   });
 });

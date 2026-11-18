@@ -1060,7 +1060,8 @@ export function registerProperty(r: FinanceRegistry): void {
     pack: "economy",
     params: { property: { type: "ref", ref: "property" }, price: { type: "money", optional: true }, from: { type: "ref", ref: "account", optional: true }, down: { type: "money", optional: true }, term_months: { type: "number", optional: true }, live: { type: "bool", optional: true }, as: trading },
     requires: [...requires, mayAs("property.trade")],
-    outcomes: { default: [{ type: "economy.property_buy", args: { party: "self", property: "property", price: "=params.price", from: "=params.from", down: "=params.down", term_months: "=params.term_months", live: "=params.live", by: "actor" } }] },
+    // `params.property`: a property, or a place the effect makes one of (a place is no binding, so its bare name would pass the word itself).
+    outcomes: { default: [{ type: "economy.property_buy", args: { party: "self", property: "=params.property", price: "=params.price", from: "=params.from", down: "=params.down", term_months: "=params.term_months", live: "=params.live", by: "actor" } }] },
     duration: "60",
     lexicon: ["buy the house", "buy the property", "make an offer on"],
     observable: "signs a stack of papers",

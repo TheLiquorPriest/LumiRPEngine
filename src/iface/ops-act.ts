@@ -35,7 +35,10 @@ function paramValue(o: OpContext, name: string, def: ParamDef, said: JsonValue):
       // A place, someone or something of the kind it takes, or either where it names no kind.
       const want: Want = def.ref === "place" ? "place" : def.ref === undefined ? "point" : "entity";
       const found = find(o, field, want, false, said);
-      return isUnread(found) ? found : found.id;
+      if (!isUnread(found)) return found.id;
+      // As the engine reads a reference that names no one (`prepare`): a place it names, which the action's effects take as such (a place bought becomes a property).
+      const place = want === "entity" && found.line === "unknown" ? find(o, field, "place", false, said) : found;
+      return isUnread(place) ? found : place.id;
     }
     case "list": {
       if (def.ref === undefined) return said;
