@@ -86,6 +86,10 @@ export function PromptView(props: PromptViewProps) {
       {shown === null ? (
         props.loading ? (
           <p class="lre-muted rpe-line">Reading the prompt…</p>
+        ) : props.problem === null ? (
+          <Empty icon="list" title="No prompt kept yet">
+            <span>RPE keeps the prompt of each turn it plays. This chat has none kept yet: its parts show here after its next turn on RPE.</span>
+          </Empty>
         ) : null
       ) : (
         <>

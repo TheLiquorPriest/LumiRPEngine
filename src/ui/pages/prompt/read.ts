@@ -2,12 +2,18 @@
 // and the front report turn by turn, and the owner's five edits of the map.
 
 import type { PromptEditAsk, PromptShown, PromptTurnShown, TurnId } from "../../../shared/api";
-import { replyOf, type RpeClient } from "../../client";
+import { replyOf, type RpeClient, RpeError } from "../../client";
 import type { PageOf } from "../../reading";
 
-/** The map as found in a turn's prompt (the chat's newest turn when none is named). */
-export function readPrompt(client: Pick<RpeClient, "call">, chat: string, turn: TurnId | null): Promise<PromptShown> {
-  return client.call("GET /api/v1/chats/:chat/prompt", { chat }, { query: turn === null ? {} : { turn } }).then(replyOf);
+/** The map as found in a turn's prompt (the chat's newest turn whose prompt is kept, when none is named); null where none is named and no turn of the chat has a prompt kept yet. */
+export async function readPrompt(client: Pick<RpeClient, "call">, chat: string, turn: TurnId | null): Promise<PromptShown | null> {
+  try {
+    return replyOf(await client.call("GET /api/v1/chats/:chat/prompt", { chat }, { query: turn === null ? {} : { turn } }));
+  } catch (error) {
+    // A chat with no turn played on RPE yet (a migrated chat before its first turn) has no prompt kept: that is no failure.
+    if (turn === null && error instanceof RpeError && error.status === 404) return null;
+    throw error;
+  }
 }
 
 /** One page of the prompt's notices and front report, turn by turn, newest first. */
