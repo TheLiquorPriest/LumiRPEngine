@@ -17,7 +17,7 @@ If a sum does not balance, a rule is bent or an action's requirement does not ho
 
 <!-- To make the rules bind, replace that paragraph. For example: "When a report says something does not add up, stop and resolve it before the reply." -->
 
-Either way, put what a report said in your answer, so that whoever asked you hears of it.
+Either way, put what a report said in your answer, so that whoever asked you hears of it. A reply to the player is not an answer of that kind: it tells the story, and a report is for the Author to put right in the record.
 
 ## What the realism levels mean
 
