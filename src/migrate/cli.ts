@@ -13,6 +13,9 @@ import type { CarriedRuns } from "./import-chats";
 import { migrate } from "./migrate";
 import type { TreeLayout } from "./own-files";
 import { reportText } from "./report";
+import { dataPaths } from "../app/config";
+import { lastSwap, readRpe } from "./going-back";
+import { notCarriedEnd, notCarriedLines, notCarriedOf } from "./not-carried";
 
 /** The extension's identifier as its manifest names it (`spindle.json`). */
 const IDENTIFIER = "lumi_rp_engine";
@@ -27,12 +30,14 @@ export interface CliIo {
 /**
  * Runs the migration from the command line's words; the exit code: 0 done, 1 refused or failed, 2
  * misused. A rehearsal is done when it has printed its report, and it exits 0 where the report says the
- * real run may start and 1 where it says the real run won't. `tree` is the file tree's layout, which says
- * where the user's own files go; `settings` the app's one registry of settings, which takes each value the
- * run carries as its own reader takes it; `runs` the turn lane's writer of a carried turn's run record,
- * with its tables.
+ * real run may start and 1 where it says the real run won't. A real run that left a chat holding records
+ * of the previous build not carried names each first, ahead of the report, and exits 1 (`not-carried.ts`).
+ * `tree` is the file tree's layout, which says where the user's own files go; `settings` the app's one
+ * registry of settings, which takes each value the run carries as its own reader takes it; `runs` the turn
+ * lane's writer of a carried turn's run record, with its tables; `lines` the lines that run the migration
+ * again and go back, as the command line writes them (absent: `rpe migrate` and `rpe down`).
  */
-export async function migrateCli(argv: readonly string[], io: CliIo, tree: TreeLayout, settings?: readonly Setting[], runs?: CarriedRuns): Promise<number> {
+export async function migrateCli(argv: readonly string[], io: CliIo, tree: TreeLayout, settings?: readonly Setting[], runs?: CarriedRuns, lines?: { again: string; down: string }): Promise<number> {
   const spec = commandSpec("migrate");
   if (spec === undefined) throw new Error("The table of commands has no command migrate.");
   const usage = helpText(spec);
@@ -79,8 +84,17 @@ export async function migrateCli(argv: readonly string[], io: CliIo, tree: TreeL
   const runtime = none ? null : folderPair;
   try {
     const { report, ran } = await migrate({ lumiverse, identifier: values.identifier ?? IDENTIFIER, userId: user, runtime, ...(none ? { ignored: folderPair } : {}), ...(values.runtime !== undefined ? { runtimeName: values.runtime } : {}), ...(Object.keys(folders).length > 0 ? { runtimeFolders: folders } : {}) }, { data, rehearse: switches.has("rehearse"), version: io.env.LRE_BUILD_ID ?? "dev", env: io.env, tree, ...(settings ? { settings } : {}), ...(runs ? { runs } : {}) });
-    io.out(switches.has("json") ? `${JSON.stringify(report, null, 2)}\n` : reportText(report));
-    return (switches.has("rehearse") ? report.refusals.length === 0 : ran) ? 0 : 1;
+    // A chat that holds records of the previous build and that the run did not carry is named first, ahead of the report, and last again; the run then ends with 1.
+    const missing = ran ? notCarriedOf(report) : [];
+    const switched = missing.length > 0 && readRpe(dataPaths(data).database, (db) => lastSwap(db, user)) !== null;
+    if (switches.has("json")) io.out(`${JSON.stringify(report, null, 2)}\n`);
+    else {
+      const first = notCarriedLines(missing, { again: lines?.again ?? "rpe migrate", back: switched ? (lines?.down ?? "rpe down") : null });
+      if (first.length > 0) io.out(`${first.join("\n")}\n`);
+      io.out(reportText(report));
+      if (missing.length > 0) io.out(notCarriedEnd(missing, false));
+    }
+    return (switches.has("rehearse") ? report.refusals.length === 0 : ran && missing.length === 0) ? 0 : 1;
   } catch (error) {
     io.err(`The migration stopped: ${error instanceof Error ? error.message : String(error)}`);
     return 1;

@@ -139,6 +139,9 @@ export interface Difference {
   kept: boolean;
 }
 
+/** Why a run did not carry a chat that holds records of the previous build. */
+export type NotCarriedCause = "fold" | "store" | "unopened";
+
 /** What the real run did with one chat (§15.5: its turns found and imported, and whether its state matched at the head and at every swipe). */
 export interface ChatImportReport {
   chatId: string;
@@ -180,6 +183,13 @@ export interface ChatImportReport {
    * stood before: how many were, and how many had lost their place (their reply is gone) and stay in the backup only. Absent where none.
    */
   own?: { placed: number; lost: number };
+  /**
+   * A chat that holds records of the previous build and that this run did not carry ("not imported"): why (the previous build's fold failed
+   * on it, RPE's store refused what that fold gave, or the previous build's reader could not open it) and whether what an earlier run carried
+   * of it stands in RPE. Said ahead of the report, and a command that leaves one ends with exit code 1 (`not-carried.ts`). Absent for every
+   * other outcome, and for a chat the previous build plays no world in now.
+   */
+  notCarried?: { cause: NotCarriedCause; stands: boolean };
 }
 
 export interface MigrationReport {

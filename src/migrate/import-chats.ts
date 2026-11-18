@@ -412,7 +412,7 @@ export function importChats(input: { store: Store; s: UserStore; db: Database; r
       })();
     } catch (error) {
       store.dropCaches();
-      reports.push({ chatId: id, outcome: "not imported", why: stands(id, whyNot(error)), ...blank });
+      reports.push({ chatId: id, outcome: "not imported", why: stands(id, whyNot(error)), ...blank, notCarried: { cause: error instanceof StoreInputError ? "store" : "fold", stands: s.chat(id) !== null } });
       continue;
     }
     if ("left" in outcome) {
@@ -427,7 +427,7 @@ export function importChats(input: { store: Store; s: UserStore; db: Database; r
     reports.push({ chatId: id, outcome: replaced ? "replaced" : "imported", turns: done.turns, placed: done.placed, shares, matched: done.matched, differences: done.differences, dropped: done.dropped, violations: done.violations, edited: done.edited, ...(own.placed + own.lost > 0 ? { own } : {}) });
     keepChat(db, s.id, id, run, shares?.chat ?? null, replaced ? "replaced" : "imported", done.differences.length > 0);
   }
-  for (const n of input.notOpened) reports.push({ chatId: n.chatId, outcome: "not imported", why: stands(n.chatId, n.why), ...blank });
+  for (const n of input.notOpened) reports.push({ chatId: n.chatId, outcome: "not imported", why: stands(n.chatId, n.why), ...blank, notCarried: { cause: "unopened", stands: s.chat(n.chatId) !== null } });
   const unread = new Set(input.notOpened.map((n) => n.chatId));
   // Chats an earlier run imported that this run didn't read: gone only when Lumiverse no longer has them.
   for (const gone of input.earlier) {

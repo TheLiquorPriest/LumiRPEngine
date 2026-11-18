@@ -17,12 +17,13 @@ import type { JsonObject } from "../shared/json";
 import type { Store } from "../store";
 import type { ChatCarried } from "./briefing";
 import type { ChatEngine, JournalRead } from "./chats";
-import { goingBack, PREVIOUS_PERMISSIONS, swapSteps } from "./going-back";
+import { goingBack, lastSwap, PREVIOUS_PERMISSIONS, shellWord, swapSteps } from "./going-back";
 import type { LumiverseMarks } from "./lumiverse-db";
 import { IMPORTED, IMPORTED_AGENTS, IMPORTED_SKILLS, SET_APART } from "./own-files";
 import type { LumiverseNow, Rehearsals } from "./rehearse-job";
 import type { ChatImportReport, ChatReport, Difference, Item, MigrationReport, RowReport } from "./report";
 import { disownedLines } from "./no-runtime";
+import { type NotCarriedShown, notCarriedOf, notCarriedShown } from "./not-carried";
 import type { RuntimeFolders } from "./runtime-folders";
 import type { OwnerRow } from "./setting-list";
 import { answersOf, chatRecord, lastReport } from "./tables";
@@ -96,7 +97,9 @@ export interface MigrationPage {
   sources: { lumiverse: string | null; runtime: RuntimeFolders | null };
   /** The backup the last real run took before it wrote anything: where, its size and checksum, and whether a file of that size is still there. */
   backup: { path: string; bytes: number; sha256: string; present: boolean } | null;
-  /** The chats still off RPE, ahead of everything else. */
+  /** The chats the last real run did not carry that hold records of the previous build: said at the top of the page, ahead of everything, while its report holds one; null where it holds none. */
+  notCarried: NotCarriedShown | null;
+  /** The chats still off RPE, ahead of everything else but the chats not carried. */
   offRpe: OffRpe[];
   /** What waits on him, GUIDANCE.md first, in the plan's order. */
   waiting: Waiting[];
@@ -243,6 +246,7 @@ export function migrationPage(input: MigrationPageInput): MigrationPage {
     rehearsal,
     sources: sources === null ? { lumiverse: input.database === null ? null : dirname(input.database), runtime: input.runtime } : { lumiverse: sources.lumiverse, runtime: sources.runtime },
     backup: null,
+    notCarried: null,
     offRpe: [],
     waiting: [],
     given,
@@ -259,6 +263,8 @@ export function migrationPage(input: MigrationPageInput): MigrationPage {
   }
   // The chats the run found off RPE, as Lumiverse and RPE hold them now.
   out.offRpe.push(...offRpeNow(input, report));
+  // The chats it did not carry, with the line that runs it again over the folder it read (every report that says so names it) and, where a switch was made, the one that goes back.
+  out.notCarried = notCarriedShown(notCarriedOf(report), { again: ["rpe", "migrate", "--lumiverse", sources?.lumiverse ?? "", "--user", input.user].map(shellWord).join(" "), back: lastSwap(input.db, input.user) === null ? null : "rpe down" });
   if (out.run !== null) out.run.counts.offRpe = out.offRpe.filter((c) => !c.done).length;
   const tree = input.tree;
   const at = (path: string): boolean => tree !== undefined && existsSync(join(tree.files, path));

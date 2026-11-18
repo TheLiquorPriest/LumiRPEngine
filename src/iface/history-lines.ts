@@ -26,6 +26,7 @@ export const HISTORY_PARTS = [
   "history-world",
   "history-actions",
   "history-build",
+  "history-migration",
 ] as const;
 
 /** Whether `path` (a file's path or its name) is the file of one of the history lines' parts. */

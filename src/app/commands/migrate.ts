@@ -3,6 +3,7 @@
 import { resolve } from "node:path";
 import { installHistoryLines, shippedTexts } from "../../iface";
 import { migrateCli } from "../../migrate/cli";
+import { shellWord } from "../../migrate/going-back";
 import { carryJob, HARNESS_MIGRATIONS, keepCarriedRun } from "../../turn";
 import type { CliIO } from "../cli";
 import { compose } from "../compose";
@@ -36,10 +37,12 @@ export async function migrateCommand(rest: readonly string[], io: CliIO, version
   const folder = read?.flags.data ?? defaultDataFolder(io.env, io.home);
   const line = read?.flags.data === undefined ? [...rest, "--data", folder] : rest;
   // Its output is whole texts, this one's lines; and it reads the build's id from the environment, where a built `rpe` does not put it.
+  // A chat it does not carry is said with the line that runs it again, as typed, and the line that goes back.
+  const again = { again: [io.invoked ?? "rpe", ...["migrate", ...rest].map(shellWord)].join(" "), down: runLine(io, dataPaths(folder), "down") };
   const migrate = async (): Promise<number> => {
     const settings = await readyToMigrate();
     // The turn lane's writer of a carried turn's run record, handed in: the migration may not import the turn lane.
-    return await migrateCli(line, { out: (text) => io.out(text.replace(/\n$/, "")), err: io.err, env: { ...io.env, LRE_BUILD_ID: version }, home: io.home }, treeLayout(), settings, { tables: { area: "harness", migrations: HARNESS_MIGRATIONS }, keep: keepCarriedRun, keepJob: carryJob });
+    return await migrateCli(line, { out: (text) => io.out(text.replace(/\n$/, "")), err: io.err, env: { ...io.env, LRE_BUILD_ID: version }, home: io.home }, treeLayout(), settings, { tables: { area: "harness", migrations: HARNESS_MIGRATIONS }, keep: keepCarriedRun, keepJob: carryJob }, again);
   };
   if (read === null || read.switches.has("rehearse")) return await migrate();
   const paths = dataPaths(folder);

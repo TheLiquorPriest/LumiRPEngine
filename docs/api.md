@@ -6800,6 +6800,8 @@ export interface MigrationReply {
   sources: { lumiverse: string | null; runtime: { configDir: string; dataDir: string } | null };
   /** The backup the last run took before it wrote anything. */
   backup: { path: string; bytes: number; sha256: string; present: boolean } | null;
+  /** The chats the last real run did not carry that hold records of the previous build, at the top of the page while its report holds one; null where it holds none. */
+  notCarried: NotCarriedShown | null;
   /** The chats still off RPE: a group of its own at the head of the page. */
   offRpe: OffRpeShown[];
   /** In the order the plan lists it: GUIDANCE.md first. */
@@ -7040,6 +7042,17 @@ export interface NotAppliedShown {
   op: string;
   words: string;
   reason: string;
+}
+```
+
+### `NotCarriedShown`
+
+The chats a real run did not carry that hold records of the previous build, in the migration's own words (`.prompts/history-migration.md`): the head, and each chat by its id with why, what of it RPE holds and what it does not, and what to do.
+
+```ts
+export interface NotCarriedShown {
+  head: string;
+  chats: { chat: string; why: string; lines: string[] }[];
 }
 ```
 

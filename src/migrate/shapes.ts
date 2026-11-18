@@ -95,6 +95,12 @@ const offRpe = shape.named(
   }),
 );
 
+const notCarried = shape.named(
+  "NotCarriedShown",
+  "The chats a real run did not carry that hold records of the previous build, in the migration's own words (`.prompts/history-migration.md`): the head, and each chat by its id with why, what of it RPE holds and what it does not, and what to do.",
+  shape.object({ head: T, chats: shape.list(shape.object({ chat: T, why: T, lines: shape.list(T) })) }),
+);
+
 const folders = shape.object({ configDir: T, dataDir: T });
 
 export const migrationReply = shape.named(
@@ -105,6 +111,7 @@ export const migrationReply = shape.named(
     rehearsal: rehearsalShown,
     sources: field(shape.object({ lumiverse: nullable(T), runtime: nullable(folders) }), "The folders a rehearsal from the page reads: the last run's, else Lumiverse's database's folder as RPE's config names it and today's runtime's own."),
     backup: field(nullable(shape.object({ path: T, bytes: N, sha256: T, present: field(shape.yesNo(), "Whether a file of that size is still there.") })), "The backup the last run took before it wrote anything."),
+    notCarried: field(nullable(notCarried), "The chats the last real run did not carry that hold records of the previous build, at the top of the page while its report holds one; null where it holds none."),
     offRpe: field(shape.list(offRpe), "The chats still off RPE: a group of its own at the head of the page."),
     waiting: field(shape.list(waiting), "In the order the plan lists it: GUIDANCE.md first."),
     given: field(shape.list(shape.object({ path: T, fate: shape.oneOf("archived", "attached"), line: T })), "The rows he has given (`migration.rows`)."),

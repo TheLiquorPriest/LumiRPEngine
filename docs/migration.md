@@ -111,6 +111,8 @@ The previous build is still installed and still plays your chats. Read the repor
 - `RPE is running at <address>, the address this data folder's config gives it: stop it (…), then run … again.` A running RPE would write its own copy over what the run carried. Stop it with the line it gives (`rpe serve` stopped, or its service stopped), run the migration, and start it again after.
 - `The migration stopped: while <step>: …` The run failed part-way. The previous build's data is as it was and the backup it took is kept. Run it again: it finishes what the first run left, with nothing duplicated.
 
+**A chat it could not carry.** Where the previous build's own reader or fold fails on a chat that holds its records, or RPE's store refuses what that fold gives, the run carries everything else and names each such chat first, ahead of the report: why, what of it RPE holds (what an earlier run carried of it stays; what was played on it in the previous build since is not in RPE), that the previous build's data holds all of it, and the line that runs the migration again once the cause is mended (and, where a switch was made, the way back). Its last line says it again, and it ends with exit code 1. The Migration page says the same at its top while the last real run's report holds such a chat. The words are the lines of `.prompts/history-migration.md`.
+
 ### The backups
 
 Every real run takes a backup of its own, and so does every switch (`rpe up`), which runs the migration again. Each is one archive in `backups/` in RPE's data folder, named `rpe-migration-backup-<the time it was made>.tar`, readable only by your account. Each is about the size of your data in the previous build. Nothing removes them, so they add up. An older one may be deleted once a newer one exists; keep the newest.
@@ -170,6 +172,8 @@ Run from the extension's own folder, `rpe up` knows Lumiverse's data folder, and
 - If anything fails along the way, it puts everything back as it was, and the previous runtime runs again.
 
 What you will see, in this order: the migration's report; `Started rpe-<name>.service, RPE's service: RPE answers at <address>, where the previous runtime <name> did, under its model name (…) and with its key.`; `Stopped and switched off <the previous runtime's unit>, the previous build's service.`; a list of the chats that were on the previous build and are on none of RPE's connections, each with the one step that puts it on RPE; the web app's token, printed once (keep it: see [the web app](install.md#the-web-app-and-its-key)); and `What is left for you to do:`, a numbered list. Then play a turn in one of your chats: RPE plays it. The switch takes a minute or two, most of it the migration and the previous runtime's stop.
+
+Where the switch's run could not carry a chat that holds records of the previous build, it names each ahead of the report, as the real run does (see "A chat it could not carry" above), with `rpe down` as the way back. The switch goes through all the same; its last line says so with the count, and `rpe up` ends with exit code 1.
 
 **When it says no.** Every stop before the previous runtime is stopped changes nothing of it, and every stop after the extension was switched prints, under the reason, the steps to go back to the previous build now. The common ones:
 

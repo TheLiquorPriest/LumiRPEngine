@@ -13,7 +13,7 @@ const SWAP = swapSteps({ identifier: "lumi_rp_engine" }).map((step) => step.trim
 
 const SOURCES: MigrationReply["sources"] = { lumiverse: "/srv/lumiverse/data", runtime: { configDir: "/srv/home/.config/lumiah", dataDir: "/srv/home/.local/share/lumiah" } };
 
-export const NOT_RUN: MigrationReply = { run: null, rehearsal: { state: "none" }, sources: SOURCES, backup: null, offRpe: [], waiting: [], given: [], swap: SWAP, goingBack: { steps: STEPS, permissions: [...PREVIOUS_PERMISSIONS] }, lumiverse: null };
+export const NOT_RUN: MigrationReply = { run: null, rehearsal: { state: "none" }, sources: SOURCES, backup: null, notCarried: null, offRpe: [], waiting: [], given: [], swap: SWAP, goingBack: { steps: STEPS, permissions: [...PREVIOUS_PERMISSIONS] }, lumiverse: null };
 
 export const MIGRATED: MigrationReply = {
   run: {
@@ -28,6 +28,7 @@ export const MIGRATED: MigrationReply = {
   rehearsal: { state: "none" },
   sources: SOURCES,
   backup: { path: "/srv/rpe/backups/before-migration.tar", bytes: 48_340_992, sha256: "4f1d2c9a8b7e6d5c4b3a29180f7e6d5c4b3a29180f7e6d5c4b3a29180f7e6d5c", present: true },
+  notCarried: null,
   offRpe: [{ chat: "chat-calder", pinned: "conn-own", pinnedName: null, active: null, played: false, done: false }],
   waiting: [
     { kind: "guidance", path: "imported/GUIDANCE.md", done: false },

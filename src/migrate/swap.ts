@@ -31,6 +31,7 @@ import { LumiverseDb } from "./lumiverse-db";
 import { earlierRuns, migrate, type MigrateOptions, type MigrateResult } from "./migrate";
 import { type ChatReport, type MigrationReport, refusalsOf, reportText } from "./report";
 import { disownedLines } from "./no-runtime";
+import { type NotCarriedSteps, notCarriedLines, notCarriedOf } from "./not-carried";
 import { runtimeConfig, type SavedRuntime } from "./runtime-folders";
 import { openToday, type Sources } from "./today";
 
@@ -122,6 +123,8 @@ export interface RpeStart {
   extension?: { build: string; registered(): Promise<string | null> };
   /** RPE's own connections in Lumiverse from before this swap, which nothing answers once it takes today's: kept in the swap's record, for going back. */
   earlier?: readonly string[];
+  /** What the switch says to do of a chat holding records of the previous build that its run did not carry: the line that runs the migration again, and the one that goes back. */
+  notCarried: NotCarriedSteps;
 }
 
 /** How often RPE is asked whether it answers yet, once its service is started, where RPE's config gives none: the default of `commandLine.askEveryMs`. */
@@ -370,18 +373,18 @@ export async function swapCheck(input: { sources: Sources; options: MigrateOptio
  * is, and only then switches today's service off. Any failure from the first stop on puts back what
  * was done, the marks included, and so does being told to stop (Ctrl-C, a closed terminal, a kill),
  * once the step under way is done: the process isn't ended in the middle, with neither build
- * answering. Whether it went through.
+ * answering. The report of the switch's run where it went through; null where it did not.
  */
-export async function swapRun(plan: SwapPlan, rpe: RpeStart, io: SwapIo): Promise<boolean> {
+export async function swapRun(plan: SwapPlan, rpe: RpeStart, io: SwapIo): Promise<MigrationReport | null> {
   const { took } = plan;
   const { identifier } = plan.sources;
   const mark = rpe.mark;
   if (plan.connections.length > 0 && mark === undefined) throw new Error("the switch was given connections to take and no way to mark them as RPE's");
   if (took !== null) {
-    if (!(await idle(identifier, took.name, took.config, io))) return false;
+    if (!(await idle(identifier, took.name, took.config, io))) return null;
     if (took.unit === null && (await underWay(took.config, io)) !== null) {
       for (const line of stopAfterSwitch({ identifier, branch: plan.branch }, `The previous runtime ${took.name} answers at ${took.config.listen}:${took.config.port}, but runs under no unit rpe up can stop: stop it where it runs, then run rpe up again.`)) io.out(line);
-      return false;
+      return null;
     }
   }
   const base = localUrl(plan.at.address, plan.at.port);
@@ -417,6 +420,8 @@ export async function swapRun(plan: SwapPlan, rpe: RpeStart, io: SwapIo): Promis
     } catch (error) {
       throw new Error(`the migration stopped: ${error instanceof Error ? error.message : String(error)}`);
     }
+    // A chat holding records of the previous build that the run did not carry is named first, ahead of the report; the switch goes on as the plan has it.
+    for (const line of notCarriedLines(notCarriedOf(run.report), rpe.notCarried)) io.out(line);
     io.out(reportText(run.report).replace(/\n$/, ""));
     if (!run.ran) throw new Error("the run was refused, as the report says");
     going();
@@ -471,14 +476,14 @@ export async function swapRun(plan: SwapPlan, rpe: RpeStart, io: SwapIo): Promis
     for (const line of failed) io.out(`Could not be put back, do it by hand: ${line}.`);
     // Today's service runs again, and what the swap did to Lumiverse stays what the switch did: said, with the way back.
     if (failed.length === 0) for (const line of stopAfterSwitch({ identifier, branch: plan.branch }, "Nothing of the previous build's was changed.")) io.out(line);
-    return false;
+    return null;
   } finally {
     letGo();
   }
   io.out(`Started ${rpe.service.unit}, RPE's service: RPE answers at ${base}${took === null ? "" : `, where the previous runtime ${took.name} did${rpe.todays ? `, under its model name (${took.loopback.model})` : ""}${took.loopback.keyHash === null ? "" : `${rpe.todays ? " and" : ","} with its key`}`}.`);
   if (took?.unit) io.out(`Stopped and switched off ${took.unit}, the previous build's service. Its unit, and the previous runtime's config and folders, stay as they were, for going back.`);
   if (ran !== null) for (const line of offRpeLines(plan, ran)) io.out(line);
-  return true;
+  return ran;
 }
 
 /** Runs `use` on RPE's database at `file`, open for writing while the swap is its one writer. */

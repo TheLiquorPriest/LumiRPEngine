@@ -6,6 +6,7 @@ import { connectionsWhere, installedExtension, type LumiverseCall, markConnectio
 import { EXTENSION_IDENTIFIER } from "../../adapter/lumiverse/pipe-wire";
 import { grantedPermissions } from "../../adapter/lumiverse/swap-reads";
 import { stopAfterSwitch, swapSteps } from "../../migrate/going-back";
+import { notCarriedEnd, notCarriedOf } from "../../migrate/not-carried";
 import { runtimeFoldersOf } from "../../migrate/runtime-folders";
 import { type Loopback, otherBuildInstalled, swapCheck, swapRun, swapStands, type TakenConnection, todaysBuildInstalled } from "../../migrate/swap";
 import { carryJob, HARNESS_MIGRATIONS, keepCarriedRun } from "../../turn";
@@ -159,11 +160,12 @@ export async function swapUp(line: SwapLine, io: CliIO, version: string): Promis
   const swapIo = { out: io.out, fetch: io.fetch, now: io.now, sleep: (ms: number) => Bun.sleep(ms), systemctl: accountSystemctl(io.env, process.getuid?.() ?? null), onStop: stopSignals };
   // Told there is none, the switch reads none; where this user's is found all the same, what it leaves out is said (src/migrate/no-runtime.ts).
   const sources = { lumiverse, identifier, userId: user, runtime, ...(none ? { ignored: folderPair } : {}), ...(flags.runtime !== undefined ? { runtimeName: flags.runtime } : {}) };
+  // The line that makes the migration's run again, with the folders this switch was given.
+  const runtimeFlags = [...(switches.has("no-runtime") ? ["--no-runtime"] : []), ...(["runtime", "runtime-config", "runtime-data", "identifier"] as const).flatMap((flag) => (flags[flag] === undefined ? [] : [`--${flag}`, flags[flag]]))];
+  const migrateLine = runLine(io, paths, "migrate", "--lumiverse", lumiverse, "--user", user, ...runtimeFlags);
   // A swap that stands already is left as it is: making the migration's run again is `rpe migrate`'s, with RPE's service stopped meanwhile.
   const standing = existing === null ? null : await swapStands({ sources, data: paths.root, rpe: { address: current.address, port: current.port, unit: existing.unit }, waitMs: current.commandLine.waitMs }, swapIo);
   if (standing !== null) {
-    const runtimeFlags = [...(switches.has("no-runtime") ? ["--no-runtime"] : []), ...(["runtime", "runtime-config", "runtime-data", "identifier"] as const).flatMap((flag) => (flags[flag] === undefined ? [] : [`--${flag}`, flags[flag]]))];
-    const migrateLine = runLine(io, paths, "migrate", "--lumiverse", lumiverse, "--user", user, ...runtimeFlags);
     io.out(`The switch stands: RPE's service ${standing.unit} runs, and RPE answers at ${standing.at}, where the previous runtime ${standing.runtime} answered${standing.todays === null ? "" : `; the previous build's service ${standing.todays} is switched off`}; the extension Lumiverse has installed is this build (${version}). Nothing was stopped or changed, and the migration was not made again.`);
     io.out(`${runLine(io, paths, "migrate")} carries what changed on the previous build's side since the last run (read at ${standing.since}): stop RPE's service (systemctl --user stop ${standing.unit}), run ${migrateLine}, then start it again (systemctl --user start ${standing.unit}).`);
     const left = await extensionLeft(call);
@@ -200,10 +202,11 @@ export async function swapUp(line: SwapLine, io: CliIO, version: string): Promis
       mark: (id, on) => markConnection(call, id, on),
       extension: { build: version, registered: () => registeredBuild(paths, current, io) },
       earlier,
+      notCarried: { again: migrateLine, back: runLine(io, paths, "down") },
     },
     swapIo,
   );
-  if (!ran) return 1;
+  if (ran === null) return 1;
   const after = { ...current, lumiverse: { ...current.lumiverse, connections: ids } };
   await webToken(ctx, after);
   const left = await extensionLeft(call);
@@ -211,5 +214,9 @@ export async function swapUp(line: SwapLine, io: CliIO, version: string): Promis
   left.push(`RPE's service's own log, should you need it: journalctl --user -u ${service.unit}.`);
   if (taken.length === 0 && own !== null) left.push(`In Lumiverse, choose the connection "${own.name}" for the chats RPE should play.`);
   sayLeft(left, io);
-  return 0;
+  // A chat holding records of the previous build that the switch's run did not carry, named ahead of the report, is said once more last: the switch stands, and the command ends with 1.
+  const missing = notCarriedOf(ran);
+  if (missing.length === 0) return 0;
+  io.out(notCarriedEnd(missing, true));
+  return 1;
 }

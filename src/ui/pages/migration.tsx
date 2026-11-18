@@ -528,6 +528,23 @@ export function MigrationView(props: {
   return (
     <div class="lre-stack rpe-page" data-page="migration">
       <PageHeader title="Migration" subtitle="A rehearsal over the previous build's data, the last real run, what waits on you, the switch and going back." />
+      {shown.notCarried === null ? null : (
+        <Banner tone="neg" icon="alert" title={shown.notCarried.head}>
+          <ul class="lre-stack rpe-plain" data-not-carried="">
+            {shown.notCarried.chats.map((c) => (
+              <li key={c.chat} class="rpe-line" data-chat={c.chat}>
+                <ChatLabel chat={c.chat} name={names(c.chat)} {...(props.open === undefined ? {} : { onOpen: props.open })} />
+                {`: ${c.why}`}
+                {c.lines.map((line) => (
+                  <p key={line} class="rpe-meta">
+                    {line}
+                  </p>
+                ))}
+              </li>
+            ))}
+          </ul>
+        </Banner>
+      )}
       {shown.offRpe.length === 0 ? null : (
         <Section title={`Chats still off RPE (${shown.offRpe.filter((c) => !c.done).length})`} id="off-rpe">
           <p class="rpe-meta">Each chat was on the previous build and was on none of RPE's connections when the run read it, and each line says where it stands now. A chat pinned to another connection is off RPE until you choose one of RPE's connections for it in Lumiverse. A chat pinned to none follows the connection active for you, so it is on RPE while that is one of RPE's. RPE changes nothing in your chats.</p>
