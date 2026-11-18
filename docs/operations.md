@@ -3101,8 +3101,8 @@ For each domain skill: the everyday operations and engine tools its text names i
 
 ### items-and-wardrobe
 
-- Names: `world_apply`, `give`, `wear`, `store`, `place`, `spawn`, `world_query`, `fill_in_detail`, `set_save`, `set_apply`, `set_drop`, `act`.
-- Actions it names, carried out by `act`: `take`, `drop`, `hand_over`, `give_back`, `lend`, `reclaim`, `lose`, `put_in`, `put_away`, `remove`, `use`, `search`, `fetch`, `take_piece`.
+- Names: `world_apply`, `give`, `wear`, `store`, `place`, `spawn`, `rules_add`, `world_query`, `fill_in_detail`, `set_save`, `set_apply`, `set_drop`, `act`.
+- Actions it names, carried out by `act`: `attack`, `reload`, `take`, `drop`, `hand_over`, `give_back`, `lend`, `reclaim`, `lose`, `put_in`, `put_away`, `remove`, `use`, `search`, `fetch`, `take_piece`.
 - Names with no engine tool, operation or action of that name: `tool_search`.
 - Its families' tools it does not name: `item_condition`, `item_use`, `item_own`, `item_grant`, `item_revoke`, `item_permit`, `item_unpermit`, `item_home`, `item_label`, `item_merge`, `item_lose`, `item_remove`, `items_access`, `items_of`.
 
@@ -3115,14 +3115,14 @@ For each domain skill: the everyday operations and engine tools its text names i
 
 ### ruleset-and-sheets
 
-- Names: `world_query`, `sheet`, `rules_apply`, `world_apply`, `act`, `set`, `pass_time`, `rules_add`, `fact`, `checks_odds`, `roll`.
-- Actions it names, carried out by `act`: `check`, `take`, `save`, `attack`, `reload`, `harm`, `heal`, `rest`, `condition`, `effect`, `award`, `advance`, `ranks`, `trait`, `stat_as`, `attempt`.
+- Names: `world_query`, `sheet`, `rules_apply`, `world_apply`, `act`, `roll`, `set`, `pass_time`, `rules_add`, `fact`, `checks_odds`.
+- Actions it names, carried out by `act`: `check`, `save`, `attack`, `take`, `reload`, `harm`, `heal`, `rest`, `condition`, `effect`, `award`, `advance`, `ranks`, `trait`, `stat_as`, `attempt`.
 - Names with no engine tool, operation or action of that name: `vs_skill`, `tool_search`.
 - Its families' tools it does not name: `gm_set_life`, `gm_despawn`, `gm_restore`, `gm_classify`, `gm_set_entity`, `gm_link`, `gm_unlink`, `fill_in_detail`, `people_regard`.
 
 ### combat
 
-- Names: `world_apply`, `act`, `fight_round`, `map_measure`, `set`, `move`, `place`, `wear`, `world_query`, `fight_start`, `fight_read`, `pass_time`, `give`.
+- Names: `sheet`, `world_apply`, `act`, `fight_round`, `map_measure`, `set`, `move`, `place`, `wear`, `world_query`, `fight_start`, `fight_read`, `pass_time`, `give`.
 - Actions it names, carried out by `act`: `fight`, `harm`, `end_turn`, `attack`, `reload`, `condition`, `effect`, `heal`, `award`, `advance`.
 - Names with no engine tool, operation or action of that name: `tool_search`, `roll_initiative`.
 - Its families' tools it does not name: `fight_end`.
