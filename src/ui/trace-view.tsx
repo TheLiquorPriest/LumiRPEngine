@@ -14,7 +14,7 @@ import { type NoticeLines, NO_NOTICES, noticeLine } from "./notice-words";
 import { JOB_STATE_WORDS } from "./pages/jobs/words";
 import { counted, duration, json, limitCount, limitName, num, tokenWords } from "./words";
 
-export const TURN_KIND_WORDS: Readonly<Record<TurnRunKind, string>> = { new: "New reply", swipe: "Swipe", regenerate: "Regenerate", continue: "Continue", impersonate: "Impersonation", settle: "Settle an edit" };
+export const TURN_KIND_WORDS: Readonly<Record<TurnRunKind, string>> = { new: "New reply", swipe: "Swipe", regenerate: "Regenerate", continue: "Continue", impersonate: "Impersonation", settle: "Settle run" };
 
 const RUN_WORDS: Readonly<Record<"turn" | "job" | "talk", string>> = { turn: "Turn", job: "Job", talk: "Talk with an agent" };
 
@@ -27,9 +27,22 @@ export const STATUS_WORDS: Readonly<Record<RunStatus | "running", { words: strin
   failed: { words: "Failed", tone: "neg" },
 };
 
-/** How a run of `kind` stands, in words: a settle run writes nothing to the chat, so its ending with no reply is how it is meant to end. */
-export function statusWords(kind: TurnRunKind | undefined, status: RunStatus | "running"): { words: string; tone: Tone } {
-  return kind === "settle" && status === "no-reply" ? { words: "Settled, no reply: as a settle run ends", tone: "pos" } : STATUS_WORDS[status];
+/** How a run of `kind` stands, in words: a settle run writes nothing to the chat, so its ending with no reply is how it is meant to end; a run that released its reply and then failed, stopped or hit a limit says both. */
+export function statusWords(kind: TurnRunKind | undefined, status: RunStatus | "running", released = false): { words: string; tone: Tone } {
+  if (kind === "settle" && status === "no-reply") return { words: "Settled; nothing written to the chat", tone: "pos" };
+  if (released && (status === "failed" || status === "limit" || status === "stopped")) return { words: `Reply released, then ${AFTER_RELEASE[status]}`, tone: STATUS_WORDS[status].tone };
+  return STATUS_WORDS[status];
+}
+
+const AFTER_RELEASE: Readonly<Record<"failed" | "limit" | "stopped", string>> = { failed: "its run failed", limit: "its run stopped at a limit", stopped: "its run was stopped" };
+
+/** Why a Settle now run ran, and what it does not do. */
+export const SETTLE_WHY = "it ran because you pressed Settle now, and it writes nothing to the chat";
+export const SETTLE_WORDS = `${SETTLE_WHY.charAt(0).toUpperCase()}${SETTLE_WHY.slice(1)}.`;
+
+/** The run of a turn that answered it: its latest that is not a settle run, which writes nothing to the chat (as RPE takes the turn's reply). */
+export function answeringRun<R extends { kind: TurnRunKind }>(runs: readonly R[]): R | undefined {
+  return runs.findLast((r) => r.kind !== "settle");
 }
 
 const AGENT_WORDS: Readonly<Record<AgentState, { words: string; tone?: Tone }>> = {
@@ -84,9 +97,11 @@ export function runSpan(run: RunNode, now: number): number | null {
 
 /** A run's head; `kind`, where the page knows it from RPE, names a settle run as one (the harness runs it as a continue) and its ending with no reply as normal. A job's run stands as its job does, in the Jobs page's words. */
 export function RunHead(props: { run: RunNode; now: number; kind?: TurnRunKind }) {
-  const { run, kind } = props;
+  const { run } = props;
+  const kind = props.kind ?? run.kind ?? undefined;
   const outcome = run.outcome?.status ?? "running";
-  const status = run.job === null ? statusWords(kind, outcome) : JOB_STATE_WORDS[run.job.state];
+  const released = run.released !== null || run.outcome?.released === true;
+  const status = run.job === null ? statusWords(kind, outcome, released) : JOB_STATE_WORDS[run.job.state];
   const span = runSpan(run, props.now);
   const totals = runTotals(run);
   const failure = run.outcome?.error === undefined || (kind === "settle" && outcome === "no-reply") ? null : replyErrorWords(run.outcome.error, run.outcome.status);
@@ -106,6 +121,7 @@ export function RunHead(props: { run: RunNode; now: number; kind?: TurnRunKind }
         <span>{counted(totals.rules, "rule fired", "rules fired")}</span>
         <span class="lre-num">{tokenWords(totals.usage)}</span>
       </div>
+      {kind === "settle" ? <p class="rpe-meta" data-settle>{SETTLE_WORDS}</p> : null}
       {failure === null ? null : <p class="lre-neg rpe-line">{failure}</p>}
     </div>
   );

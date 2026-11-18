@@ -12,7 +12,7 @@ function Runs(props: { views: readonly RunShown[]; runs: readonly RunNode[]; now
     <div class="lre-stack">
       {props.views.map((view) => {
         const run = props.runs.find((r) => r.run === (view.run ?? view.id));
-        const status = statusWords(view.kind, view.status);
+        const status = statusWords(view.kind, view.status, view.timings.released !== null);
         return (
           <div key={view.id} class="lre-stack" data-run={view.id}>
             <RunCaption nth={view.nth} of={props.views.length} id={view.id} title={run === undefined || view.kind === "settle" ? TURN_KIND_WORDS[view.kind] : runTitle(run)} />

@@ -17,7 +17,7 @@
 // new objects only along its path (run, agent, step), so a view can tell what changed by identity.
 
 import type { AgentStatus, TodoItem } from "rp-harness/contract";
-import type { AgentRef, JobView, LiveEvent, Release, ReplyPiece, RunOutcome, RunScope, ToolResult, TraceDelta, TraceEvent, TraceRecord, TurnReply, Usage } from "../shared/api";
+import type { AgentRef, JobView, LiveEvent, Release, ReplyPiece, RunOutcome, RunScope, ToolResult, TraceDelta, TraceEvent, TraceRecord, TurnReply, TurnRunKind, Usage } from "../shared/api";
 import { isRecord } from "../shared/json";
 
 export type EventOf<K extends TraceEvent["kind"]> = Extract<TraceEvent, { kind: K }>;
@@ -86,6 +86,8 @@ export interface RunNode {
   readonly run: string;
   /** The turn it is a run of, as its records' scope names it, or the read that named the run; null for a run of no turn (a job the user started), or one heard of by nothing else yet. */
   readonly turn: string | null;
+  /** The kind of run a read of its turn named it (a settle run is a continue to the harness); null before a read did. */
+  readonly kind: TurnRunKind | null;
   readonly scope: RunScope | null;
   /** The agent, run and tool call of another run that started this one (a job's). */
   readonly startedBy: { readonly agent: string; readonly run: string; readonly call: string } | null;
@@ -122,7 +124,7 @@ const NO_STREAM = { text: "", thinking: "" } as const;
 const NO_REPLY: ReplySoFar = { text: "", progress: [], held: [] };
 
 function emptyRun(run: string, turn: string | null = null): RunNode {
-  return { run, turn, scope: null, startedBy: null, started: null, startedAt: null, intent: null, agents: new Map(), roots: [], released: null, releasedAt: null, outcome: null, endedAt: null, job: null, reply: NO_REPLY, seq: 0, waiting: [], firstAt: null, lastAt: null };
+  return { run, turn, kind: null, scope: null, startedBy: null, started: null, startedAt: null, intent: null, agents: new Map(), roots: [], released: null, releasedAt: null, outcome: null, endedAt: null, job: null, reply: NO_REPLY, seq: 0, waiting: [], firstAt: null, lastAt: null };
 }
 
 function withRun(model: LiveModel, next: RunNode): LiveModel {
@@ -379,7 +381,7 @@ export function applyRead(model: LiveModel, detail: TurnReply): LiveModel {
     const status = view.status;
     const outcome: RunOutcome | null = status !== "running" && run.outcome === null && run.waiting.length === 0 ? { status, released: view.timings.released !== null, usage: view.usage, ...(view.error === null ? {} : { error: view.error }) } : run.outcome;
     const endedAt = outcome !== run.outcome ? view.timings.ended : run.endedAt;
-    next = withRun(next, { ...run, turn: run.turn ?? detail.id, reply: settleReply(text, progress, known.held), outcome, endedAt, startedAt: run.startedAt ?? view.timings.started });
+    next = withRun(next, { ...run, turn: run.turn ?? detail.id, kind: view.kind, reply: settleReply(text, progress, known.held), outcome, endedAt, startedAt: run.startedAt ?? view.timings.started });
   }
   return next;
 }

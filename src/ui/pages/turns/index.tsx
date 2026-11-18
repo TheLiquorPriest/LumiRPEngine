@@ -16,7 +16,7 @@ import { Badge, Banner, Button, Empty, Gated, PageHeader, Section } from "../../
 import { type RunNode, runsOf } from "../../live-model";
 import { NOTHING_WATCHED, onChatChange, watchTurn, type WatchLimits, type Watched } from "../../live-watch";
 import { type NoticeLines, useNoticeLines } from "../../notice-words";
-import { replyErrorWords, statusWords, TURN_KIND_WORDS } from "../../trace-view";
+import { answeringRun, replyErrorWords, statusWords, TURN_KIND_WORDS } from "../../trace-view";
 import { latestOf, liveTurn } from "../../turn-model";
 import { useUiSetting } from "../../ui-settings";
 import { counted, duration, errorWords, tokenWords, when } from "../../words";
@@ -24,6 +24,7 @@ import type { PageEntry } from "../../page-entry";
 import { type JobsReader, type JobsShown, JobsView, NO_JOBS, readJobs } from "../jobs";
 import { useRead } from "../../reading";
 import { readFolder } from "./folder";
+import { laterWords, LaterRuns } from "./later";
 import { type ReviewShown, useReview } from "./review";
 import { CarriedRecord, ENGINE_WORDS } from "./sections/carried";
 import { TURN_SECTIONS } from "./sections/list";
@@ -43,20 +44,36 @@ export function carriedWords(row: CarriedRow): string {
 
 function TurnLine(props: { turn: TurnRow; carried?: CarriedRow | undefined; onOpen: () => void }) {
   const { turn } = props;
-  const status = statusWords(turn.kind, turn.status);
-  const end = turn.timings.ended ?? turn.timings.released;
+  // What the turn is and what became of its reply are the run that answered's; a later run (Settle now) is said beside it in its own words, with its own time and spend, and the turn's total is said as one.
+  const answering = answeringRun(turn.runs);
+  const head = answering ?? turn.runs.at(-1);
+  const kind = head?.kind ?? turn.kind;
+  const status = statusWords(kind, head?.status ?? turn.status, (head?.timings.released ?? turn.timings.released) !== null);
+  const own = head?.usage ?? turn.usage;
+  const end = (head?.timings ?? turn.timings).ended ?? (head?.timings ?? turn.timings).released;
+  const later = answering === undefined ? [] : turn.runs.filter((r) => r.nth > answering.nth);
   return (
     <li class="lre-listrow">
       <button type="button" class="lre-listrow-hit" onClick={props.onOpen} data-turn={turn.id}>
         <span class="lre-listrow-content">
           <span class="lre-listrow-text">
             <span class="lre-listrow-title">
-              {TURN_KIND_WORDS[turn.kind]} · {when(turn.timings.received)}
+              {TURN_KIND_WORDS[kind]} · {when(turn.timings.received)}
             </span>
             <span class="lre-listrow-sub lre-num">
               {end === null ? "" : `${duration(end - turn.timings.received)} · `}
-              {counted(turn.usage.calls, "call")} · {tokenWords(turn.usage)}
+              {counted(own.calls, "call")} · {tokenWords(own)}
             </span>
+            {later.map((run) => (
+              <span key={run.nth} class="lre-listrow-sub lre-num" data-later-run={run.nth}>
+                {laterWords(run)}
+              </span>
+            ))}
+            {later.length === 0 ? null : (
+              <span class="lre-listrow-sub lre-num" data-turn-total>
+                {`In all, every run: ${counted(turn.usage.calls, "call")} · ${tokenWords(turn.usage)}`}
+              </span>
+            )}
             {props.carried === undefined ? null : <span class="lre-listrow-sub" data-carried-line>{carriedWords(props.carried)}</span>}
           </span>
           <span class="lre-inline">
@@ -417,15 +434,21 @@ export interface TurnViewProps {
 export function TurnView(props: TurnViewProps) {
   const { turn, settle } = props;
   const sections = props.sections ?? TURN_SECTIONS;
-  // How it stands is its latest run's: a settle run's ending with no reply is how it is meant to end.
-  const kind = turn.runs.at(-1)?.kind ?? turn.kind;
-  const status = statusWords(kind, turn.status);
-  const failure = turn.error === null || (kind === "settle" && turn.status === "no-reply") ? null : replyErrorWords(turn.error, turn.status);
+  // What the turn is and what became of its reply are the run that answered's (a Settle now run writes nothing to the chat): a swipe whose
+  // reply was released and whose run then failed stays that, and a Settle now run after it is said in its own line below.
+  const answering = answeringRun(turn.runs);
+  const head = answering ?? turn.runs.at(-1);
+  const kind = head?.kind ?? turn.kind;
+  const replied = (head?.timings.released ?? turn.timings.released) !== null;
+  const status = head === undefined ? statusWords(turn.kind, turn.status, replied) : statusWords(head.kind, head.status, replied);
+  const error = head === undefined ? turn.error : head.error;
+  const failure = error === null || (kind === "settle" && (head?.status ?? turn.status) === "no-reply") ? null : replyErrorWords(error, head?.status ?? turn.status);
+  const later = answering === undefined ? [] : turn.runs.filter((r) => r.nth > answering.nth);
   const parts: TurnParts = { turn, runs: props.runs, now: props.now, folder: props.folder, notices: props.notices, lead: props.lead, loreRows: props.loreRows, stage: props.stage, review: props.review, onOpenQuest: props.onOpenQuest, onOpenFile: props.onOpenFile, onOpenRequest: props.onOpenRequest, onCloseFile: props.onCloseFile };
   return (
     <div class="lre-stack rpe-page" data-page="turn" data-turn={turn.id}>
       <PageHeader
-        title={`${TURN_KIND_WORDS[turn.kind]}, ${when(turn.timings.received)}`}
+        title={`${TURN_KIND_WORDS[kind]}, ${when(turn.timings.received)}`}
         subtitle={
           <span class="lre-inline">
             <span class={`lre-badge ${status.tone}`}>{status.words}</span>
@@ -451,13 +474,14 @@ export function TurnView(props: TurnViewProps) {
         }
       />
       {settle === undefined ? null : <SettleNotice shown={settle.shown} />}
+      <LaterRuns runs={later} />
       {props.problem === null ? null : (
         <Banner tone="neg" icon="alert" title="Part of this turn could not be read">
           <span>{props.problem}</span>
         </Banner>
       )}
       {failure === null ? null : (
-        <Banner tone="neg" icon="alert" title="Why it ended">
+        <Banner tone="neg" icon="alert" title={replied ? "Why its run ended after the reply" : "Why it ended"}>
           <span>{failure}</span>
         </Banner>
       )}

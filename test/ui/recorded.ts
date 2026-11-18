@@ -302,15 +302,16 @@ export function turnAt(count: number = RECORDED.length, from = 1, chat = CHAT): 
 }
 
 export function summaryOf(detail: TurnReply): TurnRow {
-  return { id: detail.id, kind: detail.kind, onPath: detail.onPath, message: detail.message, status: detail.status, timings: detail.timings, usage: detail.usage, marks: [] };
+  return { id: detail.id, kind: detail.kind, onPath: detail.onPath, message: detail.message, status: detail.status, timings: detail.timings, usage: detail.usage, marks: [], runs: detail.runs.map(({ nth, kind, status, error, timings, usage }) => ({ nth, kind, status, error, timings, usage })) };
 }
 
 /** The chat's earlier turns: a swipe that stands, the attempt it replaced (off the path now), and one stopped by the player. */
-export const EARLIER: readonly TurnRow[] = [
+const EARLIER_ROWS: readonly Omit<TurnRow, "runs">[] = [
   { id: "turn-30", marks: [], kind: "swipe", onPath: true, message: "msg-0410", status: "released", timings: { received: T0 - 600_000, started: T0 - 599_780, firstWord: T0 - 591_200, released: T0 - 586_900, ended: T0 - 586_700, finished: null, intent: null, thinking: [], intake: null, wait: null }, usage: usage(3, 24_100, 19_456, 512, 88) },
   { id: "turn-29", marks: [], kind: "new", onPath: false, message: "msg-0410", status: "released", timings: { received: T0 - 720_000, started: T0 - 719_700, firstWord: T0 - 709_900, released: T0 - 705_100, ended: T0 - 704_800, finished: null, intent: null, thinking: [], intake: null, wait: null }, usage: usage(4, 30_870, 22_528, 640, 120) },
   { id: "turn-28", marks: [], kind: "new", onPath: true, message: "msg-0408", status: "stopped", timings: { received: T0 - 1_500_000, started: T0 - 1_499_760, firstWord: null, released: null, ended: T0 - 1_492_000, finished: null, intent: null, thinking: [], intake: null, wait: null }, usage: usage(2, 11_920, 8_192, 301, 64) },
 ];
+export const EARLIER: readonly TurnRow[] = EARLIER_ROWS.map((row) => ({ ...row, runs: [{ nth: 1, kind: row.kind, status: row.status, error: null, timings: row.timings, usage: row.usage }] }));
 
 const EARLIER_WORDS: Readonly<Record<string, { intent: string; reply: string }>> = {
   "turn-30": { intent: "Wants: action. Ash climbs to the lamp room to see the lamp for themself.\nScope: the stairs and the lamp room, a few minutes.", reply: "You take the stairs two at a time. The lamp room smells of paraffin and cold brass." },

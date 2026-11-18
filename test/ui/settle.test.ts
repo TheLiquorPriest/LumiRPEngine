@@ -101,13 +101,26 @@ describe("Settle now", () => {
 
   test("a settle run is named as one, and its ending with no reply is shown as normal, not as a failure", () => {
     const page = turnPage(settledTurn());
-    expect(page.text).toContain("Settled, no reply: as a settle run ends");
+    expect(page.text).toContain("Settled; nothing written to the chat");
     expect(banners(page.tree).map((b) => b.title)).not.toContain("Why it ended");
-    expect(page.text).toContain("Settle an edit");
-    const list = turns({ turns: [{ ...(EARLIER[0] as TurnsViewProps["turns"][number]), kind: "settle", status: "no-reply" }] });
-    expect(list.text).toContain("Settle an edit");
-    expect(list.text).toContain("Settled, no reply");
+    expect(page.text).toContain("Settle run");
+    const row = EARLIER[0] as TurnsViewProps["turns"][number];
+    const list = turns({ turns: [{ ...row, kind: "settle", status: "no-reply", runs: [{ ...(row.runs[0] as TurnsViewProps["turns"][number]["runs"][number]), kind: "settle", status: "no-reply" }] }] });
+    expect(list.text).toContain("Settle run");
+    expect(list.text).toContain("Settled; nothing written to the chat");
     expect(elements(list.tree).some((e) => e.props.class === "lre-badge neg")).toBe(false);
+  });
+
+  test("a swipe that released its reply and then failed stays a swipe on the list, and the settle run after it is told beside it in its own words", () => {
+    const row = EARLIER[0] as TurnsViewProps["turns"][number];
+    const swipe = { ...(row.runs[0] as TurnsViewProps["turns"][number]["runs"][number]), kind: "swipe" as const, status: "failed" as const, error: { code: "provider" as const, detail: "The connection closed." } };
+    const settle = { ...swipe, nth: 2, kind: "settle" as const, status: "no-reply" as const, error: null, usage: { ...swipe.usage, calls: 22 } };
+    const list = turns({ turns: [{ ...row, kind: "settle", status: "no-reply", runs: [swipe, settle] }] });
+    expect(list.text).toContain("Swipe");
+    expect(list.text).toContain("Reply released, then its run failed");
+    expect(list.text).toContain("Then a settle run (it ran because you pressed Settle now, and it writes nothing to the chat)");
+    expect(list.text).toContain("22 calls");
+    expect(list.text).not.toContain("Settle an edit");
   });
 
   test("a chat with no run of RPE's that a migration carried turns of says so, and still offers Settle now", () => {
