@@ -7,9 +7,10 @@ import { Badge } from "../../../frontend/components";
 import { marksWords } from "../../marks";
 import type { TurnReply } from "../../../shared/api";
 
-/** A value as a line: a text as it is, anything else as compact JSON. */
+/** A value as a line: a text as it is (an empty one as nothing), no value as "nothing", anything else as compact JSON. */
 export function valueWords(value: unknown): string {
-  if (typeof value === "string") return value;
+  if (value === null) return "nothing";
+  if (typeof value === "string") return value === "" ? "nothing" : value;
   return JSON.stringify(value) ?? "";
 }
 

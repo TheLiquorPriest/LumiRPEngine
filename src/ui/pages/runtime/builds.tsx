@@ -8,11 +8,13 @@
 // key with no end. The drawer's page token is renewed by the extension as it runs out, so its end is
 // nothing the player acts on, and the drawer does not show it.
 
+import type { ComponentChildren } from "preact";
 import type { BuildsReply, BuildsStatus, RestartState, UpdateStage } from "../../../shared/api";
 import { Badge, Banner, Button, Row, Section, type Tone } from "../../../frontend/components";
 import type { RpeClient } from "../../client";
 import type { Timers } from "../../roads";
 import { errorWords, when } from "../../words";
+import { SettingName } from "../settings/names";
 
 export interface BuildsShown {
   reply: BuildsReply | null;
@@ -109,11 +111,15 @@ const STATE_WORDS: Readonly<Record<UpdateStage["state"], string>> = { going: "un
 const STATE_TONE: Readonly<Record<UpdateStage["state"], Tone>> = { going: "accent", done: "pos", refused: "neg" };
 
 /** What the restart onto a build that has passed its checks waits for, while it waits. */
-const RESTART_WORDS: Readonly<Record<RestartState, string | null>> = {
+const RESTART_WORDS: Readonly<Record<RestartState, ComponentChildren>> = {
   none: null,
   waiting: "waits for the turns and jobs running to end",
   restarting: "restarting now",
-  off: "waits for Update now: update.restart is off",
+  off: (
+    <>
+      waits for Update now: <SettingName settingKey="update.restart" /> is off
+    </>
+  ),
   "by hand": "RPE was started by hand, so nothing starts it again: stop it and start it again",
 };
 

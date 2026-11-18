@@ -70,7 +70,7 @@ export function QuestRecordView(props: { record: QuestRecord; onTurn?: (turn: st
                     </>
                   ) : null}
                 </p>
-                <p class="rpe-pre rpe-meta">{JSON.stringify(entry.value)}</p>
+                {entry.value === null || entry.value === undefined ? null : <p class="rpe-pre rpe-meta">{JSON.stringify(entry.value)}</p>}
               </li>
             ))}
           </ol>

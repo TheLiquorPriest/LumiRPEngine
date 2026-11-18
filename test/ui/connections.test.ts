@@ -167,7 +167,7 @@ describe("the Connections page", () => {
     const input = (name: string) => elements(form.tree).find((e) => e.type === "input" && e.props.name === name)?.props;
     expect([input("retries")?.defaultValue, input("messageThreads")?.defaultChecked, input("serialTools")?.defaultChecked, input("contextWindow")?.defaultValue]).toEqual(["4", true, false, "64000"]);
     // Each says its default where it is left empty or unticked: Appendix D.1's two tries again, and message threads off.
-    expect(form.text).toContain("Left empty, the setting calls.retries holds: 2, as Appendix D.1 has it.");
+    expect(form.text).toContain("Left empty, the number in");
     expect(form.text).toContain("Message threads: off unless ticked (Appendix D.1)");
     const saved = draftOf(entries({ name: "Flash", provider: "deepseek", auth: "key", model: "deepseek-v4-flash", retries: "3", serialTools: "on", contextWindow: "48000", maxTokens: "6000", key: "" }), own);
     expect(saved.connection).toMatchObject({ retries: 3, serialTools: true, messageThreads: null, limits: { "deepseek-v4-flash": { contextWindow: 48_000, maxTokens: 6000 } } });

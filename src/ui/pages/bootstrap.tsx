@@ -17,7 +17,9 @@ import type { BootstrapBatchReply, BootstrapChatReply, BootstrapJobShown, Bootst
 import { type UiApp, useApp } from "../app";
 import { Badge, Banner, Button, Pre, Row, Section } from "../../frontend/components";
 import type { RpeClient } from "../client";
-import { counted, errorWords, num, tokenWords, when } from "../words";
+import { counted, errorWords, limitCount, limitName, num, tokenWords, when } from "../words";
+import { numberWords } from "./settings/model";
+import { useSettingView } from "./settings/names";
 import { JOB_STATE_WORDS } from "./jobs";
 import { logAt } from "./runtime/logs";
 import { ChatLabel, type ChatNames, NO_NAMES, useChatNames } from "./chat-names";
@@ -247,7 +249,7 @@ function JobLine(props: { job: BootstrapJobShown }) {
       </span>
       {view?.limit === undefined ? null : (
         <span class="rpe-meta">
-          Ended at its {view.limit.limit} limit per {view.limit.per}: {num(view.limit.value)} of {num(view.limit.max)}.
+          {`Ended at its limit on ${limitName(view.limit)}: ${limitCount(view.limit)}.`}
         </span>
       )}
       {view?.report === undefined ? null : <Pre text={view.report} mono={false} />}
@@ -255,13 +257,27 @@ function JobLine(props: { job: BootstrapJobShown }) {
   );
 }
 
-/** A cap's setting, in the page's words. */
-const CAP_WORDS: Readonly<Record<string, string>> = {
-  "bootstrap.run.calls": "Calls in its run",
-  "bootstrap.run.seconds": "Seconds of its run",
-  "jobs.run.tokensIn": "Tokens sent in its run",
-  "jobs.run.tokensOut": "Tokens written in its run",
-};
+/** A cap that ends a bootstrap job's run: the setting's own name, its value in words with its unit ("no limit" where it has none), and a press that opens it on Settings. */
+function CapRow(props: { cap: { key: string; value: number | null }; chat: string | null }) {
+  const app = useApp();
+  const { cap } = props;
+  const setting = useSettingView(cap.key);
+  const words = cap.value === null ? (setting?.none ?? "no limit") : numberWords(cap.value, setting?.unit ?? null);
+  return (
+    <Row
+      k={setting === undefined ? "A limit of its run" : setting.name}
+      v={words}
+      sub={
+        <>
+          Ends its run when reached.{" "}
+          <Button size="sm" variant="ghost" title={cap.key} onClick={() => app.go({ page: "settings", chat: props.chat, at: [cap.key] })}>
+            Change it
+          </Button>
+        </>
+      }
+    />
+  );
+}
 
 /** A whole number above 0 he typed, null for none typed, or undefined for one that is not. */
 function wholeOf(text: string): number | null | undefined {
@@ -276,7 +292,7 @@ function wholeOf(text: string): number | null | undefined {
  * offers and one leaving it to the skill (just one while the skill is off). With a job under way it says so, and a press asks him to
  * confirm a second beside it. No button is live while a start is out.
  */
-export function StartForm(props: { start: BootstrapStartShown; underWay: readonly BootstrapJobShown[]; busy: boolean; label: string; onStart(choice: StartChoice): void }) {
+export function StartForm(props: { start: BootstrapStartShown; underWay: readonly BootstrapJobShown[]; busy: boolean; label: string; chat?: string | null; onStart(choice: StartChoice): void }) {
   const { start, underWay } = props;
   const [typed, setTyped] = useState("");
   const [asked, setAsked] = useState<string | null | undefined>(undefined);
@@ -301,7 +317,7 @@ export function StartForm(props: { start: BootstrapStartShown; underWay: readonl
         sub={`Tokens sent and written by every agent of the job, a token read again from a cache counting as ${start.cachedWeight} of one; it then waits for your word to go on or end.`}
       />
       {start.caps.map((cap) => (
-        <Row key={cap.key} k={CAP_WORDS[cap.key] ?? cap.key} v={cap.value === null ? "no cap" : num(cap.value)} sub="Ends its run when reached." />
+        <CapRow key={cap.key} cap={cap} chat={props.chat ?? null} />
       ))}
       <label class="lre-stack">
         <span class="rpe-caption">Its own token limit (left empty: the setting's)</span>
@@ -409,7 +425,7 @@ export function BootstrapView(props: BootstrapViewProps) {
             <QuestionView key={q.job} question={q} chat={answer.chat} busy={shown.answering === q.job} onAnswer={(word) => props.onAnswer(q.job, word)} />
           ))}
           <FactsView facts={answer.facts} onLog={() => openLog(app, answer.chat)} />
-          <StartForm start={answer.start} underWay={answer.underWay} busy={shown.starting} label="Start a bootstrap job" onStart={props.onStart} />
+          <StartForm start={answer.start} underWay={answer.underWay} busy={shown.starting} label="Start a bootstrap job" chat={answer.chat} onStart={props.onStart} />
           <span class="rpe-caption">Its jobs, newest first</span>
           {shown.jobs.length === 0 ? (
             <p class="lre-muted rpe-line">No bootstrap job of this chat yet.</p>
@@ -451,12 +467,12 @@ function CarriedChat(props: { item: CarriedBootstrap; name: string | null; busy:
       <div class="lre-inline rpe-wrap">
         <ChatLabel chat={item.chat} name={props.name} {...(props.onOpen === undefined ? {} : { onOpen: props.onOpen })} />
         <Badge>{CARRIED_WORDS[item.state]}</Badge>
-        {item.job?.view?.limit === undefined ? null : <span class="rpe-meta">ended at its {item.job.view.limit.limit} limit</span>}
+        {item.job?.view?.limit === undefined ? null : <span class="rpe-meta">{`ended at its limit on ${limitName(item.job.view.limit)}`}</span>}
       </div>
       {item.job?.view?.report === undefined ? null : <Pre text={item.job.view.report} mono={false} />}
       {item.question === null ? null : <QuestionView question={item.question} chat={item.chat} busy={props.busy} onAnswer={(word) => props.onAnswer(item.question!.job, word)} />}
       {open ? (
-        <StartForm start={item.start} underWay={underWay} busy={props.busy} label={`Start a bootstrap job for ${props.name ?? item.chat}`} onStart={props.onStart} />
+        <StartForm start={item.start} underWay={underWay} busy={props.busy} label={`Start a bootstrap job for ${props.name ?? item.chat}`} chat={item.chat} onStart={props.onStart} />
       ) : (
         <Button size="sm" variant="ghost" onClick={() => setOpen(true)}>
           Start one for this chat

@@ -12,6 +12,8 @@ import type { PageEntry } from "../../page-entry";
 import { useUiSetting } from "../../ui-settings";
 import { bytesWords, counted, when } from "../../words";
 import { NO_STORAGE, type PruneShown, type StorageControl, storageCalls, storageControl, type StorageShown } from "./model";
+import { numberWords } from "../settings/model";
+import { useSettingView } from "../settings/names";
 
 export { NO_STORAGE, storageCalls, storageControl } from "./model";
 export type { StorageShown } from "./model";
@@ -33,13 +35,14 @@ const KIND_WORDS: Readonly<Record<string, string>> = {
 
 function KeptWords(props: { row: StorageKindRow; onSetting(key: string): void }) {
   const { kept } = props.row;
+  const setting = useSettingView(kept.by === "setting" ? kept.setting : "");
   if (kept.by === "never") return <span>kept for good</span>;
   if (kept.by === "chat") return <span>kept until its chat is deleted or you prune it</span>;
   return (
     <span>
-      {kept.value === null ? "all of it kept" : `the newest ${kept.value} kept`} by{" "}
-      <Button size="sm" variant="ghost" onClick={() => props.onSetting(kept.setting)}>
-        {kept.setting}
+      {kept.value === null ? "all of it kept" : `the newest ${setting === undefined ? kept.value : numberWords(kept.value, setting.unit)} kept`} by{" "}
+      <Button size="sm" variant="ghost" title={kept.setting} onClick={() => props.onSetting(kept.setting)}>
+        {setting === undefined ? "its setting" : setting.name}
       </Button>
     </span>
   );

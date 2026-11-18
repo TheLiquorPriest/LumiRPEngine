@@ -9,7 +9,7 @@ import type { JobView } from "../../../shared/api";
 import { Badge, Banner, Button, Pre, Section } from "../../../frontend/components";
 import { type RpeClient, walk } from "../../client";
 import type { PageEntry } from "../../page-entry";
-import { errorWords, num, tokenWords, when } from "../../words";
+import { errorWords, limitCount, limitName, tokenWords, when } from "../../words";
 import { BootstrapBrief, BootstrapMark, isBootstrapJob } from "./bootstrap-mark";
 import { JobsPage } from "./page";
 import { cancellable, JOB_STATE_WORDS } from "./words";
@@ -79,7 +79,7 @@ function JobItem(props: { job: JobView; shown: JobsShown; withChat: boolean; onC
         <span class="rpe-strong">{job.agent}</span>
         <Badge tone={state.tone}>{state.words}</Badge>
         {isBootstrapJob(job) ? <BootstrapMark job={job} /> : null}
-        {props.withChat ? <span class="rpe-meta">chat {job.scope.chat}</span> : null}
+        {props.withChat ? <span class="rpe-meta">{typeof job.scope.chat === "string" ? `chat ${job.scope.chat}` : "no chat"}</span> : null}
         {cancellable(job) ? (
           <Button size="sm" variant="ghost" busy={shown.cancelling === job.id} onClick={() => props.onCancel(job.id)}>
             Cancel
@@ -90,11 +90,7 @@ function JobItem(props: { job: JobView; shown: JobsShown; withChat: boolean; onC
       <span class="rpe-meta">
         {`${job.id} · started by ${job.startedBy === "user" ? "you" : `the ${job.startedBy.definition}`} ${when(job.started)}${job.ended === undefined ? "" : `, ended ${when(job.ended)}`} · ${tokenWords(job.usage)}`}
       </span>
-      {job.limit === undefined ? null : (
-        <span class="rpe-meta">
-          Ended at its {job.limit.limit} limit per {job.limit.per}: {num(job.limit.value)} of {num(job.limit.max)}.
-        </span>
-      )}
+      {job.limit === undefined ? null : <span class="rpe-meta">{`Ended at its limit on ${limitName(job.limit)}: ${limitCount(job.limit)}.`}</span>}
       {job.report === undefined ? null : <Pre text={job.report} mono={false} />}
       {answered === null || answered.refused === null ? null : (
         <Banner tone="neg" icon="alert" title="Not cancelled">

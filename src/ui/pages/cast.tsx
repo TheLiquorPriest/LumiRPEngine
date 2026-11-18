@@ -387,7 +387,7 @@ function plain(value: unknown): string {
   if (typeof value === "string") return value;
   if (Array.isArray(value)) return value.map(plain).join(", ");
   if (isRecord(value)) return Object.values(value).map(plain).join(" · ");
-  return String(value);
+  return value === null || value === undefined ? "none" : String(value);
 }
 
 /** Its game side, by reference to the world's person it is: where it is, what it has on it, what it owns elsewhere, its values. */

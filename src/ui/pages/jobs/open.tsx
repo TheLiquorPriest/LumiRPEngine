@@ -12,12 +12,12 @@ import { useNoticeLines } from "../../notice-words";
 import { useRead } from "../../reading";
 import { useSelect } from "../../store";
 import { AgentTree } from "../../trace-view";
-import { counted, errorWords, num, tokenWords, when } from "../../words";
+import { counted, errorWords, limitCount, limitName, num, tokenWords, when } from "../../words";
 import { type AgentWindow, CallsLine, WindowGauge } from "../usage";
 import { BootstrapAsk } from "./bootstrap";
 import { BootstrapBrief, isBootstrapJob } from "./bootstrap-mark";
 import { cancellable, JOB_STATE_WORDS } from "./words";
-import { limitsOf } from "./start";
+import { LIMIT_FIELDS, limitsOf } from "./start";
 
 /** What he may do with a job at the state it stands in. */
 export function controlsOf(job: JobView): { cancel: boolean; restart: boolean; carryOn: boolean; hold: boolean; release: boolean; pause: boolean; resume: boolean; word: boolean; answer: boolean } {
@@ -101,7 +101,7 @@ export function JobOpen(props: JobOpenProps) {
       </p>
       {job.limit === undefined ? null : (
         <p class="rpe-line" data-limit>
-          Ended at its {job.limit.limit} limit per {job.limit.per}: {num(job.limit.value)} of {num(job.limit.max)}.
+          {`Ended at its limit on ${limitName(job.limit)}: ${limitCount(job.limit)}.`}
         </p>
       )}
       {job.missing === undefined || job.missing.length === 0 ? null : <p class="rpe-meta">Names it was given that nothing provides: {job.missing.join(", ")}.</p>}
@@ -180,9 +180,9 @@ export function JobOpen(props: JobOpenProps) {
         <div class="lre-stack" data-carry-on>
           <span class="rpe-caption">Carry it on with more</span>
           <div class="rpe-log-filters">
-            {(["calls", "tokensIn", "tokensOut", "tokens", "time"] as const).map((key) => (
+            {LIMIT_FIELDS.map(([key, label]) => (
               <label key={key} class="lre-field">
-                <span class="label">{key}</span>
+                <span class="label">{label}</span>
                 <input class="lre-input" inputMode="numeric" value={typed[key] ?? ""} onInput={(e) => setTyped((held) => ({ ...held, [key]: (e.currentTarget as HTMLInputElement).value }))} />
               </label>
             ))}

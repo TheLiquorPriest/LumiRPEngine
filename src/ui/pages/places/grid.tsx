@@ -29,7 +29,12 @@ export function scaleWords(scale: JsonValue): string {
   const metric = s.unit === "metres";
   const width = metric ? s.metres : s.feet;
   const step = recordOf(s.step);
-  const clock = step.per === "round" ? `a round of ${String(step.seconds)} seconds moves ${counted(Number(step.squares), "square")}` : "a minute moves one square";
+  const clock =
+    step.per !== "round"
+      ? "a minute moves one square"
+      : typeof step.seconds === "number" && typeof step.squares === "number"
+        ? `a round of ${counted(step.seconds, "second")} moves ${counted(step.squares, "square")}`
+        : "a round's step is not said";
   return `${typeof width === "number" ? `A square is ${Math.round(width * 100) / 100} ${metric ? "metres" : "feet"} wide` : "A square's width is not said"}; ${clock}.`;
 }
 

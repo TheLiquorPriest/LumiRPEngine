@@ -3,9 +3,11 @@
 // that waits for the turns and jobs running and says so; and the lines only the server's own command line runs,
 // to copy. Everything is in the route's words; nothing here decides whether RPE may restart.
 
+import type { ComponentChildren } from "preact";
 import type { BuildsStatus, RestartState, ServiceHow } from "../../../shared/api";
 import { Badge, Banner, Button, Row, Section } from "../../../frontend/components";
 import { when } from "../../words";
+import { SettingName } from "../settings/names";
 
 export interface RestartShown {
   busy: boolean;
@@ -17,11 +19,15 @@ export interface RestartShown {
 export const NO_RESTART: RestartShown = { busy: false, answer: null, problem: null };
 
 /** Where a restart stands, in a line. */
-export const RESTART_WORDS: Readonly<Record<RestartState, string>> = {
+export const RESTART_WORDS: Readonly<Record<RestartState, ComponentChildren>> = {
   none: "Nothing is waiting for a restart.",
   waiting: "A restart is waiting for the turns and jobs running to end.",
   restarting: "RPE is restarting now.",
-  off: "A restart is needed to take the build on disk, and update.restart is off.",
+  off: (
+    <>
+      A restart is needed to take the build on disk, and <SettingName settingKey="update.restart" /> is off.
+    </>
+  ),
   "by hand": "A restart is needed, and RPE was started by hand: nothing starts it again.",
 };
 

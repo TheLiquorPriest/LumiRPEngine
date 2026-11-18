@@ -11,6 +11,7 @@ import { useRead } from "../../reading";
 import { useUiSetting } from "../../ui-settings";
 import { errorWords, LEVEL_WORDS } from "../../words";
 import { filesCalls, type WriteLevel, writeLevels } from "../files/model";
+import { SettingName } from "../settings/names";
 
 /** The view of the hooks, in a rule address: `rules/~hooks/<level>/<name>`. */
 export const HOOKS = "~hooks";
@@ -224,7 +225,13 @@ export function HookOpen(props: { chat: string | null; row: HookRow; onChanged()
         <span class="rpe-caption">Its command</span>
         <Pre text={hook.runs} mono />
         <p class="rpe-meta" data-hook-timeout>
-          {timeout === null ? "No timeout of its own: the hooks.timeoutSeconds setting's seconds hold." : `Stopped after ${timeout} seconds.`}
+          {timeout === null ? (
+            <>
+              No timeout of its own: the time in <SettingName settingKey="hooks.timeoutSeconds" /> holds.
+            </>
+          ) : (
+            `Stopped after ${timeout} seconds.`
+          )}
         </p>
       </div>
       {hook.state === "waiting" || hook.state === "off" ? (

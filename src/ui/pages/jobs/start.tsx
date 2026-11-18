@@ -9,7 +9,8 @@ import { Banner, Button, Section } from "../../../frontend/components";
 import { useRead } from "../../reading";
 import { errorWords } from "../../words";
 
-const LIMIT_FIELDS = [
+/** The limits a job may be given of its own: each by the key the route takes it under, and as its field is labelled. */
+export const LIMIT_FIELDS = [
   ["calls", "Calls at most"],
   ["tokensIn", "Tokens in at most"],
   ["tokensOut", "Tokens out at most"],
@@ -17,16 +18,16 @@ const LIMIT_FIELDS = [
   ["time", "Seconds at most"],
 ] as const;
 
-/** The limits he typed: a field left empty sets none; a whole number of at least one is kept; anything else is named. */
+/** The limits he typed: a field left empty sets none; a whole number of at least one is kept; anything else is named, by its field's label. */
 export function limitsOf(typed: Readonly<Record<string, string>>): { limits: JobLimits; bad: string[] } {
   const limits: Record<string, number> = {};
   const bad: string[] = [];
-  for (const [key] of LIMIT_FIELDS) {
+  for (const [key, label] of LIMIT_FIELDS) {
     const text = (typed[key] ?? "").trim();
     if (text === "") continue;
     const n = Number(text);
     if (Number.isInteger(n) && n >= 1) limits[key] = n;
-    else bad.push(key);
+    else bad.push(label);
   }
   return { limits, bad };
 }

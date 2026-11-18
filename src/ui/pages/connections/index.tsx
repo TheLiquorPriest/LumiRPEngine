@@ -12,6 +12,7 @@ import { Badge, Banner, Button, Empty, PageHeader } from "../../../frontend/comp
 import type { RpeClient } from "../../client";
 import type { PageEntry } from "../../page-entry";
 import { duration, errorWords, num } from "../../words";
+import { SettingName } from "../settings/names";
 import { NO_SIGNIN, SignInPanel, type SignInShown, signInCalls, signInSteps } from "./signin";
 import { FORM_WORDS, formKey, NO_TAG_STATE, type ReplyForm, startedState, TagCheckShown, type TagCheckState } from "./tags";
 import { WebSearchSection } from "./web";
@@ -206,7 +207,9 @@ function ConnectionForm(props: { was: ConnectionShown | null; fill?: ModelLimits
         <label class="lre-field">
           <span class="label">Tries again</span>
           <input name="retries" class="lre-input" type="number" inputMode="numeric" min={0} defaultValue={was?.retries === undefined ? "" : String(was.retries)} autoComplete="off" />
-          <span class="lre-field-help">How many times a call that failed before any answer arrived is made again. Left empty, the setting calls.retries holds: 2, as Appendix D.1 has it.</span>
+          <span class="lre-field-help">
+            How many times a call that failed before any answer arrived is made again. Left empty, the number in <SettingName settingKey="calls.retries" /> holds.
+          </span>
         </label>
         <label class="lre-inline">
           <input name="messageThreads" type="checkbox" defaultChecked={was?.messageThreads === true} />

@@ -1,6 +1,7 @@
 // Numbers, times, counts and the tree's levels as the pages say them.
 
 import type { LayerLevel, Usage } from "rp-harness/contract";
+import type { LimitHit } from "../shared/api";
 
 /** The levels of the agents' tree, as the Files and Settings pages name them. */
 export const LEVEL_WORDS: Readonly<Record<LayerLevel, string>> = { shipped: "Shipped", global: "Yours", character: "This character's", chat: "This chat's" };
@@ -54,6 +55,37 @@ export function tokenWords(usage: Usage): string {
   const cached = usage.cacheRead > 0 ? ` (${num(usage.cacheRead)} cached)` : "";
   const reasoning = usage.reasoning !== undefined && usage.reasoning > 0 ? ` (${num(usage.reasoning)} reasoning)` : "";
   return `${num(usage.input)} in${cached} · ${num(usage.output)} out${reasoning}`;
+}
+
+const LIMIT_OF: Readonly<Record<LimitHit["limit"], string>> = {
+  calls: "model calls",
+  tokensIn: "tokens sent",
+  tokensOut: "tokens written",
+  tokens: "tokens sent and written",
+  time: "time",
+  depth: "depth of sub-agents",
+  agents: "sub-agents started",
+  jobs: "jobs started",
+  callTokensIn: "tokens sent in one call",
+  callTokensOut: "tokens written in one answer",
+  callTime: "time of one call",
+  toolRounds: "rounds of tool calls",
+  repeats: "the same tool call in a row",
+  tokensPerMinute: "tokens in a minute",
+};
+
+const LIMIT_OVER: Readonly<Record<LimitHit["per"], string>> = { turn: "in a turn", agent: "by one agent", job: "in one job", day: "in a day", connection: "on a connection" };
+
+/** What a limit reached was a limit on, in plain words: "model calls in a turn", "tokens sent in a day". */
+export function limitName(hit: Pick<LimitHit, "limit" | "per" | "connection">): string {
+  const over = hit.connection === undefined ? LIMIT_OVER[hit.per] : hit.per === "connection" ? `on ${hit.connection}` : `${LIMIT_OVER[hit.per]}, on ${hit.connection}`;
+  return `${LIMIT_OF[hit.limit]} ${over}`;
+}
+
+/** The count against a limit reached: "6 of 5", a time as its length. */
+export function limitCount(hit: Pick<LimitHit, "limit" | "max" | "value">): string {
+  const say = hit.limit === "time" || hit.limit === "callTime" ? duration : num;
+  return `${say(hit.value)} of ${say(hit.max)}`;
 }
 
 /** A value as JSON, laid out to read. */
