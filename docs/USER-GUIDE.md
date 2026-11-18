@@ -518,7 +518,7 @@ The agents keep their own notes in the chat's `persistent-workspace/` folder, an
 
 ### The Agents page
 
-**Agents** lists every agent definition in force for the open chat, or as a new chat takes them with none open. One opened shows **What it runs on** (the connection, model and effort it will really run with, or why no connection resolves for it), its effort, limits and sampling as settings (for every chat or this chat, with what its header says beside each and a way back to it), **Its tools**, **What it reads** (its stack, part by part), and **What it is given**. **Change it** edits its header as fields (its model from your connections, its tools, what it reads, what it is given) and its text: **Save as mine** at a level, reset a shipped one to its default, or **Make a copy** as a new agent. **Open its file on Files** goes to its file.
+**Agents** lists every agent definition in force for the open chat, or as a new chat takes them with none open, each with what it runs on. One opened shows **What it runs on** (the connection, model and effort it will really run with, or why no connection resolves for it; where its model has no level as high as the effort set, the level it is sent: "It is set to think at max; its model has no level so high, so it is sent high"), its effort, limits and sampling as settings (for every chat or this chat, with what its header says beside each and a way back to it), **Its tools** (with how many tokens their descriptions take against **Size of an agent's tool list**, marked where it is over: nothing is refused), **What it reads** (its stack, part by part), and **What it is given**. **Change it** edits its header as fields (its model from your connections, its tools, what it reads, what it is given) and its text: **Save as mine** at a level, reset a shipped one to its default, or **Make a copy** as a new agent. **Open its file on Files** goes to its file.
 
 The shipped agents and their efforts are in [How RPE works](#how-rpe-works) and [Models and connections](#models-and-connections). Which agent leads a chat's turns is **The Author** (`turn.lead`).
 
@@ -545,6 +545,8 @@ rpe deny <name>
 
 No page can switch one on: the Rules page, and the Settings page under **Server and service**, show each thing, whether it waits, is on or is off, and what it runs or calls, with the line to run; the Files page shows what waits in the file you have open. A thing whose command or address changes waits again. See [What RPE never does by itself](security.md#what-rpe-never-does-by-itself).
 
+A rule whose command waits does not fire. Where it matched in a run, the run's trace (on Live, and on the turn's page under **The run, step by step**) says so: "Your rule … matched, but its command waits for you to allow it, so it did not run and the rule did not fire. To allow it, type on the server: rpe allow …", with its command.
+
 ## Models and connections
 
 RPE calls your model providers itself, on connections you add to it. Lumiverse's own connections are not used for this; Lumiverse reaches RPE through RPE's connection, "RPE", which offers the model `rpe`.
@@ -563,7 +565,7 @@ A connection moved to another server holds its key back until you allow its new 
 
 Each agent definition's `model:` names a connection, or `default`: your default connection. The shipped agents all say `default`; name another of your connections in a definition to run that agent on it (the indexer's file says it is meant for a smaller model). The Agents page shows, for each agent, the connection, model and effort it will really run with.
 
-**Effort** is how hard a model thinks, from `off` to `max`; a level a model does not have is sent as the nearest it has. As shipped, the Author thinks at `max`, the GM at `high`, a character and the narrator at `medium`, the keeper and the indexer at `low`. An agent's **Effort** setting (`agents.<definition>.effort`), set on the Agents page for every chat or for one, stands over its definition; a connection's own effort (`connections.<connection>.effort`) stands over the definitions on it.
+**Effort** is how hard a model thinks, from `off` to `max`; a level a model does not have is sent as the nearest it has. The Agents page shows the level set and, where it differs, the level sent ("max (sent high)"), and a run's trace shows both at each agent's start. As shipped, the Author thinks at `max`, the GM at `high`, a character and the narrator at `medium`, the keeper and the indexer at `low`. An agent's **Effort** setting (`agents.<definition>.effort`), set on the Agents page for every chat or for one, stands over its definition; a connection's own effort (`connections.<connection>.effort`) stands over the definitions on it.
 
 ### Limits
 
@@ -592,10 +594,10 @@ An agent's sampling (temperature, top P and the rest) is the provider's own unle
 
 A **job** is work that need not finish before your next message: summarizing a stretch of the past, mapping the prompt, indexing lore, what happened meanwhile in the wider world. The Author starts one when its turn can leave the work for later; you start one from a page (**Index now**, **Map again**, a bootstrap, Build's model jobs) or by hand. A job runs as an agent of its own, beside the chat, and what it records is placed before the next turn that begins after it ends. The next briefing tells the Author what a finished job changed.
 
-**Jobs** lists every job of every chat, or of the open chat (**This chat's**, **Every chat's**), newest started first, filtered by **Where it stands**. Each shows its agent and what it was asked, who started it and when, what it spent, the limit it ended at and its report. One opened shows its work step by step, as Live draws a run (behind the spoiler gate), with its calls against its limit and each agent's window, and **What it wrote**. By where it stands: **Cancel**, **Start again**, **Pause** and **Resume**, **Hold** and **Let it go**, **Carry it on with more** at a limit, and **A word to its lead**, which it gets at its next call as yours. A job that asks you a question waits for your answer there.
+**Jobs** lists every job of every chat, or of the open chat (**This chat's**, **Every chat's**), newest started first, filtered by **Where it stands**. Each shows its agent and what it was asked, who started it and when, what it spent, the limit it ended at, who ended it where someone did ("You cancelled it.", the agent that cancelled it with its run, or RPE and why: "RPE ended it: the turn that started it left the chat's path.", "RPE found it cut off by a restart. You can resume it."), and its report. One opened shows its work step by step, as Live draws a run (behind the spoiler gate), with its calls against its limit and each agent's window, and **What it wrote**. By where it stands: **Cancel**, **Start again**, **Pause** and **Resume**, **Hold** and **Let it go**, **Carry it on with more** at a limit, and **A word to its lead**, which it gets at its next call as yours. A job that asks you a question waits for your answer there.
 
 - **Start a job** by hand: **The agent that does it**, **What it is to do**, **What it is given**, and limits of its own, which hold only where tighter than the limits of every job. It starts at once, or waits for the jobs running to end.
-- **All jobs**: switch jobs off (no job starts, by an agent's call or from a page; those waiting keep waiting), or hold them (those running stop at their agent's next call, and none starts, until you let them go). Beside them, **Limits on jobs**, each with what it is held against.
+- **All jobs**: switch jobs off (no job starts, by an agent's call or from a page; those waiting keep waiting), or hold them (those running stop at their agent's next call, and none starts, until you let them go). Beside them, **Limits on jobs**, each with what it is held against: the jobs running now, the jobs started in the last 24 hours "of the … you allow", the tokens used in the last 24 hours.
 - As shipped, two jobs run at once across your chats (**Jobs at once**, `jobs.atOnce`); a job's run has no limit of calls, tokens or time unless you set one (`jobs.run.calls`, `jobs.run.seconds` and the rest); and a job's record is kept 90 days (`jobs.keepDays`).
 
 ### Bootstrap: a chat with a past
@@ -606,7 +608,7 @@ The **Story** page (and **Jobs**, for any chat) shows how far the record stands,
 
 ### Sessions
 
-A **session** is the Author's working memory between turns. Each scene of the story is a session. **Sessions** lists them, newest first, open or closed, with the turn that closed it, and the sessions of the sub-agents, jobs and talks it ran beneath the turn that started them.
+A **session** is the Author's working memory between turns. Each scene of the story is a session. **Sessions** lists them, newest first, open or closed, with what closed it and when (you, a turn's scene change, RPE, the end of its run or the end of its job), and the sessions of the sub-agents, jobs and talks it ran beneath the turn that started them.
 
 A session opened shows **What its next turn carries**, in each of the three ways a session can carry its earlier turns:
 
@@ -616,7 +618,7 @@ A session opened shows **What its next turn carries**, in each of the three ways
 
 Which one the chats use is **Context carried in a session** (`sessions.carry`, **Continuing** as shipped). The page's **What carrying costs and buys** shows the latest measurement of the three, when one has been run, and **Make a mode the default for** **Every chat** or **This chat**: nothing changes it by itself.
 
-**Compaction.** When a call would not fit its model's window less the room kept for the answer (`compaction.reserveTokens`), a session's earlier turns are summarized, keeping the newest three whole (`compaction.keepTurns`); as shipped, the Author is first given the chance to save what matters (the rule `save-before-compaction`). **Its compactions** lists each, with **Undo the summary**, after a question that says what that costs. **Compact now** asks for one at the next turn. **Close this scene** closes the session, and **Reopen it** opens it again. **Its turns** lists the turns that ran in it, each with its transcript behind the spoiler gate.
+**Compaction.** When a call would not fit its model's window less the room kept for the answer (`compaction.reserveTokens`), a session's earlier turns are summarized, keeping the newest three whole (`compaction.keepTurns`); as shipped, the Author is first given the chance to save what matters (the rule `save-before-compaction`). **Its compactions** lists each, with **Undo the summary**, after a question that says what that costs. **Compact now** asks for one at the next turn; where there is nothing to fold yet (its earlier turns are already under a summary, or no more than those kept whole), it says **Nothing to compact yet**, with its turns. **Close this scene** closes the session, and **Reopen it** opens it again. **Its turns** lists the turns that ran in it, each with its transcript behind the spoiler gate.
 
 ## Authoring
 
@@ -711,20 +713,20 @@ With a chat open, **Where a change goes** chooses **For every chat** or **For th
 
 **Storage** shows what RPE keeps and how much, on disk and in its database:
 
-- **What RPE keeps**: each kind, with how many, how big, the oldest, how long it is kept (the setting that decides it opens on Settings) and when you last pruned it;
+- **What RPE keeps**: each kind, with how many, how big, the oldest, how long it is kept ("kept as" the setting that decides it says, which opens on Settings; "kept until its chat is deleted or you prune it"; or "RPE never removes it") and when you last pruned it;
 - **Chat by chat**: each chat's folder by area and its rows of the database, with its notes; a chat Lumiverse deleted says so, with **Prune what is left of it**;
 - **The notes agents lean on**, each opening on the Files page;
 - **Backups and copies of the database**, with **Make a backup now**.
 
-Nothing is pruned by a press alone: **Prune old turn folders**, **Prune closed sessions' files**, **Prune note versions past what is kept** and **Prune decided suggestions past what is kept** first say exactly what would go and what stays, and take exactly that on **Yes, prune exactly that**. A backup asks the same way (**Yes, make it**).
+Nothing is pruned by a press alone: **Prune old turn folders**, **Prune closed sessions' files**, and, on a chat's line, **Prune note versions past what is kept** and **Prune decided suggestions past what is kept** first say exactly what would go and what stays, and take exactly that on **Yes, prune exactly that**. **Make a backup now** first says what it would make (one archive in the backups folder, with the database and the files of the tree, and their size), and makes it on **Yes, make it**: the same archive as `rpe backup`.
 
 ### The Runtime page
 
 **Runtime** shows how RPE runs, and which build:
 
-- **How RPE runs**: as a service or started by hand, since when, the addresses it listens on, the build, and the memory it holds now, at its highest and against its service's limit. **Restart** waits for the turns and jobs running, and says so. What only the server's command line can do is listed with the line to run there (`rpe up --memory`, `rpe up --systemd`).
+- **How RPE runs**: as a service or started by hand, since when, the addresses it listens on, and the build; **Memory it holds** (now, the most since it started, and the worker threads running) and, under a service, **Against its service's limit**. **Restart** waits for the turns and jobs running, and says so; once RPE answers again, the page says **RPE is back** on its build, with how long the restart took. What only the server's command line can do is listed with the line to run there (`rpe up --memory`, `rpe up --systemd`). A worker thread with nothing to do ends after a while (`workers.idleSeconds`) and lets its memory go.
 - **Builds**: the build RPE runs, the app file on disk and what the extension says it is; the newest update stage by stage; and **Update now**, which takes a new build that has passed its checks, or says there is none, or why the last one was refused. How an update arrives is in [install.md](install.md#updating). In the web app, what this browser signs in with: its session and when it ends, and the web key.
-- **RPE's log**: its newest lines first, a page at a time, narrowed by level, area, chat, turn and job. The Jobs and Turns pages link to the lines of one job or one turn.
+- **RPE's log**: its newest lines first, a page at a time, narrowed by level, area, chat, turn and job. The Jobs and Turns pages link to the lines of one job or one turn. Its first line says why this run started: its first start here, the restart you asked for, an update from an earlier build, a stop, or that the last run failed or ended without saying why (killed, out of memory, or the machine stopped). A refused sign-in, with the address it came from, and a connection's test that failed are logged too.
 - **Where the time goes**: for **This chat** or **Every chat**, each part of a turn over the latest turns, with its middle time, the slowest and the latest. It reports; it decides nothing.
 
 ### The Migration page
