@@ -86,13 +86,21 @@ The **Connections** page shows each connection's limits, and where each comes fr
 
 ## A panel on the Play page refuses
 
-Its words come from `guidance/.prompts/play-answers.md` and `request-answers.md`. A tap that manages (taking a thing off, paying, moving the clock) is kept as your change at once; made while a turn of the chat runs, it is marked pending and takes effect before the next turn begins.
+Its words come from `guidance/.prompts/play-answers.md` and `request-answers.md`. A press that manages (money, a group, gear, a ✎ correction, a hint) is kept as your change at once, and a notice where you pressed says what was done, with its **Undo**; made while a turn of the chat runs, it is marked pending and takes effect before the next turn begins. Any other press waits for your next message: the HUD shows it ("With your next message: …"), with **Send now** and a ✕ that takes it back, and the same press again takes it back too. Nothing shows a refusal for it, since nothing was refused: it waits.
 
 **"This chat does not play a world in RPE." / "The revision of the world this chat plays is not in RPE, so nothing can be changed in it."** The chat has no world (**Attach** gives it one on the Play page) or the world's revision is gone from RPE.
 
 **"Nothing was undone: …" or "Undone, but not all of it."** An Undo takes back what it still can of a change. Nothing is undone where "the turn this change was kept with is no longer part of this chat's story" (a swipe or a rewind took that turn away), or where what would take it back no longer fits the world. Each part that stays is named, with why: "something has changed it since", "this build keeps no undo for it", you have seen how its roll fell, or the turn has not finished yet.
 
 **"… isn't anyone you know", "… isn't a place you know", "… it needs someone"** and the like. An action names a person, a place or a thing the player's character does not know of or the action does not take. Name one that is known.
+
+**"A turn of this chat is running, so nothing was put in the chat: …"** **Send now** puts a line in the chat as your message and starts a reply; Lumiverse would stop the reply being written to start this one, so RPE sends nothing while a turn runs. Send it once the reply is in, or stop the turn first. What waits still waits.
+
+**"RPE is not connected to a Lumiverse, so it cannot put your line in the chat: …"** RPE writes your line and starts the reply through Lumiverse's own routes, as you, with its sign-in. Connect it with `rpe lumiverse`. What waits still waits.
+
+**"Lumiverse did not take your line, so nothing was sent: …" / "Your line is in the chat as your message, but Lumiverse did not start the reply: …"** Lumiverse's own words follow. In the second, your line stands in the chat: start the reply from the chat. A reply RPE starts is played by RPE only where its extension holds the permissions the reply needs (see [A reply fails before RPE plays it](#a-reply-fails-before-rpe-plays-it)).
+
+**"Nothing waits in this chat to send now: …"** It was sent or taken back already, on this page or another.
 
 ## The web app
 
