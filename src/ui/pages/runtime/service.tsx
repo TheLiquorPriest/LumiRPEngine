@@ -1,12 +1,13 @@
 // How RPE runs (plan §4.4 the `service` group, §14 Runtime): under its service unit or started by hand, since when,
-// the addresses it listens on, the build it runs and whether its service put the known-good copy back; a Restart
-// that waits for the turns and jobs running and says so; and the lines only the server's own command line runs,
-// to copy. Everything is in the route's words; nothing here decides whether RPE may restart.
+// the addresses it listens on, the build it runs and whether its service put the known-good copy back; the memory it
+// holds now, at its highest and against its service's limit; a Restart that waits for the turns and jobs running and
+// says so; and the lines only the server's own command line runs, to copy. Everything is in the route's words; nothing
+// here decides whether RPE may restart.
 
 import type { ComponentChildren } from "preact";
-import type { BuildsStatus, RestartState, ServiceHow } from "../../../shared/api";
+import type { BuildsStatus, RestartState, ServiceHow, ServiceMemory } from "../../../shared/api";
 import { Badge, Banner, Button, Row, Section } from "../../../frontend/components";
-import { when } from "../../words";
+import { bytesWords, counted, when } from "../../words";
 import { SettingName } from "../settings/names";
 
 export interface RestartShown {
@@ -85,6 +86,7 @@ export function ServiceView(props: ServiceViewProps) {
           />
           <Row k="Its build" v={<code>{how.build}</code>} />
           <Row k="It listens on" v={<span data-listens>{how.listens.map((a) => <code key={a} class="lre-id"> {a}</code>)}</span>} />
+          <MemoryRows memory={how.memory} />
           <p class="rpe-line" data-restart-state>
             {RESTART_WORDS[how.restart]}
             {how.runs === "by hand" ? " Restart is not offered: nothing starts RPE again once it stops." : ""}
@@ -102,5 +104,26 @@ export function ServiceView(props: ServiceViewProps) {
         </ul>
       </div>
     </Section>
+  );
+}
+
+/** What RPE holds now, and against its service's limit where it runs as a service whose count can be read. */
+function MemoryRows(props: { memory: ServiceMemory }) {
+  const { holds, peak, threads, service } = props.memory;
+  return (
+    <>
+      <Row k="Memory it holds" v={<span data-memory>{bytesWords(holds)}</span>} sub={`at most ${bytesWords(peak)} since it started; ${counted(threads, "worker thread")} running`} />
+      {service === null ? null : (
+        <Row
+          k="Against its service's limit"
+          v={<span data-memory-limit>{service.limit === null ? `${bytesWords(service.holds)}, with no limit` : `${bytesWords(service.holds)} of ${bytesWords(service.limit)}`}</span>}
+          sub={service.peak === null ? undefined : `at most ${bytesWords(service.peak)}`}
+        />
+      )}
+      <p class="rpe-meta" data-memory-about>
+        {service === null ? "" : "The service's count takes in the pages of the files RPE wrote that the system keeps in memory, and the system gives them back before the limit is reached. "}
+        You change the limit with <code>rpe up --memory</code>; the service holds to it from the next <code>rpe up --systemd</code>. A worker thread with nothing to do ends after a while and lets its memory go: how long is on the Settings page, under Worker threads.
+      </p>
+    </>
   );
 }

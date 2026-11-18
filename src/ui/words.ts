@@ -22,11 +22,12 @@ export function cut(text: string, most: number): string {
   return text.length > most ? `${text.slice(0, most - 1)}…` : text;
 }
 
-/** A file's size: "512 bytes", "2.0 KB", "1.4 MB". */
+/** A size: "512 bytes", "2.0 KB", "1.4 MB", "2.0 GB". */
 export function bytesWords(n: number): string {
   if (n < 1024) return counted(n, "byte");
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(n / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
 /** A length of time: "850 ms", "12.4 s", "3 min 05 s", "1 h 02 min". */

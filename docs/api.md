@@ -3492,7 +3492,7 @@ The extension's record of a generation it stopped because it could not tell whos
 
 ### `GET /api/v1/service`
 
-How RPE runs: under its service or by hand, since when, where it listens, its build, and whether its service put the known-good copy back.
+How RPE runs: under its service or by hand, since when, where it listens, its build, whether its service put the known-good copy back, and the memory it holds now against its service's limit.
 
 | | |
 |---|---|
@@ -7962,7 +7962,7 @@ export interface Scope {
 
 ### `ServiceHow`
 
-How RPE runs now: under its service (the unit's name) or started by hand, since when, the addresses it listens on, the build it runs, whether its service put the known-good copy back, and where a restart stands.
+How RPE runs now: under its service (the unit's name) or started by hand, since when, the addresses it listens on, the build it runs, whether its service put the known-good copy back, where a restart stands, and the memory it holds.
 
 ```ts
 export interface ServiceHow {
@@ -7979,6 +7979,7 @@ export interface ServiceHow {
   /** What the service's pre-start step did when a build swapped in did not come up, in words; null where it did nothing. */
   fellBack: string | null;
   restart: RestartState;
+  memory: ServiceMemory;
 }
 ```
 
@@ -7991,6 +7992,23 @@ export interface ServiceLog {
   lines: ({ at: number; level: "debug" | "info" | "warn" | "error"; message: string; area: string | null; chat: string | null; turn: string | null; job: string | null; fields: JsonValue })[];
   /** How many lines RPE keeps at most (`service.logLines`). */
   kept: number;
+}
+```
+
+### `ServiceMemory`
+
+What RPE holds now, in bytes: the process's own count, now and at its highest, its worker threads, and what the kernel counts against its service's limit with that limit.
+
+```ts
+export interface ServiceMemory {
+  /** The process's resident size now: what it holds in the machine's memory. */
+  holds: number;
+  /** The most it has held since it started. */
+  peak: number;
+  /** Worker threads running now, each a runtime of its own (about 50 MB in the built app); one with nothing to do ends after workers.idleSeconds. */
+  threads: number;
+  /** What the kernel counts against the service's limit now and at its highest (it takes in the pages of the files RPE wrote that the system keeps in memory, which it gives back before the limit is reached), and the limit, the unit's MemoryMax (null: none); null where RPE does not run as a service, or the count cannot be read. */
+  service: { holds: number; peak: number | null; limit: number | null } | null;
 }
 ```
 

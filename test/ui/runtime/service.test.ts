@@ -10,7 +10,17 @@ import { canRestart, NO_RESTART, ServiceView } from "../../../src/ui/pages/runti
 import { TimingsView } from "../../../src/ui/pages/runtime/timings";
 import { banners, elements, expand, press, textOf } from "../vnodes";
 
-const HOW: ServiceHow = { runs: "service", unit: "rpe-ann.service", since: 1_800_000_000_000, listens: ["http://127.0.0.1:7777"], build: "a1b2c3d4", fellBack: null, restart: "none" };
+const MIB = 1024 * 1024;
+const HOW: ServiceHow = {
+  runs: "service",
+  unit: "rpe-ann.service",
+  since: 1_800_000_000_000,
+  listens: ["http://127.0.0.1:7777"],
+  build: "a1b2c3d4",
+  fellBack: null,
+  restart: "none",
+  memory: { holds: 300 * MIB, peak: 420 * MIB, threads: 2, service: { holds: 512 * MIB, peak: 700 * MIB, limit: 2048 * MIB } },
+};
 
 describe("how RPE runs", () => {
   test("a service shows its unit and offers Restart; one started by hand, or one already restarting, does not", () => {
@@ -29,6 +39,16 @@ describe("how RPE runs", () => {
     const tree = expand(h(ServiceView, { how: { ...HOW, fellBack: "The new build did not start twice." }, problem: null, restart: { busy: false, problem: null, answer: { running: "a1b2c3d4", disk: null, broken: null, extension: null, agree: true, restart: "waiting", update: null, words: "RPE restarts once the job running ends." } }, onRestart: () => undefined }));
     expect(banners(tree).map((b) => b.title)).toEqual(["Restart", "The known-good copy was put back"]);
     expect(textOf(tree)).toContain("RPE restarts once the job running ends.");
+  });
+
+  test("the memory RPE holds is said, and against its service's limit where it runs as one", () => {
+    const words = textOf(expand(h(ServiceView, { how: HOW, problem: null, restart: NO_RESTART, onRestart: () => undefined })));
+    expect(words).toContain("300.0 MB");
+    expect(words).toContain("at most 420.0 MB since it started; 2 worker threads running");
+    expect(words).toContain("512.0 MB of 2.0 GB");
+    const byHand = textOf(expand(h(ServiceView, { how: { ...HOW, runs: "by hand", unit: null, restart: "by hand", memory: { ...HOW.memory, service: null } }, problem: null, restart: NO_RESTART, onRestart: () => undefined })));
+    expect(byHand).toContain("300.0 MB");
+    expect(byHand).not.toContain("Against its service's limit");
   });
 });
 

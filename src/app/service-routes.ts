@@ -7,6 +7,7 @@ import type { App } from "./app";
 import { buildsStatus, restartState } from "./app";
 import { COMMAND_PATHS } from "./command-routes";
 import { route, shape } from "./routes";
+import { memoryHeld } from "./service-memory";
 import { acrossTurns, type TurnTimes } from "./service-timings";
 
 /** Where the extension says a new app file has arrived (the extension's road, open to the extension's key alone). */
@@ -19,9 +20,23 @@ const T = shape.text();
 const N = shape.number();
 const level = shape.oneOf("debug", "info", "warn", "error");
 
+const memory = shape.named(
+  "ServiceMemory",
+  "What RPE holds now, in bytes: the process's own count, now and at its highest, its worker threads, and what the kernel counts against its service's limit with that limit.",
+  shape.object({
+    holds: shape.field(N, "The process's resident size now: what it holds in the machine's memory."),
+    peak: shape.field(N, "The most it has held since it started."),
+    threads: shape.field(N, "Worker threads running now, each a runtime of its own (about 50 MB in the built app); one with nothing to do ends after workers.idleSeconds."),
+    service: shape.field(
+      shape.nullable(shape.object({ holds: N, peak: shape.nullable(N), limit: shape.nullable(N) })),
+      "What the kernel counts against the service's limit now and at its highest (it takes in the pages of the files RPE wrote that the system keeps in memory, which it gives back before the limit is reached), and the limit, the unit's MemoryMax (null: none); null where RPE does not run as a service, or the count cannot be read.",
+    ),
+  }),
+);
+
 const howRuns = shape.named(
   "ServiceHow",
-  "How RPE runs now: under its service (the unit's name) or started by hand, since when, the addresses it listens on, the build it runs, whether its service put the known-good copy back, and where a restart stands.",
+  "How RPE runs now: under its service (the unit's name) or started by hand, since when, the addresses it listens on, the build it runs, whether its service put the known-good copy back, where a restart stands, and the memory it holds.",
   shape.object({
     runs: shape.field(shape.oneOf("service", "by hand"), "Under RPE's own service unit, which starts it again when it exits, or started by hand, which nothing starts again."),
     unit: shape.field(shape.nullable(T), "The service unit's name, where it runs as one."),
@@ -30,6 +45,7 @@ const howRuns = shape.named(
     build: shape.field(T, "The build this process runs."),
     fellBack: shape.field(shape.nullable(T), "What the service's pre-start step did when a build swapped in did not come up, in words; null where it did nothing."),
     restart: restartState,
+    memory,
   }),
 );
 
@@ -52,7 +68,7 @@ const partTime = shape.object({
   latest: shape.field(N, "The newest turn's, in milliseconds."),
 });
 
-export function serviceRoutes(at: Pick<App, "builds" | "version" | "config" | "listening" | "serviceLog" | "now">, turns?: TurnsTimed) {
+export function serviceRoutes(at: Pick<App, "builds" | "version" | "config" | "listening" | "serviceLog" | "now" | "workers" | "index">, turns?: TurnsTimed) {
   const { builds } = at;
   const started = at.now() - process.uptime() * 1000;
   return [
@@ -80,7 +96,7 @@ export function serviceRoutes(at: Pick<App, "builds" | "version" | "config" | "l
       path: "/api/v1/service",
       access: "page",
       group: "service",
-      does: "How RPE runs: under its service or by hand, since when, where it listens, its build, and whether its service put the known-good copy back.",
+      does: "How RPE runs: under its service or by hand, since when, where it listens, its build, whether its service put the known-good copy back, and the memory it holds now against its service's limit.",
       reply: howRuns,
       handle: async () => {
         const runs = await builds.runs();
@@ -93,6 +109,7 @@ export function serviceRoutes(at: Pick<App, "builds" | "version" | "config" | "l
           build: at.version,
           fellBack: runs.fellBack,
           restart: builds.status().restart,
+          memory: await memoryHeld(at.workers.running + at.index.threads, runs.service),
         };
       },
     }),
