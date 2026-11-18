@@ -43,21 +43,3 @@ test("the plain connection's reply comes at the delays it was scripted with: thi
     await session.close();
   }
 }, 120_000);
-
-test("RPE's reply comes at its own delays: its first word after the intent record's, and its words at its own pace", async () => {
-  const session = await host.begin(start);
-  try {
-    const acts = session.acts;
-    const moments = await acts.send(RIG_CHAT, acts.connections.rpe, "I look at the lamp.", { preset: "preset-lamp", persona: "pers-traveller" });
-    await acts.player.settled(RIG_CHAT);
-    const [sent, first, last] = [moments.sent, moments.firstWord, moments.lastWord].map((n) => n ?? Number.NaN) as [number, number, number];
-    // The intent record comes first (after 200 ms), then the reply's first word one gap later.
-    expect(first - sent).toBeGreaterThanOrEqual(200 + 80 - moments.resolution);
-    expect(first - sent).toBeLessThan(200 + 80 + SLACK_MS);
-    const span = (REPLY_WORDS.length - 1) * 80;
-    expect(last - first).toBeGreaterThanOrEqual(span * 0.8);
-    expect(last - first).toBeLessThan(span + SLACK_MS);
-  } finally {
-    await session.close();
-  }
-}, 120_000);

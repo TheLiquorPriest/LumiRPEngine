@@ -20,8 +20,8 @@ async function listed(script: string, ...args: string[]): Promise<string[]> {
 test("--release runs every test file through the per-file runner: its list is the whole suite's", async () => {
   const [release, gate] = await Promise.all([listed("scripts/test/run.ts", "--release"), listed("scripts/test-all.ts")]);
   expect(release).toEqual(gate);
-  // The property suite is one of them, as in the gate; its shards on the fixed and fresh seeds come after. (Named by its end only: `bun run check`'s selection takes a test that names a folder as reading that folder's data files.)
-  expect(release.filter((file) => file.endsWith("ledger/properties.test.ts"))).toHaveLength(1);
+  // The ledger's scenarios are one of them, once. (The property suite went with the previous build's guard, 4a3c9f1d9.)
+  expect(release.filter((file) => file.endsWith("ledger/scenarios.test.ts"))).toHaveLength(1);
 }, 20_000);
 
 test("the whole suite's list is every test file under test/, test/proof/ among them", async () => {

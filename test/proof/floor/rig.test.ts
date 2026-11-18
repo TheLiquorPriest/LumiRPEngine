@@ -35,8 +35,10 @@ import { recordOf } from "./replay";
 
 const ROOT = resolve(import.meta.dir, "../../../scripts/proof");
 
-/** What the page's clock cannot tell from the path before a reply's first piece: the two requests Send makes, RPE's turn route, a batch of the stream (40 ms), and a loaded machine. */
+/** What the page's clock cannot tell from the path before a reply's first piece: the two requests Send makes, RPE's turn route, its intake before the first call, a batch of the stream (40 ms), and a loaded machine. */
 const PATH_MS = 300;
+/** The same in the two-step form, where the reply's message comes after the first call's tool, its answer and the second call's start (about 30 ms more). */
+const TWO_STEP_PATH_MS = 350;
 /** What a span between two moments of one stream can be off its gaps by: the stream's batch at each end, and a loaded machine. */
 const SPAN_MS = 100;
 /** What a moment's change between two runs can be off the change made: the path's own jitter in the median of ten, each way. */
@@ -125,7 +127,7 @@ function expectedOf(d: ArmsDelays, played: Played): Figure[] {
   const twoStep = played.run.form === "two-step";
   const first = rows["first-words"].figures ?? {};
   const token = rows["per-token"].figures ?? {};
-  const moment = (name: string, measured: number | null, expected: number): Figure => ({ name, measured, expected, below: resolution, above: PATH_MS });
+  const moment = (name: string, measured: number | null, expected: number): Figure => ({ name, measured, expected, below: resolution, above: twoStep ? TWO_STEP_PATH_MS : PATH_MS });
   const span = (name: string, measured: number | null, expected: number, over = 1): Figure => ({ name, measured, expected, below: SPAN_MS / over, above: SPAN_MS / over });
   const gaps = (REPLY_WORDS.length - 1) * d.plain.between;
   const plainEnd = median(played.run.turns.filter((t) => t.arm === "plain" && t.page !== null && t.page.ended !== null && t.page.lastWord !== null).map((t) => (t.page?.ended ?? 0) - (t.page?.lastWord ?? 0)));
@@ -286,6 +288,6 @@ describe("the floor's numbers are the delays of the scripted replies, in the two
     // The same figures held to delays RPE did not have (its first word 300 ms and its message's end 300 ms later): off by more than the path can account for, in the figures that rest on them and no other.
     const wrong = faultsOf(expectedOf(LATER, played));
     expect(wrong.map((f) => f.name).sort()).toEqual(["RPE less plain, first words", "RPE: message ended, less the record", "RPE: message ended, the record not taken off"].sort());
-    for (const f of wrong) expect(f.off ?? Number.POSITIVE_INFINITY).toBeLessThan(-(600 - PATH_MS));
+    for (const f of wrong) expect(f.off ?? Number.POSITIVE_INFINITY).toBeLessThan(-(600 - TWO_STEP_PATH_MS));
   }, 300_000);
 });
