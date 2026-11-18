@@ -108,7 +108,7 @@ export const CAST_FACT_DEFS: readonly FactDef[] = [
   },
   {
     name: "dream.due",
-    counts: "Characters for whom, since they last dreamt (or since their first perception on a turn RPE played, if they never have), a sleep has begun (a turn RPE played whose world state has their person's activity at sleep, after one that did not) or story time has passed the hours the setting cast.dreamAfterHours gives, each counted once, by casting. A chat that keeps no story time counts the sleeps alone. due: each with its casting, the story hours since then (hours; null with no story time), whether a sleep began since (slept), and the reply of the turn it last dreamt in (dreamt; null for none, or a turn whose reply is not on the path).",
+    counts: "Characters for whom, since they last dreamt (or since their first perception on a turn RPE played, if they never have), a sleep has begun (a turn RPE played whose world state has their person's activity at sleep, after one that did not) or story time has passed the hours the setting cast.dreamAfterHours gives, each counted once, by casting. A chat that keeps no story time counts the sleeps alone. One whose own agent has a job in hand (going on or waiting to, or ended after this turn began) is not counted until that job's writes count: one run of its agent at a time. due: each with its casting, the story hours since then (hours; null with no story time), whether a sleep began since (slept), and the reply of the turn it last dreamt in (dreamt; null for none, or a turn whose reply is not on the path).",
     by: [...UNPERCEIVED_GROUPS],
     fields: ["due"],
   },
@@ -267,7 +267,7 @@ export function castFacts(deps: { store: Store; onStage: OnStage; scenes: Scenes
         const messages = [...new Set(gaps.flatMap((g) => g.turns.map((t) => at.replyOf(t)).filter((m): m is number => m !== null)))].sort((a, b) => a - b);
         values["path.unperceived"] = valueOf(gaps, { messages, read: readsOf(earlier.map((t) => stage.get(t)?.how ?? "none")) });
       }
-      if (waits.size > 0) Object.assign(values, await waitingValues({ deps, scope, at, played, record, waiting, groupOf, waits, onStage: turn === null ? [] : (stage.get(turn)?.who ?? []).flatMap((said) => characterNamed(said) ?? []) }));
+      if (waits.size > 0) Object.assign(values, await waitingValues({ deps, scope, at, played, record, waiting, groupOf, waits, busy: (character) => inHand(character).length > 0, onStage: turn === null ? [] : (stage.get(turn)?.who ?? []).flatMap((said) => characterNamed(said) ?? []) }));
       if (wanted.older) {
         try {
           values["cast.base.older"] = await baseOlder(deps, scope, chats);
@@ -294,6 +294,8 @@ interface WaitingInput {
   waits: ReadonlySet<(typeof WAITING_FACTS)[number]>;
   /** The characters on stage at the turn read. */
   onStage: readonly Character[];
+  /** Whether a job of the character's own agent has its perceptions in hand at the reading (`InHand`). */
+  busy(character: Character): boolean;
 }
 
 /** The facts of what waits for the characters' own agents, those of `waits` alone. */
@@ -362,6 +364,8 @@ async function dreamDue(input: WaitingInput): Promise<FactValue> {
     // Where it is counted from: its last dream, else its first perception on a turn RPE played; a character that has perceived nothing has lived nothing to dream of.
     const from = w.dreamt ?? firstPerceived(input.record, w.character, played);
     if (from === undefined) continue;
+    // One run of its agent at a time: a job of its own agent going on, or not yet counted, has what it has lived in hand; the dream waits for it.
+    if (input.busy(w.character)) continue;
     // A dream of a job's that is placed on no turn of the path came after every turn but the one read.
     const index = at.order.get(from.turn) ?? at.turns.length - 2;
     const passed = now === null || from.at === null ? null : (now - from.at) / 60;

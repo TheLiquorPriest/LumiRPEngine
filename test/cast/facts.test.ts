@@ -326,4 +326,26 @@ describe("what waits for a character's own agent", () => {
       expect((await read(fourth.id))["path.untaken"]?.count).toBe(1);
     }
   });
+
+  test("dream.due waits while a job of the character's own agent has what it lived in hand: one run of its agent at a time", async () => {
+    const b = await openBench();
+    const jobs: JobRead[] = [];
+    const facts = castFacts({ ...UNSCENED, jobs: async () => jobs, store: b.t.store, sources: b.t.shelf.reader, onStage: async () => new Map(), playerMind: async () => false });
+    const due = async (turn: string) => (await facts.read({ user: USER, chat: CHAT, session: "s-1", turn }, ["dream.due"]))["dream.due"];
+    const first = await b.t.begin();
+    await b.call("cast_update", { operations: [{ op: "cast", who: "Bram", as: "principal" }] }, first.id);
+    await b.call("perceive", { perceptions: [{ who: "Bram", reach: "whole", content: "The last guest goes up." }] }, first.id);
+    await b.t.tie(first);
+    const night = await b.t.begin();
+    await b.t.writes.run(() => b.t.s.addChanges(night.id, [{ lane: "engine", op: "set", value: { type: "set", entity: "bram", field: "activity", value: "sleep" } }]));
+    expect(await due(night.id)).toMatchObject({ count: 1, names: ["Bram"] });
+    // His agent's job taking in what he holds, started in this turn: the dream waits for it, while it runs and once done until the turn after.
+    jobs.push({ plays: "Bram", state: "queued", started: 7, ended: null, turn: night.id });
+    expect(await due(night.id)).toMatchObject({ count: 0 });
+    jobs[0] = { plays: "Bram", state: "done", started: 7, ended: Number.MAX_SAFE_INTEGER, turn: night.id };
+    expect(await due(night.id)).toMatchObject({ count: 0 });
+    // One that failed has nothing in hand.
+    jobs[0] = { plays: "Bram", state: "failed", started: 7, ended: 9, turn: night.id };
+    expect(await due(night.id)).toMatchObject({ count: 1, names: ["Bram"] });
+  });
 });
