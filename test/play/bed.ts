@@ -16,7 +16,6 @@ import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { type PlayDeps, playRoutes, PlayService } from "../../src/play";
 import { TAP_DEFAULTS } from "../../src/play/settings";
 import { hashJson } from "../../src/shared/hash";
-import type { ErrorMessage, ResultBodies, ResultMessage } from "../../src/shared/protocol";
 import type { StateView } from "../../src/shared/state-view";
 import { MAP_DEFAULTS } from "../../src/shared/map-config";
 import type { WorldDoc } from "../../src/shared/world";
@@ -48,13 +47,6 @@ export function words(name: string, fields: Record<string, unknown> = {}): strin
   return template.render(part.header, fields);
 }
 
-/** The words the play panels' file gives a code an answer names (`keys`), as the shipped file has them. */
-export function keyed(code: string): string {
-  const said = readPart(readFileSync(join(GUIDANCE, ".prompts", "play-answers.md"), "utf8")).keys[code];
-  if (said === undefined) throw new Error(`no key ${code}`);
-  return said;
-}
-
 export interface Bed {
   store: Store;
   /** The play panels' service the routes stand on, and the turn lane's requests it holds a press in. */
@@ -74,10 +66,6 @@ export interface Bed {
   turn(during?: (apply: (operations: JsonObject[]) => Promise<ToolResult>) => Promise<void>, chat?: string, user?: string): Promise<TurnRow>;
   /** The chat's state view, as the page reads it. */
   state(query?: Record<string, string>, user?: string, chat?: string): Promise<StateView>;
-  /** Sends one of today's messages (its `lre`, `reqId` and `chatId` added) to the actions route. */
-  send(message: Record<string, unknown>, user?: string, chat?: string): Promise<ResultMessage | ErrorMessage>;
-  /** Sends today's Undo chip to the undo route. */
-  undo(chip: string, user?: string, chat?: string): Promise<ResultMessage | ErrorMessage>;
 }
 
 let replies = 0;
@@ -156,27 +144,7 @@ export function makeBed(lumiverse: PlayDeps["lumiverse"] = noLumiverse): Bed {
     async state(query = {}, user = USER, chat = CHAT) {
       return await callRoute(stateRoute, { query, params: { chat }, user });
     },
-    async send() {
-      throw new Error("The chat's old actions route is gone: a tap goes to the taps route.");
-    },
-    async undo() {
-      throw new Error("The chat's old actions route is gone: an Undo goes to the edits' undo route.");
-    },
   };
-}
-
-/** The body of an `lre.result` answering `request`, checked to be one. */
-export function body<K extends keyof ResultBodies>(answer: ResultMessage | ErrorMessage, request: K): ResultBodies[K] {
-  if (answer.type !== "lre.result" || answer.request !== request) throw new Error(`not ${request}'s result: ${JSON.stringify(answer)}`);
-  // The request checked above names the body's type.
-  const out = answer.body as ResultBodies[K];
-  return out;
-}
-
-/** The `lre.error` an answer is, checked to be one: its code and its words. */
-export function refusal(answer: ResultMessage | ErrorMessage): { code: string; message: string } {
-  if (answer.type !== "lre.error") throw new Error(`not an error: ${JSON.stringify(answer)}`);
-  return { code: answer.code, message: answer.message };
 }
 
 /** A panel's view model as data. */
