@@ -107,6 +107,22 @@ export interface ChangeRow {
   created: number;
 }
 
+/** Who a change names as its maker (`by`) when a person made it: the owner, on any page or panel. */
+export const PERSON_BY = "player";
+
+/**
+ * Whether an agent's own call wrote a change: only such a change carries the agent's handle. RPE's own records (the knowledge switch at
+ * a turn's start), a migration's rows and the rows a write brings with it (a holding a perception gives) carry none.
+ */
+export function byAgent(change: Pick<ChangeRow, "handle">): boolean {
+  return change.handle !== null;
+}
+
+/** Whether someone made a change: an agent's own call (`byAgent`), or a person. Only theirs is left to anyone to settle. */
+export function bySomeone(change: Pick<ChangeRow, "handle" | "by">): boolean {
+  return byAgent(change) || change.by === PERSON_BY;
+}
+
 /**
  * His own change of a chat an import forgets (`forgetImport`), kept to be written again once the import has tied the chat's turns
  * afresh (`restoreOwn`): what it recorded, when it took effect (`at`: its job's end, else when it was made), and the reply of the

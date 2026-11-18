@@ -30,7 +30,7 @@
 
 import type { AgentRef, FactDef, FactsPort, FactValue, Scope } from "rp-harness/contract";
 import { pairMarks } from "../quests/thread";
-import type { ChangeRow, Store } from "../store";
+import { byAgent, type ChangeRow, type Store } from "../store";
 import { storyAt } from "../story/path";
 import { StoryRecord } from "../story/record";
 import { CARRIED_SESSION, type RunRecord } from "./runs";
@@ -135,9 +135,9 @@ export function turnFacts(store: Store, deps: TurnFactsDeps): FactSource {
       const runNow = turn === null ? null : (ownRuns(turn).at(-1) ?? null);
       // Every run owes the player a reply but one that writes nothing into the chat.
       const owes = runNow !== null && runNow.kind !== "settle";
-      // Only an agent's own call writes a change with its handle: RPE's own records, a migration's, a person's, and the rows a write
-      // brings with it carry none. What a migration wrote on a carried turn is the previous build's, nothing this turn recorded.
-      const mine = (): ChangeRow[] => (turn === null ? [] : user.changes(turn).filter((c) => c.ord > (runNow?.mark ?? -1) && c.job === null && c.handle !== null && c.source !== "import"));
+      // Only an agent's own call writes a change with its handle (`byAgent`): RPE's own records, a migration's, a person's, and the rows
+      // a write brings with it carry none. What a migration wrote on a carried turn is the previous build's, nothing this turn recorded.
+      const mine = (): ChangeRow[] => (turn === null ? [] : user.changes(turn).filter((c) => c.ord > (runNow?.mark ?? -1) && c.job === null && byAgent(c) && c.source !== "import"));
       const recorded = (): number => mine().length;
       // An intent record is taken when its end reaches RPE.
       const intended = (r: FactsRun): boolean => r.intent?.to != null;

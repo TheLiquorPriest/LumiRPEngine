@@ -34,6 +34,7 @@ import { migrateStore, missingStoreTables } from "./schema";
 import { FoldAway, type AwayFold, type AwayHeld, type FoldJob, type StoreAway, type StoreBrief } from "./away";
 import { TreeView } from "./view";
 import {
+  bySomeone,
   JoinedTurnError,
   LANES,
   StoreInputError,
@@ -2638,7 +2639,8 @@ export class UserStore {
    * names no source, or is an invention with no gap check or consent, wherever in the world it is. The next turn is `next` when given,
    * else the one after it on the chat's path, else the newest begun after it; with none, what stands after it at the chat's head. Each
    * with its turn (null: placed between turns), the things it is about, and why it is listed. A joined turn is refused, as every
-   * reading of one is.
+   * reading of one is. Only what someone made is listed (`bySomeone`: an agent's own call, or a person), since only that is anyone's
+   * to settle: never RPE's own records, a migration's rows, or the rows a write brings with it, as the turn's counts leave them out.
    */
   unsettledOf(chat: string, turnId: string | null, next?: string): UnsettledChange[] {
     const t = turnId === null ? null : this.turnToWrite(turnId);
@@ -2655,6 +2657,7 @@ export class UserStore {
     const env = this.store.env;
     const out: UnsettledChange[] = [];
     const consider = (change: ChangeRow, turn: string | null, applied: boolean, reports: readonly Report[]): void => {
+      if (!bySomeone(change)) return;
       const why: UnsettledWhy[] = [];
       if (change.reports.length > 0 || reports.length > 0) why.push("reported");
       if (!applied) why.push("not_applied");
