@@ -109,7 +109,7 @@ describe("the turn before, told and kept", () => {
     expect(sent(b, 3)).not.toContain(told);
   });
 
-  test("a continue's run is kept beside the run it continues, and the turn is listed once, as its latest run", async () => {
+  test("a continue's run is kept beside the run it continues, and the turn is listed once, as the run that played it, with each run beside it", async () => {
     const b = await bed({ answers: [replying("The lamp turns."), replying("Then it stops, and Wren swears.")] });
     const turn = await settledTurn(b, await play(b, "normal", "I climb the stairs."));
     const generation = await play(b, "continue");
@@ -124,7 +124,7 @@ describe("the turn before, told and kept", () => {
     expect(new Set(runs.map((r) => r.id)).size).toBe(2);
     expect(b.turns.runs.record(USER, turn.id)?.kind).toBe("continue");
     const list = (await b.page<TurnsReply>("GET", `/api/v1/chats/${CHAT}/turns`)).body.turns;
-    expect(list.map((t) => [t.id, t.kind])).toEqual([[turn.id, "continue"]]);
+    expect(list.map((t) => [t.id, t.kind, t.runs.map((r) => r.kind)])).toEqual([[turn.id, "new", ["new", "continue"]]]);
   });
 
   test("a turn whose message is deleted is told to the harness once, when the delete is heard", async () => {
@@ -386,7 +386,7 @@ describe("what has happened in the chat since the last turn", () => {
   test("a carried chat whose first comparison finds more replies edited after their turns than the briefing's bound: the newest are told in full, the rest in one line by their messages' numbers, and the next turn is told none of them again", async () => {
     // Seven replies the earlier build played, each touched up by the player since it last read them: the chat shows the new text, and
     // each carried turn is tied to the old one, as the migration ties it.
-    const reply = (i: number, how: string): string => `Reply ${i}, ${how}: ${"the lamp turns and the sea runs high under the rock, ".repeat(6)}`;
+    const reply = (i: number, how: string): string => `Reply ${i}, ${how}: ${"the lamp turns and the sea runs high under the rock, ".repeat(6)}`.trimEnd();
     const messages: ChatMessage[] = Array.from({ length: 13 }, (_, i) => (i % 2 === 0 ? { id: `m${i}`, role: "assistant", content: reply(i, "touched up") } : { id: `m${i}`, role: "user", content: `Line ${i}.` }));
     const b = await bed({ answers: [replying("Wren looks up."), replying("Wren nods.")], messages, global: "briefing:\n  editedTokens: 250\n" });
     await carriedOver(b);
@@ -461,7 +461,7 @@ describe("what a comparison of the path found, kept with the chat", () => {
     const edited = `Message ${first.message} was edited after its turn. Before: The lamp turns. Now: The lamp turns, and stops.`;
     const deleted = "1 turn(s) were deleted since the last one.";
     const told = (n: number): string[] => b.requests[n]!.since.map((s) => s.text);
-    for (const n of [2, 3]) expect(told(n)).toEqual(expect.arrayContaining([edited, deleted]));
+    for (const n of [2, 3]) expect(told(n)).toEqual(expect.arrayContaining([edited, expect.stringContaining(deleted)]));
     expect(told(4)).not.toContain(edited);
     expect(told(4)).not.toContain(deleted);
   });

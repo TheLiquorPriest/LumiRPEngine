@@ -100,9 +100,9 @@ test("Settle now runs on the newest turn after an edit: told the edit and the as
     ["settle", "no-reply", null],
     ["settle", "no-reply", null],
   ]);
-  // Nothing of either reached the chat, and the Turn page lists the turn by its latest run.
+  // Nothing of either reached the chat, and the Turn page lists the turn once, as the run that played it, with each run beside it.
   expect(b.db.rows("SELECT id, content FROM messages WHERE chat_id = ? ORDER BY rowid", CHAT)).toEqual(chatBefore);
-  expect((await b.page<TurnsReply>("GET", `/api/v1/chats/${CHAT}/turns`)).body.turns.map((t) => [t.id, t.kind])).toEqual([[turn.id, "settle"]]);
+  expect((await b.page<TurnsReply>("GET", `/api/v1/chats/${CHAT}/turns`)).body.turns.map((t) => [t.id, t.kind, t.runs.map((r) => r.kind)])).toEqual([[turn.id, "new", ["new", "settle", "settle"]]]);
 
   // The next turn is not told the edit again: the run on its turn was told it.
   const next = await settledTurn(b, await play(b, "I watch the sea."));

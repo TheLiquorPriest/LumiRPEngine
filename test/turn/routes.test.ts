@@ -27,7 +27,7 @@ type StopAnswer = ApiRoutes["POST /api/v1/chats/:chat/turns/:turn/stop"]["reply"
 
 /** Every field of a page's type, once: a field added to the type or left out of here does not compile. */
 const CHAT_FIELDS: Record<keyof ChatList["chats"][number], true> = { id: true, name: true, lastTurnAt: true, running: true, played: true, world: true };
-const SUMMARY_FIELDS: Record<keyof TurnList["turns"][number], true> = { id: true, kind: true, onPath: true, message: true, status: true, marks: true, timings: true, usage: true };
+const SUMMARY_FIELDS: Record<keyof TurnList["turns"][number], true> = { id: true, kind: true, onPath: true, message: true, status: true, marks: true, timings: true, usage: true, runs: true };
 const DETAIL_FIELDS: Record<keyof TurnDetail, true> = { ...SUMMARY_FIELDS, chat: true, intent: true, reply: true, emptyReply: true, error: true, trace: true, lore: true, runs: true, prompt: true, asked: true, record: true, found: true, todos: true, changes: true, unsettled: true, told: true, carried: true, card: true, quests: true, threads: true };
 const RUN_FIELDS: Record<keyof TurnDetail["runs"][number], true> = { id: true, run: true, nth: true, kind: true, status: true, target: true, held: true, intentRecord: true, timings: true, usage: true, reply: true, saved: true, error: true, stoppedBy: true, lastText: true, notGiven: true, trace: true, requests: true };
 const fields = (shape: object): string[] => Object.keys(shape).sort();
@@ -171,7 +171,8 @@ describe("a turn's runs, its folder, and the world", () => {
       expect(run.trace.map((t) => t.seq)).toEqual(run.trace.map((_, i) => i + 1));
       expect(run.trace.at(-1)?.event.kind).toBe("run_ended");
     }
-    expect(detail.runs[0]!.trace.length + detail.runs[1]!.trace.length).toBe(detail.trace.length);
+    // The turn's trace holds besides the records of the host's own word (a session opened), which are no run's.
+    expect(detail.runs[0]!.trace.length + detail.runs[1]!.trace.length).toBe(detail.trace.filter((t) => t.event.kind !== "session").length);
     // The turn's usage is both runs' together: one model call each.
     expect(detail.usage.calls).toBe(2);
     expect(detail.usage.output).toBe(detail.runs[0]!.usage.output + detail.runs[1]!.usage.output);
