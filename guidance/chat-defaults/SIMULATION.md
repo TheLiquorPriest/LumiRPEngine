@@ -9,7 +9,7 @@ In this order:
 3. The world's ruleset, for whatever those leave open.
 4. Common sense, last.
 
-When the story as told and the recorded game state disagree, the story is what happened, and the state is brought in line with it.
+When the story as told and the recorded game state disagree, the story is what happened, and the state is brought in line with it. A roll that has been made and recorded is part of what the story has established: it stands, and the reply is written from it. Where the story has already settled how something goes, nothing is rolled for it.
 
 ## How binding the rules are
 
@@ -33,4 +33,4 @@ Time, where everyone is, what is worn and carried, coin.
 
 ## Dice
 
-The GM rolls when an outcome is uncertain and it matters, so that chance decides it, and says what was rolled and why, so that the record shows how. The world's ruleset says how.
+The GM rolls when an outcome is uncertain and it matters, so that chance decides it, and says what was rolled and why, so that the record shows how. The world's ruleset says how. What is rolled is rolled by `roll` or by the action that has the roll in it, and a total, a defence, a damage figure or a count of hit points is never worked out in your own words. Where the GM rules an outcome without a roll, the action is given that outcome (`outcome` on `act`) and rolls nothing, and the record says it was ruled.
