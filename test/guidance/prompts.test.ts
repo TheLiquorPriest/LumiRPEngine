@@ -30,7 +30,7 @@ const NOTICES: Record<string, Record<string, unknown>> = {
   edited_more: { count: 5, messages: "3, 4, 5, 6, 7" },
   player_edited: { message: 9, old: "I wave.", new: "I wave twice." },
   deleted: { count: 2, turns: [{ message: 4, words: "Wren waved" }], more: "7, 9" },
-  swipe_flipped: { message: 8, range: "9-11", stopped: [{ about: "Wren", words: "A payment of $3.00 to Wren", message: 9, why: "a later turn had already set that value" }], more: 2 },
+  swipe_flipped: { message: 8, again: true, range: "9-11", stopped: [{ about: "Wren", words: "A payment of $3.00 to Wren", message: 9, why: "a later turn had already set that value" }], more: 2 },
   swipe_shown: { message: 8 },
   job_finished: { job: "j-1", agent: "mapper", brief: "Map the harbour.", report: "Two quays.", applied: [{ words: "Place: Quay, in the harbour", about: "the harbour" }], not_applied: [{ words: "A payment of $3.00 to Wren", about: "Wren", why: "a later turn had already set that value", later: 9 }], more: 4 },
   job_failed: { job: "j-1", agent: "mapper", brief: "Map the harbour." },
@@ -416,10 +416,11 @@ describe("a row each of E.6: present, laid out as its row says, asking for nothi
     const part = await lines("notices");
     expect(part.line("deleted", { count: 3, turns: [{ message: 4, words: "Wren waved" }, { message: 6, words: "The quay" }], more: "9" } as never)).toBe('3 turn(s) were deleted since the last one. Messages are numbered as the chat stood before, counting its first message as 0. Message 4, "Wren waved…". Message 6, "The quay…". Also messages 9.');
     expect(part.line("deleted", { count: 1 } as never)).toBe("1 turn(s) were deleted since the last one. Messages are numbered as the chat stood before, counting its first message as 0.");
-    const flipped = part.line("swipe_flipped", { message: 8, range: "9-11", stopped: [{ about: "Wren", words: "A payment of $3.00 to Wren", message: 9, why: "a later turn had already set that value" }, { message: 10, why: "it failed" }], more: 2 } as never) ?? "";
+    const flipped = part.line("swipe_flipped", { message: 8, again: true, range: "9-11", stopped: [{ about: "Wren", words: "A payment of $3.00 to Wren", message: 9, why: "a later turn had already set that value" }, { message: 10, why: "it failed" }], more: 2 } as never) ?? "";
     expect(flipped).toBe("An earlier reply (8) was changed to another of its swipes. The turns after it were applied again on it (messages 9-11). Not applied, about Wren: A payment of $3.00 to Wren from message 9, because a later turn had already set that value. Not applied: a change from message 10, because it failed. 2 more are not listed.");
     expect(part.line("unplayed", { range: "12-14", why: [{ message: 13, why: "a restart cut off the earlier build's turn for it" }] } as never)).toEndWith(" Message 13: a restart cut off the earlier build's turn for it.");
-    expect(part.line("swipe_flipped", { message: 8 } as never)).toBe("An earlier reply (8) was changed to another of its swipes. The turns after it were applied again on it.");
+    // With no turn after it, only what changed: no turn was applied again.
+    expect(part.line("swipe_flipped", { message: 8 } as never)).toBe("An earlier reply (8) was changed to another of its swipes.");
     const keys = split(SHIPPED.get(".prompts/notices.md") ?? "").header?.["keys"] as Record<string, unknown>;
     expect(Object.entries(keys).filter(([, said]) => typeof said !== "string" || said === "" || ASKS.test(said))).toEqual([]);
     expect(typeof keys["changed_since"]).toBe("string");

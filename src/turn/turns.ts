@@ -1866,7 +1866,9 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         listed.push(entry);
       }
       const range = from === undefined || to === undefined ? undefined : from === to ? `${from}` : `${from}-${to}`;
-      add("restacked", notices?.line("swipe_flipped", { message: f.message, ...(range !== undefined ? { range } : {}), stopped: listed, ...(left > 0 ? { more: left } : {}) }), f.to !== null ? { turn: f.to } : {});
+      // Turns stood after the reply flipped, and were applied again on it, only where the comparison found a stretch of them.
+      const again = f.stretch !== null && f.stretch !== undefined;
+      add("restacked", notices?.line("swipe_flipped", { message: f.message, ...(again ? { again: true } : {}), ...(range !== undefined ? { range } : {}), stopped: listed, ...(left > 0 ? { more: left } : {}) }), f.to !== null ? { turn: f.to } : {});
     }
 
     // The texts Lumiverse holds now: of each reply edited since its turn was tied, of each of the player's messages edited since RPE
