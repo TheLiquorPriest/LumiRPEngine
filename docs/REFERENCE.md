@@ -415,6 +415,10 @@ Each is carried out by an agent with `world_apply`'s `act` operation: `action` i
 
 Its own: `d20.advance`, `d20.attack`, `d20.award`, `d20.check`, `d20.condition`, `d20.effect`, `d20.harm`, `d20.heal`, `d20.ranks`, `d20.reload`, `d20.rest`, `d20.save`, `d20.stat_as`, `d20.state`, `d20.trait`, `d20.upkeep`.
 
+### Panels and slots
+
+Panels: `d20.sheet`. Slots it writes: none.
+
 ## Economy pack (`economy`)
 
 Version 1 · realism domain `money` · requires `space`.
