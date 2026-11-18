@@ -446,7 +446,7 @@ A character holds a secret once the story gives it to them (told, found out, sho
 
 Each lane's writes go ahead, wait for your word, or are left out, by the **Write permission** settings: **the story lane** (`permissions.story`), **the engine lane** (`permissions.engine`), and **tools that reach outside RPE** (`permissions.external`: the web, a command, an MCP server). Each is `auto` (go ahead) as shipped; `confirm` makes each write wait for your word; `never` leaves it out.
 
-A write that waits shows under its turn's reply with **Go ahead** and **No**, and on the turn's page under **The review card**: each change by lane with **Undo it**, and **Questions asked on it** with **Let it go ahead** and **Do not**.
+A write that waits shows under its turn's reply with **Go ahead** and **No**, and on the turn's page under **The review card**: each change by lane, told in words (what changed, who made it and how sure it is, what it reported, what **Undo it** does and what it would leave as it is), with **The record as written** closed under it for whoever is finding a fault, and **Questions asked on it** with **Let it go ahead** and **Do not**.
 
 ## Lore
 

@@ -1,7 +1,8 @@
 import type { CardChange, CardQuestion, ReviewCardReply } from "../../../../shared/api";
-import { Badge, Banner, Button, Pre } from "../../../../frontend/components";
+import { Badge, Banner, Button, Disclosure, Pre } from "../../../../frontend/components";
 import { when } from "../../../words";
 import { valueWords } from "../changes";
+import { madeWords } from "../../../marks";
 import type { ReviewShown } from "../review";
 import type { TurnSection } from "../types";
 
@@ -20,22 +21,17 @@ function CardChangeLine(props: { change: CardChange; dropped: boolean; busy: str
   return (
     <li class="rpe-entry lre-stack" data-card-change={change.id} data-applied={change.applied ? "yes" : "no"}>
       <p class="rpe-line">
-        <span class="rpe-strong">{change.op}</span> {valueWords(change.value)} {change.applied ? <Badge tone="pos">applied</Badge> : props.dropped ? <Badge tone="warn">dropped</Badge> : <Badge tone="warn">held</Badge>}
+        <span class="rpe-strong">{change.words}</span> {change.applied ? <Badge tone="pos">applied</Badge> : props.dropped ? <Badge tone="warn">dropped</Badge> : <Badge tone="warn">held</Badge>}
         {undone ? <Badge>undone</Badge> : null}
       </p>
       <p class="rpe-meta">
-        {change.by === null ? "no author named" : `by ${change.by}`}
-        {change.source === null ? "" : `, ${change.source}`}
-        {change.standing === null ? "" : `, ${change.standing}`}
-        {undone ? `, reversed by ${change.undoneBy.join(", ")}` : ""}
+        {madeWords(change)}
+        {undone ? " It has been undone since." : ""}
       </p>
-      {change.reports.length === 0 ? null : (
+      {change.reportWords.length === 0 ? null : (
         <ul class="rpe-reports">
-          {change.reports.map((r, i) => (
-            <li key={i}>
-              {r.code}
-              {r.values === undefined ? "" : `: ${valueWords(r.values)}`}
-            </li>
+          {change.reportWords.map((words, i) => (
+            <li key={i}>{words}</li>
           ))}
         </ul>
       )}
@@ -45,11 +41,28 @@ function CardChangeLine(props: { change: CardChange; dropped: boolean; busy: str
             Undo it
           </Button>
           <span class="rpe-meta" data-undo>
-            {change.undo.ops.length === 0 ? "It has no reversal." : `Reverses it with: ${change.undo.ops.join(", ")}.`}
-            {change.undo.leftWords.length === 0 ? "" : ` ${change.undo.leftWords.join(" ")}`}
+            {[change.undo.words, ...change.undo.leftWords].filter((said) => said !== "").join(" ")}
           </span>
         </div>
       )}
+      <Disclosure summary="The record as written" class="rpe-record">
+        <div class="lre-stack" data-record>
+          <p class="rpe-line">
+            <span class="rpe-strong">{change.op}</span> {valueWords(change.value)}
+          </p>
+          {change.reports.map((r, i) => (
+            <p key={i} class="rpe-meta">
+              {r.code}
+              {r.values === undefined ? "" : `: ${valueWords(r.values)}`}
+            </p>
+          ))}
+          <p class="rpe-meta">
+            {change.undo.ops.length === 0 ? "No reversal is kept." : `Undo records: ${change.undo.ops.join(", ")}.`}
+            {change.undo.left.length === 0 ? "" : ` Left as it is: ${change.undo.left.map((r) => r.code).join(", ")}.`}
+            {undone ? ` Reversed by ${change.undoneBy.join(", ")}.` : ""}
+          </p>
+        </div>
+      </Disclosure>
     </li>
   );
 }
