@@ -10,7 +10,7 @@ import { SETTINGS as HARNESS_SETTINGS } from "rp-harness/helpers";
 import { NO_SESSION, turnSettings } from "../../src/turn";
 import { CHAT_CONFIG, CHATS_FOLDER, GLOBAL_CONFIG, SHIPPED_FOLDER } from "../../src/tree";
 import type { SettingsReply, SettingView } from "../../src/app/settings-routes";
-import { keyFor, type Setting } from "../../src/app/setting-list";
+import { keyFor, type Setting, setFor } from "../../src/app/setting-list";
 import { loadConfig, SERVER_SETTINGS } from "../../src/app/config";
 import { CHAT, CONNECTION, openTurnBed, PRESET, replying, settledTurn, type TurnBed, USER } from "../turn/bed";
 
@@ -63,7 +63,7 @@ test("every setting RPH and RPE read is listed for a chat: the value in force, i
   const b = await playedBed("history:\n  window: 30\nconnections:\n  Floor model:\n    reply:\n      form: two-step\n");
   const made = await b.page<{ id: string; error?: string }>("POST", "/api/v1/connections", { connection: { name: "Floor model", provider: "deepseek", auth: "key", model: "deepseek-v4-flash" }, key: "sk-invented-0000-1111" });
   expect(made.body.error).toBeUndefined();
-  await writeFile(chatFile(b), "# This chat's own.\nhistory:\n  window: 12\nlimits:\n  turn:\n    calls: 0\n");
+  await writeFile(chatFile(b), "# This chat's own.\nhistory:\n  window: 12\nlimits:\n  turn:\n    calls: -1\n");
 
   const { status, body } = await settings(b, "GET", `?chat=${CHAT}`);
   expect(status).toBe(200);
@@ -79,11 +79,11 @@ test("every setting RPH and RPE read is listed for a chat: the value in force, i
   expect(setting(body, "compaction.reserveTokens")).toMatchObject({ value: 16_384, default: 16_384, from: null });
   expect(setting(body, "turn.passConnection").levels).toEqual(["global"]);
   // A value the setting does not take leaves its default in force, and says why.
-  expect(setting(body, "limits.turn.calls")).toMatchObject({ value: 40, from: "chat", passed: { value: 0 } });
-  expect(setting(body, "limits.turn.calls").passed?.why).toContain("a whole number, at least 1");
+  expect(setting(body, "limits.turn.calls")).toMatchObject({ value: null, from: "chat", passed: { value: -1 } });
+  expect(setting(body, "limits.turn.calls").passed?.why).toContain("a whole number, at least 0");
   // Per connection: the one the global file names by its name, and by its id where no file names it.
-  expect(setting(body, "connections.Floor model.reply.form")).toMatchObject({ value: "two-step", from: "global", connection: { id: made.body.id, name: "Floor model" } });
-  expect(setting(body, `connections.${made.body.id}.jobs.perDay`)).toMatchObject({ value: null, from: null, connection: { id: made.body.id, name: "Floor model" } });
+  expect(setting(body, "connections.Floor model.reply.form")).toMatchObject({ value: "two-step", from: "global", setFor: { kind: "connection", key: "Floor model", name: "Floor model" } });
+  expect(setting(body, `connections.${made.body.id}.jobs.perDay`)).toMatchObject({ value: null, from: null, setFor: { kind: "connection", key: made.body.id, name: "Floor model" } });
 
   // With no chat, the levels every chat shares.
   const shared = await settings(b, "GET", "");
@@ -100,7 +100,7 @@ test("GET /api/v1/settings offers every setting of RPH's exported list with its 
   expect(status).toBe(200);
   expect(HARNESS_SETTINGS.length).toBeGreaterThan(0);
   for (const def of HARNESS_SETTINGS) {
-    const shown = setting(body, keyFor(def, made.body.id));
+    const shown = setting(body, keyFor(def, setFor(def) === "definition" ? body.settings.find((s) => s.pattern === def.key)?.setFor?.key : made.body.id));
     expect({ key: def.key, default: shown.default, takes: shown.takes, none: shown.none, orNone: shown.orNone }).toEqual({ key: def.key, default: def.default, takes: def.takes, none: def.none ?? null, orNone: def.orNone === true });
   }
 });
@@ -258,7 +258,7 @@ test("the server's limits are listed under RPE-global.yml with their defaults, a
   const put = await settings(b, "PUT", "", { level: "global", key: "server.maxBodyBytes", value: 2_097_152 });
   expect(put.status).toBe(200);
   expect(setting(put.body, "server.maxBodyBytes")).toMatchObject({ value: 2_097_152, from: "global", file: "@global/RPE-global.yml" });
-  expect(Bun.YAML.parse(await readFile(b.app.paths.globalConfig, "utf8"))).toMatchObject({ server: { bodyBytes: 2_097_152 } });
+  expect(Bun.YAML.parse(await readFile(b.app.paths.globalConfig, "utf8"))).toMatchObject({ server: { maxBodyBytes: 2_097_152 } });
   // Read from the global level alone; config.json is not written.
   expect((await settings(b, "PUT", "", { level: "chat", chat: CHAT, key: "server.maxBodyBytes", value: 4096 })).status).toBe(400);
   expect(await readFile(b.app.paths.config, "utf8")).toBe(configBefore);
@@ -309,7 +309,7 @@ test("a setting written while the Files page switches a file off: both changes a
     expect({ round, setting: setting.status, switched }).toEqual({ round, setting: 200, switched: 200 });
     const text = await readFile(b.app.paths.globalConfig, "utf8");
     expect({ round, comment: text.startsWith("# Mine.\n") }).toEqual({ round, comment: true });
-    expect({ round, doc: Bun.YAML.parse(text) }).toMatchObject({ round, doc: { history: { window: 20 + round }, off: expect.arrayContaining([`rules/${file}`]) } });
+    expect({ round, doc: Bun.YAML.parse(text) }).toMatchObject({ round, doc: { history: { window: 20 + round }, stack: { off: expect.arrayContaining([`rules/${file}`]) } } });
   }
 });
 
