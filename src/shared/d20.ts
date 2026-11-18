@@ -243,6 +243,8 @@ export interface D20Def {
     skillPoints: { plus: Expr; min: number; first: number };
     /** A feat at the first level and each `featEvery`; an ability point each `abilityEvery`. Both told as open, never chosen. */
     featEvery: number;
+    /** Where a ruleset's feats fall otherwise: a formula with `level`, the total level reached, read in place of `featEvery` when given. */
+    featAt?: Expr;
     abilityEvery: number;
     /** Experience as the GM gives it (`table`), or worked out from what was overcome (`challenge`). */
     experienceBy: "table" | "challenge";

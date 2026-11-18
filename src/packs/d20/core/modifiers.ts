@@ -56,8 +56,10 @@ export function modifiersOf(ctx: ReadContext, rules: D20Def, who: EntityId, give
     for (const m of mods) {
       const to = choice !== undefined ? m.to.replace("{choice}", choice) : m.to;
       if (!wants(to)) continue;
-      if (m.when !== undefined && !worked(ctx, who, m.when, false)) continue;
-      const value = Number(worked(ctx, who, m.value, 0));
+      // A chosen trait's value and condition may name its choice too (`table('weapons', '{choice}', 'threat')`).
+      const chosen = (v: string | number): string | number => (choice !== undefined && typeof v === "string" ? v.replaceAll("{choice}", choice) : v);
+      if (m.when !== undefined && !worked(ctx, who, chosen(m.when), false)) continue;
+      const value = Number(worked(ctx, who, chosen(m.value), 0));
       if (!Number.isFinite(value)) continue;
       out.push({ to, value, type: typeof m.type === "string" && m.type !== "" ? m.type : null, source, from, ...(m.note !== undefined ? { note: m.note } : {}), ...(m.limit === true ? { limit: true as const } : {}), ...(Array.isArray(m.bypass) ? { bypass: m.bypass } : {}), counted: true });
     }

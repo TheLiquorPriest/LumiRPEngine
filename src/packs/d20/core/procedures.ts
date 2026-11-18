@@ -501,7 +501,7 @@ function weaponOf(s: Scratch, who: EntityId, said: string): Weapon | null {
     const thing = [...gearOn(s.ctx, who).readied, ...carried()].find((id) => s.name(id).toLowerCase() === lower || id === said);
     if (thing !== undefined) return asThing(thing);
     const nat = naturals.find((a) => a.label.toLowerCase() === lower);
-    if (nat) return { label: nat.label, item: null, rowId: "", row: null, natural: nat };
+    if (nat) return { label: nat.label, item: null, rowId: weaponKey(nat), row: null, natural: nat };
     const row = rowOf(s.ctx, rules, "weapons", said);
     return row ? { label: labelOfRow(row.row, row.id), item: null, rowId: row.id, row: row.row, natural: null } : null;
   }
@@ -510,7 +510,7 @@ function weaponOf(s: Scratch, who: EntityId, said: string): Weapon | null {
     if (w) return w;
   }
   const first = naturals[0];
-  return first ? { label: first.label, item: null, rowId: "", row: null, natural: first } : null;
+  return first ? { label: first.label, item: null, rowId: weaponKey(first), row: null, natural: first } : null;
 }
 
 /** A weapon's damage dice for a wielder of `size`: its row's notation for that size (or its one notation), or its own attack's. */
@@ -525,6 +525,20 @@ function damageDice(w: Weapon, size: string): string {
     if (first !== undefined) return first;
   }
   return "";
+}
+
+/** What a creature's own attack is known by in the totals' `weapon` and in a modifier's choice (`attack.weapon.bite`): its label in lower case. */
+export function weaponKey(natural: NaturalAttack): string {
+  return natural.label.toLowerCase();
+}
+
+/**
+ * The lowest natural die an attack with a weapon threatens on: its own attack's threat or its row's (the sure hit's die without one),
+ * widened by what modifies `threat.weapon.<id>` (a feat that doubles a weapon's range adds its width), stacked as any total's are.
+ */
+export function threatFrom(ctx: ReadContext, rules: D20Def, who: EntityId, w: Pick<Weapon, "rowId" | "row" | "natural">): number {
+  const own = w.natural?.threat ?? numberIn(w.row?.threat ?? null) ?? rules.attack.autoHit;
+  return w.rowId === "" ? own : own - sumOf(stacked(ctx, rules, who, `threat.weapon.${w.rowId}`));
 }
 
 /** Whether a creature is proficient with a weapons row: its classes' or traits' proficiency names the row's or the row itself. */
@@ -658,7 +672,7 @@ export function attackPlan(s: Scratch, who: EntityId, p: Readonly<Record<string,
     spend: shot?.rounds ?? (magazine !== null ? 1 : 0),
     dice: damageDice(w, sizeOf(s.ctx, rules, who)),
     types: w.natural?.types ?? wordsIn(w.row?.types),
-    threatFrom: w.natural?.threat ?? numberIn(w.row?.threat ?? null) ?? a.autoHit,
+    threatFrom: threatFrom(s.ctx, rules, who, w),
     multiplier: w.natural?.multiplier ?? numberIn(w.row?.multiplier ?? null) ?? 1,
     strength: Math.floor((own(a.strengthShare, held) ?? 0) * modOf(s.ctx, rules, who, a.strength)),
     damageBonus: totalOf(s.ctx, rules, who, a.totals.damage, vars) + enh + toDamage.reduce((n, g) => n + Number(g.value), 0),
@@ -981,11 +995,13 @@ const reload: Procedure = (s, who, p) => {
   return null;
 };
 
-/** The level the experience table puts `xp` at. */
+/** The level an amount of experience reaches by the experience table, read in the column its progression's thresholds name (`xp` without one). */
 function levelForXp(s: Scratch, xp: number): number {
+  const thresholds = own(s.ctx.world.ruleset?.progression ?? {}, s.rules.levels.progression)?.thresholds;
+  const column = thresholds !== undefined && !Array.isArray(thresholds) ? thresholds.column : "xp";
   let level = 0;
   for (const [key, row] of Object.entries(rowsOf(s.ctx, s.rules, "experience"))) {
-    const need = numberIn(row.xp);
+    const need = numberIn(row[column] ?? null);
     const at = Number(key);
     if (need !== null && Number.isFinite(at) && xp >= need && at > level) level = at;
   }
@@ -1067,7 +1083,7 @@ const advance: Procedure = (s, who, p, rng) => {
       die,
       way,
       points,
-      ...(first || (rules.levels.featEvery > 0 && total % rules.levels.featEvery === 0) ? { feat: true } : {}),
+      ...((rules.levels.featAt !== undefined ? s.holds(String(rules.levels.featAt), who, { level: total }) : first || (rules.levels.featEvery > 0 && total % rules.levels.featEvery === 0)) ? { feat: true } : {}),
       ...(rules.levels.abilityEvery > 0 && total % rules.levels.abilityEvery === 0 ? { ability: true } : {}),
       ...(features.length > 0 ? { features: features.map((f) => labelOfRow(own(traits, f), f)).join(", ") } : {}),
     }),
