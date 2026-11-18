@@ -1227,7 +1227,7 @@ export interface JobToldReply {
   told: TurnTold;
 }
 
-/** A job: its agent, what it was asked, where it stands, its scope, who started it, when, what it spent, its report, the limit it ended at, who ended it, what its start named and gave, what it was not given, what it wrote, the job it repeats, where it asks, and what the owner gave it beyond its limits. */
+/** A job: its agent, what it was asked, where it stands, its scope, who started it, when, what it spent, its report, the limit it ended at, who ended it, what its start named and gave, the character its agent plays, what it was not given, what it wrote, the job it repeats, where it asks, and what the owner gave it beyond its limits. */
 export interface JobView {
   id: string;
   agent: string;
@@ -1244,6 +1244,8 @@ export interface JobView {
   stoppedBy?: JobStopper;
   /** The attachments its start named, by name. */
   attach?: string[];
+  /** The character its agent plays, as its start named it. */
+  plays?: string;
   /** The limits of its own its start gave. */
   limits?: JobLimits;
   /** The names in attach nobody could find. */

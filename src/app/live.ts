@@ -155,7 +155,7 @@ const jobStopper = shape.named(
 );
 export const jobView = shape.named(
   "JobView",
-  "A job: its agent, what it was asked, where it stands, its scope, who started it, when, what it spent, its report, the limit it ended at, who ended it, what its start named and gave, what it was not given, what it wrote, the job it repeats, where it asks, and what the owner gave it beyond its limits.",
+  "A job: its agent, what it was asked, where it stands, its scope, who started it, when, what it spent, its report, the limit it ended at, who ended it, what its start named and gave, the character its agent plays, what it was not given, what it wrote, the job it repeats, where it asks, and what the owner gave it beyond its limits.",
   shape.object({
     id: T,
     agent: T,
@@ -170,6 +170,7 @@ export const jobView = shape.named(
     limit: opt(limitHit),
     stoppedBy: opt(jobStopper, "For a job ended before its agent was done (cancelled, at a limit, off the path, interrupted): who ended it."),
     attach: opt(shape.list(T), "The attachments its start named, by name."),
+    plays: opt(T, "The character its agent plays, as its start named it."),
     limits: opt(jobLimits, "The limits of its own its start gave."),
     missing: opt(shape.list(T), "The names in attach nobody could find."),
     wrote: opt(shape.list(shape.named("JobWrite", "A write a job made: the tool, the lane it writes to where it names one, and the first line of the tool's own answer.", shape.object({ tool: T, lane: opt(T), line: T }))), "Each write it made, its sub-agents' included, in order."),
