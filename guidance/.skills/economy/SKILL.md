@@ -11,6 +11,7 @@ Everyone's coin is kept as accounts. Every payment has two sides: it leaves one 
 `world_apply` with a `pay` operation: who pays, who is paid, how much, and what for.
 
 - If something was bought, name the goods in the same operation: goods nothing recorded goes by are `spawn`ed first, earlier in the same call. The money and the goods change hands as one change, so a swipe takes both back. A meal bought is paid here; that it is eaten is the action `eat`, in the skill `time`.
+- A weapon, armour or the rounds for a firearm that is bought, where the world has the tabletop rules, is the catalog's own item (the skill `items-and-wardrobe` says how): `spawn` it with its `type` earlier in the same call, then name it in the goods.
 - If it was a gift, a bribe, a fine or a loss, say which. The books keep the reason.
 - A payment between two people who are both in the scene is one operation, not two.
 
