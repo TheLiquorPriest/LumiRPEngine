@@ -75,6 +75,18 @@ for (const type of ["swipe", "regenerate"] as const) {
   });
 }
 
+test("a failed swipe taken away leaves RPE holding the reply as it shows again, its turn on the path and its line under it, as soon as the swipe's end is recorded", async () => {
+  const { b, first } = await played(["The lamp turns."]);
+  await set(b, "lumiverse.reply.removeEmpty", true, "global");
+  await set(b, "limits.turn.calls", 0, "chat");
+  await staged(b, first.message!, "swipe");
+
+  const row = b.db.rows("SELECT swipes FROM messages WHERE id = ?", first.message!)[0]!;
+  expect(JSON.parse(String(row.swipes))).toHaveLength(1);
+  expect(b.turns.store.user(USER).line(CHAT).at(-1)?.turn).toBe(first.id);
+  expect(await lineOf(b, first.message!)).toMatchObject([{ played: true, empty: false, turn: first.id }]);
+});
+
 test("a failed swipe's empty swipe that stays has its line at once, and the swipe after it is not told it as another swipe", async () => {
   const { b, first } = await played(["The lamp turns.", "The lamp gutters."]);
   await set(b, "limits.turn.calls", 0, "chat");

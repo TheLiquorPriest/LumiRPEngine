@@ -771,6 +771,22 @@ export class LumiverseServer {
       if (method === "POST" && chat[2] === "messages") return reply(appendMessage(env, user, id, await request.text()));
       return null;
     }
+    // `DELETE /api/v1/chats/:chatId/messages/:id` and `…/messages/:id/swipe/:idx` (`routes/chats.routes.ts:1127-1132`, `:1227-1233`): the message
+    // found among the user's own by its id alone, whatever chat the path names (`deleteMessage`, `deleteSwipe`); 200 `{success: true}`, or for a
+    // swipe the message as it stands after; 404 for no such message, and for a swipe that is not there or is the message's last.
+    const deleting = method === "DELETE" ? /^\/api\/v1\/chats\/[^/]+\/messages\/([^/]+)(?:\/swipe\/([^/]+))?$/.exec(path) : null;
+    if (deleting !== null) {
+      const id = decodeURIComponent(deleting[1]!);
+      const held = env.db?.rows("SELECT m.chat_id FROM messages m JOIN chats c ON m.chat_id = c.id WHERE m.id = ? AND c.user_id = ?", id, user)[0];
+      if (held === undefined) return json(404, { error: deleting[2] === undefined ? "Not found" : "Not found, invalid index, or last swipe" });
+      const chatId = String(held.chat_id);
+      if (deleting[2] === undefined) {
+        env.host.deleteMessage(chatId, id);
+        return json(200, { success: true });
+      }
+      const row = env.host.deleteSwipe(chatId, id, Number.parseInt(deleting[2], 10)) ? env.db?.rows("SELECT * FROM messages WHERE id = ?", id)[0] : undefined;
+      return row === undefined ? json(404, { error: "Not found, invalid index, or last swipe" }) : json(200, rowToMessage(row));
+    }
     const starts: Record<string, "normal" | "regenerate" | "continue"> = { "/api/v1/generate": "normal", "/api/v1/generate/regenerate": "regenerate", "/api/v1/generate/continue": "continue" };
     if (method === "POST" && path in starts) return reply(await startRoute(env, user, starts[path]!, await request.text(), this.generations));
     return this.fromConnections(request, url, user, env, reply);
