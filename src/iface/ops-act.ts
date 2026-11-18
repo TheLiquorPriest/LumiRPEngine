@@ -247,14 +247,15 @@ const act: OpDef = {
         }
       }
     }
-    // What the action worked out and where its numbers came from, as its records say it (an event type that is `told`).
-    const toldSince = (start: number): string[] =>
+    // What the action worked out and where its numbers came from, as its records say it (an event type that is `told`): whole for the
+    // answer, and as the player's character is shown it (another's hit points as the fight shows them) for the fight's round.
+    const toldSince = (start: number, viewer?: EntityId): string[] =>
       w.events.slice(start).flatMap((e) => {
         const def = reg.get(e.type);
-        return def?.told === true ? [def.describe(e, w.ctx)] : [];
+        return def?.told === true ? [def.describe(e, w.ctx, viewer)] : [];
       });
     // An action of the tabletop rules taken in a fight under way is recorded into the fight with those words, spends its cost, and settles who is down (RULESET-DESIGN §5.3).
-    intoFight(o, action, res.actor, params, res.outcome, toldSince(from));
+    intoFight(o, action, res.actor, params, res.outcome, toldSince(from, w.world.pov));
     if (w.events.length === from) o.reply.line("already_so", { n: o.n, op: o.op, what: `${action.label} [${action.id}]` });
     for (const unmet of res.advised ?? []) o.draft.adviseOp(o.n, { code: "unmet_requirement", values: { requirement: typeof unmet.requirement === "string" ? unmet.requirement : unmet.reason, ...(unmet.words !== undefined ? { words: unmet.words } : {}) } });
     const told = toldSince(from);
