@@ -11,7 +11,7 @@ import { readText } from "../app/disk";
 import { treeSettingsOf } from "./settings";
 import { chatQuery, suggestionAcceptBody, suggestionAcceptedReply, suggestionDismissedReply, suggestionState, suggestionsReply, type TreeSuggestionView } from "./shapes";
 import type { TreeSuggestion } from "./suggestions";
-import { kindOf, levelBase, locate } from "./view";
+import { type ChatLocation, kindOf, levelBase, locate } from "./view";
 
 /** The levels a suggestion's file may be taken in place of at: the user's own, never the shipped one. */
 const OWN_LEVELS: readonly LayerLevel[] = ["global", "character", "chat"];
@@ -20,16 +20,16 @@ export function suggestionRoutes(kit: RouteKit) {
   const { deps, own } = kit;
 
   /**
-   * Where accepting a suggestion may write: the levels that have a place for its file (and a folder, for a chat not played yet),
-   * and the one it writes at when none is named: the file's own level, or for a shipped file the chat's, which the suggestion came from.
+   * Where accepting a suggestion may write: the levels that have a place for its file (a chat's own and its character's too for a
+   * chat not placed yet, which taking it places), and the one it writes at when none is named: the file's own level, or for a shipped
+   * file the chat's, which the suggestion came from.
    */
-  const placesOf = async (user: string, s: TreeSuggestion): Promise<{ level?: LayerLevel; levels: LayerLevel[] }> => {
-    const loc = own.locationOf(user, s.chat);
+  const placesOf = async (loc: ChatLocation, s: TreeSuggestion): Promise<{ level?: LayerLevel; levels: LayerLevel[] }> => {
     const lookup = await locate(loc, s.path);
     if (!lookup.ok) return { levels: [] };
     const at = lookup.at;
     const levels = OWN_LEVELS.filter((l) => {
-      const place = levelBase(loc, l) === null ? null : placeAt(at.level, at.rest, l);
+      const place = s.chat === null && levelBase(loc, l) === null ? null : placeAt(at.level, at.rest, l);
       return place !== null && userMayWrite(l, place, kindOf(l, place));
     });
     const level = at.level === "shipped" ? (levels.includes("chat") ? "chat" : levels[0]) : at.level;
@@ -41,7 +41,7 @@ export function suggestionRoutes(kit: RouteKit) {
     const loc = own.locationOf(user, s.chat);
     const lookup = await locate(loc, s.path);
     const now = lookup.ok && lookup.at.is === "file" && lookup.at.disk !== null ? await readText(lookup.at.disk) : null;
-    const where = await placesOf(user, s);
+    const where = await placesOf(loc, s);
     return { ...s, lines: lineDiff(now ?? "", s.text, (await treeSettingsOf(loc)).diffCells), levels: where.levels, ...(where.level === undefined ? {} : { level: where.level }) };
   };
 
@@ -77,8 +77,9 @@ export function suggestionRoutes(kit: RouteKit) {
       reply: suggestionAcceptedReply,
       handle: async ({ user, params, body }) => {
         const s = openSuggestion(user, params.id);
-        const loc = own.locationOf(user, s.chat);
-        const level = body.level === undefined ? (await placesOf(user, s)).level : levelOf(body.level, LEVELS, s.chat);
+        // Taken, it is written as yours: a chat not placed yet is placed first, as any write at its level places it.
+        const loc = await own.locationFor(user, s.chat);
+        const level = body.level === undefined ? (await placesOf(loc, s)).level : levelOf(body.level, LEVELS, s.chat);
         if (level === undefined) throw new RouteError(400, `No level of this chat has a place for ${s.path}: name the level your own is written at, as \`level\`.`);
         if (!(await deps.suggestions.decide(user, s.id, "accepted"))) throw new RouteError(409, `Suggestion ${s.id} was decided already.`);
         let written: string;

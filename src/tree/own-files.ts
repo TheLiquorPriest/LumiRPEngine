@@ -6,8 +6,8 @@
 // and a folder made, a file or folder of his renamed, moved or copied, never a shipped one or one RPE
 // makes again. The Files routes call these, and so does the migration's switch-on, which writes his
 // files too. Every path is a path of the chat's view, found by the view (`locate`): none leaves the tree,
-// and a link is refused. A chat RPE has not played yet is placed, as its first turn places it, at his
-// first write to it.
+// and a link is refused. A chat RPE has not played yet is placed, by the one placer its first turn and its
+// jobs use, at your first write to it; read before that, it holds nothing of its own, and reads as its defaults.
 
 import { cp, mkdir, readdir, rename, rm } from "node:fs/promises";
 import { lstatSync } from "node:fs";
@@ -56,12 +56,18 @@ export class OwnFiles {
     return this.locationOf(user, chat);
   }
 
-  /** A path of the view, found; a 400 for one that is not a path, a 404 for one the view does not hold. */
-  async found(loc: ChatLocation, path: string): Promise<FoundFile> {
+  /** A path of the view, found, wherever it is on disk or whether it has a place there yet; a 400 for one that is not a path, a 404 for one the view does not hold. */
+  async located(loc: ChatLocation, path: string): Promise<Located> {
     const lookup = await locate(loc, path);
     if (!lookup.ok) throw new RouteError(lookup.reason === "invalid" ? 400 : 404, `The tree has no file ${path} that a page can reach.`);
-    if (lookup.at.disk === null) throw new RouteError(404, `RPE has not played this chat yet, so it has no folder for ${lookup.at.path}.`);
-    return { ...lookup.at, disk: lookup.at.disk };
+    return lookup.at;
+  }
+
+  /** A path of the view, found on disk; a 404 too for one at a level of a chat that has no folder yet, which holds nothing of its own. */
+  async found(loc: ChatLocation, path: string): Promise<FoundFile> {
+    const at = await this.located(loc, path);
+    if (at.disk === null) throw new RouteError(404, `There is no ${at.path} yet: the ${at.level === "character" ? "character's" : "chat's own"} level holds nothing until something is written in the chat.`);
+    return { ...at, disk: at.disk };
   }
 
   /**

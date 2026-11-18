@@ -190,7 +190,8 @@ export function fileRoutes(kit: RouteKit) {
       reply: treeFileReply,
       handle: async ({ user, params, query }) => {
         const loc = own.locationOf(user, chatOf(query.chat));
-        const named = await own.found(loc, viewPathOf(params["*"]));
+        // The name alone is looked for: a chat with no folder yet reads as its defaults, the nearest of the shared levels' files.
+        const named = await own.located(loc, viewPathOf(params["*"]));
         const path = await inForceOf(await listingContext(loc), named.level, named.rest);
         if (path === null) throw new RouteError(404, `No file of the name of ${named.path} is in force for this chat: none is there, or its name is switched off.`);
         return await readFound(loc, await own.found(loc, path), query);
