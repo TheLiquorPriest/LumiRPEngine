@@ -4,6 +4,7 @@ format: lines
 keys:
   feed_*: the narrator's own sections (what a person is doing and how they regard the player's character, a project, a plan and the orders given, a vote waiting, a quest's stage, what is owed and what is on a person, a thing carried or lent, the date and time, the weather, the conditions someone is under, how an organization names a person and what they may do there, the usual routines of the people here), each a phrase or a sentence filled with what it names; feed_org_type_*, feed_role_*, feed_worn_*, feed_mood_* are the single words those fill in
   feedset, feedset_*: a section's settings in this chat as one sentence (the feedset line, with its parts feedset_scope_*, feedset_cut, feedset_uncapped, feedset_sources); feed_marked_scene and feed_marked_gm mark a fact beyond the player character's knowledge
+  feed_property, feed_where_somewhere, feed_where_at, feed_role_and_share: the Property section - one property's line (name, where it is, and what is said of who holds it - stake, absent where nothing is), where it is (somewhere where the place is out of the viewer's sight, else at a place - place) and a holder's role with their share (role, share)
 ---
 feed_name_knowsdoesnt_know_you_and_feels_words: {{name}} {{#if_known}}knows{{/if_known}}{{^if_known}}doesn't know{{/if_known}} you{{#if_words}} and feels {{words}} toward you{{/if_words}}.
 feed_right_now_they_are_doing: Right now they are {{doing}}.
@@ -156,3 +157,7 @@ feed_the_rest_of_the_plan: - The rest of the plan: {{who}}: {{text}} ({{status}}
 feed_tally: {{for}} for, {{against}} against, {{abstain}} abstaining{{#yet}}; not yet voted: {{yet}}{{/yet}}; it needs {{quorum}} to take part and more than {{pass}} of the votes cast for it
 feed_you_asked_approval: - You asked approval for {{org}}: {{text}} ({{why}}). It waits on {{approvers}}.
 feed_waiting_for_approval_at: - Waiting for approval at {{org}}, asked by {{by}}: {{text}} ({{why}}); {{approvers}} may approve it.
+feed_property: {{name}}{{where}}{{#stake}}: {{stake}}{{/stake}}.
+feed_where_somewhere:  somewhere
+feed_where_at:  at {{place}}
+feed_role_and_share: {{role}}, {{share}}%

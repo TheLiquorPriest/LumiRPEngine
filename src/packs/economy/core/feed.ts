@@ -35,13 +35,18 @@ export function propertyLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
   const where = (id: EntityId, viewer: EntityId | null): string => {
     const place = placeOfEntity(ctx.state, id);
     if (!place) return "";
-    if (viewer !== null && !canSeePlace(ctx.registry, ctx.world, ctx.state, viewer, place)) return " somewhere";
+    if (viewer !== null && !canSeePlace(ctx.registry, ctx.world, ctx.state, viewer, place)) return say("feed_where_somewhere");
     const at = own(ctx.world.places, place)?.name ?? place;
     // A building named for its place ("114 Harbor Street at 114 Harbor Street") says where it is already.
-    return at === name(id) ? "" : ` at ${at}`;
+    return at === name(id) ? "" : say("feed_where_at", { place: at });
   };
   /** A holder's role and share, as every property line names them. */
-  const roleOf = (o: { role: OwnerRole; worth: number }): string => `${roleLabel(o.role)}${o.worth > 0 ? `, ${Math.round(o.worth)}%` : ""}`;
+  const roleOf = (o: { role: OwnerRole; worth: number }): string => (o.worth > 0 ? say("feed_role_and_share", { role: roleLabel(o.role), share: Math.round(o.worth) }) : roleLabel(o.role));
+  /** One property's line: its name, where it is as `viewer` may see it, and what is said of who holds it. */
+  const propertyLine = (id: EntityId, viewer: EntityId | null, stake: string): string => say("feed_property", { name: name(id), where: where(id, viewer), ...(stake !== "" ? { stake } : {}) });
+  /** The holders of a property, each with their role, those `known` named and the rest as someone. */
+  const heldBy = (owners: readonly { party: EntityId; role: OwnerRole; worth: number }[], known: (party: EntityId) => boolean): string =>
+    say("feed_held_by_rest", { rest: owners.map((o) => say("feed_party_someone_o", { party: name(o.party), o: roleOf(o), if_party: known(o.party) })).join(", ") });
   const lines: FeedLine[] = [];
   const others: EntityId[] = [];
   for (const id of propertyIds(ctx.state)) {
@@ -64,7 +69,7 @@ export function propertyLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
       const you = direct ? say("feed_you_role", { role: roleLabel(direct.role) }) : through ? say("feed_you_through_party_someone", { party: name(through.party), if_party: !!(see(pov, through.party)) }) : null;
       stake = [rest.length > 0 ? say("feed_held_by_rest", { rest: rest.join(", ") }) : null, you].filter((p) => p !== null).join("; ");
     }
-    lines.push({ text: `${name(id)}${where(id, pov)}${stake !== "" ? `: ${stake}` : ""}.`, known: "pov" });
+    lines.push({ text: propertyLine(id, pov, stake), known: "pov" });
   }
   if (scope === "player") return lines;
   const here = placeOfEntity(ctx.state, pov);
@@ -82,9 +87,8 @@ export function propertyLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
     const knowers = owners.filter((o) => withHim(o.party) && see(o.party, id)).map((o) => o.party);
     const knower = knowers[0];
     if (knower !== undefined) {
-      const text = `${name(id)}${where(id, knower)}: held by ${owners.map((o) => `${see(knower, o.party) || o.party === knower ? name(o.party) : "someone"} (${roleOf(o)})`).join(", ")}.`;
-      lines.push({ text, known: "scene", who: knowers.map(name).join(", ") });
-    } else if (scope === "gm") lines.push({ text: `${name(id)}${where(id, null)}: held by ${owners.map((o) => `${name(o.party)} (${roleOf(o)})`).join(", ")}.`, known: "gm" });
+      lines.push({ text: propertyLine(id, knower, heldBy(owners, (party) => see(knower, party) || party === knower)), known: "scene", who: knowers.map(name).join(", ") });
+    } else if (scope === "gm") lines.push({ text: propertyLine(id, null, heldBy(owners, () => true)), known: "gm" });
     else continue;
     told++;
   }

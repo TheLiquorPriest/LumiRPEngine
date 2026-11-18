@@ -267,6 +267,9 @@ org_log_sold_at_the_market: sold at the market
 org_log_a_property: A property
 org_log_sold_at_its_value: sold at its value
 org_log_to_its_owners_by_share: to its owners by share
+org_log_to_no_one: to no one
+org_log_to_who: to {{who}}
+org_log_one_of_its_owners: one of its owners
 org_log_a_stake_in_another_company: A stake in another company
 org_log_bizname_gathered_for_winding_up: {{bizName}}: gathered for winding up
 org_log_wrote_off_an_invoice_owedcount_invoices_owed: Wrote off {{#if_owed}}an invoice{{/if_owed}}{{^if_owed}}{{owedCount}} invoices{{/if_owed}} owed it ({{cents}})

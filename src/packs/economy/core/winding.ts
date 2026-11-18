@@ -446,7 +446,7 @@ function thingsTo(api: FinanceApi, ctx: ReadContext, business: EntityId, to: Ent
 function assetsOf(api: FinanceApi, ctx: ReadContext, business: EntityId, plan: Pick<WindPlan, "property" | "to">, viewer: EntityId | null): WindAsset[] {
   const { properties, stakes } = heldAssets(api, ctx, business, plan.property === "sell");
   const recipient = thingsTo(api, ctx, business, plan.to);
-  const goes = recipient === null ? "to no one" : `to ${hiddenFrom(ctx, viewer, recipient) ? "one of its owners" : labelOf(ctx, recipient)}`;
+  const goes = recipient === null ? say("org_log_to_no_one") : say("org_log_to_who", { who: hiddenFrom(ctx, viewer, recipient) ? say("org_log_one_of_its_owners") : labelOf(ctx, recipient) });
   const shown = (id: EntityId, unseen: string): Pick<WindAsset, "id" | "label"> => (hiddenFrom(ctx, viewer, id) ? { id: opaqueId(id), label: unseen } : { id, label: labelOf(ctx, id) });
   return [
     ...soleHoldings(api, ctx, business).map((h) => ({ ...shown(h, say("org_log_a_holding")), value: holdingValue(ctx, h), goes: say("org_log_sold_at_the_market") })),
