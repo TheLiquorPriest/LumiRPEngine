@@ -1505,8 +1505,10 @@ export interface LoreIndexRow {
 export interface LoreIndexStatus {
   /** Entries in the chat's lore. */
   entries: number;
-  /** Entries no run has written lines for as they stand now. */
+  /** Entries no run has written lines for as they stand now: those never indexed, and those indexed at an earlier revision. */
   unindexed: number;
+  /** Of those, the entries a run indexed at an earlier revision and that have changed since: their lines still show, marked as out of date, until a run redoes them. */
+  stale: number;
   /** The definition indexing runs as. */
   agent: string;
   /** The connection the definition runs on: the one it names, else his default; null where none is there. */

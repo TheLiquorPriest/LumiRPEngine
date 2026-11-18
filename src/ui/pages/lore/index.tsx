@@ -28,19 +28,46 @@ export function loreMatches(row: LoreIndexRow, query: string): boolean {
   return hay.some((h) => h.toLowerCase().includes(q));
 }
 
-function EntryLine(props: { row: LoreIndexRow; bindings?: ((row: LoreIndexRow) => ComponentChildren) | undefined }) {
+/** Where indexing stands, in a line: the entries, those not indexed as they stand now, and how many of those were indexed at an earlier revision and have changed since. */
+export function indexWords(status: LoreIndexStatus): string {
+  const entries = counted(status.entries, "entry", "entries");
+  if (status.unindexed === 0) return `${entries}; every one is indexed.`;
+  const now = `${status.unindexed} not indexed as ${status.unindexed === 1 ? "it stands" : "they stand"} now`;
+  if (status.stale === 0) return `${entries}; ${now}.`;
+  const earlier = status.stale < status.unindexed ? `${status.stale} of them indexed at an earlier revision and changed since` : status.unindexed === 1 ? "it was indexed at an earlier revision and has changed since" : "all of them indexed at an earlier revision and changed since";
+  return `${entries}; ${now}, ${earlier}.`;
+}
+
+/** The press that starts indexing again from an entry's own line: the job indexes every entry not indexed as it stands now, this one with them. */
+interface IndexAgain {
+  busy: boolean;
+  disabled: boolean;
+  press(): void;
+}
+
+function EntryLine(props: { row: LoreIndexRow; bindings?: ((row: LoreIndexRow) => ComponentChildren) | undefined; again?: IndexAgain | undefined }) {
   const { row } = props;
   const how = row.activation.length === 0 ? "never by itself" : row.activation.map((a) => ACTIVATION_WORDS[a] ?? a).join(", ");
   return (
     <li class="lre-stack rpe-entry" data-entry={row.id}>
       <Row k={row.title} v={row.source} sub={`${row.id} · ${counted(row.size, "character")} · ${how}`} />
-      {row.indexed ? (
+      {row.kind === null && row.line === null ? null : (
         <p class="rpe-line" data-line>
           {row.kind === null ? null : <Badge>{row.kind}</Badge>} {row.line ?? ""}
-          {row.stale ? <Badge tone="warn" title="Its lines were written for an earlier revision of the entry">out of date</Badge> : null}
+          {row.stale ? <Badge tone="warn" title="Its lines were written for an earlier revision of the entry, which has changed since">out of date</Badge> : null}
           {row.edited.length === 0 ? null : <Badge tone="accent" title={`Your own: ${row.edited.join(", ")}`}>yours</Badge>}
         </p>
-      ) : (
+      )}
+      {row.stale ? (
+        <p class="lre-inline rpe-wrap rpe-meta" data-stale>
+          <span>{`Indexed at an earlier revision; the entry has changed since${row.line === null || row.edited.includes("line") ? "" : ", so the line above is of its earlier text"}.`}</span>
+          {props.again === undefined ? null : (
+            <Button size="sm" variant="ghost" busy={props.again.busy} disabled={props.again.disabled} title="Indexes this entry again, and any other that is not indexed as it stands now" onClick={props.again.press}>
+              Index again
+            </Button>
+          )}
+        </p>
+      ) : row.indexed ? null : (
         <p class="rpe-meta" data-unindexed>
           Not indexed yet{row.keys.length === 0 ? "" : `; its keys: ${row.keys.join(", ")}`}.
         </p>
@@ -110,7 +137,7 @@ export function LoreView(props: LoreViewProps) {
         )}
         {status === null ? null : (
           <div class="lre-stack" data-status>
-            <p class="rpe-line">{`${counted(status.entries, "entry", "entries")}; ${status.unindexed === 0 ? "every one is indexed" : `${status.unindexed} not indexed as ${status.unindexed === 1 ? "it stands" : "they stand"} now`}.`}</p>
+            <p class="rpe-line">{indexWords(status)}</p>
             <p class="rpe-meta" data-connection>
               {status.connection === null
                 ? "No connection is there for the indexer to run on: add one on Connections."
@@ -148,7 +175,7 @@ export function LoreView(props: LoreViewProps) {
         {rows.length === 0 && index.items.length > 0 ? <p class="lre-muted rpe-line">{index.more ? "Nothing among the entries read so far; reading on." : "No entry matches."}</p> : null}
         <ul class="rpe-plain lre-stack" data-entries>
           {rows.map((row) => (
-            <EntryLine key={row.id} row={row} bindings={props.bindings} />
+            <EntryLine key={row.id} row={row} bindings={props.bindings} again={{ busy: props.indexing.busy, disabled: status?.connection === null, press: props.onIndex }} />
           ))}
         </ul>
         {index.more ? (

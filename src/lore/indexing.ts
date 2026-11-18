@@ -163,6 +163,14 @@ function claimOf(user: string, entry: Pick<LoreCatalogEntry, "world" | "id" | "r
   return `${user}\u0000${placeOf(entry)}\u0000${entry.revision}`;
 }
 
+/** How a chat's lore stands (`LoreIndex.counts`). */
+export interface LoreCounts {
+  entries: number;
+  indexed: number;
+  stale: number;
+  unindexed: number;
+}
+
 /** The next entries an indexing run is handed, and the counts the answer tells: `left` still to be handed to a run, `held` those another job has now. */
 export interface LoreBatch {
   entries: IndexedEntry[];
@@ -450,9 +458,20 @@ export class LoreIndex {
     return { entries, left: free.length, held };
   }
 
+  /**
+   * How the chat's lore stands, from one reading of its entries: how many there are, how many a run has written lines for as they
+   * stand now, how many have lines of an earlier revision only (changed since, shown marked), and how many are not indexed as they
+   * stand now (those, and those no run has indexed at all), those another job holds included.
+   */
+  async counts(at: LoreAt): Promise<LoreCounts> {
+    const entries = await this.entries(at);
+    const indexed = entries.filter((e) => e.indexed).length;
+    return { entries: entries.length, indexed, stale: entries.filter((e) => e.stale).length, unindexed: entries.length - indexed };
+  }
+
   /** How many entries of the chat's lore no run has indexed as they stand now, those another job holds included. */
   async unindexed(at: LoreAt): Promise<number> {
-    return (await this.entries(at)).filter((e) => !e.indexed).length;
+    return (await this.counts(at)).unindexed;
   }
 
   /** Gives back what a job was handed and has not written lines for: it ended. */

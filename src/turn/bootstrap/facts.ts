@@ -138,8 +138,8 @@ export interface DoneEnoughDeps {
 }
 
 async function loreFact(deps: DoneEnoughDeps, user: string, chat: string): Promise<LoreIndexFact> {
-  const entries = await deps.loreIndex.entries({ user, chat });
-  return { entries: entries.length, indexed: entries.filter((e) => e.indexed).length, stale: entries.filter((e) => e.stale).length };
+  const { entries, indexed, stale } = await deps.loreIndex.counts({ user, chat });
+  return { entries, indexed, stale };
 }
 
 /** The maximal runs of places below `count` where `at` holds. */

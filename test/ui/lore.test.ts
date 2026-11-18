@@ -21,7 +21,7 @@ function view(over: Partial<LoreViewProps> = {}) {
     chat: "c-1",
     index: { items: Array.from({ length: 60 }, (_, i) => row(i + 1)), more: false, loading: false, problem: null },
     query: "",
-    status: { entries: 60, unindexed: 0, agent: "indexer", connection: { id: "c1", name: "Flash" }, model: "deepseek-v4-flash" },
+    status: { entries: 60, unindexed: 0, stale: 0, agent: "indexer", connection: { id: "c1", name: "Flash" }, model: "deepseek-v4-flash" },
     statusProblem: null,
     overlays: { overlays: [{ id: 1, entry: "e-3", title: "Entry 3", note: "The inn burned down.", turn: 4, turnId: "t-4", by: "the Author", agent: null }] },
     overlaysProblem: null,
@@ -67,9 +67,23 @@ describe("the Lore page", () => {
   });
 
   test("with no connection there is none to index on, and RPE's refusal is shown in its words", () => {
-    const { text } = view({ status: { entries: 3, unindexed: 3, agent: "indexer", connection: null, model: null }, indexing: { busy: false, job: null, problem: "Jobs are off." } });
+    const { text } = view({ status: { entries: 3, unindexed: 3, stale: 0, agent: "indexer", connection: null, model: null }, indexing: { busy: false, job: null, problem: "Jobs are off." } });
     expect(text).toContain("No connection is there for the indexer to run on");
     expect(text).toContain("Jobs are off.");
+  });
+
+  test("an entry changed after it was indexed says so, shows the line it has as of the earlier text and offers indexing again", () => {
+    const page = view({
+      status: { entries: 2, unindexed: 1, stale: 1, agent: "indexer", connection: { id: "c1", name: "Flash" }, model: null },
+      index: { items: [row(1, { indexed: false, stale: true, line: "The old gate keeper." }), row(2)], more: false, loading: false, problem: null },
+    });
+    expect(page.text).toContain("The old gate keeper.");
+    expect(page.text).toContain("out of date");
+    expect(page.text).toContain("Indexed at an earlier revision; the entry has changed since, so the line above is of its earlier text.");
+    expect(page.text).not.toContain("Not indexed yet");
+    expect(page.text).toContain("2 entries; 1 not indexed as it stands now, it was indexed at an earlier revision and has changed since.");
+    press(page.tree, "Index again");
+    expect(page.asked).toEqual(["index"]);
   });
 
   test("the routes are read from the chat, a page at a time, and the job is started as a post", async () => {

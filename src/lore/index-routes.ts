@@ -65,7 +65,8 @@ const statusReply = shape.named(
   "Where a chat's lore indexing stands, and what it runs on: how many entries the chat's lore holds, how many no run has indexed as they stand now, and the model the indexer's definition runs on.",
   shape.object({
     entries: field(shape.whole({ least: 0 }), "Entries in the chat's lore."),
-    unindexed: field(shape.whole({ least: 0 }), "Entries no run has written lines for as they stand now."),
+    unindexed: field(shape.whole({ least: 0 }), "Entries no run has written lines for as they stand now: those never indexed, and those indexed at an earlier revision."),
+    stale: field(shape.whole({ least: 0 }), "Of those, the entries a run indexed at an earlier revision and that have changed since: their lines still show, marked as out of date, until a run redoes them."),
     agent: field(T, "The definition indexing runs as."),
     connection: field(shape.nullable(shape.object({ id: field(T, "The connection's id."), name: field(T, "Its name.") })), "The connection the definition runs on: the one it names, else his default; null where none is there."),
     model: field(shape.nullable(T), "That connection's model; null where none resolves."),
@@ -188,9 +189,9 @@ export function loreIndexRoutes(deps: LoreIndexRoutesDeps) {
       reply: statusReply,
       handle: async ({ user, params }) => {
         const at: LoreAt = { user, chat: params.chat };
-        const [entries, unindexed, listed] = await Promise.all([deps.index.entries(at), deps.index.unindexed(at), deps.definitions.list(deps.scope(user, params.chat))]);
+        const [counts, listed] = await Promise.all([deps.index.counts(at), deps.definitions.list(deps.scope(user, params.chat))]);
         const runsOn = listed.find((d) => d.name === LORE_INDEXER)?.runsOn;
-        return { entries: entries.length, unindexed, agent: LORE_INDEXER, connection: runsOn?.connection ?? null, model: runsOn?.model ?? null };
+        return { entries: counts.entries, unindexed: counts.unindexed, stale: counts.stale, agent: LORE_INDEXER, connection: runsOn?.connection ?? null, model: runsOn?.model ?? null };
       },
     }),
     route({
