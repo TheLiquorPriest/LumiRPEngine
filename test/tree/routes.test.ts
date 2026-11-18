@@ -10,7 +10,10 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, readdir, readFile, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { YAML } from "bun";
-import type { FileProblem, RuleView } from "rp-harness/contract";
+import { createHarness } from "rp-harness";
+import type { FileProblem, Harness, RuleView } from "rp-harness/contract";
+import { createFolderHost } from "rp-harness/hosts/folder";
+import { NO_SESSION } from "../../src/turn";
 import type { App, RunningServer } from "../../src/app";
 import { CHATS_FOLDER, ChatMeasurer, type DefaultsDeps, layDefaults, NO_CHAT, type NoteFiles, TREE_MIGRATIONS, TreeChats, type TreeFileDiff, type TreeFileEntry, type TreeFiles, type TreeFileText, treeFiles, treeRoutes, type TreeStorage, type SuggestionFiled, type TreeSuggestionView, TreeSuggestions } from "../../src/tree/index";
 import { answeredProblems } from "../app/call";
@@ -66,10 +69,13 @@ describe("the Files page's routes", () => {
   let measurer: ChatMeasurer;
   /** The file port agents write through. */
   let port: TreeFiles;
-  /** The rules RPH lists for the chat, as the Rules page's switch finds one by its name. */
-  let ruled: RuleView[] = [];
-  /** What RPH finds wrong in the files, as the listing and a write's answer say it. */
-  let flagged: FileProblem[] = [];
+  /** The rules a test sets for the chat, as the Rules page's switch finds one by its name; null: as RPH lists them. */
+  let ruled: RuleView[] | null = null;
+  /** What a test sets as found wrong in the files, as the listing and a write's answer say it; null: as RPH finds it. */
+  let flagged: FileProblem[] | null = null;
+  /** RPH's harness over the bed's files. */
+  let harness: Harness;
+  const scopeOf = (chat: string | null) => ({ user: OWNER, chat: chat ?? NO_CHAT, session: NO_SESSION });
 
   const call = async <T>(method: string, path: string, body?: unknown, headers: Record<string, string> = page): Promise<{ status: number; body: T }> => {
     const res = await fetch(`${server.url}${path}`, { method, headers: { ...headers, "content-type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
@@ -82,6 +88,8 @@ describe("the Files page's routes", () => {
 
   beforeEach(async () => {
     bed = await makeBed();
+    ruled = null;
+    flagged = null;
     const sources = { rph: join(bed.root, "rph"), rpe: join(bed.root, "rpe") };
     rph = sources.rph;
     await put(sources.rph, SHIPPED_RPH);
@@ -97,8 +105,13 @@ describe("the Files page's routes", () => {
             suggestions = new TreeSuggestions({ db: a.db, writes: a.writes, now: a.now });
             const chats = new TreeChats(a.db, a.writes, a.paths.files);
             port = treeFiles({ files: a.paths.files, user: OWNER, chats, turnFolder: async () => null, writes: a.writes, now: a.now });
-            // The agent's stack is the harness's own `definitions.stack`, which this bed has none of.
-            const stack = async () => [];
+            // RPH's own reading of the files: its harness over the tree's file port, with a folder host for what the files do not give.
+            await mkdir(join(a.paths.root, "rph-host", "host"), { recursive: true });
+            await writeFile(join(a.paths.root, "rph-host", "host", "facts.json"), JSON.stringify({ defs: [], values: {} }));
+            const host = await createFolderHost({ dir: join(a.paths.root, "rph-host"), user: OWNER });
+            // The folder host keeps no tools of a no-chat scope's; the bed has no tools to list.
+            harness = createHarness({ ...host, files: port, tools: { ...host.tools, all: async () => [] } });
+            const stack = (_user: string, chat: string | null, agent: string) => harness.definitions.stack(scopeOf(chat), agent);
             const apply = async (_user: string, chat: string) => {
               if (open === null) return { session: null };
               applied.push(chat);
@@ -107,7 +120,7 @@ describe("the Files page's routes", () => {
             // A chat RPE has not played yet is placed by the names Lumiverse would give.
             const place = (user: string, chat: string) => chats.place(user, chat, GHOST);
             measurer = new ChatMeasurer({ files: a.paths.files, chats, now: a.now });
-            a.routes.add("tree", treeRoutes({ files: a.paths.files, chats, db: a.db, writes: a.writes, now: a.now, backups: a.paths.backups, copiesKept: 3, measurer, suggestions, turning: () => turning, stack, preview: async () => ({ part: { fields: [], missing: [], problems: [] }, values: null }), apply, place, openSessions: async () => (open === null ? [] : [open]), guidance: () => ({ rules: async () => ruled, definitions: async () => [], stack: async () => [], external: async () => [], problems: async () => flagged }), written: (saved) => void told.push(saved) }));
+            a.routes.add("tree", treeRoutes({ files: a.paths.files, chats, db: a.db, writes: a.writes, now: a.now, backups: a.paths.backups, copiesKept: 3, measurer, suggestions, turning: () => turning, stack, preview: async () => ({ part: { fields: [], missing: [], problems: [] }, values: null }), apply, place, openSessions: async () => (open === null ? [] : [open]), guidance: (_user, chat) => ({ rules: async () => ruled ?? harness.rules.list(scopeOf(chat)), definitions: () => harness.definitions.list(scopeOf(chat)), stack: (agent) => harness.definitions.stack(scopeOf(chat), agent), external: async () => [], problems: async () => flagged ?? harness.problems(scopeOf(chat)) }), written: (saved) => void told.push(saved) }));
           },
         },
       ],
@@ -353,7 +366,7 @@ describe("the Files page's routes", () => {
     expect((await call("POST", "/api/v1/rules/nowhere/switch", { on: false, level: "chat", chat: CHAT })).status).toBe(404);
   });
 
-  test.skip("hardening: pinning a file for an agent writes it in the level's stack.pins with his words kept, unpinning takes it out, a file the view does not hold is refused, and a pin of a file that is gone or an agent no definition names is listed, not dropped", async () => {
+  test("pinning a file for an agent writes it in the level's stack.pins with his words kept, unpinning takes it out, a file the view does not hold is refused, and a pin of a file that is gone or an agent no definition names is listed, not dropped", async () => {
     await writeFile(join(chatFolder, "WORLD.md"), "# World\n");
     await writeFile(join(chatFolder, "RPE.yml"), "# his own words\nstack:\n  off: []\n");
     const pinned = await call<{ file: TreeFileEntry }>("PUT", "/api/v1/files-pin/WORLD.md", { level: "chat", chat: CHAT, agent: "gm", pinned: true });
@@ -418,7 +431,7 @@ describe("the Files page's routes", () => {
     expect(told).toEqual([]);
   });
 
-  test.skip("hardening: an agent's stack is read with or without a chat, Apply now renews the open session's block and says so, and with none open says the next one opens as the files stand", async () => {
+  test("an agent's stack is read with or without a chat, Apply now renews the open session's block and says so, and with none open says the next one opens as the files stand", async () => {
     const withChat = await call<{ agent: string; parts: { kind: string; path: string; text?: string }[] }>("GET", `/api/v1/files-stack?agent=gm&chat=${CHAT}`);
     expect(withChat.body.parts.find((p) => p.kind === "definition")).toMatchObject({ path: "@shipped/.agents/gm.md" });
     await call("PUT", "/api/v1/files/@shipped/.agents/gm.md", { level: "chat", chat: CHAT, text: "---\nname: gm\ndescription: This chat's GM.\n---\nMine.\n" });
@@ -511,7 +524,7 @@ describe("the Files page's routes", () => {
     expect(await readFile(join(lamp, "RPE.yml"), "utf8")).toContain("turnFolders: 7");
   });
 
-  test.skip("hardening: the listing reads a folder a page at a time and finds files by name and by text across the levels; each rule stands as RPH finds it; a long file is read a range at a time", async () => {
+  test("the listing reads a folder a page at a time and finds files by name and by text across the levels; each rule stands as RPH finds it; a long file is read a range at a time", async () => {
     type Page = { folder: string; items: { name: string; path: string; folder: boolean; level: string; entry: TreeFileEntry | null }[]; next: string | null; levels: string[]; stopped: string | null };
     const list = (query: string) => call<Page>("GET", `/api/v1/files-list?chat=${CHAT}${query}`);
     const top = (await list("")).body;
@@ -634,7 +647,7 @@ describe("the Files page's routes", () => {
     expect(await readdir(join(chatFolder, ".."))).not.toContain(chatFolder.split("/").at(-1) ?? "");
   });
 
-  test.skip("hardening: the Storage page gets what each chat's folder takes by area and the notes agents lean on; the Files page gets an agent's stack with where each part comes from", async () => {
+  test("the Storage page gets what each chat's folder takes by area and the notes agents lean on; the Files page gets an agent's stack with where each part comes from", async () => {
     const scope = { user: OWNER, chat: CHAT, session: "s-1", turn: "t-1" };
     const author = { id: "lead-1", definition: "author" };
     for (const text of ["One.\n", "One, two.\n", "One, two, three.\n"]) expect((await port.write(scope, "persistent-workspace/ledger.md", { op: "write", text }, author)).status).toBe("written");
