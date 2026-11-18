@@ -175,7 +175,7 @@ export class WorldChats {
     const { world, state } = this.head(user, chat);
     if (!(await this.deps.worlds.hasRevision(world, to, user))) throw new WorldError("not_found", `revision ${to} of the world is not one of its revisions`);
     const marker = validMarkerBody({ kind: "migrate", to, merge: picks });
-    if (marker === null) throw new WorldError("bad_request", "his picks are not picks of an Upgrade");
+    if (marker === null) throw new WorldError("bad_request", "your picks are not picks of an Upgrade");
     const waiting = this.deps.turning(user, chat);
     if (state.revision === to && Object.keys(picks).length === 0) return { revision: to, edit: null, applied: true, waiting };
     return { revision: to, ...(await this.record(user, chat, marker, { from: state.revision, to })), waiting };

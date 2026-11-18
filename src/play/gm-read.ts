@@ -308,7 +308,7 @@ export function gmRoutes(deps: GmReadDeps) {
             return { gm: routineGmView(ctx, params.entity, query.day ? Number(query.day) : undefined) };
           }
           const player = routinePlayerView(ctx, params.entity);
-          if (player === null) throw new RouteError(404, `Chat ${params.chat} has no one ${params.entity} his character knows.`);
+          if (player === null) throw new RouteError(404, `Chat ${params.chat} has no one ${params.entity} your character knows.`);
           return { player };
         }),
     }),

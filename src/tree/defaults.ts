@@ -108,7 +108,7 @@ export function updatesSince<U extends DefaultUpdate>(updates: readonly U[], wri
 export async function recordWritten(writes: TreeWrites, user: string, file: string, at: number): Promise<void> {
   await writes.run((db) => {
     db.run("INSERT INTO tree_written (user, file, seen, at) VALUES (?1, ?2, COALESCE((SELECT MAX(seq) FROM tree_default WHERE user = ?1), 0), ?3) ON CONFLICT (user, file) DO UPDATE SET seen = excluded.seen, at = excluded.at", [user, file, at]);
-  }, "keeping when the user wrote a file");
+  }, "keeping when you wrote a file");
 }
 
 function linesOf(text: string): string[] {

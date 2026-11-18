@@ -124,7 +124,7 @@ export async function recordOwnerEdit(deps: OwnerEditDeps, user: string, chat: s
       ...store.map((c): ChangeInput => ({ lane: "engine", op: c.op, value: c.value, by: PLAYER, source: PLAYER, cite, precision: c.precision ?? null, standing: c.standing ?? null })),
     ]);
     return { undo: edit, advised };
-  }, "recording an edit of his");
+  }, "recording an edit of yours");
   if (out.undo !== null) stateChanged(deps.live, chat);
   return out;
 }

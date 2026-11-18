@@ -630,7 +630,7 @@ export class PlayService {
       const unreversed = all.filter((c) => left.some((l) => l.values?.change === c.id));
       if (unreversed.length > 0) throw new Refused("conflict", { line: "no_undo_for", codes: { parts: unreversed.map((c) => c.op) } });
       return changes.length > 0;
-    }, "undoing an edit of his");
+    }, "undoing an edit of yours");
   }
 
   private async refusalWords(error: Refused): Promise<string> {

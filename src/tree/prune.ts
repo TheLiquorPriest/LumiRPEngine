@@ -153,7 +153,7 @@ export async function planPrune(deps: PruneDeps, user: string, ask: PruneAsk): P
     take: async () => {
       if (backup !== null) await rm(join(deps.backups, backup.name), { force: true });
       else await takePlanned(planned);
-      await deps.writes.run((db) => db.run("INSERT INTO tree_prune (user, at) VALUES (?, ?) ON CONFLICT (user) DO UPDATE SET at = excluded.at", [user, deps.now()]), "keeping when the user last pruned");
+      await deps.writes.run((db) => db.run("INSERT INTO tree_prune (user, at) VALUES (?, ?) ON CONFLICT (user) DO UPDATE SET at = excluded.at", [user, deps.now()]), "keeping when you last pruned");
     },
   };
 }

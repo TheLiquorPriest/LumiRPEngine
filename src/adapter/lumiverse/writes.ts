@@ -169,7 +169,7 @@ export function createWrites(deps: WriteDeps): Writes {
       const id = isRecord(made.body) && typeof made.body.id === "string" ? made.body.id : null;
       if (id === null) throw new LumiverseError("protocol", "Lumiverse answered a book's creation with no id.");
       const had = await chatBooksNow(session, chat);
-      if (had === null) throw new LumiverseError("protocol", `The chat ${chat} is not one of this user's: the book made for it was not attached.`, 404);
+      if (had === null) throw new LumiverseError("protocol", `The chat ${chat} is not one of yours: the book made for it was not attached.`, 404);
       await attach(chat, [...had.filter((b) => b !== id), id]);
       return id;
     },

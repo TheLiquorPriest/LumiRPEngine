@@ -547,7 +547,7 @@ export class LoreIndex {
       }
       // His own bindings stand over a run's and outlive a run that redoes the entry; null takes them off, and the run's show again.
       if ("defines" in edit) putBindings(db, at.user, entry.id, "owner", (edit.defines ?? []).map((b) => ({ ...resolveRecord(world, b.what), aspect: b.aspect })), null, now);
-    }, "keeping the user's edit of the lore index");
+    }, "keeping your edit of the lore index");
     await this.keepFiles(at);
     return joined(entry, this.rows(at.user, [entry]).get(placeOf(entry)), this.bindings(at, [entry]).get(entry.id));
   }

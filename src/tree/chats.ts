@@ -144,7 +144,7 @@ CREATE INDEX suggestion_chat ON suggestion (user, chat, state);
   },
   {
     version: 8,
-    name: "every change an update made to a default, and when the user wrote their own files",
+    name: "every change an update made to a default, and when you wrote your own files",
     // `tree_default` becomes one row for each file an update changed or took away (`removed`), numbered in the order updates came (`seq`),
     // where it kept only the last change of each file. `tree_written`: when the user wrote one of their files through RPE (by its place below
     // the tree's folder), and the last `seq` there had been then, which is what says which updates came after.
@@ -172,7 +172,7 @@ CREATE TABLE tree_written (
   },
   {
     version: 9,
-    name: "chats Lumiverse deleted, and when the user last pruned",
+    name: "chats Lumiverse deleted, and when you last pruned",
     // `tree_chat.deleted`: when RPE heard Lumiverse delete the chat. `tree_prune`: when the user last pruned anything the Storage page offers.
     sql: `
 ALTER TABLE tree_chat ADD COLUMN deleted INTEGER;

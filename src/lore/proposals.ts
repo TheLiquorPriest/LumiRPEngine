@@ -427,9 +427,9 @@ export class LoreProposals {
       if (w.kind === "put_back") db.run("UPDATE lore_write_log SET put_back = ? WHERE user = ? AND id = ?", [made, user, w.of]);
       else if (w.proposal !== null) db.run("UPDATE lore_proposal SET status = 'approved', decided = ?, write = ? WHERE user = ? AND id = ?", [at, made, user, w.proposal]);
       return made;
-    }, "keeping a write to the user's lore");
+    }, "keeping a write to your lore");
     const row = this.deps.db.query<WriteRow, [string, number]>("SELECT * FROM lore_write_log WHERE user = ? AND id = ?").get(user, id);
-    if (row === null) throw new Error(`The write ${id} to the user's lore was kept and cannot be read back.`);
+    if (row === null) throw new Error(`The write ${id} to your lore was kept and cannot be read back.`);
     return writeView(row);
   }
 }

@@ -74,6 +74,6 @@ export const engineWrote = (e: Pick<BookEntry, "extensions">): boolean => engine
 
 /** His books as a picker lists them; refused in words where the door gives no list. */
 export async function listBooks(books: BuildBooks, user: string, chat: string | null): Promise<LoreBookView[]> {
-  if (books.list === undefined) throw new Error("The door's books give no list of the user's books.");
+  if (books.list === undefined) throw new Error("The door's books give no list of your books.");
   return await books.list(user, chat);
 }

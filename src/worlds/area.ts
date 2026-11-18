@@ -67,7 +67,7 @@ export function worldsArea(takes: () => WorldsTakes): WorldsArea {
       });
     },
     service() {
-      if (made === null) throw new Error("The worlds area is not mounted yet, so his worlds cannot be read or written.");
+      if (made === null) throw new Error("The worlds area is not mounted yet, so your worlds cannot be read or written.");
       return made;
     },
   };

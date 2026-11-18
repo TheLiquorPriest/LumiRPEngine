@@ -330,7 +330,7 @@ export function createDbReader(deps: DbReaderDeps): DbReader {
       return r === null ? null : mapped(`chat ${chat}`, () => chatFrom(row(r)));
     },
     async chats() {
-      const rows = await step("the user's chats", (db) => db.query(Q.chats).all(user));
+      const rows = await step("your chats", (db) => db.query(Q.chats).all(user));
       return rows.map((r) => mapped("a chat", () => chatFrom(row(r))));
     },
     async path(chat) {
@@ -381,7 +381,7 @@ export function createDbReader(deps: DbReaderDeps): DbReader {
       return r === null ? null : mapped(`world book ${book}`, () => bookFrom(row(r)));
     },
     async books() {
-      const rows = await step("the user's world books", (db) => db.query(Q.books).all(user));
+      const rows = await step("your world books", (db) => db.query(Q.books).all(user));
       return rows.map((r) => mapped("a world book", () => bookFrom(row(r))));
     },
     async entries(book) {
@@ -405,7 +405,7 @@ export function createDbReader(deps: DbReaderDeps): DbReader {
       return r === null ? null : mapped(`character ${character}`, () => characterFrom(row(r)));
     },
     async characters() {
-      const rows = await step("the user's characters", (db) => db.query(Q.characters).all(user));
+      const rows = await step("your characters", (db) => db.query(Q.characters).all(user));
       return rows.map((r) => mapped("a character", () => characterFrom(row(r))));
     },
     async persona(persona) {
