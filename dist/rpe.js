@@ -2927,7 +2927,7 @@ var init_config = __esm(() => {
     signInPauseMinutes: { key: "auth.signInPauseMinutes", default: D.auth.signInPauseMinutes, takes: whole(1), advice: [{ above: 24 * 60, says: "After wrong passwords RPE sends Lumiverse none for over a day." }], levels: GLOBAL, perConnection: false, name: "Pause after wrong Lumiverse passwords", about: "Minutes RPE sends Lumiverse no password after the wrong ones the setting before allows.", effect: "start" },
     queueEvents: { key: "liveSocket.queueEvents", default: D.live.queueEvents, takes: whole(1), advice: [{ above: 1e6, says: "Over a million events are held in RPE's memory for one slow page." }], levels: GLOBAL, perConnection: false, name: "Events held for a slow page", about: "Events the live socket holds for one slow page following one chat; past it the oldest are dropped, and the page is told which.", effect: "start" },
     messageBytes: { key: "liveSocket.maxMessageBytes", default: D.live.messageBytes, takes: whole(1), advice: [{ below: 256, says: "A page's own messages on the live socket (a follow, a renewal) take up to 256 bytes, and are refused." }, { above: 16 * 1024 * 1024, says: "A page may send a message this large, held whole in memory." }], levels: GLOBAL, perConnection: false, name: "Largest live message", about: "Bytes of the largest message a page may send on the live socket.", effect: "start" },
-    follows: { key: "liveSocket.maxFollows", default: D.live.follows, takes: whole(1), advice: [{ above: 1e5, says: "One page may follow over 100,000 chats at once." }], levels: GLOBAL, perConnection: false, name: "Chats one live socket follows", about: "The most chats one page's live socket may follow at once; the user's jobs and his own events count as one each.", effect: "start" },
+    follows: { key: "liveSocket.maxFollows", default: D.live.follows, takes: whole(1), advice: [{ above: 1e5, says: "One page may follow over 100,000 chats at once." }], levels: GLOBAL, perConnection: false, name: "Chats one live socket follows", about: "The most chats one page's live socket may follow at once; your jobs and your own events count as one each.", effect: "start" },
     chatIdChars: { key: "liveSocket.maxChatIdChars", default: D.live.chatIdChars, takes: whole(1), advice: [{ above: 1e4, says: "A chat id this long is held for each follow." }], levels: GLOBAL, perConnection: false, name: "Longest chat id followed", about: "The most characters of a chat id a page may follow on the live socket; a longer one is refused.", effect: "start" },
     sockets: { key: "liveSocket.atOnce", default: D.live.sockets, takes: whole(1), advice: [{ above: 1e5, says: "Over 100,000 live sockets may stay open at once." }], levels: GLOBAL, perConnection: false, name: "Live sockets open at once", about: "The most live sockets RPE keeps open at once; one more is closed at once with the reason.", effect: "start" },
     idleSeconds: { key: "server.idleSeconds", default: D.server.idleSeconds, takes: { type: "whole", least: 0, most: 255 }, levels: GLOBAL, perConnection: false, name: "Idle connection closed after", about: "Seconds a connection may send and be sent nothing before RPE closes it; 0 for no bound. A reply's stream and the live socket stay open by what they send.", effect: "start" },
@@ -3522,7 +3522,7 @@ CREATE INDEX page_token_expires ON page_token (expires);`);
     },
     {
       version: 4,
-      name: "the models each provider key taken at the swap opens",
+      name: "the models each provider key taken at the switch opens",
       sql: "ALTER TABLE provider_key ADD COLUMN models TEXT;"
     }
   ];
@@ -108590,8 +108590,8 @@ var init_kit2 = __esm(() => {
     default: false,
     takes: { type: "yesNo" },
     perConnection: false,
-    name: "His character has a mind",
-    about: "His own character is cast with an agent of its own, with its own memories and knowledge, as any principal is; off, it is the persona alone and has none. The shipped guidance reads it as the fact cast.playerMind.",
+    name: "Your character has a mind",
+    about: "Your own character is cast with an agent of its own, with its own memories and knowledge, as any principal is; off, it is the persona alone and has none. The shipped guidance reads it as the fact cast.playerMind.",
     effect: "turn"
   };
   CAST_SETTINGS = [...Object.values(CAST_SETTING_DEFS), CAST_PLAYER_MIND];
@@ -111224,12 +111224,12 @@ var init_page_settings = __esm(() => {
     filePieceBytes: { key: "pages.filePieceBytes", default: 65536, least: 1, advice: [below(1024, "A file is read under 1 KiB at a time, with a press for each more."), above2(4194304, "A piece over 4 MiB is read and drawn whole before any of it shows.")], name: "Bytes of a file read per piece", about: "Bytes of a file the Files page reads from RPE at a time, so a file of any size opens its first piece at once and goes on when asked." },
     chatsAtATime: { key: "pages.chatsPage", default: 50, least: 1, advice: [above2(500, "Over 500 chats are read at once, each with what it takes on the disk, and the page opens slowly.")], name: "Chats read at a time on Storage", about: "Chats the Storage page reads from RPE at a time, each with what its folder and its rows of the database take." },
     logLines: { key: "pages.logPage", default: 200, least: 1, advice: [below(10, "The log is read a few lines at a time, with a press for each more."), above2(2000, "Over 2000 lines are drawn at once, and RPE keeps only service.logLines of them.")], name: "Log lines shown per page on Runtime", about: "Lines of RPE's own log the Runtime page reads at a time, the newest first; older lines are read on request (RPE keeps service.logLines of them)." },
-    rowsAtOnce: { key: "pages.rowsPage", default: 30, least: 1, advice: [below(5, "A list is read a few rows at a time, with a press for each more."), above2(500, "Over 500 rows are read and drawn at once.")], name: "Rows read at once", about: "Rows the Sessions, Rules and Lore pages' lists read from RPE at a time (sessions and their turns, firings of a rule, proposals and writes to his lore); more are read on request." },
+    rowsAtOnce: { key: "pages.rowsPage", default: 30, least: 1, advice: [below(5, "A list is read a few rows at a time, with a press for each more."), above2(500, "Over 500 rows are read and drawn at once.")], name: "Rows read at once", about: "Rows the Sessions, Rules and Lore pages' lists read from RPE at a time (sessions and their turns, firings of a rule, proposals and writes to your lore); more are read on request." },
     toastsShown: { key: "pages.toastsShown", default: 3, least: 1, advice: [above2(20, "Over twenty toasts at once cover the view.")], name: "Toasts shown at once", about: "Toasts the kept views (Build, Play, the chat's toolbar) show at once; a new one pushes the oldest out." },
     errorToastMs: { key: "pages.errorToastMs", default: 6000, least: 1, advice: [below(500, "An error toast goes before it can be read."), above2(120000, "An error toast stays over two minutes.")], name: "An error toast shows for", about: "Milliseconds an error toast shows in the kept views." },
     toastMs: { key: "pages.toastMs", default: 3500, least: 1, advice: [below(500, "A toast goes before it can be read."), above2(120000, "A toast stays over two minutes.")], name: "Any other toast shows for", about: "Milliseconds any other toast shows in the kept views." },
     downloadRevokeMs: { key: "pages.downloadRevokeMs", default: 1000, least: 1, advice: [below(100, "A download's link may go before the browser has fetched it."), above2(60000, "A download's link is kept in the browser over a minute.")], name: "A download link is kept for", about: "Milliseconds the kept views keep a download's link before the browser lets it go." },
-    previewWaitMs: { key: "pages.previewWaitMs", default: 300, least: 1, advice: [below(50, "The preview is rendered again at almost every key pressed."), above2(1e4, "The preview waits over ten seconds after typing stops.")], name: "Wait after typing before a prompt part is rendered again", about: "Milliseconds the Files page waits after he stops typing in a prompt part before it asks RPH to render the draft again for its preview." },
+    previewWaitMs: { key: "pages.previewWaitMs", default: 300, least: 1, advice: [below(50, "The preview is rendered again at almost every key pressed."), above2(1e4, "The preview waits over ten seconds after typing stops.")], name: "Wait after typing before a prompt part is rendered again", about: "Milliseconds the Files page waits after you stop typing in a prompt part before it asks RPH to render the draft again for its preview." },
     briefChars: { key: "pages.briefChars", default: 90, least: 1, advice: [below(20, "A brief cut this short says little of the job."), above2(2000, "A brief this long fills the Jobs list.")], name: "Characters of a job's brief shown in the Jobs list", about: "Characters of a job's brief the Jobs list shows on its line before it cuts the rest with an ellipsis; the job open shows its brief whole." },
     titleChars: { key: "pages.titleChars", default: 60, least: 1, advice: [below(20, "A scene's name cut this short says little of it."), above2(500, "A scene's name this long fills the Sessions list.")], name: "Characters of a scene's name shown on Sessions", about: "Characters of a scene's name (its name, title or summary in the story record) the Sessions list shows before it cuts the rest with an ellipsis." },
     messagesAtOnce: { key: "pages.messagesPage", default: 100, least: 1, advice: [above2(1000, "Lumiverse gives at most 1000 rows a read: past it the timeline is given that many at a time.")], name: "Messages read at once for the Story timeline", about: "Messages whose text the Story timeline asks Lumiverse's door for in one read, for the beats it has listed; the rest are read straight after." }
@@ -116839,7 +116839,7 @@ var init_settings5 = __esm(() => {
       levels: ["shipped", "global"],
       perConnection: false,
       name: "Messages ahead of a turn",
-      about: "Messages the chat is taken to grow by before the next turn's prompt (this turn's reply and the player's next message), where the story record is measured.",
+      about: "Messages the chat is taken to grow by before the next turn's prompt (this turn's reply and your next message), where the story record is measured.",
       effect: "start"
     }
   };
@@ -122013,12 +122013,12 @@ var require_dist = __commonJS(function(exports) {
           skipBlank();
           if (index >= length2 && options_1.Allow.OBJ & allow)
             return obj3;
-          const key = parseStr();
+          const key2 = parseStr();
           skipBlank();
           index++;
           try {
             const value = parseAny();
-            obj3[key] = value;
+            obj3[key2] = value;
           } catch (e) {
             if (options_1.Allow.OBJ & allow)
               return obj3;
@@ -122587,11 +122587,11 @@ function setSlot(container, slot, value) {
   else if (slot.kind === "member")
     setMember(container, slot.key, value);
 }
-function setMember(members, key, value) {
-  if (key === "__proto__") {
-    Object.defineProperty(members, key, { value, writable: true, enumerable: true, configurable: true });
+function setMember(members, key2, value) {
+  if (key2 === "__proto__") {
+    Object.defineProperty(members, key2, { value, writable: true, enumerable: true, configurable: true });
   } else {
-    members[key] = value;
+    members[key2] = value;
   }
 }
 var MAX_REPORTED_DEPTH = 32, ROOT_SLOT, CREDIT_PER_APPEND = 256, CREDIT_PER_CHARACTER = 8, MAX_PENDING_SCALAR_LENGTH = 64, NUMBER4, NUMBER_WITHOUT_EXPONENT_DIGITS, LITERALS, QUOTE = 34, BACKSLASH = 92, SIMPLE_ESCAPES;
@@ -124507,8 +124507,8 @@ async function readJson2(response) {
   }
 }
 function errorDetail2(json11) {
-  for (const key of ["error_description", "detail", "message", "error"]) {
-    const value = json11?.[key];
+  for (const key2 of ["error_description", "detail", "message", "error"]) {
+    const value = json11?.[key2];
     if (typeof value === "string" && value.trim())
       return `: ${value.trim()}`;
   }
@@ -125237,8 +125237,8 @@ function isEmptyObj(obj4) {
     return false;
   return true;
 }
-function hasOwn6(obj4, key) {
-  return Object.prototype.hasOwnProperty.call(obj4, key);
+function hasOwn6(obj4, key2) {
+  return Object.prototype.hasOwnProperty.call(obj4, key2);
 }
 function isObj2(obj4) {
   return obj4 != null && typeof obj4 === "object" && !Array.isArray(obj4);
@@ -125310,13 +125310,13 @@ function getBrowserInfo() {
     { key: "firefox", pattern: /Firefox(?:\W+(\d+)\.(\d+)(?:\.(\d+))?)?/ },
     { key: "safari", pattern: /(?:Version\W+(\d+)\.(\d+)(?:\.(\d+))?)?(?:\W+Mobile\S*)?\W+Safari/ }
   ];
-  for (const { key, pattern } of browserPatterns) {
+  for (const { key: key2, pattern } of browserPatterns) {
     const match = pattern.exec(navigator.userAgent);
     if (match) {
       const major = match[1] || 0;
       const minor = match[2] || 0;
       const patch2 = match[3] || 0;
-      return { browser: key, version: `${major}.${minor}.${patch2}` };
+      return { browser: key2, version: `${major}.${minor}.${patch2}` };
     }
   }
   return null;
@@ -125542,7 +125542,7 @@ function maybe_map(val, fn) {
   }
   return fn(val);
 }
-var has = (obj4, key) => (has = Object.hasOwn ?? Function.prototype.call.bind(Object.prototype.hasOwnProperty), has(obj4, key)), hex_table, limit3 = 1024, encode = (str31, _defaultEncoder, charset, _kind, format) => {
+var has = (obj4, key2) => (has = Object.hasOwn ?? Function.prototype.call.bind(Object.prototype.hasOwnProperty), has(obj4, key2)), hex_table, limit3 = 1024, encode = (str31, _defaultEncoder, charset, _kind, format) => {
   if (str31.length === 0) {
     return str31;
   }
@@ -125671,12 +125671,12 @@ function inner_stringify(object2, prefix, generateArrayPrefix, commaRoundTrip, a
     return adjusted_prefix + "[]";
   }
   for (let j = 0;j < obj_keys.length; ++j) {
-    const key = obj_keys[j];
-    const value = typeof key === "object" && typeof key.value !== "undefined" ? key.value : obj4[key];
+    const key2 = obj_keys[j];
+    const value = typeof key2 === "object" && typeof key2.value !== "undefined" ? key2.value : obj4[key2];
     if (skipNulls && value === null) {
       continue;
     }
-    const encoded_key = allowDots && encodeDotInKeys ? key.replace(/\./g, "%2E") : key;
+    const encoded_key = allowDots && encodeDotInKeys ? key2.replace(/\./g, "%2E") : key2;
     const key_prefix = isArray(obj4) ? typeof generateArrayPrefix === "function" ? generateArrayPrefix(adjusted_prefix, encoded_key) : adjusted_prefix : adjusted_prefix + (allowDots ? "." + encoded_key : "[" + encoded_key + "]");
     sideChannel.set(object2, step2);
     const valueSideChannel = new WeakMap;
@@ -125771,11 +125771,11 @@ function stringify(object2, opts = {}) {
   }
   const sideChannel = new WeakMap;
   for (let i = 0;i < obj_keys.length; ++i) {
-    const key = obj_keys[i];
-    if (options.skipNulls && obj4[key] === null) {
+    const key2 = obj_keys[i];
+    if (options.skipNulls && obj4[key2] === null) {
       continue;
     }
-    push_to_array(keys, inner_stringify(obj4[key], key, generateArrayPrefix, commaRoundTrip, options.allowEmptyArrays, options.strictNullHandling, options.skipNulls, options.encodeDotInKeys, options.encode ? options.encoder : null, options.filter, options.sort, options.allowDots, options.serializeDate, options.format, options.formatter, options.encodeValuesOnly, options.charset, sideChannel));
+    push_to_array(keys, inner_stringify(obj4[key2], key2, generateArrayPrefix, commaRoundTrip, options.allowEmptyArrays, options.strictNullHandling, options.skipNulls, options.encodeDotInKeys, options.encode ? options.encoder : null, options.filter, options.sort, options.allowDots, options.serializeDate, options.format, options.formatter, options.encodeValuesOnly, options.charset, sideChannel));
   }
   const joined4 = keys.join(options.delimiter);
   let prefix = options.addQueryPrefix === true ? "?" : "";
@@ -125800,8 +125800,8 @@ var init_stringify = __esm(() => {
       return String(prefix) + "[]";
     },
     comma: "comma",
-    indices(prefix, key) {
-      return String(prefix) + "[" + key + "]";
+    indices(prefix, key2) {
+      return String(prefix) + "[" + key2 + "]";
     },
     repeat(prefix) {
       return String(prefix);
@@ -127448,37 +127448,37 @@ var checkFileSupport = () => {
     throw new TypeError("The provided fetch function does not support file uploads with the current global FormData class.");
   }
   const form = new FormData;
-  await Promise.all(Object.entries(body || {}).map(([key, value]) => addFormValue(form, key, value, stripFilenames)));
+  await Promise.all(Object.entries(body || {}).map(([key2, value]) => addFormValue(form, key2, value, stripFilenames)));
   return form;
-}, addFormValue = async (form, key, value, stripFilenames) => {
+}, addFormValue = async (form, key2, value, stripFilenames) => {
   if (value === undefined)
     return;
   if (value == null) {
-    throw new TypeError(`Received null for "${key}"; to pass null in FormData, you must use the string 'null'`);
+    throw new TypeError(`Received null for "${key2}"; to pass null in FormData, you must use the string 'null'`);
   }
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-    form.append(key, String(value));
+    form.append(key2, String(value));
   } else if (value instanceof Response) {
     let options = {};
     const contentType = value.headers.get("Content-Type");
     if (contentType) {
       options = { type: contentType };
     }
-    form.append(key, makeFile([await value.blob()], getName(value, stripFilenames), options));
+    form.append(key2, makeFile([await value.blob()], getName(value, stripFilenames), options));
   } else if (isAsyncIterable(value)) {
-    form.append(key, makeFile([await new Response(ReadableStreamFrom(value)).blob()], getName(value, stripFilenames)));
+    form.append(key2, makeFile([await new Response(ReadableStreamFrom(value)).blob()], getName(value, stripFilenames)));
   } else if (value instanceof Blob) {
     const isFile = typeof File !== "undefined" && value instanceof File;
     const name = isFile ? value.name : getName(value, stripFilenames);
-    form.append(key, makeFile([value], name, { type: value.type }));
+    form.append(key2, makeFile([value], name, { type: value.type }));
   } else if (Array.isArray(value)) {
-    await Promise.all(value.map((entry) => addFormValue(form, key + "[]", entry, stripFilenames)));
+    await Promise.all(value.map((entry) => addFormValue(form, key2 + "[]", entry, stripFilenames)));
   } else if (typeof value.then === "function") {
-    throw new TypeError(`Received a Promise for "${key}"; await it first, e.g. \`await toFile(...)\``);
+    throw new TypeError(`Received a Promise for "${key2}"; await it first, e.g. \`await toFile(...)\``);
   } else if (value instanceof ArrayBuffer || ArrayBuffer.isView(value)) {
-    throw new TypeError(`Received ${value.constructor.name} for "${key}"; to upload raw bytes, wrap them with \`await toFile(bytes, 'filename')\``);
+    throw new TypeError(`Received ${value.constructor.name} for "${key2}"; to upload raw bytes, wrap them with \`await toFile(bytes, 'filename')\``);
   } else if (typeof value === "object") {
-    await Promise.all(Object.entries(value).map(([name, prop]) => addFormValue(form, `${key}[${name}]`, prop, stripFilenames)));
+    await Promise.all(Object.entries(value).map(([name, prop]) => addFormValue(form, `${key2}[${name}]`, prop, stripFilenames)));
   } else {
     throw new TypeError(`Invalid value given to form, expected a string, number, boolean, object, Array, File or Blob but got ${value} instead`);
   }
@@ -128645,17 +128645,17 @@ var require_sha256 = __commonJS(function(exports, module) {
     }();
     exports2.Hash = Hash;
     var HMAC = function() {
-      function HMAC2(key) {
+      function HMAC2(key2) {
         this.inner = new Hash;
         this.outer = new Hash;
         this.blockSize = this.inner.blockSize;
         this.digestLength = this.inner.digestLength;
         var pad = new Uint8Array(this.blockSize);
-        if (key.length > this.blockSize) {
-          new Hash().update(key).finish(pad).clean();
+        if (key2.length > this.blockSize) {
+          new Hash().update(key2).finish(pad).clean();
         } else {
-          for (var i = 0;i < key.length; i++) {
-            pad[i] = key[i];
+          for (var i = 0;i < key2.length; i++) {
+            pad[i] = key2[i];
           }
         }
         for (var i = 0;i < pad.length; i++) {
@@ -128715,8 +128715,8 @@ var require_sha256 = __commonJS(function(exports, module) {
     }
     exports2.hash = hash;
     exports2["default"] = hash;
-    function hmac(key, data) {
-      var h = new HMAC(key).update(data);
+    function hmac(key2, data) {
+      var h = new HMAC(key2).update(data);
       var digest = h.digest();
       h.clean();
       return digest;
@@ -128739,7 +128739,7 @@ var require_sha256 = __commonJS(function(exports, module) {
       counter[0]++;
     }
     var hkdfSalt = new Uint8Array(exports2.digestLength);
-    function hkdf(key, salt, info, length2) {
+    function hkdf(key2, salt, info, length2) {
       if (salt === undefined) {
         salt = hkdfSalt;
       }
@@ -128747,7 +128747,7 @@ var require_sha256 = __commonJS(function(exports, module) {
         length2 = 32;
       }
       var counter = new Uint8Array([1]);
-      var okm = hmac(salt, key);
+      var okm = hmac(salt, key2);
       var hmac_ = new HMAC(okm);
       var buffer = new Uint8Array(hmac_.digestLength);
       var bufpos = buffer.length;
@@ -128892,8 +128892,8 @@ var require_dist2 = __commonJS(function(exports) {
       var _a;
       const jsonParse = (_a = options === null || options === undefined ? undefined : options.jsonParse) !== null && _a !== undefined ? _a : true;
       const normalizedHeaders = {};
-      for (const key of Object.keys(headers)) {
-        normalizedHeaders[key.toLowerCase()] = headers[key];
+      for (const key2 of Object.keys(headers)) {
+        normalizedHeaders[key2.toLowerCase()] = headers[key2];
       }
       const msgId = normalizedHeaders["webhook-id"];
       const msgSignature = normalizedHeaders["webhook-signature"];
@@ -131344,10 +131344,10 @@ function readOnlyRootFor(ctx, target) {
 }
 function scrubbedShellEnv() {
   const env2 = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (key.startsWith("ANTHROPIC_"))
+  for (const [key2, value] of Object.entries(process.env)) {
+    if (key2.startsWith("ANTHROPIC_"))
       continue;
-    env2[key] = value;
+    env2[key2] = value;
   }
   return env2;
 }
@@ -132037,10 +132037,10 @@ async function forceStop(client, work, log2, requestOptions) {
 }
 function serverLeaseState(e) {
   let node = e instanceof APIError ? e.error : undefined;
-  for (const key of ["error", "details", "current_state"]) {
+  for (const key2 of ["error", "details", "current_state"]) {
     if (!isObj2(node))
       return {};
-    node = node[key];
+    node = node[key2];
   }
   return isObj2(node) ? node : {};
 }
@@ -133277,9 +133277,9 @@ var init_parser = () => {};
 // node_modules/@anthropic-ai/sdk/internal/message-stream-utils.mjs
 function withLazyInput(prev, jsonBuf) {
   const next = {};
-  for (const key of Object.keys(prev)) {
-    if (key !== "input")
-      next[key] = prev[key];
+  for (const key2 of Object.keys(prev)) {
+    if (key2 !== "input")
+      next[key2] = prev[key2];
   }
   Object.defineProperty(next, JSON_BUF_PROPERTY, { value: jsonBuf, enumerable: false, writable: true });
   let input;
@@ -138050,8 +138050,8 @@ function shortHash(str31) {
 // node_modules/@earendil-works/pi-ai/dist/utils/headers.js
 function headersToRecord(headers) {
   const result = {};
-  for (const [key, value] of headers.entries()) {
-    result[key] = value;
+  for (const [key2, value] of headers.entries()) {
+    result[key2] = value;
   }
   return result;
 }
@@ -138212,15 +138212,15 @@ function makeJsonSchemaNodeStrict(schema, isUnsupportedKeyword) {
   if (!isJsonSchemaObject(schema)) {
     throw new UnsupportedStrictJsonSchemaError("boolean schemas are unsupported");
   }
-  for (const key of UNSUPPORTED_STRICT_SCHEMA_KEYS) {
-    if (schema[key] !== undefined) {
-      throw new UnsupportedStrictJsonSchemaError(`${key} schemas are unsupported`);
+  for (const key2 of UNSUPPORTED_STRICT_SCHEMA_KEYS) {
+    if (schema[key2] !== undefined) {
+      throw new UnsupportedStrictJsonSchemaError(`${key2} schemas are unsupported`);
     }
   }
   if (isUnsupportedKeyword) {
-    for (const [key, value] of Object.entries(schema)) {
-      if (isUnsupportedKeyword(key, value)) {
-        throw new UnsupportedStrictJsonSchemaError(`${key}: ${JSON.stringify(value)} is unsupported`);
+    for (const [key2, value] of Object.entries(schema)) {
+      if (isUnsupportedKeyword(key2, value)) {
+        throw new UnsupportedStrictJsonSchemaError(`${key2}: ${JSON.stringify(value)} is unsupported`);
       }
     }
   }
@@ -138253,19 +138253,19 @@ function makeJsonSchemaNodeStrict(schema, isUnsupportedKeyword) {
   if (schema.properties !== undefined && !isJsonSchemaObject(schema.properties)) {
     throw new UnsupportedStrictJsonSchemaError("object properties must be a schema map");
   }
-  if (schema.required !== undefined && (!Array.isArray(schema.required) || schema.required.some((key) => typeof key !== "string"))) {
+  if (schema.required !== undefined && (!Array.isArray(schema.required) || schema.required.some((key2) => typeof key2 !== "string"))) {
     throw new UnsupportedStrictJsonSchemaError("object required must be a string array");
   }
   const properties = schema.properties ?? {};
   const propertyNames = Object.keys(properties);
   const required = new Set(Array.isArray(schema.required) ? schema.required : []);
-  if ([...required].some((key) => !propertyNames.includes(key))) {
+  if ([...required].some((key2) => !propertyNames.includes(key2))) {
     throw new UnsupportedStrictJsonSchemaError("required contains an unknown property");
   }
-  for (const [key, property] of Object.entries(properties)) {
+  for (const [key2, property] of Object.entries(properties)) {
     makeJsonSchemaNodeStrict(property, isUnsupportedKeyword);
-    if (!required.has(key) && !schemaAllowsNull(property)) {
-      properties[key] = { anyOf: [property, { type: "null" }] };
+    if (!required.has(key2) && !schemaAllowsNull(property)) {
+      properties[key2] = { anyOf: [property, { type: "null" }] };
     }
   }
   schema.required = propertyNames;
@@ -138916,10 +138916,10 @@ function hashThreadPrefix(model2, params, messages) {
     betas,
     fallbacks
   ]);
-  const conversation = JSON.stringify(messages, (key, value) => {
-    if (key === "cache_control")
+  const conversation = JSON.stringify(messages, (key2, value) => {
+    if (key2 === "cache_control")
       return;
-    if (key === "content" && typeof value === "string")
+    if (key2 === "content" && typeof value === "string")
       return [{ type: "text", text: value }];
     return value;
   });
@@ -139001,8 +139001,8 @@ function hasHeader(headers, name) {
   if (!headers)
     return false;
   const expected = name.toLowerCase();
-  for (const [key, value] of Object.entries(headers)) {
-    if (key.toLowerCase() === expected && value !== null && value.trim().length > 0)
+  for (const [key2, value] of Object.entries(headers)) {
+    if (key2.toLowerCase() === expected && value !== null && value.trim().length > 0)
       return true;
   }
   return false;
@@ -139236,8 +139236,8 @@ function createClient(model2, apiKey, optionsHeaders, fetch2, dynamicHeaders, se
     "anthropic-dangerous-direct-browser-access": "true"
   }, sessionAffinityHeaders, model2.headers, optionsHeaders);
   if (federation) {
-    const key = JSON.stringify([model2.baseUrl, federation]);
-    if (federationClient?.key !== key || federationClient.fetch !== fetch2) {
+    const key2 = JSON.stringify([model2.baseUrl, federation]);
+    if (federationClient?.key !== key2 || federationClient.fetch !== fetch2) {
       const client2 = new PiAnthropic({
         apiKey: null,
         authToken: null,
@@ -139246,7 +139246,7 @@ function createClient(model2, apiKey, optionsHeaders, fetch2, dynamicHeaders, se
         dangerouslyAllowBrowser: true,
         fetch: fetch2
       });
-      federationClient = { key, fetch: fetch2, client: client2 };
+      federationClient = { key: key2, fetch: fetch2, client: client2 };
     }
     return { client: federationClient.client.withOptions({ defaultHeaders }), isOAuthToken: false };
   }
@@ -139995,12 +139995,12 @@ var claudeCodeVersion = "2.1.322", claudeCodeTools, ccToolLookup, toClaudeCodeNa
     thinkingEnabled: true,
     thinkingBudgetTokens: Math.min(adjusted.thinkingBudget, Math.max(0, maxTokens - 1024))
   });
-}, ANTHROPIC_STRICT_UNSUPPORTED_KEYWORDS, ANTHROPIC_STRICT_STRING_FORMATS, isAnthropicStrictUnsupportedKeyword = (key, value) => {
-  if (ANTHROPIC_STRICT_UNSUPPORTED_KEYWORDS.has(key))
+}, ANTHROPIC_STRICT_UNSUPPORTED_KEYWORDS, ANTHROPIC_STRICT_STRING_FORMATS, isAnthropicStrictUnsupportedKeyword = (key2, value) => {
+  if (ANTHROPIC_STRICT_UNSUPPORTED_KEYWORDS.has(key2))
     return true;
-  if (key === "minItems")
+  if (key2 === "minItems")
     return value !== 0 && value !== 1;
-  if (key === "format")
+  if (key2 === "format")
     return typeof value !== "string" || !ANTHROPIC_STRICT_STRING_FORMATS.has(value);
   return false;
 };
@@ -140307,8 +140307,8 @@ function isEmptyObj2(obj4) {
     return false;
   return true;
 }
-function hasOwn7(obj4, key) {
-  return Object.prototype.hasOwnProperty.call(obj4, key);
+function hasOwn7(obj4, key2) {
+  return Object.prototype.hasOwnProperty.call(obj4, key2);
 }
 function isObj3(obj4) {
   return obj4 != null && typeof obj4 === "object" && !Array.isArray(obj4);
@@ -141481,13 +141481,13 @@ function getBrowserInfo2() {
     { key: "firefox", pattern: /Firefox(?:\W+(\d+)\.(\d+)(?:\.(\d+))?)?/ },
     { key: "safari", pattern: /(?:Version\W+(\d+)\.(\d+)(?:\.(\d+))?)?(?:\W+Mobile\S*)?\W+Safari/ }
   ];
-  for (const { key, pattern } of browserPatterns) {
+  for (const { key: key2, pattern } of browserPatterns) {
     const match = pattern.exec(navigator.userAgent);
     if (match) {
       const major = match[1] || 0;
       const minor = match[2] || 0;
       const patch2 = match[3] || 0;
-      return { browser: key, version: `${major}.${minor}.${patch2}` };
+      return { browser: key2, version: `${major}.${minor}.${patch2}` };
     }
   }
   return null;
@@ -141607,10 +141607,10 @@ var jsonRequestBodyObservers, FallbackEncoder2 = ({ headers, body }) => {
     encoded = JSON.stringify(body);
   } else {
     const active = [...observers];
-    encoded = JSON.stringify(body, function(key, value) {
+    encoded = JSON.stringify(body, function(key2, value) {
       let observed = value;
       for (const observer of active) {
-        const replacement = observer.value(this, key, observed);
+        const replacement = observer.value(this, key2, observed);
         if (replacement !== undefined) {
           observed = replacement;
         }
@@ -141659,10 +141659,10 @@ function maybe_map2(val, fn) {
   }
   return fn(val);
 }
-var cachedHas, has2 = (obj4, key) => {
+var cachedHas, has2 = (obj4, key2) => {
   const resolvedHas = cachedHas ?? Object.hasOwn ?? Function.prototype.call.bind(Object.prototype.hasOwnProperty);
   cachedHas = resolvedHas;
-  return resolvedHas(obj4, key);
+  return resolvedHas(obj4, key2);
 }, hex_table2, limit4 = 1024, encode2 = (str31, _defaultEncoder, charset, _kind, format) => {
   if (str31.length === 0) {
     return str31;
@@ -141797,12 +141797,12 @@ function inner_stringify2(object2, prefix, generateArrayPrefix, commaRoundTrip, 
   if (allowEmptyArrays && isArray2(obj4) && obj4.length === 0) {
     return adjusted_prefix + "[]";
   }
-  for (const key of obj_keys) {
-    const value = typeof key === "object" && key.value !== undefined ? key.value : obj4[key];
+  for (const key2 of obj_keys) {
+    const value = typeof key2 === "object" && key2.value !== undefined ? key2.value : obj4[key2];
     if (skipNulls && value === null) {
       continue;
     }
-    const encoded_key = allowDots && encodeDotInKeys ? key.replace(/\./g, "%2E") : key;
+    const encoded_key = allowDots && encodeDotInKeys ? key2.replace(/\./g, "%2E") : key2;
     let key_prefix;
     if (isArray2(obj4)) {
       key_prefix = typeof generateArrayPrefix === "function" ? generateArrayPrefix(adjusted_prefix, encoded_key) : adjusted_prefix;
@@ -141905,11 +141905,11 @@ function stringify2(object2, opts = {}) {
     obj_keys.sort(options.sort);
   }
   const sideChannel = new WeakMap;
-  for (const key of obj_keys) {
-    if (options.skipNulls && obj4[key] === null) {
+  for (const key2 of obj_keys) {
+    if (options.skipNulls && obj4[key2] === null) {
       continue;
     }
-    push_to_array2(keys, inner_stringify2(obj4[key], key, generateArrayPrefix, commaRoundTrip, options.allowEmptyArrays, options.strictNullHandling, options.skipNulls, options.encodeDotInKeys, options.encode ? options.encoder : null, options.filter, options.sort, options.allowDots, options.serializeDate, options.format, options.formatter, options.encodeValuesOnly, options.charset, sideChannel));
+    push_to_array2(keys, inner_stringify2(obj4[key2], key2, generateArrayPrefix, commaRoundTrip, options.allowEmptyArrays, options.strictNullHandling, options.skipNulls, options.encodeDotInKeys, options.encode ? options.encoder : null, options.filter, options.sort, options.allowDots, options.serializeDate, options.format, options.formatter, options.encodeValuesOnly, options.charset, sideChannel));
   }
   const joined4 = keys.join(options.delimiter);
   let prefix = options.addQueryPrefix === true ? "?" : "";
@@ -141930,8 +141930,8 @@ var init_stringify2 = __esm(() => {
       return String(prefix) + "[]";
     },
     comma: "comma",
-    indices(prefix, key) {
-      return String(prefix) + "[" + key + "]";
+    indices(prefix, key2) {
+      return String(prefix) + "[" + key2 + "]";
     },
     repeat(prefix) {
       return String(prefix);
@@ -143475,13 +143475,13 @@ function supportsFormData2(fetchObject) {
   return promise;
 }
 async function* iterateMultipartBody(entries4, boundary, options, preservedFilenames) {
-  for await (const { key, value } of entries4) {
+  for await (const { key: key2, value } of entries4) {
     if (isUploadable(value)) {
       const filename = preservedFilenames?.get(value) ?? getStreamingFileName(value, options);
       const type = getStreamingFileType(value);
       yield encodeUTF82(`--${boundary}\r
 `);
-      yield encodeUTF82(`Content-Disposition: form-data; name="${escapeHeaderValue(key)}"; filename="${escapeHeaderValue(filename)}"\r
+      yield encodeUTF82(`Content-Disposition: form-data; name="${escapeHeaderValue(key2)}"; filename="${escapeHeaderValue(filename)}"\r
 Content-Type: ${type}\r
 \r
 `);
@@ -143489,7 +143489,7 @@ Content-Type: ${type}\r
     } else {
       yield encodeUTF82(`--${boundary}\r
 `);
-      yield encodeUTF82(`Content-Disposition: form-data; name="${escapeHeaderValue(key)}"\r
+      yield encodeUTF82(`Content-Disposition: form-data; name="${escapeHeaderValue(key2)}"\r
 \r
 ${String(value)}`);
     }
@@ -143503,26 +143503,26 @@ function* iterateFormEntries(body) {
   if (!body || typeof body !== "object") {
     return;
   }
-  for (const [key, value] of Object.entries(body)) {
-    yield* iterateFormValue(key, value);
+  for (const [key2, value] of Object.entries(body)) {
+    yield* iterateFormValue(key2, value);
   }
 }
-function* iterateFormValue(key, value) {
+function* iterateFormValue(key2, value) {
   if (value === undefined) {
     return;
   }
   if (value == null) {
-    throw new TypeError(`Received null for "${key}"; to pass null in FormData, you must use the string 'null'`);
+    throw new TypeError(`Received null for "${key2}"; to pass null in FormData, you must use the string 'null'`);
   }
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean" || isUploadable(value)) {
-    yield { key, value };
+    yield { key: key2, value };
   } else if (Array.isArray(value)) {
     for (const entry of value) {
-      yield* iterateFormValue(key + "[]", entry);
+      yield* iterateFormValue(key2 + "[]", entry);
     }
   } else if (typeof value === "object") {
     for (const [name, prop] of Object.entries(value)) {
-      yield* iterateFormValue(`${key}[${name}]`, prop);
+      yield* iterateFormValue(`${key2}[${name}]`, prop);
     }
   } else {
     throw new TypeError(`Invalid value given to form, expected a string, number, boolean, object, Array, File or Blob but got ${value} instead`);
@@ -143622,7 +143622,7 @@ var brand_privateStreamingFile, checkFileSupport2 = () => {
     throw new TypeError("The provided fetch function does not support file uploads with the current global FormData class.");
   }
   const form = new FormData;
-  await Promise.all(Object.entries(body || {}).map(([key, value]) => addFormValue2(form, key, value, options)));
+  await Promise.all(Object.entries(body || {}).map(([key2, value]) => addFormValue2(form, key2, value, options)));
   return form;
 }, isBlob = (value) => value instanceof Blob, isReadableStream = (value) => typeof value === "object" && value !== null && ("getReader" in value) && typeof value.getReader === "function", isStreamingFile = (value) => typeof value === "object" && value !== null && (brand_privateStreamingFile in value), isUploadable = (value) => typeof value === "object" && value !== null && (value instanceof Response || isAsyncIterable2(value) || isReadableStream(value) || isStreamingFile(value) || isBlob(value)), hasStreamingUploadableValue = (value) => {
   if (isStreamingFile(value) || isAsyncIterable2(value) || isReadableStream(value)) {
@@ -143674,31 +143674,31 @@ var brand_privateStreamingFile, checkFileSupport2 = () => {
     body,
     headers: buildHeaders2([{ "content-type": `multipart/form-data; boundary=${boundary}` }, opts.headers])
   };
-}, addFormValue2 = async (form, key, value, options) => {
+}, addFormValue2 = async (form, key2, value, options) => {
   if (value === undefined) {
     return;
   }
   if (value == null) {
-    throw new TypeError(`Received null for "${key}"; to pass null in FormData, you must use the string 'null'`);
+    throw new TypeError(`Received null for "${key2}"; to pass null in FormData, you must use the string 'null'`);
   }
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-    form.append(key, String(value));
+    form.append(key2, String(value));
   } else if (value instanceof Response) {
     const blob2 = await value.blob();
-    form.append(key, makeFile2([blob2], getName2(value, { stripFilename: options.stripFilenames }), { type: blob2.type }));
+    form.append(key2, makeFile2([blob2], getName2(value, { stripFilename: options.stripFilenames }), { type: blob2.type }));
   } else if (isAsyncIterable2(value)) {
-    form.append(key, makeFile2([await new Response(ReadableStreamFrom2(value)).blob()], getName2(value, { stripFilename: options.stripFilenames })));
+    form.append(key2, makeFile2([await new Response(ReadableStreamFrom2(value)).blob()], getName2(value, { stripFilename: options.stripFilenames })));
   } else if (isBlob(value)) {
     const filename = getName2(value, { stripFilename: options.stripFilenames });
     if (filename === undefined) {
-      form.append(key, value);
+      form.append(key2, value);
     } else {
-      form.append(key, value, filename);
+      form.append(key2, value, filename);
     }
   } else if (Array.isArray(value)) {
     const entries4 = await Promise.all(value.map(async (entry) => {
       const entryForm = new FormData;
-      await addFormValue2(entryForm, key + "[]", entry, options);
+      await addFormValue2(entryForm, key2 + "[]", entry, options);
       return entryForm;
     }));
     for (const entryForm of entries4) {
@@ -143710,7 +143710,7 @@ var brand_privateStreamingFile, checkFileSupport2 = () => {
       }
     }
   } else if (typeof value === "object") {
-    await Promise.all(Object.entries(value).map(([name, prop]) => addFormValue2(form, `${key}[${name}]`, prop, options)));
+    await Promise.all(Object.entries(value).map(([name, prop]) => addFormValue2(form, `${key2}[${name}]`, prop, options)));
   } else {
     throw new TypeError(`Invalid value given to form, expected a string, number, boolean, object, Array, File or Blob but got ${value} instead`);
   }
@@ -144046,10 +144046,10 @@ function rememberTrustedIntrinsic(constructor) {
   if (/^function [A-Za-z_$][\w$]*\(\) \{ \[native code\] \}$/u.test(source2) && prototypeDescriptor.configurable === false && prototypeDescriptor.writable === false) {
     trustedNativeConstructorSources.add(source2);
     const descriptors = new Map;
-    for (const key of Reflect.ownKeys(prototypeDescriptor.value)) {
-      const descriptor = Object.getOwnPropertyDescriptor(prototypeDescriptor.value, key);
+    for (const key2 of Reflect.ownKeys(prototypeDescriptor.value)) {
+      const descriptor = Object.getOwnPropertyDescriptor(prototypeDescriptor.value, key2);
       if (descriptor) {
-        descriptors.set(key, descriptor);
+        descriptors.set(key2, descriptor);
       }
     }
     canonicalIntrinsicDescriptors.set(source2, descriptors);
@@ -144285,8 +144285,8 @@ function estimateRetainedBufferBytes(current3, visit2, depth3) {
 }
 function visitHiddenEventValues(current3, kind, visit2) {
   if (kind === "map") {
-    for (const [key, entry] of mapEntries.call(current3)) {
-      if (!visit2(key, 8) || !visit2(entry, 8)) {
+    for (const [key2, entry] of mapEntries.call(current3)) {
+      if (!visit2(key2, 8) || !visit2(entry, 8)) {
         return false;
       }
     }
@@ -144325,12 +144325,12 @@ function getInspectableEventKeys(current3, kind, availableBytes) {
   if (typeof length2 !== "number" || !Number.isSafeInteger(length2) || length2 < 0 || length2 > MAX_INSPECTABLE_TYPED_ARRAY_ELEMENTS) {
     return;
   }
-  return Reflect.ownKeys(current3).filter((key) => {
-    if (typeof key !== "string") {
+  return Reflect.ownKeys(current3).filter((key2) => {
+    if (typeof key2 !== "string") {
       return true;
     }
-    const index = Number(key);
-    return !Number.isInteger(index) || index < 0 || index >= length2 || String(index) !== key;
+    const index = Number(key2);
+    return !Number.isInteger(index) || index < 0 || index >= length2 || String(index) !== key2;
   });
 }
 function visitInspectableEventProperties(current3, kind, depth3, availableBytes, charge3, visit2) {
@@ -144338,19 +144338,19 @@ function visitInspectableEventProperties(current3, kind, depth3, availableBytes,
   if (keys === undefined) {
     return false;
   }
-  for (const key of keys) {
-    if (!charge3(typeof key === "string" ? key.length * 2 + 8 : 8)) {
+  for (const key2 of keys) {
+    if (!charge3(typeof key2 === "string" ? key2.length * 2 + 8 : 8)) {
       return false;
     }
-    if (typeof key === "symbol") {
-      visit2(key, depth3 + 1);
+    if (typeof key2 === "symbol") {
+      visit2(key2, depth3 + 1);
     }
-    const descriptor = Object.getOwnPropertyDescriptor(current3, key);
+    const descriptor = Object.getOwnPropertyDescriptor(current3, key2);
     if (!descriptor) {
       return false;
     }
     if (!("value" in descriptor)) {
-      if (key === "stack" && isTrustedNativeErrorStack(current3, descriptor)) {
+      if (key2 === "stack" && isTrustedNativeErrorStack(current3, descriptor)) {
         continue;
       }
       return false;
@@ -144382,19 +144382,19 @@ function visitRetainedEventPrototypes(current3, depth3, isBlobInternalHandle, vi
       if (!intrinsic2) {
         return visitInspectableEventProperties(retainedPrototype, undefined, prototypeDepth, availableBytes, charge3, visit2);
       }
-      for (const key of Reflect.ownKeys(retainedPrototype)) {
-        const descriptor = Object.getOwnPropertyDescriptor(retainedPrototype, key);
+      for (const key2 of Reflect.ownKeys(retainedPrototype)) {
+        const descriptor = Object.getOwnPropertyDescriptor(retainedPrototype, key2);
         if (!descriptor) {
           return false;
         }
-        if (isCanonicalIntrinsicDescriptor(descriptor, intrinsic2.descriptors.get(key), intrinsic2.functionPrototype)) {
+        if (isCanonicalIntrinsicDescriptor(descriptor, intrinsic2.descriptors.get(key2), intrinsic2.functionPrototype)) {
           continue;
         }
-        if (!charge3(typeof key === "string" ? key.length * 2 + 8 : 8) || !("value" in descriptor)) {
+        if (!charge3(typeof key2 === "string" ? key2.length * 2 + 8 : 8) || !("value" in descriptor)) {
           return false;
         }
-        if (typeof key === "symbol") {
-          visit2(key, prototypeDepth + 1);
+        if (typeof key2 === "symbol") {
+          visit2(key2, prototypeDepth + 1);
         }
         visit2(descriptor.value, prototypeDepth + 1);
       }
@@ -145298,8 +145298,8 @@ var init_EventStream = __esm(() => {
     }
     try {
       const blob2 = new Blob([]);
-      for (const key of Object.getOwnPropertySymbols(blob2)) {
-        const descriptor = Object.getOwnPropertyDescriptor(blob2, key);
+      for (const key2 of Object.getOwnPropertySymbols(blob2)) {
+        const descriptor = Object.getOwnPropertyDescriptor(blob2, key2);
         if (descriptor && "value" in descriptor && typeof descriptor.value === "object" && descriptor.value) {
           return Object.getPrototypeOf(descriptor.value);
         }
@@ -145925,12 +145925,12 @@ var STR = 1, NUM = 2, ARR = 4, OBJ = 8, NULL2 = 16, BOOL = 32, NAN = 64, INFINIT
         if (index >= length2 && Allow.OBJ & allow) {
           return obj4;
         }
-        const key = parseStr();
+        const key2 = parseStr();
         skipBlank();
         index++;
         try {
           const value = parseAny();
-          Object.defineProperty(obj4, key, { value, writable: true, enumerable: true, configurable: true });
+          Object.defineProperty(obj4, key2, { value, writable: true, enumerable: true, configurable: true });
         } catch (e) {
           if (Allow.OBJ & allow) {
             return obj4;
@@ -146427,10 +146427,10 @@ function canonicalSerializedParserSchema(value, budget) {
         }
         const items = [];
         for (let index = 0;index < length2; index += 1) {
-          const key = String(index);
-          const descriptor = Object.getOwnPropertyDescriptor(current3, key);
+          const key2 = String(index);
+          const descriptor = Object.getOwnPropertyDescriptor(current3, key2);
           if (!descriptor) {
-            if (Object.getOwnPropertyDescriptor(Array.prototype, key) || Object.getOwnPropertyDescriptor(Object.prototype, key)) {
+            if (Object.getOwnPropertyDescriptor(Array.prototype, key2) || Object.getOwnPropertyDescriptor(Object.prototype, key2)) {
               return UNSAFE_SERIALIZED_PARSER_VALUE;
             }
             budget.nodes += 1;
@@ -146456,11 +146456,11 @@ function canonicalSerializedParserSchema(value, budget) {
         return UNSAFE_SERIALIZED_PARSER_VALUE;
       }
       const entries4 = [];
-      for (const key of keys) {
-        if (typeof key !== "string") {
+      for (const key2 of keys) {
+        if (typeof key2 !== "string") {
           continue;
         }
-        const descriptor = Object.getOwnPropertyDescriptor(current3, key);
+        const descriptor = Object.getOwnPropertyDescriptor(current3, key2);
         if (!descriptor) {
           return UNSAFE_SERIALIZED_PARSER_VALUE;
         }
@@ -146470,7 +146470,7 @@ function canonicalSerializedParserSchema(value, budget) {
         if (!("value" in descriptor)) {
           return UNSAFE_SERIALIZED_PARSER_VALUE;
         }
-        entries4.push([key, descriptor.value]);
+        entries4.push([key2, descriptor.value]);
       }
       entries4.sort(([left], [right]) => {
         if (left === right) {
@@ -146479,7 +146479,7 @@ function canonicalSerializedParserSchema(value, budget) {
         return left < right ? -1 : 1;
       });
       const fields3 = [];
-      for (const [key, entry] of entries4) {
+      for (const [key2, entry] of entries4) {
         const normalized2 = visit2(entry, depth3 + 1);
         if (normalized2 === UNSAFE_SERIALIZED_PARSER_VALUE) {
           return normalized2;
@@ -146487,10 +146487,10 @@ function canonicalSerializedParserSchema(value, budget) {
         if (normalized2 === OMITTED_SERIALIZED_PARSER_VALUE) {
           continue;
         }
-        if (!charge3(key.length * 6 + 3)) {
+        if (!charge3(key2.length * 6 + 3)) {
           return UNSAFE_SERIALIZED_PARSER_VALUE;
         }
-        fields3.push(`${stringifyParserSchemaValue(key)}:${normalized2}`);
+        fields3.push(`${stringifyParserSchemaValue(key2)}:${normalized2}`);
       }
       return `{${fields3.join(",")}}`;
     } finally {
@@ -146504,9 +146504,9 @@ function canonicalSerializedParserSchema(value, budget) {
     return;
   }
 }
-function rememberSerializedParserSchema(signatures, source2, holder, key) {
+function rememberSerializedParserSchema(signatures, source2, holder, key2) {
   const parser = Object.getOwnPropertyDescriptor(source2, "$parseRaw");
-  const schema = Object.getOwnPropertyDescriptor(holder, key);
+  const schema = Object.getOwnPropertyDescriptor(holder, key2);
   if (!parser || !("value" in parser) || typeof parser.value !== "function" || !schema || !("value" in schema)) {
     return;
   }
@@ -146515,9 +146515,9 @@ function rememberSerializedParserSchema(signatures, source2, holder, key) {
     signatures.set(source2, normalized2);
   }
 }
-function hasMatchingSerializedParserSchema(signatures, source2, holder, key, value) {
+function hasMatchingSerializedParserSchema(signatures, source2, holder, key2, value) {
   const expected = source2 && signatures.get(source2);
-  const descriptor = Object.getOwnPropertyDescriptor(holder, key);
+  const descriptor = Object.getOwnPropertyDescriptor(holder, key2);
   return expected !== undefined && descriptor !== undefined && "value" in descriptor && canonicalSerializedParserSchema(value, { nodes: 0, bytes: 0 }) === expected;
 }
 function serializedParserDescriptor(descriptor, value) {
@@ -146571,8 +146571,8 @@ function snapshotSerializedResponseFormat(serialized) {
   }
   return Object.create(Object.getPrototypeOf(source2), descriptors);
 }
-function ownSerializedParserObject(holder, key) {
-  const descriptor = Object.getOwnPropertyDescriptor(holder, key);
+function ownSerializedParserObject(holder, key2) {
+  const descriptor = Object.getOwnPropertyDescriptor(holder, key2);
   if (!descriptor || !("value" in descriptor)) {
     return;
   }
@@ -146607,8 +146607,8 @@ function observeSerializedChatCompletionParserParams(body, initial, update2) {
   let actualToolOwners = new Map;
   let functionFrames = new WeakMap;
   return observeJSONRequestBody(body, {
-    value(holder, key, value) {
-      if (!root && key === "" && typeof value === "object" && value !== null) {
+    value(holder, key2, value) {
+      if (!root && key2 === "" && typeof value === "object" && value !== null) {
         root = value;
         tools = undefined;
         responseFormat = undefined;
@@ -146619,10 +146619,10 @@ function observeSerializedChatCompletionParserParams(body, initial, update2) {
         functionFrames = new WeakMap;
         return;
       }
-      if (holder === root && key === "response_format") {
+      if (holder === root && key2 === "response_format") {
         if (typeof value === "object" && value !== null) {
           responseFormat = value;
-          const owner2 = ownSerializedParserObject(holder, key);
+          const owner2 = ownSerializedParserObject(holder, key2);
           responseFrame = {
             source: owner2 === body.response_format ? initial.response_format : undefined,
             schemaMatches: false
@@ -146630,7 +146630,7 @@ function observeSerializedChatCompletionParserParams(body, initial, update2) {
         }
         return;
       }
-      if (holder === root && key === "tools") {
+      if (holder === root && key2 === "tools") {
         if (Array.isArray(value)) {
           tools = new Proxy(value, {
             get(target, property) {
@@ -146649,7 +146649,7 @@ function observeSerializedChatCompletionParserParams(body, initial, update2) {
         return;
       }
       if (holder === tools) {
-        const index = Number(key);
+        const index = Number(key2);
         if (!Number.isSafeInteger(index) || index < 0 || index >= MAX_STREAM_TOOL_CALLS || typeof value !== "object" || value === null) {
           return;
         }
@@ -146662,9 +146662,9 @@ function observeSerializedChatCompletionParserParams(body, initial, update2) {
       }
       const tool = toolFrames.get(holder);
       if (tool) {
-        if (key === "type" && typeof value === "string") {
+        if (key2 === "type" && typeof value === "string") {
           tool.type = value;
-        } else if (key === "function" && typeof value === "object" && value !== null) {
+        } else if (key2 === "function" && typeof value === "object" && value !== null) {
           const fn2 = { source: tool.source, schemaMatches: false };
           tool.function = fn2;
           functionFrames.set(value, fn2);
@@ -146672,21 +146672,21 @@ function observeSerializedChatCompletionParserParams(body, initial, update2) {
         return;
       }
       if (holder === responseFormat && responseFrame) {
-        if (key === "type" && typeof value === "string") {
+        if (key2 === "type" && typeof value === "string") {
           responseFrame.type = value;
-        } else if (key === "json_schema") {
-          responseFrame.schemaMatches = hasMatchingSerializedParserSchema(originalSchemaSignatures, responseFrame.source, holder, key, value);
+        } else if (key2 === "json_schema") {
+          responseFrame.schemaMatches = hasMatchingSerializedParserSchema(originalSchemaSignatures, responseFrame.source, holder, key2, value);
         }
         return;
       }
       const fn = functionFrames.get(holder);
       if (fn) {
-        if (key === "name" && typeof value === "string") {
+        if (key2 === "name" && typeof value === "string") {
           fn.name = value;
-        } else if (key === "strict" && typeof value === "boolean") {
+        } else if (key2 === "strict" && typeof value === "boolean") {
           fn.strict = value;
-        } else if (key === "parameters") {
-          fn.schemaMatches = hasMatchingSerializedParserSchema(originalSchemaSignatures, fn.source, holder, key, value);
+        } else if (key2 === "parameters") {
+          fn.schemaMatches = hasMatchingSerializedParserSchema(originalSchemaSignatures, fn.source, holder, key2, value);
         }
       }
       return;
@@ -149218,11 +149218,11 @@ class TurnState {
       return;
     }
     const call = event.item;
-    const key = JSON.stringify([call.turn_id, call.call_id]);
-    if (__classPrivateFieldGet2(this, _TurnState_calls, "f").has(key)) {
+    const key2 = JSON.stringify([call.turn_id, call.call_id]);
+    if (__classPrivateFieldGet2(this, _TurnState_calls, "f").has(key2)) {
       return;
     }
-    __classPrivateFieldGet2(this, _TurnState_calls, "f").add(key);
+    __classPrivateFieldGet2(this, _TurnState_calls, "f").add(key2);
     return call;
   }
 }
@@ -149431,10 +149431,10 @@ var init_agent_session_stream = __esm(() => {
         this.controller.signal.removeEventListener("abort", onAbort);
       }
     }
-  }, _AgentSessionStream_submit = async function _AgentSessionStream_submit2(result, options, key = uuid42(), attempt2 = 0) {
+  }, _AgentSessionStream_submit = async function _AgentSessionStream_submit2(result, options, key2 = uuid42(), attempt2 = 0) {
     __classPrivateFieldGet2(this, _AgentSessionStream_instances, "m", _AgentSessionStream_checkAbort).call(this);
     try {
-      await __classPrivateFieldGet2(this, _AgentSessionStream_sessions, "f").events.create(__classPrivateFieldGet2(this, _AgentSessionStream_sessionID, "f"), { events: [result], "Idempotency-Key": key }, options);
+      await __classPrivateFieldGet2(this, _AgentSessionStream_sessions, "f").events.create(__classPrivateFieldGet2(this, _AgentSessionStream_sessionID, "f"), { events: [result], "Idempotency-Key": key2 }, options);
     } catch (error3) {
       const delay = [100, 300, 600][attempt2];
       if (delay === undefined || !(error3 instanceof BadRequestError2) || error3.code !== "invalid_request_error" || !error3.error || !("message" in error3.error) || error3.error.message !== `Unknown pending tool call: ${result.call_id}`) {
@@ -149450,7 +149450,7 @@ var init_agent_session_stream = __esm(() => {
           clearTimeout(timer);
         }
       }
-      await __classPrivateFieldGet2(this, _AgentSessionStream_instances, "m", _AgentSessionStream_submit2).call(this, result, options, key, attempt2 + 1);
+      await __classPrivateFieldGet2(this, _AgentSessionStream_instances, "m", _AgentSessionStream_submit2).call(this, result, options, key2, attempt2 + 1);
     }
   };
 });
@@ -150311,9 +150311,9 @@ function isPrimitiveAssistantStreamArrayDelta(accumulator, delta) {
 }
 function countOwnAssistantStreamArrayEntries(accumulator) {
   let count2 = 0;
-  for (const key of Object.keys(accumulator)) {
-    const index = Number(key);
-    if (Number.isSafeInteger(index) && index >= 0 && index < accumulator.length && String(index) === key) {
+  for (const key2 of Object.keys(accumulator)) {
+    const index = Number(key2);
+    if (Number.isSafeInteger(index) && index >= 0 && index < accumulator.length && String(index) === key2) {
       count2 += 1;
     }
   }
@@ -150386,22 +150386,22 @@ function assertValidAssistantStreamArrayDelta(accumulator, delta, kind, projecti
 }
 function assertValidAssistantStreamDeltaIndices(accumulator, delta, projection) {
   let projectedValues = projection.records.get(accumulator);
-  for (const [key, deltaValue] of Object.entries(delta)) {
-    if (key === "index" || key === "type") {
+  for (const [key2, deltaValue] of Object.entries(delta)) {
+    if (key2 === "index" || key2 === "type") {
       continue;
     }
     let accumulatedValue;
-    if (projectedValues?.has(key)) {
-      accumulatedValue = projectedValues.get(key);
-    } else if (hasOwn7(accumulator, key)) {
-      accumulatedValue = accumulator[key];
+    if (projectedValues?.has(key2)) {
+      accumulatedValue = projectedValues.get(key2);
+    } else if (hasOwn7(accumulator, key2)) {
+      accumulatedValue = accumulator[key2];
     }
     if (accumulatedValue === null || accumulatedValue === undefined) {
       if (!projectedValues) {
         projectedValues = new Map;
         projection.records.set(accumulator, projectedValues);
       }
-      projectedValues.set(key, deltaValue);
+      projectedValues.set(key2, deltaValue);
       continue;
     }
     if (isObj3(accumulatedValue) && isObj3(deltaValue)) {
@@ -150422,8 +150422,8 @@ function markAssistantStreamValueExternallyMutable(value) {
   if (Array.isArray(value)) {
     assistantStreamArrayStates.delete(value);
   }
-  for (const key of Reflect.ownKeys(value)) {
-    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+  for (const key2 of Reflect.ownKeys(value)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key2);
     if (descriptor && "value" in descriptor) {
       markAssistantStreamValueExternallyMutable(descriptor.value);
     }
@@ -150478,27 +150478,27 @@ function applyAssistantStreamArrayDelta(accumulator, delta, applyRecord) {
 }
 function applyAssistantStreamDelta(accumulator, delta) {
   const externallyMutable = externallyMutableAssistantStreamValues.has(accumulator);
-  for (const [key, deltaValue] of Object.entries(delta)) {
-    if (key === "__proto__" || key === "constructor" || key === "prototype") {
-      throw new OpenAIError(`Assistant stream delta contains an unsafe property: ${key}`);
+  for (const [key2, deltaValue] of Object.entries(delta)) {
+    if (key2 === "__proto__" || key2 === "constructor" || key2 === "prototype") {
+      throw new OpenAIError(`Assistant stream delta contains an unsafe property: ${key2}`);
     }
-    if (!hasOwn7(accumulator, key)) {
+    if (!hasOwn7(accumulator, key2)) {
       if (externallyMutable) {
         markAssistantStreamValueExternallyMutable(deltaValue);
       }
-      accumulator[key] = deltaValue;
+      accumulator[key2] = deltaValue;
       continue;
     }
-    let accumulatedValue = accumulator[key];
+    let accumulatedValue = accumulator[key2];
     if (accumulatedValue === null || accumulatedValue === undefined) {
       if (externallyMutable) {
         markAssistantStreamValueExternallyMutable(deltaValue);
       }
-      accumulator[key] = deltaValue;
+      accumulator[key2] = deltaValue;
       continue;
     }
-    if (key === "index" || key === "type") {
-      accumulator[key] = deltaValue;
+    if (key2 === "index" || key2 === "type") {
+      accumulator[key2] = deltaValue;
       continue;
     }
     if (typeof accumulatedValue === "string" && typeof deltaValue === "string") {
@@ -150511,9 +150511,9 @@ function applyAssistantStreamDelta(accumulator, delta) {
       applyAssistantStreamArrayDelta(accumulatedValue, deltaValue, applyAssistantStreamDelta);
       continue;
     } else {
-      throw new TypeError(`Unhandled record type: ${getAssistantStreamDiagnosticProperty(key)}`);
+      throw new TypeError(`Unhandled record type: ${getAssistantStreamDiagnosticProperty(key2)}`);
     }
-    accumulator[key] = accumulatedValue;
+    accumulator[key2] = accumulatedValue;
   }
   return accumulator;
 }
@@ -150521,9 +150521,9 @@ function assertSafeAssistantStreamDelta(value) {
   if (!isObj3(value) && !Array.isArray(value)) {
     return;
   }
-  for (const [key, nestedValue] of Object.entries(value)) {
-    if (key === "__proto__" || key === "constructor" || key === "prototype") {
-      throw new OpenAIError(`Assistant stream delta contains an unsafe property: ${key}`);
+  for (const [key2, nestedValue] of Object.entries(value)) {
+    if (key2 === "__proto__" || key2 === "constructor" || key2 === "prototype") {
+      throw new OpenAIError(`Assistant stream delta contains an unsafe property: ${key2}`);
     }
     assertSafeAssistantStreamDelta(nestedValue);
   }
@@ -151324,7 +151324,7 @@ var init_assistant_run_polling = __esm(() => {
 });
 
 // node_modules/openai/resources/beta/threads/runs/runs.mjs
-var Runs;
+var Runs2;
 var init_runs = __esm(() => {
   init_steps2();
   init_steps2();
@@ -151333,7 +151333,7 @@ var init_runs = __esm(() => {
   init_AssistantStream();
   init_assistant_run_polling();
   init_path3();
-  Runs = class Runs extends APIResource2 {
+  Runs2 = class Runs2 extends APIResource2 {
     constructor() {
       super(...arguments);
       this.steps = new Steps(this._client);
@@ -151415,7 +151415,7 @@ var init_runs = __esm(() => {
       return AssistantStream.createToolAssistantStream(runId, this._client.beta.threads.runs, params, options);
     }
   };
-  Runs.Steps = Steps;
+  Runs2.Steps = Steps;
 });
 
 // node_modules/openai/resources/beta/threads/threads.mjs
@@ -151431,7 +151431,7 @@ var init_threads3 = __esm(() => {
   Threads3 = class Threads3 extends APIResource2 {
     constructor() {
       super(...arguments);
-      this.runs = new Runs(this._client);
+      this.runs = new Runs2(this._client);
       this.messages = new Messages4(this._client);
     }
     create(body = {}, options) {
@@ -151482,7 +151482,7 @@ var init_threads3 = __esm(() => {
       return AssistantStream.createThreadAssistantStream(body, this._client.beta.threads, options);
     }
   };
-  Threads3.Runs = Runs;
+  Threads3.Runs = Runs2;
   Threads3.Messages = Messages4;
 });
 
@@ -151795,13 +151795,13 @@ var init_output_items = __esm(() => {
 });
 
 // node_modules/openai/resources/evals/runs/runs.mjs
-var Runs2;
+var Runs3;
 var init_runs2 = __esm(() => {
   init_output_items();
   init_output_items();
   init_pagination2();
   init_path3();
-  Runs2 = class Runs2 extends APIResource2 {
+  Runs3 = class Runs3 extends APIResource2 {
     constructor() {
       super(...arguments);
       this.outputItems = new OutputItems(this._client);
@@ -151842,7 +151842,7 @@ var init_runs2 = __esm(() => {
       });
     }
   };
-  Runs2.OutputItems = OutputItems;
+  Runs3.OutputItems = OutputItems;
 });
 
 // node_modules/openai/resources/evals/evals.mjs
@@ -151855,7 +151855,7 @@ var init_evals = __esm(() => {
   Evals = class Evals extends APIResource2 {
     constructor() {
       super(...arguments);
-      this.runs = new Runs2(this._client);
+      this.runs = new Runs3(this._client);
     }
     create(body, options) {
       return this._client.post("/evals", { body, ...options, __security: { bearerAuth: true } });
@@ -151877,7 +151877,7 @@ var init_evals = __esm(() => {
       return this._client.delete(path5`/evals/${evalID}`, { ...options, __security: { bearerAuth: true } });
     }
   };
-  Evals.Runs = Runs2;
+  Evals.Runs = Runs3;
 });
 
 // node_modules/openai/lib/file-processing.mjs
@@ -152769,16 +152769,16 @@ function getOutputItemIdentityKeys(output, eventType) {
   return identities;
 }
 function assertOutputItemIdentitiesAvailable(identities, keys) {
-  for (const key of keys) {
-    if (identities.has(key)) {
-      throw new OpenAIError(`duplicate output item identity '${key}'`);
+  for (const key2 of keys) {
+    if (identities.has(key2)) {
+      throw new OpenAIError(`duplicate output item identity '${key2}'`);
     }
   }
 }
 function addOutputItemIdentities(identities, keys) {
   assertOutputItemIdentitiesAvailable(identities, keys);
-  for (const key of keys) {
-    identities.add(key);
+  for (const key2 of keys) {
+    identities.add(key2);
   }
 }
 function createResponseOutputIdentityIndex(snapshot2) {
@@ -154457,12 +154457,12 @@ async function verifyWebhookSignature(payload, signatureHeader, timestamp, webho
   const decodedSecret = Uint8Array.from(secret.startsWith("whsec_") ? fromBase642(secret.slice("whsec_".length)) : encodeUTF82(secret));
   const signedPayload = webhookId ? `${webhookId}.${timestamp}.${payload}` : `${timestamp}.${payload}`;
   const signedPayloadBytes = Uint8Array.from(encodeUTF82(signedPayload));
-  const key = await crypto.subtle.importKey("raw", decodedSecret, { name: "HMAC", hash: "SHA-256" }, false, useBoundedVerification ? ["sign", "verify"] : ["verify"]);
+  const key2 = await crypto.subtle.importKey("raw", decodedSecret, { name: "HMAC", hash: "SHA-256" }, false, useBoundedVerification ? ["sign", "verify"] : ["verify"]);
   if (useBoundedVerification && firstSignature) {
-    const expectedSignature = new Uint8Array(await crypto.subtle.sign("HMAC", key, signedPayloadBytes));
+    const expectedSignature = new Uint8Array(await crypto.subtle.sign("HMAC", key2, signedPayloadBytes));
     const signatureToVerify = selectMatchingSignature(signatureHeader, expectedSignature, firstSignature);
     try {
-      if (await crypto.subtle.verify("HMAC", key, Uint8Array.from(signatureToVerify), signedPayloadBytes)) {
+      if (await crypto.subtle.verify("HMAC", key2, Uint8Array.from(signatureToVerify), signedPayloadBytes)) {
         return;
       }
     } catch {}
@@ -154471,7 +154471,7 @@ async function verifyWebhookSignature(payload, signatureHeader, timestamp, webho
   for (const signature of signatureCandidates(signatureHeader)) {
     try {
       const signatureBytes = Uint8Array.from(fromBase642(signature));
-      const isValid = await crypto.subtle.verify("HMAC", key, signatureBytes, signedPayloadBytes);
+      const isValid = await crypto.subtle.verify("HMAC", key2, signatureBytes, signedPayloadBytes);
       if (isValid) {
         return;
       }
@@ -154698,9 +154698,9 @@ class OpenAI {
     const provider2 = clientOptions.provider;
     const { baseURL = provider2 ? null : readEnv2("OPENAI_BASE_URL"), dataResidency: _dataResidency, [inheritedDataResidencySelection]: inheritedResidencySelection = false, apiKey = provider2 ? null : readEnv2("OPENAI_API_KEY") ?? null, adminAPIKey = provider2 ? null : readEnv2("OPENAI_ADMIN_KEY") ?? null, organization = provider2 ? null : readEnv2("OPENAI_ORG_ID") ?? null, project: project2 = provider2 ? null : readEnv2("OPENAI_PROJECT_ID") ?? null, webhookSecret = readEnv2("OPENAI_WEBHOOK_SECRET") ?? null, workloadIdentity, x509Transport, credential: _credential, ...opts } = clientOptions;
     if (provider2) {
-      const conflictingOptions = ["apiKey", "adminAPIKey", "workloadIdentity", "x509Transport", "baseURL", "dataResidency"].filter((key) => (key === "workloadIdentity" ? workloadIdentity : clientOptions[key]) != null);
+      const conflictingOptions = ["apiKey", "adminAPIKey", "workloadIdentity", "x509Transport", "baseURL", "dataResidency"].filter((key2) => (key2 === "workloadIdentity" ? workloadIdentity : clientOptions[key2]) != null);
       if (conflictingOptions.length) {
-        throw new OpenAIError(`The \`provider\` option cannot be used with ${conflictingOptions.map((key) => `\`${key}\``).join(", ")}. Configure authentication and the base URL through the provider instead.`);
+        throw new OpenAIError(`The \`provider\` option cannot be used with ${conflictingOptions.map((key2) => `\`${key2}\``).join(", ")}. Configure authentication and the base URL through the provider instead.`);
       }
     }
     const identity2 = isX509WorkloadIdentity(workloadIdentity) ? { x509: workloadIdentity, legacy: undefined } : { x509: undefined, legacy: workloadIdentity };
@@ -155824,12 +155824,12 @@ var init_openai = __esm(() => {
 });
 
 // node_modules/@earendil-works/pi-ai/dist/api/openai-prompt-cache.js
-function clampOpenAIPromptCacheKey(key) {
-  if (key === undefined)
+function clampOpenAIPromptCacheKey(key2) {
+  if (key2 === undefined)
     return;
-  const chars = Array.from(key);
+  const chars = Array.from(key2);
   if (chars.length <= OPENAI_PROMPT_CACHE_KEY_MAX_LENGTH)
-    return key;
+    return key2;
   return chars.slice(0, OPENAI_PROMPT_CACHE_KEY_MAX_LENGTH).join("");
 }
 var OPENAI_PROMPT_CACHE_KEY_MAX_LENGTH = 64;
@@ -155845,8 +155845,8 @@ function hasHeader2(headers, name) {
   if (!headers)
     return false;
   const expected = name.toLowerCase();
-  for (const [key, value] of Object.entries(headers)) {
-    if (key.toLowerCase() === expected && value !== null && value.trim().length > 0)
+  for (const [key2, value] of Object.entries(headers)) {
+    if (key2.toLowerCase() === expected && value !== null && value.trim().length > 0)
       return true;
   }
   return false;
@@ -156163,10 +156163,10 @@ function resolveClampedThinkingBudget(model2, options, params) {
 }
 function buildChatTemplateValues(model2, options, values3, thinkingBudget) {
   const resolvedValues = {};
-  for (const [key, value] of Object.entries(values3)) {
+  for (const [key2, value] of Object.entries(values3)) {
     const resolved = resolveChatTemplateKwargValue(model2, options, value, thinkingBudget);
     if (resolved !== undefined) {
-      resolvedValues[key] = resolved;
+      resolvedValues[key2] = resolved;
     }
   }
   return Object.keys(resolvedValues).length > 0 ? resolvedValues : undefined;
@@ -157679,8 +157679,8 @@ function hasHeader3(headers, name) {
   if (!headers)
     return false;
   const expected = name.toLowerCase();
-  for (const [key, value] of Object.entries(headers)) {
-    if (key.toLowerCase() === expected && value !== null && value.trim().length > 0)
+  for (const [key2, value] of Object.entries(headers)) {
+    if (key2.toLowerCase() === expected && value !== null && value.trim().length > 0)
       return true;
   }
   return false;
@@ -158120,8 +158120,8 @@ var require_retry = __commonJS(function(exports) {
       maxTimeout: Infinity,
       randomize: false
     };
-    for (var key in options) {
-      opts[key] = options[key];
+    for (var key2 in options) {
+      opts[key2] = options[key2];
     }
     if (opts.minTimeout > opts.maxTimeout) {
       throw new Error("minTimeout is greater than maxTimeout");
@@ -158151,9 +158151,9 @@ var require_retry = __commonJS(function(exports) {
     }
     if (!methods) {
       methods = [];
-      for (var key in obj4) {
-        if (typeof obj4[key] === "function") {
-          methods.push(key);
+      for (var key2 in obj4) {
+        if (typeof obj4[key2] === "function") {
+          methods.push(key2);
         }
       }
     }
@@ -158275,9 +158275,9 @@ var require_extend = __commonJS(function(exports, module) {
     if (obj4.constructor && !hasOwnConstructor && !hasIsPrototypeOf) {
       return false;
     }
-    var key;
-    for (key in obj4) {}
-    return typeof key === "undefined" || hasOwn8.call(obj4, key);
+    var key2;
+    for (key2 in obj4) {}
+    return typeof key2 === "undefined" || hasOwn8.call(obj4, key2);
   };
   var setProperty = function setProperty2(target, options) {
     if (defineProperty && options.name === "__proto__") {
@@ -158568,16 +158568,16 @@ var require_common = __commonJS(function(exports) {
     function redactHeaders(headers) {
       if (!headers)
         return;
-      headers.forEach((_, key) => {
-        if (/^authentication$/i.test(key) || /^authorization$/i.test(key) || /secret/i.test(key))
-          headers.set(key, REDACT);
+      headers.forEach((_, key2) => {
+        if (/^authentication$/i.test(key2) || /^authorization$/i.test(key2) || /secret/i.test(key2))
+          headers.set(key2, REDACT);
       });
     }
-    function redactString(obj4, key) {
-      if (typeof obj4 === "object" && obj4 !== null && typeof obj4[key] === "string") {
-        const text13 = obj4[key];
+    function redactString(obj4, key2) {
+      if (typeof obj4 === "object" && obj4 !== null && typeof obj4[key2] === "string") {
+        const text13 = obj4[key2];
         if (/grant_type=/i.test(text13) || /assertion=/i.test(text13) || /secret/i.test(text13)) {
-          obj4[key] = REDACT;
+          obj4[key2] = REDACT;
         }
       }
     }
@@ -158585,9 +158585,9 @@ var require_common = __commonJS(function(exports) {
       if (!obj4 || typeof obj4 !== "object") {
         return;
       } else if (obj4 instanceof FormData || obj4 instanceof URLSearchParams || "forEach" in obj4 && "set" in obj4) {
-        obj4.forEach((_, key) => {
-          if (["grant_type", "assertion"].includes(key) || /secret/.test(key)) {
-            obj4.set(key, REDACT);
+        obj4.forEach((_, key2) => {
+          if (["grant_type", "assertion"].includes(key2) || /secret/.test(key2)) {
+            obj4.set(key2, REDACT);
           }
         });
       } else {
@@ -158852,8 +158852,8 @@ var require_common2 = __commonJS(function(exports, module) {
     createDebug.enabled = enabled;
     createDebug.humanize = require_ms();
     createDebug.destroy = destroy;
-    Object.keys(env3).forEach((key) => {
-      createDebug[key] = env3[key];
+    Object.keys(env3).forEach((key2) => {
+      createDebug[key2] = env3[key2];
     });
     createDebug.names = [];
     createDebug.skips = [];
@@ -159271,13 +159271,13 @@ var require_node = __commonJS(function(exports, module) {
       ];
     }
   } catch (error3) {}
-  exports.inspectOpts = Object.keys(process.env).filter((key) => {
-    return /^debug_/i.test(key);
-  }).reduce((obj4, key) => {
-    const prop = key.substring(6).toLowerCase().replace(/_([a-z])/g, (_, k) => {
+  exports.inspectOpts = Object.keys(process.env).filter((key2) => {
+    return /^debug_/i.test(key2);
+  }).reduce((obj4, key2) => {
+    const prop = key2.substring(6).toLowerCase().replace(/_([a-z])/g, (_, k) => {
       return k.toUpperCase();
     });
-    let val = process.env[key];
+    let val = process.env[key2];
     if (/^(yes|on|true|enabled)$/i.test(val)) {
       val = true;
     } else if (/^(no|off|false|disabled)$/i.test(val)) {
@@ -159645,15 +159645,15 @@ var require_parse_proxy_response = __commonJS(function(exports) {
             socket.destroy();
             return reject26(new Error(`Invalid header from proxy CONNECT response: "${header3}"`));
           }
-          const key = header3.slice(0, firstColon).toLowerCase();
+          const key2 = header3.slice(0, firstColon).toLowerCase();
           const value = header3.slice(firstColon + 1).trimStart();
-          const current3 = headers[key];
+          const current3 = headers[key2];
           if (typeof current3 === "string") {
-            headers[key] = [current3, value];
+            headers[key2] = [current3, value];
           } else if (Array.isArray(current3)) {
             current3.push(value);
           } else {
-            headers[key] = value;
+            headers[key2] = value;
           }
         }
         debug("got proxy server response: %o %o", firstLine, headers);
@@ -159813,10 +159813,10 @@ var require_dist4 = __commonJS(function(exports) {
   }
   function omit(obj4, ...keys) {
     const ret = {};
-    let key;
-    for (key in obj4) {
-      if (!keys.includes(key)) {
-        ret[key] = obj4[key];
+    let key2;
+    for (key2 in obj4) {
+      if (!keys.includes(key2)) {
+        ret[key2] = obj4[key2];
       }
     }
     return ret;
@@ -160034,8 +160034,8 @@ var require_gaxios = __commonJS(function(exports) {
           opts.url = opts.url + prefix + additionalQueryParams;
         } else {
           const url2 = opts.url instanceof URL ? opts.url : new URL(opts.url);
-          for (const [key, value] of new URLSearchParams(opts.params)) {
-            url2.searchParams.append(key, value);
+          for (const [key2, value] of new URLSearchParams(opts.params)) {
+            url2.searchParams.append(key2, value);
           }
           opts.url = url2;
         }
@@ -160170,8 +160170,8 @@ Content-Type: ${partContentType}\r
       base2 = base2 instanceof Headers ? base2 : new Headers(base2);
       for (const headers of append) {
         const add3 = headers instanceof Headers ? headers : new Headers(headers);
-        add3.forEach((value, key) => {
-          key === "set-cookie" ? base2.append(key, value) : base2.set(key, value);
+        add3.forEach((value, key2) => {
+          key2 === "set-cookie" ? base2.append(key2, value) : base2.set(key2, value);
         });
       }
       return base2;
@@ -161699,13 +161699,13 @@ var require_stringify = __commonJS(function(exports, module) {
         return typeof c === "string" ? c : "\\u" + ("0000" + a.charCodeAt(0).toString(16)).slice(-4);
       }) + '"' : '"' + string + '"';
     }
-    function str31(key, holder) {
-      var i, k, v, length2, mind2 = gap, partial, value = holder[key], isBigNumber = value != null && (value instanceof BigNumber || BigNumber.isBigNumber(value));
+    function str31(key2, holder) {
+      var i, k, v, length2, mind2 = gap, partial, value = holder[key2], isBigNumber = value != null && (value instanceof BigNumber || BigNumber.isBigNumber(value));
       if (value && typeof value === "object" && typeof value.toJSON === "function") {
-        value = value.toJSON(key);
+        value = value.toJSON(key2);
       }
       if (typeof rep === "function") {
-        value = rep.call(holder, key, value);
+        value = rep.call(holder, key2, value);
       }
       switch (typeof value) {
         case "string":
@@ -161972,7 +161972,7 @@ var require_parse = __commonJS(function(exports, module) {
       }
       error3("Bad array");
     }, object2 = function() {
-      var key, object3 = Object.create(null);
+      var key2, object3 = Object.create(null);
       if (ch === "{") {
         next("{");
         white();
@@ -161981,30 +161981,30 @@ var require_parse = __commonJS(function(exports, module) {
           return object3;
         }
         while (ch) {
-          key = string();
+          key2 = string();
           white();
           next(":");
-          if (_options.strict === true && Object.hasOwnProperty.call(object3, key)) {
-            error3('Duplicate key "' + key + '"');
+          if (_options.strict === true && Object.hasOwnProperty.call(object3, key2)) {
+            error3('Duplicate key "' + key2 + '"');
           }
-          if (suspectProtoRx.test(key) === true) {
+          if (suspectProtoRx.test(key2) === true) {
             if (_options.protoAction === "error") {
               error3("Object contains forbidden prototype property");
             } else if (_options.protoAction === "ignore") {
               value();
             } else {
-              object3[key] = value();
+              object3[key2] = value();
             }
-          } else if (suspectConstructorRx.test(key) === true) {
+          } else if (suspectConstructorRx.test(key2) === true) {
             if (_options.constructorAction === "error") {
               error3("Object contains forbidden constructor property");
             } else if (_options.constructorAction === "ignore") {
               value();
             } else {
-              object3[key] = value();
+              object3[key2] = value();
             }
           } else {
-            object3[key] = value();
+            object3[key2] = value();
           }
           white();
           if (ch === "}") {
@@ -162042,8 +162042,8 @@ var require_parse = __commonJS(function(exports, module) {
       if (ch) {
         error3("Syntax error");
       }
-      return typeof reviver === "function" ? function walk8(holder, key) {
-        var k, v, value2 = holder[key];
+      return typeof reviver === "function" ? function walk8(holder, key2) {
+        var k, v, value2 = holder[key2];
         if (value2 && typeof value2 === "object") {
           Object.keys(value2).forEach(function(k2) {
             v = walk8(value2, k2);
@@ -162054,7 +162054,7 @@ var require_parse = __commonJS(function(exports, module) {
             }
           });
         }
-        return reviver.call(holder, key, value2);
+        return reviver.call(holder, key2, value2);
       }({ "": result }, "") : result;
     };
   };
@@ -162578,8 +162578,8 @@ var require_src4 = __commonJS(function(exports) {
     return new URL(exports.BASE_PATH, baseUrl).href;
   }
   function validate(options) {
-    Object.keys(options).forEach((key) => {
-      switch (key) {
+    Object.keys(options).forEach((key2) => {
+      switch (key2) {
         case "params":
         case "property":
         case "headers":
@@ -162587,7 +162587,7 @@ var require_src4 = __commonJS(function(exports) {
         case "qs":
           throw new Error("'qs' is not a valid configuration option. Please use 'params' instead.");
         default:
-          throw new Error(`'${key}' is not a valid configuration option.`);
+          throw new Error(`'${key2}' is not a valid configuration option.`);
       }
     });
   }
@@ -162597,7 +162597,7 @@ var require_src4 = __commonJS(function(exports) {
     let params = {};
     if (typeof type === "object") {
       const metadataAccessor2 = type;
-      new Headers(metadataAccessor2.headers).forEach((value, key) => headers.set(key, value));
+      new Headers(metadataAccessor2.headers).forEach((value, key2) => headers.set(key2, value));
       metadataKey = metadataAccessor2.metadataKey;
       params = metadataAccessor2.params || params;
       noResponseRetries = metadataAccessor2.noResponseRetries || noResponseRetries;
@@ -162612,7 +162612,7 @@ var require_src4 = __commonJS(function(exports) {
       if (options.property) {
         metadataKey += `/${options.property}`;
       }
-      new Headers(options.headers).forEach((value, key) => headers.set(key, value));
+      new Headers(options.headers).forEach((value, key2) => headers.set(key2, value));
       params = options.params || params;
     }
     const requestMethod = fastFail ? fastFailMetadataRequest : gaxios_1.request;
@@ -162661,8 +162661,8 @@ var require_src4 = __commonJS(function(exports) {
     await Promise.all(properties.map((item) => {
       return (async () => {
         const res = await metadataAccessor(item);
-        const key = item.metadataKey;
-        r[key] = res;
+        const key2 = item.metadataKey;
+        r[key2] = res;
       })();
     }));
     return r;
@@ -162912,8 +162912,8 @@ var require_crypto = __commonJS(function(exports) {
       const outputBuffer = await window.crypto.subtle.digest("SHA-256", inputBuffer);
       return (0, shared_1.fromArrayBufferToHex)(outputBuffer);
     }
-    async signWithHmacSha256(key, msg) {
-      const rawKey = typeof key === "string" ? key : String.fromCharCode(...new Uint16Array(key));
+    async signWithHmacSha256(key2, msg) {
+      const rawKey = typeof key2 === "string" ? key2 : String.fromCharCode(...new Uint16Array(key2));
       const enc = new TextEncoder;
       const cryptoKey = await window.crypto.subtle.importKey("raw", enc.encode(rawKey), {
         name: "HMAC",
@@ -162961,8 +162961,8 @@ var require_crypto2 = __commonJS(function(exports) {
     async sha256DigestHex(str31) {
       return crypto4.createHash("sha256").update(str31).digest("hex");
     }
-    async signWithHmacSha256(key, msg) {
-      const cryptoKey = typeof key === "string" ? key : toBuffer(key);
+    async signWithHmacSha256(key2, msg) {
+      const cryptoKey = typeof key2 === "string" ? key2 : toBuffer(key2);
       return toArrayBuffer(crypto4.createHmac("sha256", cryptoKey).update(msg).digest());
     }
   }
@@ -163025,8 +163025,8 @@ var require_safe_buffer = __commonJS(function(exports, module) {
   var buffer = __require("buffer");
   var Buffer2 = buffer.Buffer;
   function copyProps(src, dst) {
-    for (var key in src) {
-      dst[key] = src[key];
+    for (var key2 in src) {
+      dst[key2] = src[key2];
     }
   }
   if (Buffer2.from && Buffer2.alloc && Buffer2.allocUnsafe && Buffer2.allocUnsafeSlow) {
@@ -163252,9 +163252,9 @@ var require_util2 = __commonJS(function(exports) {
     return str31.replace(/([_][^_])/g, (match) => match.slice(1).toUpperCase());
   }
   function originalOrCamelOptions(obj4) {
-    function get(key) {
+    function get(key2) {
       const o = obj4 || {};
-      return o[key] ?? o[snakeToCamel(key)];
+      return o[key2] ?? o[snakeToCamel(key2)];
     }
     return { get };
   }
@@ -163267,22 +163267,22 @@ var require_util2 = __commonJS(function(exports) {
       this.capacity = options.capacity;
       this.maxAge = options.maxAge;
     }
-    #moveToEnd(key, value) {
-      this.#cache.delete(key);
-      this.#cache.set(key, {
+    #moveToEnd(key2, value) {
+      this.#cache.delete(key2);
+      this.#cache.set(key2, {
         value,
         lastAccessed: Date.now()
       });
     }
-    set(key, value) {
-      this.#moveToEnd(key, value);
+    set(key2, value) {
+      this.#moveToEnd(key2, value);
       this.#evict();
     }
-    get(key) {
-      const item = this.#cache.get(key);
+    get(key2) {
+      const item = this.#cache.get(key2);
       if (!item)
         return;
-      this.#moveToEnd(key, item.value);
+      this.#moveToEnd(key2, item.value);
       this.#evict();
       return item.value;
     }
@@ -163297,9 +163297,9 @@ var require_util2 = __commonJS(function(exports) {
   }
   exports.LRUCache = LRUCache;
   function removeUndefinedValuesInObject(object2) {
-    Object.entries(object2).forEach(([key, value]) => {
+    Object.entries(object2).forEach(([key2, value]) => {
       if (value === undefined || value === "undefined") {
-        delete object2[key];
+        delete object2[key2];
       }
     });
     return object2;
@@ -164071,8 +164071,8 @@ var require_oauth2client = __commonJS(function(exports) {
           certificates = res.data;
           break;
         case CertificateFormat.JWK:
-          for (const key of res.data.keys) {
-            certificates[key.kid] = key;
+          for (const key2 of res.data.keys) {
+            certificates[key2.kid] = key2;
           }
           break;
         default:
@@ -164499,58 +164499,58 @@ var require_jwa = __commonJS(function(exports, module) {
     MSG_INVALID_VERIFIER_KEY += " or a KeyObject";
     MSG_INVALID_SECRET += "or a KeyObject";
   }
-  function checkIsPublicKey(key) {
-    if (Buffer2.isBuffer(key)) {
+  function checkIsPublicKey(key2) {
+    if (Buffer2.isBuffer(key2)) {
       return;
     }
-    if (typeof key === "string") {
+    if (typeof key2 === "string") {
       return;
     }
     if (!supportsKeyObjects) {
       throw typeError(MSG_INVALID_VERIFIER_KEY);
     }
-    if (typeof key !== "object") {
+    if (typeof key2 !== "object") {
       throw typeError(MSG_INVALID_VERIFIER_KEY);
     }
-    if (typeof key.type !== "string") {
+    if (typeof key2.type !== "string") {
       throw typeError(MSG_INVALID_VERIFIER_KEY);
     }
-    if (typeof key.asymmetricKeyType !== "string") {
+    if (typeof key2.asymmetricKeyType !== "string") {
       throw typeError(MSG_INVALID_VERIFIER_KEY);
     }
-    if (typeof key.export !== "function") {
+    if (typeof key2.export !== "function") {
       throw typeError(MSG_INVALID_VERIFIER_KEY);
     }
   }
-  function checkIsPrivateKey(key) {
-    if (Buffer2.isBuffer(key)) {
+  function checkIsPrivateKey(key2) {
+    if (Buffer2.isBuffer(key2)) {
       return;
     }
-    if (typeof key === "string") {
+    if (typeof key2 === "string") {
       return;
     }
-    if (typeof key === "object") {
+    if (typeof key2 === "object") {
       return;
     }
     throw typeError(MSG_INVALID_SIGNER_KEY);
   }
-  function checkIsSecretKey(key) {
-    if (Buffer2.isBuffer(key)) {
+  function checkIsSecretKey(key2) {
+    if (Buffer2.isBuffer(key2)) {
       return;
     }
-    if (typeof key === "string") {
-      return key;
+    if (typeof key2 === "string") {
+      return key2;
     }
     if (!supportsKeyObjects) {
       throw typeError(MSG_INVALID_SECRET);
     }
-    if (typeof key !== "object") {
+    if (typeof key2 !== "object") {
       throw typeError(MSG_INVALID_SECRET);
     }
-    if (key.type !== "secret") {
+    if (key2.type !== "secret") {
       throw typeError(MSG_INVALID_SECRET);
     }
-    if (typeof key.export !== "function") {
+    if (typeof key2.export !== "function") {
       throw typeError(MSG_INVALID_SECRET);
     }
   }
@@ -165048,10 +165048,10 @@ var require_getCredentials = __commonJS(function(exports) {
       this.keyFilePath = keyFilePath;
     }
     async getCredentials() {
-      const key = await readFile12(this.keyFilePath, "utf8");
+      const key2 = await readFile12(this.keyFilePath, "utf8");
       let body;
       try {
-        body = JSON.parse(key);
+        body = JSON.parse(key2);
       } catch (error3) {
         const err = error3;
         throw new Error(`Invalid JSON key file: ${err.message}`);
@@ -165280,9 +165280,9 @@ var require_jwtaccess = __commonJS(function(exports) {
       capacity: 500,
       maxAge: 60 * 60 * 1000
     });
-    constructor(email, key, keyId, eagerRefreshThresholdMillis) {
+    constructor(email, key2, keyId, eagerRefreshThresholdMillis) {
       this.email = email;
-      this.key = key;
+      this.key = key2;
       this.keyId = keyId;
       this.eagerRefreshThresholdMillis = eagerRefreshThresholdMillis ?? 5 * 60 * 1000;
     }
@@ -165299,8 +165299,8 @@ var require_jwtaccess = __commonJS(function(exports) {
       return cacheKey;
     }
     getRequestHeaders(url2, additionalClaims, scopes) {
-      const key = this.getCachedKey(url2, scopes);
-      const cachedToken = this.cache.get(key);
+      const key2 = this.getCachedKey(url2, scopes);
+      const cachedToken = this.cache.get(key2);
       const now = Date.now();
       if (cachedToken && cachedToken.expiration - now > this.eagerRefreshThresholdMillis) {
         return new Headers(cachedToken.headers);
@@ -165339,7 +165339,7 @@ var require_jwtaccess = __commonJS(function(exports) {
       const payload = Object.assign(defaultClaims, additionalClaims);
       const signedJWT = jws.sign({ header: header3, payload, secret: this.key });
       const headers = new Headers({ authorization: `Bearer ${signedJWT}` });
-      this.cache.set(key, {
+      this.cache.set(key2, {
         expiration: exp * 1000,
         headers
       });
@@ -165915,10 +165915,10 @@ var require_oauth2common = __commonJS(function(exports) {
       if (err.stack) {
         keys.push("stack");
       }
-      keys.forEach((key) => {
-        if (key !== "message") {
-          Object.defineProperty(newError, key, {
-            value: err[key],
+      keys.forEach((key2) => {
+        if (key2 !== "message") {
+          Object.defineProperty(newError, key2, {
+            value: err[key2],
             writable: false,
             enumerable: true
           });
@@ -166454,7 +166454,7 @@ var require_certificatesubjecttokensupplier = __commonJS(function(exports) {
       }
     }
     async#getKeyAndCert(certPath, keyPath) {
-      let cert, key;
+      let cert, key2;
       try {
         cert = await fs5.promises.readFile(certPath);
         new crypto_1.X509Certificate(cert);
@@ -166463,13 +166463,13 @@ var require_certificatesubjecttokensupplier = __commonJS(function(exports) {
         throw new CertificateSourceUnavailableError(`Failed to read certificate file at ${certPath}: ${message}`);
       }
       try {
-        key = await fs5.promises.readFile(keyPath);
-        (0, crypto_1.createPrivateKey)(key);
+        key2 = await fs5.promises.readFile(keyPath);
+        (0, crypto_1.createPrivateKey)(key2);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         throw new CertificateSourceUnavailableError(`Failed to read private key file at ${keyPath}: ${message}`);
       }
-      return { cert, key };
+      return { cert, key: key2 };
     }
     async#processChainFromPaths(leafCertBuffer) {
       const leafCert = new crypto_1.X509Certificate(leafCertBuffer);
@@ -166666,11 +166666,11 @@ var require_awsrequestsigner = __commonJS(function(exports) {
     }
   }
   exports.AwsRequestSigner = AwsRequestSigner;
-  async function sign(crypto4, key, msg) {
-    return await crypto4.signWithHmacSha256(key, msg);
+  async function sign(crypto4, key2, msg) {
+    return await crypto4.signWithHmacSha256(key2, msg);
   }
-  async function getSigningKey(crypto4, key, dateStamp, region, serviceName) {
-    const kDate = await sign(crypto4, `AWS4${key}`, dateStamp);
+  async function getSigningKey(crypto4, key2, dateStamp, region, serviceName) {
+    const kDate = await sign(crypto4, `AWS4${key2}`, dateStamp);
     const kRegion = await sign(crypto4, kDate, region);
     const kService = await sign(crypto4, kRegion, serviceName);
     const kSigning = await sign(crypto4, kService, "aws4_request");
@@ -166693,8 +166693,8 @@ var require_awsrequestsigner = __commonJS(function(exports) {
     const signedHeadersList = [
       ...amzHeaders.keys()
     ].sort();
-    signedHeadersList.forEach((key) => {
-      canonicalHeaders += `${key}:${amzHeaders.get(key)}
+    signedHeadersList.forEach((key2) => {
+      canonicalHeaders += `${key2}:${amzHeaders.get(key2)}
 `;
     });
     const signedHeaders = signedHeadersList.join(";");
@@ -166907,7 +166907,7 @@ var require_awsclient = __commonJS(function(exports) {
       const extendedHeaders = gaxios_1.Gaxios.mergeHeaders({
         "x-goog-cloud-target-resource": this.audience
       }, options.headers);
-      extendedHeaders.forEach((value, key) => reformattedHeader.push({ key, value }));
+      extendedHeaders.forEach((value, key2) => reformattedHeader.push({ key: key2, value }));
       return encodeURIComponent(JSON.stringify({
         url: options.url,
         method: options.method,
@@ -168598,25 +168598,25 @@ class BaseModule {
 }
 function formatMap(templateString, valueMap) {
   const regex = /\{([^}]+)\}/g;
-  return templateString.replace(regex, (match, key) => {
-    if (Object.prototype.hasOwnProperty.call(valueMap, key)) {
-      const value = valueMap[key];
+  return templateString.replace(regex, (match, key2) => {
+    if (Object.prototype.hasOwnProperty.call(valueMap, key2)) {
+      const value = valueMap[key2];
       return value !== undefined && value !== null ? String(value) : "";
     } else {
-      throw new Error(`Key '${key}' not found in valueMap.`);
+      throw new Error(`Key '${key2}' not found in valueMap.`);
     }
   });
 }
 function setValueByPath(data, keys, value) {
   for (let i = 0;i < keys.length - 1; i++) {
-    const key = keys[i];
-    if (key.endsWith("[]")) {
-      const keyName = key.slice(0, -2);
+    const key2 = keys[i];
+    if (key2.endsWith("[]")) {
+      const keyName = key2.slice(0, -2);
       if (!(keyName in data)) {
         if (Array.isArray(value)) {
           data[keyName] = Array.from({ length: value.length }, () => ({}));
         } else {
-          throw new Error(`Value must be a list given an array path ${key}`);
+          throw new Error(`Value must be a list given an array path ${key2}`);
         }
       }
       if (Array.isArray(data[keyName])) {
@@ -168633,8 +168633,8 @@ function setValueByPath(data, keys, value) {
         }
       }
       return;
-    } else if (key.endsWith("[0]")) {
-      const keyName = key.slice(0, -3);
+    } else if (key2.endsWith("[0]")) {
+      const keyName = key2.slice(0, -3);
       if (!(keyName in data)) {
         data[keyName] = [{}];
       }
@@ -168642,10 +168642,10 @@ function setValueByPath(data, keys, value) {
       setValueByPath(arrayData[0], keys.slice(i + 1), value);
       return;
     }
-    if (!data[key] || typeof data[key] !== "object") {
-      data[key] = {};
+    if (!data[key2] || typeof data[key2] !== "object") {
+      data[key2] = {};
     }
-    data = data[key];
+    data = data[key2];
   }
   const keyToSet = keys[keys.length - 1];
   const existingData = data[keyToSet];
@@ -168679,9 +168679,9 @@ function getValueByPath(data, keys, defaultValue = undefined) {
       if (typeof data !== "object" || data === null) {
         return defaultValue;
       }
-      const key = keys[i];
-      if (key.endsWith("[]")) {
-        const keyName = key.slice(0, -2);
+      const key2 = keys[i];
+      if (key2.endsWith("[]")) {
+        const keyName = key2.slice(0, -2);
         if (keyName in data) {
           const arrayData = data[keyName];
           if (!Array.isArray(arrayData)) {
@@ -168692,7 +168692,7 @@ function getValueByPath(data, keys, defaultValue = undefined) {
           return defaultValue;
         }
       } else {
-        data = data[key];
+        data = data[key2];
       }
     }
     return data;
@@ -168717,9 +168717,9 @@ function moveValueByPath(data, paths) {
     }
     if (wildcardIdx !== -1 && destKeys.length > wildcardIdx) {
       for (let i = wildcardIdx;i < destKeys.length; i++) {
-        const key = destKeys[i];
-        if (key !== "*" && !key.endsWith("[]") && !key.endsWith("[0]")) {
-          excludeKeys.add(key);
+        const key2 = destKeys[i];
+        if (key2 !== "*" && !key2.endsWith("[]") && !key2.endsWith("[0]")) {
+          excludeKeys.add(key2);
         }
       }
     }
@@ -168733,16 +168733,16 @@ function _moveValueRecursive(data, sourceKeys, destKeys, keyIdx, excludeKeys) {
   if (typeof data !== "object" || data === null) {
     return;
   }
-  const key = sourceKeys[keyIdx];
-  if (key.endsWith("[]")) {
-    const keyName = key.slice(0, -2);
+  const key2 = sourceKeys[keyIdx];
+  if (key2.endsWith("[]")) {
+    const keyName = key2.slice(0, -2);
     const dataRecord = data;
     if (keyName in dataRecord && Array.isArray(dataRecord[keyName])) {
       for (const item of dataRecord[keyName]) {
         _moveValueRecursive(item, sourceKeys, destKeys, keyIdx + 1, excludeKeys);
       }
     }
-  } else if (key === "*") {
+  } else if (key2 === "*") {
     if (typeof data === "object" && data !== null && !Array.isArray(data)) {
       const dataRecord = data;
       const keysToMove = Object.keys(dataRecord).filter((k) => !k.startsWith("_") && !excludeKeys.has(k));
@@ -168767,8 +168767,8 @@ function _moveValueRecursive(data, sourceKeys, destKeys, keyIdx, excludeKeys) {
     }
   } else {
     const dataRecord = data;
-    if (key in dataRecord) {
-      _moveValueRecursive(dataRecord[key], sourceKeys, destKeys, keyIdx + 1, excludeKeys);
+    if (key2 in dataRecord) {
+      _moveValueRecursive(dataRecord[key2], sourceKeys, destKeys, keyIdx + 1, excludeKeys);
     }
   }
 }
@@ -169548,8 +169548,8 @@ function processJsonSchema(_jsonSchema) {
       genAISchema[fieldName] = listSchemaFieldValue;
     } else if (dictSchemaFieldNames.includes(fieldName)) {
       const dictSchemaFieldValue = {};
-      for (const [key, value] of Object.entries(fieldValue)) {
-        dictSchemaFieldValue[key] = processJsonSchema(value);
+      for (const [key2, value] of Object.entries(fieldValue)) {
+        dictSchemaFieldValue[key2] = processJsonSchema(value);
       }
       genAISchema[fieldName] = dictSchemaFieldValue;
     } else {
@@ -169726,9 +169726,9 @@ function tModelsUrl(apiClient, baseModels) {
   return res;
 }
 function tExtractModels(response) {
-  for (const key of ["models", "tunedModels", "publisherModels"]) {
-    if (hasField(response, key)) {
-      return response[key];
+  for (const key2 of ["models", "tunedModels", "publisherModels"]) {
+    if (hasField(response, key2)) {
+      return response[key2];
     }
   }
   return [];
@@ -177865,8 +177865,8 @@ class ApiClient {
     const prependProjectLocation = this.shouldPrependVertexProjectPath(request2, patchedHttpOptions);
     const url2 = this.constructUrl(request2.path, patchedHttpOptions, prependProjectLocation);
     if (request2.queryParams) {
-      for (const [key, value] of Object.entries(request2.queryParams)) {
-        url2.searchParams.append(key, String(value));
+      for (const [key2, value] of Object.entries(request2.queryParams)) {
+        url2.searchParams.append(key2, String(value));
       }
     }
     let requestInit = {};
@@ -177882,11 +177882,11 @@ class ApiClient {
   }
   patchHttpOptions(baseHttpOptions, requestHttpOptions) {
     const patchedHttpOptions = JSON.parse(JSON.stringify(baseHttpOptions));
-    for (const [key, value] of Object.entries(requestHttpOptions)) {
+    for (const [key2, value] of Object.entries(requestHttpOptions)) {
       if (typeof value === "object") {
-        patchedHttpOptions[key] = Object.assign(Object.assign({}, patchedHttpOptions[key]), value);
+        patchedHttpOptions[key2] = Object.assign(Object.assign({}, patchedHttpOptions[key2]), value);
       } else if (value !== undefined) {
-        patchedHttpOptions[key] = value;
+        patchedHttpOptions[key2] = value;
       }
     }
     return patchedHttpOptions;
@@ -178078,8 +178078,8 @@ class ApiClient {
   async getHeadersInternal(httpOptions, url2) {
     const headers = new Headers;
     if (httpOptions && httpOptions.headers) {
-      for (const [key, value] of Object.entries(httpOptions.headers)) {
-        headers.append(key, value);
+      for (const [key2, value] of Object.entries(httpOptions.headers)) {
+        headers.append(key2, value);
       }
     }
     if ((httpOptions === null || httpOptions === undefined ? undefined : httpOptions.timeout) && httpOptions.timeout > 0) {
@@ -178228,17 +178228,17 @@ function includeExtraBodyToRequestInit(requestInit, extraBody) {
   }
   function deepMerge(target, source2) {
     const output = Object.assign({}, target);
-    for (const key in source2) {
-      if (Object.prototype.hasOwnProperty.call(source2, key)) {
-        const sourceValue = source2[key];
-        const targetValue = output[key];
+    for (const key2 in source2) {
+      if (Object.prototype.hasOwnProperty.call(source2, key2)) {
+        const sourceValue = source2[key2];
+        const targetValue = output[key2];
         if (sourceValue && typeof sourceValue === "object" && !Array.isArray(sourceValue) && targetValue && typeof targetValue === "object" && !Array.isArray(targetValue)) {
-          output[key] = deepMerge(targetValue, sourceValue);
+          output[key2] = deepMerge(targetValue, sourceValue);
         } else {
           if (targetValue && sourceValue && typeof targetValue !== typeof sourceValue) {
-            console.warn(`includeExtraBodyToRequestInit:deepMerge: Type mismatch for key "${key}". Original type: ${typeof targetValue}, New type: ${typeof sourceValue}. Overwriting.`);
+            console.warn(`includeExtraBodyToRequestInit:deepMerge: Type mismatch for key "${key2}". Original type: ${typeof targetValue}, New type: ${typeof sourceValue}. Overwriting.`);
           }
-          output[key] = sourceValue;
+          output[key2] = sourceValue;
         }
       }
     }
@@ -178458,15 +178458,15 @@ class LiveMusicSession {
 }
 function headersToMap$1(headers) {
   const headerMap = {};
-  headers.forEach((value, key) => {
-    headerMap[key] = value;
+  headers.forEach((value, key2) => {
+    headerMap[key2] = value;
   });
   return headerMap;
 }
 function mapToHeaders$1(map2) {
   const headers = new Headers;
-  for (const [key, value] of Object.entries(map2)) {
-    headers.append(key, value);
+  for (const [key2, value] of Object.entries(map2)) {
+    headers.append(key2, value);
   }
   return headers;
 }
@@ -178712,15 +178712,15 @@ class Session {
 }
 function headersToMap(headers) {
   const headerMap = {};
-  headers.forEach((value, key) => {
-    headerMap[key] = value;
+  headers.forEach((value, key2) => {
+    headerMap[key2] = value;
   });
   return headerMap;
 }
 function mapToHeaders(map2) {
   const headers = new Headers;
-  for (const [key, value] of Object.entries(map2)) {
-    headers.append(key, value);
+  for (const [key2, value] of Object.entries(map2)) {
+    headers.append(key2, value);
   }
   return headers;
 }
@@ -179272,14 +179272,14 @@ function toolToMldev(fromObject) {
 }
 function getFieldMasks(setup) {
   const fields3 = [];
-  for (const key in setup) {
-    if (Object.prototype.hasOwnProperty.call(setup, key)) {
-      const value = setup[key];
+  for (const key2 in setup) {
+    if (Object.prototype.hasOwnProperty.call(setup, key2)) {
+      const value = setup[key2];
       if (typeof value === "object" && value != null && Object.keys(value).length > 0) {
-        const field7 = Object.keys(value).map((kk) => `${key}.${kk}`);
+        const field7 = Object.keys(value).map((kk) => `${key2}.${kk}`);
         fields3.push(...field7);
       } else {
-        fields3.push(key);
+        fields3.push(key2);
       }
     }
   }
@@ -179533,10 +179533,10 @@ function withEnvSecurity(security) {
 function securityFromHeaders(headers) {
   var _a6, _b;
   const defaultHeaders = {};
-  for (const [key, value] of headers) {
-    const lowerKey = key.toLowerCase();
+  for (const [key2, value] of headers) {
+    const lowerKey = key2.toLowerCase();
     if (lowerKey !== "authorization" && lowerKey !== "x-goog-api-key") {
-      defaultHeaders[key] = value;
+      defaultHeaders[key2] = value;
     }
   }
   const security = {
@@ -179550,9 +179550,9 @@ function applyDefaultHeaders(target, source2) {
   if (!source2) {
     return;
   }
-  for (const [key, value] of new Headers(source2)) {
-    if (target.get(key) === null) {
-      target.set(key, value);
+  for (const [key2, value] of new Headers(source2)) {
+    if (target.get(key2) === null) {
+      target.set(key2, value);
     }
   }
 }
@@ -179636,8 +179636,8 @@ function getErrorPayload(error3) {
   const dataError = getObjectProperty(error3, "error");
   return dataError && typeof dataError === "object" ? dataError : undefined;
 }
-function getObjectProperty(value, key) {
-  return value && typeof value === "object" ? value[key] : undefined;
+function getObjectProperty(value, key2) {
+  return value && typeof value === "object" ? value[key2] : undefined;
 }
 function stringifyErrorBody(error3) {
   if (!error3)
@@ -179654,8 +179654,8 @@ function isPlainObject$2(value) {
 function isCompatAPIErrorInstance(value) {
   return typeof value === "object" && value !== null ? APIError3.prototype.isPrototypeOf(value) : false;
 }
-function defineReadonly(target, key, value) {
-  Object.defineProperty(target, key, {
+function defineReadonly(target, key2, value) {
+  Object.defineProperty(target, key2, {
     configurable: true,
     enumerable: true,
     value,
@@ -179864,9 +179864,9 @@ function isPlainObject$1(value) {
   }
 }
 function formEncoder(sep8) {
-  return (key, value, options) => {
+  return (key2, value, options) => {
     let out = "";
-    const pairs = (options === null || options === undefined ? undefined : options.explode) ? explode(key, value) : [[key, value]];
+    const pairs = (options === null || options === undefined ? undefined : options.explode) ? explode(key2, value) : [[key2, value]];
     if (pairs.every(([_, v]) => v == null)) {
       return;
     }
@@ -179902,7 +179902,7 @@ function formEncoder(sep8) {
     return out.slice(1);
   };
 }
-function encodeJSON(key, value, options) {
+function encodeJSON(key2, value, options) {
   if (typeof value === "undefined") {
     return;
   }
@@ -179910,16 +179910,16 @@ function encodeJSON(key, value, options) {
     return (options === null || options === undefined ? undefined : options.charEncoding) === "percent" ? encodeURIComponent(v) : v;
   };
   const encVal = encodeString(JSON.stringify(value, jsonReplacer));
-  return (options === null || options === undefined ? undefined : options.explode) ? encVal : `${encodeString(key)}=${encVal}`;
+  return (options === null || options === undefined ? undefined : options.explode) ? encVal : `${encodeString(key2)}=${encVal}`;
 }
-function explode(key, value) {
+function explode(key2, value) {
   if (Array.isArray(value)) {
-    return value.map((v) => [key, v]);
+    return value.map((v) => [key2, v]);
   } else if (isPlainObject$1(value)) {
     const o = value !== null && value !== undefined ? value : {};
     return Object.entries(o).map(([k, v]) => [k, v]);
   } else {
-    return [[key, value]];
+    return [[key2, value]];
   }
 }
 function serializeValue(value) {
@@ -179977,13 +179977,13 @@ function queryEncoder(f) {
     var _a6, _b, _c;
     const opts = Object.assign(Object.assign({}, options), { explode: (_a6 = options === null || options === undefined ? undefined : options.explode) !== null && _a6 !== undefined ? _a6 : true, charEncoding: (_b = options === null || options === undefined ? undefined : options.charEncoding) !== null && _b !== undefined ? _b : "percent" });
     const allowEmptySet = new Set((_c = options === null || options === undefined ? undefined : options.allowEmptyValue) !== null && _c !== undefined ? _c : []);
-    const encoded = Object.entries(values3).map(([key, value]) => {
-      if (allowEmptySet.has(key)) {
+    const encoded = Object.entries(values3).map(([key2, value]) => {
+      if (allowEmptySet.has(key2)) {
         if (value === undefined || value === null || value === "" || Array.isArray(value) && value.length === 0) {
-          return `${encodeURIComponent(key)}=`;
+          return `${encodeURIComponent(key2)}=`;
         }
       }
-      return f(key, value, opts);
+      return f(key2, value, opts);
     });
     return queryJoin(...encoded);
   };
@@ -183294,8 +183294,8 @@ function attachSdkHttpResponse(value, call) {
 }
 function createSdkHttpResponse(response, parsedBody) {
   const headers = {};
-  for (const [key, value] of response.headers.entries()) {
-    headers[key] = value;
+  for (const [key2, value] of response.headers.entries()) {
+    headers[key2] = value;
   }
   return {
     headers,
@@ -183469,11 +183469,11 @@ class NodeAuth {
       throw new Error("Trying to set google-auth headers but googleAuth is unset");
     }
     const authHeaders = await this.googleAuth.getRequestHeaders(url2);
-    for (const [key, value] of authHeaders) {
-      if (headers.get(key) !== null) {
+    for (const [key2, value] of authHeaders) {
+      if (headers.get(key2) !== null) {
         continue;
       }
-      headers.append(key, value);
+      headers.append(key2, value);
     }
   }
 }
@@ -185408,9 +185408,9 @@ function getApiKeyFromEnv() {
   }
   return envGoogleApiKey || envGeminiApiKey || undefined;
 }
-var import_p_retry, import_google_auth_library, _defaultBaseGeminiUrl = undefined, _defaultBaseVertexUrl = undefined, Outcome, Language, FunctionResponseScheduling, Type, AuthType, HttpElementLocation, ApiSpec, Environment, SafetyPolicy, PhishBlockThreshold, Behavior, DynamicRetrievalConfigMode, ThinkingLevel, PersonGeneration, ProminentPeople, HarmCategory, HarmBlockMethod, HarmBlockThreshold, FunctionCallingConfigMode, FinishReason, HarmProbability, HarmSeverity, UrlRetrievalStatus, BlockedReason, TrafficType, MediaModality, ModelStage, MediaResolution, Modality, Delivery, AspectRatio, ImageSize, TuningMode, AdapterSize, ResponseParseType, MatchOperation, ReinforcementTuningThinkingLevel, JobState, TuningJobState, AggregationMetric, PairwiseChoice, VideoOrientation, TuningSpeed, TuningTask, DocumentState, ServiceTier, MediaProcessing, PartMediaResolutionLevel, ToolType, ResourceScope, FeatureSelectionPreference, EmbeddingApiType, SafetyFilterLevel, ImagePromptLanguage, MaskReferenceMode, ControlReferenceType, SubjectReferenceType, EditMode, SegmentMode, VideoGenerationReferenceType, VideoGenerationMaskMode, VideoCompressionQuality, ImageResizeMode, TuningMethod, FileState, FileSource, TurnCompleteReason, InteractionStatus, VadSignalType, VoiceActivityType, StartSensitivity, EndSensitivity, ActivityHandling, TurnCoverage, AudioTranscriptionConfigMode, Scale, MusicGenerationMode, LiveMusicPlaybackControl, PagedItem, Pager, Batches4, Caches, ApiError, Files$1, CONTENT_TYPE_HEADER = "Content-Type", SERVER_TIMEOUT_HEADER = "X-Server-Timeout", USER_AGENT_HEADER = "User-Agent", GOOGLE_API_CLIENT_HEADER = "x-goog-api-client", SDK_VERSION = "2.21.0", LIBRARY_LABEL, VERTEX_AI_API_DEFAULT_VERSION = "v1beta1", GOOGLE_AI_API_DEFAULT_VERSION = "v1beta", MULTI_REGIONAL_LOCATIONS, DEFAULT_RETRY_ATTEMPTS = 5, DEFAULT_RETRY_INITIAL_DELAY = 1, DEFAULT_RETRY_MAX_DELAY = 60, DEFAULT_RETRY_EXP_BASE = 2, DEFAULT_RETRY_JITTER = 1, DEFAULT_RETRY_HTTP_STATUS_CODES, MCP_LABEL = "mcp_used/unknown", hasMcpToolUsageFromMcpToTool = false, FUNCTION_RESPONSE_REQUIRES_ID = "FunctionResponse request must have an `id` field from the response of a ToolCall.FunctionalCalls in Google AI.", defaultLiveSendClientContentParamerters, DEFAULT_MAX_REMOTE_CALLS = 10, Models4, Operations, Tokens, Documents, FileSearchStores, envMemo = undefined, HTTPClientError, UnexpectedClientError, InvalidRequestError, RequestAbortedError, RequestTimeoutError, ConnectionError, GoogleGenAiError, GeminiNextGenAPIClientError, APIError3, APIUserAbortError3, APIConnectionError3, APIConnectionTimeoutError3, BadRequestError3, AuthenticationError3, PermissionDeniedError3, NotFoundError3, ConflictError3, UnprocessableEntityError3, RateLimitError3, InternalServerError3, hasOwn8, ServerList, SDK_METADATA, encodeForm, encodeSimple = (key, value, options) => {
+var import_p_retry, import_google_auth_library, _defaultBaseGeminiUrl = undefined, _defaultBaseVertexUrl = undefined, Outcome, Language, FunctionResponseScheduling, Type, AuthType, HttpElementLocation, ApiSpec, Environment, SafetyPolicy, PhishBlockThreshold, Behavior, DynamicRetrievalConfigMode, ThinkingLevel, PersonGeneration, ProminentPeople, HarmCategory, HarmBlockMethod, HarmBlockThreshold, FunctionCallingConfigMode, FinishReason, HarmProbability, HarmSeverity, UrlRetrievalStatus, BlockedReason, TrafficType, MediaModality, ModelStage, MediaResolution, Modality, Delivery, AspectRatio, ImageSize, TuningMode, AdapterSize, ResponseParseType, MatchOperation, ReinforcementTuningThinkingLevel, JobState, TuningJobState, AggregationMetric, PairwiseChoice, VideoOrientation, TuningSpeed, TuningTask, DocumentState, ServiceTier, MediaProcessing, PartMediaResolutionLevel, ToolType, ResourceScope, FeatureSelectionPreference, EmbeddingApiType, SafetyFilterLevel, ImagePromptLanguage, MaskReferenceMode, ControlReferenceType, SubjectReferenceType, EditMode, SegmentMode, VideoGenerationReferenceType, VideoGenerationMaskMode, VideoCompressionQuality, ImageResizeMode, TuningMethod, FileState, FileSource, TurnCompleteReason, InteractionStatus, VadSignalType, VoiceActivityType, StartSensitivity, EndSensitivity, ActivityHandling, TurnCoverage, AudioTranscriptionConfigMode, Scale, MusicGenerationMode, LiveMusicPlaybackControl, PagedItem, Pager, Batches4, Caches, ApiError, Files$1, CONTENT_TYPE_HEADER = "Content-Type", SERVER_TIMEOUT_HEADER = "X-Server-Timeout", USER_AGENT_HEADER = "User-Agent", GOOGLE_API_CLIENT_HEADER = "x-goog-api-client", SDK_VERSION = "2.21.0", LIBRARY_LABEL, VERTEX_AI_API_DEFAULT_VERSION = "v1beta1", GOOGLE_AI_API_DEFAULT_VERSION = "v1beta", MULTI_REGIONAL_LOCATIONS, DEFAULT_RETRY_ATTEMPTS = 5, DEFAULT_RETRY_INITIAL_DELAY = 1, DEFAULT_RETRY_MAX_DELAY = 60, DEFAULT_RETRY_EXP_BASE = 2, DEFAULT_RETRY_JITTER = 1, DEFAULT_RETRY_HTTP_STATUS_CODES, MCP_LABEL = "mcp_used/unknown", hasMcpToolUsageFromMcpToTool = false, FUNCTION_RESPONSE_REQUIRES_ID = "FunctionResponse request must have an `id` field from the response of a ToolCall.FunctionalCalls in Google AI.", defaultLiveSendClientContentParamerters, DEFAULT_MAX_REMOTE_CALLS = 10, Models4, Operations, Tokens, Documents, FileSearchStores, envMemo = undefined, HTTPClientError, UnexpectedClientError, InvalidRequestError, RequestAbortedError, RequestTimeoutError, ConnectionError, GoogleGenAiError, GeminiNextGenAPIClientError, APIError3, APIUserAbortError3, APIConnectionError3, APIConnectionTimeoutError3, BadRequestError3, AuthenticationError3, PermissionDeniedError3, NotFoundError3, ConflictError3, UnprocessableEntityError3, RateLimitError3, InternalServerError3, hasOwn8, ServerList, SDK_METADATA, encodeForm, encodeSimple = (key2, value, options) => {
   let out = "";
-  const pairs = (options === null || options === undefined ? undefined : options.explode) ? explode(key, value) : [[key, value]];
+  const pairs = (options === null || options === undefined ? undefined : options.explode) ? explode(key2, value) : [[key2, value]];
   if (pairs.every(([_, v]) => v == null)) {
     return;
   }
@@ -188373,8 +188373,8 @@ var init_node3 = __esm(() => {
         throw new Error(`Invalid uri format: ${uri}. Expected to contain /media/`);
       }
       const queryParams = {};
-      parsedUri.searchParams.forEach((value, key) => {
-        queryParams[key] = value;
+      parsedUri.searchParams.forEach((value, key2) => {
+        queryParams[key2] = value;
       });
       queryParams["alt"] = "media";
       const httpOptions = Object.assign({}, config3 === null || config3 === undefined ? undefined : config3.httpOptions);
@@ -189448,12 +189448,12 @@ var init_node3 = __esm(() => {
       const headers = Object.assign({}, httpOptions.headers || {});
       if (authHeaders) {
         if (typeof authHeaders[Symbol.iterator] === "function") {
-          for (const [key, value] of authHeaders) {
-            headers[key] = value;
+          for (const [key2, value] of authHeaders) {
+            headers[key2] = value;
           }
         } else {
-          for (const [key, value] of Object.entries(authHeaders)) {
-            headers[key] = value;
+          for (const [key2, value] of Object.entries(authHeaders)) {
+            headers[key2] = value;
           }
         }
       }
@@ -189675,10 +189675,10 @@ function sanitizeForOpenApi(schema) {
     return schema;
   }
   const result = {};
-  for (const [key, value] of Object.entries(schema)) {
-    if (JSON_SCHEMA_META_DECLARATIONS.has(key))
+  for (const [key2, value] of Object.entries(schema)) {
+    if (JSON_SCHEMA_META_DECLARATIONS.has(key2))
       continue;
-    result[key] = sanitizeForOpenApi(value);
+    result[key2] = sanitizeForOpenApi(value);
   }
   return result;
 }
@@ -189687,12 +189687,12 @@ function rewriteConstAsEnum(schema, isNameMap = false) {
     return schema.map((item) => rewriteConstAsEnum(item));
   if (typeof schema !== "object" || schema === null)
     return schema;
-  const result = Object.fromEntries(Object.entries(schema).map(([key, value]) => {
-    if (isNameMap || JSON_SCHEMA_SUBSCHEMAS.has(key))
-      return [key, rewriteConstAsEnum(value)];
-    if (JSON_SCHEMA_NAME_MAPS.has(key))
-      return [key, rewriteConstAsEnum(value, true)];
-    return [key, value];
+  const result = Object.fromEntries(Object.entries(schema).map(([key2, value]) => {
+    if (isNameMap || JSON_SCHEMA_SUBSCHEMAS.has(key2))
+      return [key2, rewriteConstAsEnum(value)];
+    if (JSON_SCHEMA_NAME_MAPS.has(key2))
+      return [key2, rewriteConstAsEnum(value, true)];
+    return [key2, value];
   }));
   if (!isNameMap && "const" in result && result.enum === undefined) {
     const value = result.const;
@@ -190641,12 +190641,12 @@ async function consumeChatStream(model2, output, stream7, mistralStream, onProvi
         currentBlock = null;
       }
       const callId = toolCall2.id && toolCall2.id !== "null" ? toolCall2.id : deriveMistralToolCallId(`toolcall:${toolCall2.index ?? 0}`, 0);
-      const key = toolCall2.index ?? callId;
-      let open9 = toolCallsByKey.get(key);
+      const key2 = toolCall2.index ?? callId;
+      let open9 = toolCallsByKey.get(key2);
       if (!open9) {
         output.content.push({ type: "toolCall", id: callId, name: toolCall2.function.name, arguments: {} });
         open9 = { contentIndex: output.content.length - 1, arguments: new ToolCallArgumentsStream };
-        toolCallsByKey.set(key, open9);
+        toolCallsByKey.set(key2, open9);
         stream7.push({ type: "toolcall_start", contentIndex: open9.contentIndex, partial: output });
       }
       const argsDelta = typeof toolCall2.function.arguments === "string" ? toolCall2.function.arguments : JSON.stringify(toolCall2.function.arguments || {});
@@ -190691,8 +190691,8 @@ function stripSymbolKeys(value) {
   }
   if (value && typeof value === "object") {
     const result = {};
-    for (const [key, entry] of Object.entries(value)) {
-      result[key] = stripSymbolKeys(entry);
+    for (const [key2, entry] of Object.entries(value)) {
+      result[key2] = stripSymbolKeys(entry);
     }
     return result;
   }
@@ -191288,9 +191288,9 @@ var init_openrouter_images = __esm(() => {
 function probabilities(label5, value, id3) {
   if (!isRecord4(value))
     throw new Error(`${label5} returned invalid probabilities for ${id3}`);
-  return Object.fromEntries(Object.entries(value).map(([key, probability]) => [
-    key,
-    requiredNumber(label5, probability, `probability for ${id3}.${key}`)
+  return Object.fromEntries(Object.entries(value).map(([key2, probability]) => [
+    key2,
+    requiredNumber(label5, probability, `probability for ${id3}.${key2}`)
   ]));
 }
 function parseAnswers2(label5, value, context2) {
@@ -192088,7 +192088,7 @@ function accountSystemctl(env, uid) {
   const run = accountProgram(env, uid);
   return async (args) => {
     const ran = await run("systemctl", ["--user", ...args]);
-    return ran.code === 127 ? { ...ran, err: "There is no systemctl on this machine's PATH: RPE's service, as today's runtime's, is a systemd user unit." } : ran;
+    return ran.code === 127 ? { ...ran, err: "There is no systemctl on this machine's PATH: RPE's service, as the previous runtime's, is a systemd user unit." } : ran;
   };
 }
 async function lingering(run, account2) {
@@ -192314,7 +192314,7 @@ CREATE TABLE world_file (
   },
   {
     version: 5,
-    name: "which character each of today's people became",
+    name: "which character each of the previous build's people became",
     sql: `
 CREATE TABLE migration_person (
   user TEXT NOT NULL,
@@ -192354,7 +192354,7 @@ CREATE TABLE migration_put (
   },
   {
     version: 8,
-    name: "the swap's record and his word on going back",
+    name: "the switch's record and your word on going back",
     sql: `
 CREATE TABLE migration_swap (user TEXT NOT NULL, at TEXT NOT NULL, record TEXT NOT NULL, PRIMARY KEY (user, at));
 CREATE TABLE migration_no_going_back (user TEXT PRIMARY KEY, at TEXT NOT NULL);
@@ -192362,7 +192362,7 @@ CREATE TABLE migration_no_going_back (user TEXT PRIMARY KEY, at TEXT NOT NULL);
   },
   {
     version: 9,
-    name: "his answers to the questions today's build left",
+    name: "your answers to the questions the previous build left",
     sql: `
 CREATE TABLE migration_answer (
   user TEXT NOT NULL,
@@ -192513,7 +192513,7 @@ var NEVER_REMOVE = "Never remove the extension to install it again: removing it 
 function switchBack(identifier, branch, first) {
   return [
     `  ${first}. In Lumiverse, switch the installed extension (${identifier}) to the branch the previous build is kept on, ${branch}, with Lumiverse's branch switch: switching keeps its storage. ${NEVER_REMOVE} (the migration's backup holds a copy).`,
-    `  ${first + 1}. In Lumiverse's extension settings, the previous build asks again for the ${RETURNING.length} permissions the light build did not: ${ADMIN_APPROVES.join(", ")} wait for an admin's approval, so approve them (or have an admin of this Lumiverse do so); ${BY_THEMSELVES.join(", ")} come back by themselves. Then switch the extension off and on again, so that it starts with them in hand. The ${PREVIOUS_PERMISSIONS.length} permissions it asks for: ${PREVIOUS_PERMISSIONS.join(", ")}.`
+    `  ${first + 1}. In Lumiverse's extension settings, the previous build asks again for the ${RETURNING.length} permissions the new build did not: ${ADMIN_APPROVES.join(", ")} wait for an admin's approval, so approve them (or have an admin of this Lumiverse do so); ${BY_THEMSELVES.join(", ")} come back by themselves. Then switch the extension off and on again, so that it starts with them in hand. The ${PREVIOUS_PERMISSIONS.length} permissions it asks for: ${PREVIOUS_PERMISSIONS.join(", ")}.`
   ];
 }
 var connections = (ids2) => ids2.length === 1 ? `the connection ${ids2[0]}` : `the connections ${ids2.join(", ")}`;
@@ -192521,12 +192521,12 @@ function goingBack(facts) {
   const name = facts.runtime === null ? "<its name>" : shellWord(facts.runtime.name);
   const source2 = facts.runtime?.source ?? null;
   const script = source2 === null ? "<the extension's folder>/dist/lumiah.js" : shellWord(source2);
-  const down = "RPE's service is stopped and removed, and its data stays where it is: what you played on RPE does not flow back, and a later cutover finds it as you left it.";
+  const down = "RPE's service is stopped and removed, and its data stays where it is: what you played on RPE does not flow back, and a later switch finds it as you left it.";
   const more = [];
   const moved3 = facts.moved ?? [];
   if (moved3.length > 0) {
     more.push([
-      "In Lumiverse, give each chat you moved onto one of RPE's connections since the swap the connection it had then: RPE no longer answers there.",
+      "In Lumiverse, give each chat you moved onto one of RPE's connections since the switch the connection it had then: RPE no longer answers there.",
       ...moved3.map((c) => `       "${c.name}" (${c.chat}): ${c.had === null ? "no connection of its own, so that it follows the one active for you" : `the connection ${c.had}`}`)
     ]);
   }
@@ -192534,22 +192534,22 @@ function goingBack(facts) {
     more.push([`In Lumiverse, give every chat you moved to RPE's connection ${facts.own} the connection it had before: RPE no longer answers there.`]);
   const earlier = facts.earlier ?? [];
   if (earlier.length > 0)
-    more.push([`In Lumiverse, ${connections(earlier)}, RPE's own before the swap took today's, ${earlier.length === 1 ? "answers" : "answer"} nothing: RPE answered there alone. Give any chat still on ${earlier.length === 1 ? "it" : "them"} the previous build's connection, or remove ${earlier.length === 1 ? "it" : "them"}.`]);
+    more.push([`In Lumiverse, ${connections(earlier)}, RPE's own before the switch took over the previous build's, ${earlier.length === 1 ? "answers" : "answer"} nothing: RPE answered there alone. Give any chat still on ${earlier.length === 1 ? "it" : "them"} the previous build's connection, or remove ${earlier.length === 1 ? "it" : "them"}.`]);
   const replaced = facts.keyReplaced ?? [];
   if (replaced.length > 0)
-    more.push([`In Lumiverse, put back on ${connections(replaced)} the key ${replaced.length === 1 ? "it" : "each"} held before the swap: the previous build's runtime takes only that key, and the one there now is a key RPE made.`]);
+    more.push([`In Lumiverse, put back on ${connections(replaced)} the key ${replaced.length === 1 ? "it" : "each"} held before the switch: the previous build's runtime takes only that key, and the one there now is a key RPE made.`]);
   return [
-    "To go back to the previous build: today's data was never changed, and neither was its connection in Lumiverse.",
+    "To go back to the previous build: its data was never changed, and neither was its connection in Lumiverse.",
     facts.downRun === false ? `  1. Run rpe down: ${down}` : `  1. rpe down: done. ${down}`,
     ...switchBack(facts.identifier, facts.branch ?? PREVIOUS_BRANCH_DEFAULT, 2),
-    `  4. Run the previous build's own install line, the one you use when you update it: bun ${script} up --name ${name} --systemd. It reads its address from its own config, keeps its registration, and takes up its service's unit, which the swap only switched off, with the memory cap it holds: all as the swap left them.`,
+    `  4. Run the previous build's own install line, the one you use when you update it: bun ${script} up --name ${name} --systemd. It reads its address from its own config, keeps its registration, and takes up its service's unit, which the switch only switched off, with the memory cap it holds: all as the switch left them.`,
     ...more.flatMap(([first, ...rest], i) => [`  ${5 + i}. ${first}`, ...rest])
   ];
 }
 function stopAfterSwitch(facts, why) {
   return [
     why,
-    `What has changed: Lumiverse runs the light extension (${facts.identifier}) now, and the ${RETURNING.length} permissions it does not ask for were withdrawn (${RETURNING.join(", ")}). What has not: today's service runs, and today's data is as it was.`,
+    `What has changed: Lumiverse runs the new build of the extension (${facts.identifier}) now, and the ${RETURNING.length} permissions it does not ask for were withdrawn (${RETURNING.join(", ")}). What has not: the previous build's service runs, and its data is as it was.`,
     "To go back to the previous build now:",
     ...switchBack(facts.identifier, facts.branch ?? PREVIOUS_BRANCH_DEFAULT, 1)
   ];
@@ -192558,7 +192558,7 @@ function swapSteps(facts) {
   return [
     `  1. In Lumiverse, switch the installed extension (${facts.identifier}) to the new build's branch, ${NEW_BUILD_BRANCH} until it is main, with Lumiverse's branch switch: switching keeps its storage. ${NEVER_REMOVE}.`,
     `  2. In Lumiverse's extension settings, approve its five permissions: ${LIGHT_PERMISSIONS.join(", ")}.`,
-    "  3. Let any reply being written finish: the swap waits for today's runtime to be idle before it stops it, and stops nothing while a reply is under way.",
+    "  3. Let any reply being written finish: the switch waits for the previous runtime to be idle before it stops it, and stops nothing while a reply is under way.",
     `  4. Run ${facts.up ?? "rpe up"}.`
   ];
 }
@@ -193822,7 +193822,7 @@ function createDbReader(deps) {
       return r === null ? null : mapped(`chat ${chat}`, () => chatFrom(row(r)));
     },
     async chats() {
-      const rows = await step("the user's chats", (db) => db.query(Q.chats).all(user));
+      const rows = await step("your chats", (db) => db.query(Q.chats).all(user));
       return rows.map((r) => mapped("a chat", () => chatFrom(row(r))));
     },
     async path(chat) {
@@ -193873,7 +193873,7 @@ function createDbReader(deps) {
       return r === null ? null : mapped(`world book ${book}`, () => bookFrom(row(r)));
     },
     async books() {
-      const rows = await step("the user's world books", (db) => db.query(Q.books).all(user));
+      const rows = await step("your world books", (db) => db.query(Q.books).all(user));
       return rows.map((r) => mapped("a world book", () => bookFrom(row(r))));
     },
     async entries(book) {
@@ -193896,7 +193896,7 @@ function createDbReader(deps) {
       return r === null ? null : mapped(`character ${character}`, () => characterFrom(row(r)));
     },
     async characters() {
-      const rows = await step("the user's characters", (db) => db.query(Q.characters).all(user));
+      const rows = await step("your characters", (db) => db.query(Q.characters).all(user));
       return rows.map((r) => mapped("a character", () => characterFrom(row(r))));
     },
     async persona(persona) {
@@ -197329,9 +197329,9 @@ var WRITER = gone("LumiAH's writer agent");
 var LOOP = gone("LumiAH's agent loop");
 var RECALL2 = gone("LumiAH's recall tools");
 var JOBS2 = gone("how LumiAH's jobs were run");
-var MODEL = { none: "the model and effort an agent of today's runs on are carried as model choices, and its limits and tools into the header of an agent definition of his own; RPE's own agents are set up in their files" };
+var MODEL = { none: "the model and effort an agent of the previous build runs on are carried as model choices, and its limits and tools into the header of an agent definition of your own; RPE's own agents are set up in their files" };
 var LUMIAH = {
-  "core.reply.progress": { unlike: "today's, off, showed no progress line; RPE's least still shows the one that keeps a silent turn alive", to: "progress.show" },
+  "core.reply.progress": { unlike: "the previous build's, off, showed no progress line; RPE's least still shows the one that keeps a silent turn alive", to: "progress.show" },
   "core.reply.progressChars": { none: "RPE's progress line is not cut at a length of its own" },
   "core.story.hidden": { to: "history.hiddenReadable" },
   "core.story.from": { to: "story.from" },
@@ -197348,11 +197348,11 @@ var LUMIAH = {
   "core.loop.retryWaitMs": { to: "calls.retryWaitSeconds", seconds: true },
   "core.loop.answerFloor": { to: "limits.minAnswerTokens" },
   "core.cache.retention": { to: "calls.cacheRetention" },
-  "core.cache.key": { none: "RPE asks a provider to cache by the call, with no key of the user's" },
+  "core.cache.key": { none: "RPE asks a provider to cache by the call, with no key of yours" },
   "core.connections.atOnce": { to: "throttles.atOnce" },
   "core.connections.throttles": { none: "a throttle is carried to the connection of RPE's that the connection it names is (the same id, or the same provider, model and address); one set on a connection RPE holds none for has no connection to go to" },
   "core.connections.toolRefusalMinutes": { to: "calls.toolRefusalMinutes" },
-  "core.prices": { none: "RPE keeps no money figures, so none of the user's prices" },
+  "core.prices": { none: "RPE keeps no money figures, so none of your prices" },
   "core.session.keepTurns": { to: "compaction.keepTurns" },
   "core.delegation.depth": { to: "limits.turn.depth" },
   "core.delegation.atOnce": { to: "limits.turn.agentsAtOnce" },
@@ -197361,7 +197361,7 @@ var LUMIAH = {
   "core.jobs.perRun": { to: "jobs.perRun" },
   "core.jobs.budget.tokensIn": { to: "jobs.run.tokensIn" },
   "core.jobs.budget.tokensOut": { to: "jobs.run.tokensOut" },
-  "core.jobs.budget.toolTurns": { unlike: "today's counted the answers that called tools; RPE's counts every model call", to: "jobs.run.calls" },
+  "core.jobs.budget.toolTurns": { unlike: "the previous build's counted the answers that called tools; RPE's counts every model call", to: "jobs.run.calls" },
   "core.jobs.budget.wallMs": { to: "jobs.run.seconds", seconds: true },
   "core.jobs.tokensPerDay": { to: "jobs.tokensPerDay" },
   "core.spend.tokensPerDay": { to: "limits.day.tokens" },
@@ -197435,7 +197435,7 @@ var ENGINE = {
   findings: gone("the old engines' findings list"),
   minds: { none: "RPE has no setting of that meaning besides those named of it; each chat's own choices are carried with the chat" },
   loreIndex: { none: "RPE has no setting of that meaning besides the entry that heads the index" },
-  prompts: { none: "his edited texts are attached under imported/, switched off" },
+  prompts: { none: "your edited texts are attached under imported/, switched off" },
   tidy: { to: "things.maxTidyFindings" }
 };
 function engineFate(key) {
@@ -197471,7 +197471,7 @@ var TUNING = {
   providerMs: { to: "calls.providerWaitSeconds", seconds: true },
   answerSilentMs: { to: "calls.silentAfterSeconds", seconds: true },
   signInMs: { to: "calls.signInOpenSeconds", seconds: true },
-  connectionsRead: { none: "it capped today's read of his connections at one page of 200; RPE reads every page" },
+  connectionsRead: { none: "it capped the previous build's read of your connections at one page of 200; RPE reads every page" },
   traceMs: { none: "RPE's trace is written to the turn's folder, not sent in batches" },
   traceBatch: { none: "RPE's trace is written to the turn's folder, not sent in batches" },
   traceHeld: { none: "RPE's trace is written to the turn's folder, not sent in batches" },
@@ -197598,7 +197598,7 @@ async function carrySettings(today6, items, globalConfig, earlier, registry2, co
       if (value === "include" || value === "leave_out")
         puts.push({ from: [from], to: "history.hiddenReadable", value: value === "include" });
       else
-        notCarried.push({ from, to: "history.hiddenReadable", why: "today's is neither include nor leave_out" });
+        notCarried.push({ from, to: "history.hiddenReadable", why: "the previous build's is neither include nor leave_out" });
     } else if (path === "transport.history.keep" || path === "transport.history.count") {
       history.from.push(from);
       if (path.endsWith("keep"))
@@ -197623,7 +197623,7 @@ async function carrySettings(today6, items, globalConfig, earlier, registry2, co
       puts.push({ from: history.from, to: "history.window", value: kept4 });
     else
       for (const from of history.from)
-        notCarried.push({ from, to: "history.window", why: "today's cutoff keeps no whole number of messages, at least 1" });
+        notCarried.push({ from, to: "history.window", why: "the previous build's cutoff keeps no whole number of messages, at least 1" });
   }
   const withChat = { mapDisplay: true, tidyLeft: true, knowledge: true, narrator: true, tidy: true, engine: true };
   for (const item of items) {
@@ -197654,7 +197654,7 @@ async function carrySettings(today6, items, globalConfig, earlier, registry2, co
       out.noHome.push(`runtime ${name}: memory`);
     for (const [field4, value] of Object.entries(isRecord(runtime.tuning) ? runtime.tuning : {})) {
       if (Object.hasOwn(RUNTIME_DEFAULTS, field4) && value === RUNTIME_DEFAULTS[field4])
-        archived.push({ from: `runtime ${name}: tuning.${field4}`, why: "it is at today's own default, which is no choice of his: RPE's own default for the setting of that meaning stands" });
+        archived.push({ from: `runtime ${name}: tuning.${field4}`, why: "it is at the previous build's own default, which is no choice of yours: RPE's own default for the setting of that meaning stands" });
       else
         settle5(`runtime ${name}: tuning.${field4}`, tuningFate(field4), value);
     }
@@ -197726,7 +197726,7 @@ async function carrySettings(today6, items, globalConfig, earlier, registry2, co
         if (ours === undefined)
           continue;
         const to = `RPE-global.yml: ${key}`;
-        const change2 = "reset or removed on today's side since an earlier run";
+        const change2 = "reset or removed on the previous build's side since an earlier run";
         if (hashJson(ours) !== was) {
           followed2.push({ what: to, change: change2, followed: false });
           continue;
@@ -197925,7 +197925,7 @@ async function carryOwnFiles(today6, items, places2, history, models) {
       continue;
     out.agentIds.push(id3);
     const run = runOf3(id3, ownAgents, settings);
-    const choice = run.connection === null ? null : models({ where: `agent ${id3} of his own`, connection: run.connection, model: run.model, to: { agent: id3, path: `${IMPORTED_AGENTS}/${id3}.md` } });
+    const choice = run.connection === null ? null : models({ where: `agent ${id3} of your own`, connection: run.connection, model: run.model, to: { agent: id3, path: `${IMPORTED_AGENTS}/${id3}.md` } });
     if (choice !== null)
       out.agentModels.push({ agent: id3, connection: choice.connection, carriedTo: choice.carried?.id ?? null, why: choice.why });
     for (const tool of run.tools)
@@ -198171,7 +198171,7 @@ function findChoices(engine, harness) {
   }
   for (const [id3, def] of Object.entries(defs))
     if (isRecord(def) && text9(def.connectionId) !== null)
-      out.push({ where: `agent ${id3} of his own`, connection: def.connectionId, model: text9(def.model), to: agentPlace(id3) });
+      out.push({ where: `agent ${id3} of your own`, connection: def.connectionId, model: text9(def.model), to: agentPlace(id3) });
   return out;
 }
 function addressOf(url2) {
@@ -199695,7 +199695,7 @@ class LoreIndex {
       }
       if ("defines" in edit)
         putBindings(db, at2.user, entry.id, "owner", (edit.defines ?? []).map((b) => ({ ...resolveRecord(world, b.what), aspect: b.aspect })), null, now);
-    }, "keeping the user's edit of the lore index");
+    }, "keeping your edit of the lore index");
     await this.keepFiles(at2);
     return joined3(entry, this.rows(at2.user, [entry]).get(placeOf7(entry)), this.bindings(at2, [entry]).get(entry.id));
   }
@@ -199967,10 +199967,10 @@ class LoreProposals {
       else if (w.proposal !== null)
         db.run("UPDATE lore_proposal SET status = 'approved', decided = ?, write = ? WHERE user = ? AND id = ?", [at2, made, user, w.proposal]);
       return made;
-    }, "keeping a write to the user's lore");
+    }, "keeping a write to your lore");
     const row = this.deps.db.query("SELECT * FROM lore_write_log WHERE user = ? AND id = ?").get(user, id3);
     if (row === null)
-      throw new Error(`The write ${id3} to the user's lore was kept and cannot be read back.`);
+      throw new Error(`The write ${id3} to your lore was kept and cannot be read back.`);
     return writeView(row);
   }
 }
@@ -200027,7 +200027,7 @@ var LORE_INDEX_ENTRY_DEF = {
   default: null,
   takes: { type: "text" },
   orNone: true,
-  none: "no index entry of his own",
+  none: "no index entry of your own",
   perConnection: false,
   name: "Your own lore index entry",
   about: "A lore entry of yours whose text heads the readable lore index of each chat, in front of the lines RPE writes. Give its id in Lumiverse.",
@@ -200039,7 +200039,7 @@ var SECRETS_NARRATOR_KNOWLEDGE_DEF = {
   takes: { type: "oneOf", values: NARRATOR_KNOWLEDGE },
   perConnection: false,
   name: "Narrator's knowledge",
-  about: "What the narrator knows of the chat's secrets: `scene` (everyone in the scene) or `pov` (the player's character only). The chat's own choice wins over its world's own, which wins over this global one.",
+  about: "What the narrator knows of the chat's secrets: `scene` (everyone in the scene) or `pov` (your character only). The chat's own choice wins over its world's own, which wins over this global one.",
   effect: "use"
 };
 var SECRETS_NARRATOR_SECRETS_DEF = {
@@ -200048,7 +200048,7 @@ var SECRETS_NARRATOR_SECRETS_DEF = {
   takes: { type: "oneOf", values: NARRATOR_SECRETS },
   perConnection: false,
   name: "Narrator's secrets",
-  about: "How a secret kept from the player's character reaches the narrator: `marked` (put in, marked as a secret) or `omit` (left out). The chat's own choice wins over its world's own, which wins over this global one.",
+  about: "How a secret kept from your character reaches the narrator: `marked` (put in, marked as a secret) or `omit` (left out). The chat's own choice wins over its world's own, which wins over this global one.",
   effect: "use"
 };
 var SECRETS_TRACKED_DEF = {
@@ -202679,8 +202679,8 @@ var ROWS3 = [
   { id: "rollback", what: "A rollback of the agents engine's last compaction that you asked for and that had not been applied", fate: "archived", found: "own" },
   { id: "chips-staged", what: "Review cards and stored chips; staged changes", fate: "carried", found: "own" },
   { id: "old-engine-notes", what: "The classic pipeline's re-narrate lines and the agents engine's kept scene", fate: "archived", found: "own" },
-  { id: "depth-engine", what: "The depth engine's files, left by a build before today's: each chat's switch to it, its bootstrap of the chat, the layer of what it landed, its search index of the chat, its loopback registry and its day's spend", fate: "archived", found: "own" },
-  { id: "rpe-own", what: "RPE's own files, written by its light extension: its registration with RPE", fate: "archived", found: "own" },
+  { id: "depth-engine", what: "The depth engine's files, left by a build before the previous one: each chat's switch to it, its bootstrap of the chat, the layer of what it landed, its search index of the chat, its loopback registry and its day's spend", fate: "archived", found: "own" },
+  { id: "rpe-own", what: "RPE's own files, written by the new build of the extension: its registration with RPE", fate: "archived", found: "own" },
   { id: "pins", what: "Pins", fate: "carried", found: "inside" },
   { id: "settings", what: "Your settings", fate: "carried", found: "own" },
   { id: "model-choices", what: "Which model each kind of work uses, where a setting names a connection that lives in Lumiverse", fate: "carried", found: "inside" },
@@ -202699,9 +202699,9 @@ var ROWS3 = [
   { id: "browser-prefs", what: "Browser preferences", fate: "carried", found: "not read", why: "They sit in the browser's own storage, which the new pages read under the same keys." },
   { id: "derived", what: "Search vectors, caches and snapshots", fate: "archived", found: "own" },
   { id: "logs", what: "Logs, diagnostics and small working files", fate: "archived", found: "own" },
-  { id: "working-copy", what: "The runtime's working copy and its temporary folder; the installed copy of today's runtime", fate: "archived", found: "own" },
+  { id: "working-copy", what: "The runtime's working copy and its temporary folder; the installed copy of the previous runtime", fate: "archived", found: "own" },
   { id: "deleted-chats", what: "Run data of chats since deleted in Lumiverse", fate: "archived", found: "own" },
-  { id: "second-copies", what: "Where today's build keeps two copies of one thing: the copy that is not the authority, left in the file it is in", fate: "attached", found: "inside" },
+  { id: "second-copies", what: "Where the previous build keeps two copies of one thing: the copy that is not the authority, left in the file it is in", fate: "attached", found: "inside" },
   { id: "owner-rows", what: "Files you gave a row to: each kept as you said, with your line saying what it is", fate: "archived", found: "own" }
 ];
 var ROW = Object.fromEntries(ROWS3.map((r) => [r.id, r]));
@@ -202710,7 +202710,7 @@ var NO_PLACE_YET = {
   "assistant-threads": "the pages lane",
   "chips-staged": "the turn lane's tables, which a run is given by its caller (`MigrateOptions.runs`); without them it is kept in the backup only",
   "approvals-jobs": "the turn lane's tables, and its writer of a carried job (`MigrateOptions.runs.keepJob`), which a run is given by its caller",
-  "owner-rows": "nothing reads a file he names (\xA722): an attached one stays in the backup, with his line, until a reader of it is built"
+  "owner-rows": "nothing reads a file you name (\xA722): an attached one stays in the backup, with your line, until a reader of it is built"
 };
 
 // src/migrate/report.ts
@@ -202742,7 +202742,7 @@ function refusalsOf(report, whose, runtime) {
     if (other !== whose.user)
       out.push(`An earlier run carried the data of the Lumiverse user ${other} into this data folder, and this run is for ${whose.user}: one RPE serves one Lumiverse user.`);
   if (runtime.missing !== null)
-    out.push(`The runtime's folders are not where this run looks: neither ${runtime.missing.configDir} nor ${runtime.missing.dataDir} is there. Say where they are, or that the server runs no runtime of today's build (--no-runtime).`);
+    out.push(`The runtime's folders are not where this run looks: neither ${runtime.missing.configDir} nor ${runtime.missing.dataDir} is there. Say where they are, or that the server runs no runtime of the previous build (--no-runtime).`);
   if (runtime.undecided !== null)
     out.push(runtime.undecided);
   for (const r of report.rows) {
@@ -202757,7 +202757,7 @@ function refusalsOf(report, whose, runtime) {
     }
   }
   if (report.notClassified.length > 0)
-    out.push(`${report.notClassified.length} found, not classified: ${report.notClassified.map((i) => `${i.where}: ${i.path}`).join("; ")}. To give a file a row, add it to files/RPE-global.yml under migration.rows as a path (as named here), a fate (archived or attached) and your line saying what it is; docs/migration.md, "The report", has an example.`);
+    out.push(`${report.notClassified.length} found, not classified: ${report.notClassified.map((i) => `${i.where}: ${i.path}`).join("; ")}. To give a file a row, add it to files/RPE-global.yml under migration.rows as a path (as named here), a fate (archived or attached) and your line saying what it is; docs/migration.md, "1. The rehearsal", has an example under "Giving a file a row".`);
   if (report.disk.free !== null && report.disk.free < report.disk.total)
     out.push(`The real run needs ${report.disk.total} bytes where it writes, and ${report.disk.free} are free.`);
   return out;
@@ -202914,12 +202914,12 @@ function reportText(report) {
     lines.push(`  ${c.chatId} (${c.engine ?? "no world"}): ${c.turns} turns over ${c.replies} replies; journal ${c.journal}${c.underWay > 0 ? `; ${c.underWay} turn(s) under way` : ""}${landed.length > 0 ? `; ${landed.join(", ")}` : ""}${waits.length > 0 ? `; waiting: ${waits.join(", ")}` : ""}`);
   }
   if ((report.offRpe ?? []).length > 0) {
-    lines.push("", "Chats that were on today and are on none of RPE's connections once swapped (every connection that reaches today's runtime becomes RPE's): in Lumiverse, choose one of RPE's connections for each, and it is on RPE.");
+    lines.push("", "Chats that were on the previous build and are on none of RPE's connections once the switch is made (every connection that reaches the previous runtime becomes RPE's): in Lumiverse, choose one of RPE's connections for each, and it is on RPE.");
     for (const c of report.offRpe ?? [])
       lines.push(`  ${c.chat}: ${c.pinned === null ? "pinned to no connection, so it follows the one active for you" : `pinned to connection ${c.pinned}`}`);
   }
   if (report.imports !== null) {
-    lines.push("", "Chats into RPE: turns, where each swipe was folded, and the check against today's fold");
+    lines.push("", "Chats into RPE: turns, where each swipe was folded, and the check against the previous build's fold");
     for (const c of report.imports) {
       if (c.outcome !== "imported" && c.outcome !== "replaced") {
         lines.push(`  ${c.chatId}: ${c.outcome}${c.why ? ` (${c.why})` : ""}`);
@@ -202928,13 +202928,13 @@ function reportText(report) {
       const p = c.placed;
       const where = `${p.own} on their own path, ${p.shown} where they show (no turn path of their own), ${p.lost} where they show (their own path lost to an edit or a deletion)`;
       const check4 = `matched at the head ${c.matched.head ? "yes" : "no"}, at ${c.matched.swipes} of ${c.matched.of} swipes`;
-      lines.push(`  ${c.chatId}: ${c.outcome}, ${c.turns} turns (${where})${c.shares ? `; shares ${c.shares.messages} message(s) with ${c.shares.chat}` : ""}; ${check4}${c.differences.length > 0 ? "; MARKED: today's state is kept as the start where they differ" : ""}`);
+      lines.push(`  ${c.chatId}: ${c.outcome}, ${c.turns} turns (${where})${c.shares ? `; shares ${c.shares.messages} message(s) with ${c.shares.chat}` : ""}; ${check4}${c.differences.length > 0 ? "; MARKED: the previous build's state is kept as the start where they differ" : ""}`);
       for (const d of c.differences)
         lines.push(`    ${d.kept ? "differs" : "differs (not kept: the turn is the chat it was made from's)"} at ${d.at === "head" ? "the head" : `message ${d.at.message}, swipe ${d.at.swipe}`}: ${d.values.join(", ")}`);
       if ((c.edited ?? 0) > 0)
-        lines.push(`    ${c.edited} swipe(s) edited since today's build read them: each is told to the chat's agents as a reply edited after its turn, at the first turn on RPE that finds it showing`);
+        lines.push(`    ${c.edited} swipe(s) edited since the previous build read them: each is told to the chat's agents as a reply edited after its turn, at the first turn on RPE that finds it showing`);
       if (c.own !== undefined)
-        lines.push(`    ${c.own.placed} change(s) of his own and his jobs' made in RPE since an earlier run are kept, tied to the same replies${c.own.lost > 0 ? `; ${c.own.lost} had lost their place (their reply is gone) and are not kept` : ""}`);
+        lines.push(`    ${c.own.placed} change(s) of your own and your jobs' made in RPE since an earlier run are kept, tied to the same replies${c.own.lost > 0 ? `; ${c.own.lost} had lost their place (their reply is gone) and are not kept` : ""}`);
     }
   }
   if (report.unreadable.length > 0) {
@@ -202949,7 +202949,7 @@ function reportText(report) {
   }
   if (report.runtime !== undefined && (report.runtime.taken !== null || report.runtime.leftAlone.length > 0 || (report.runtime.archived ?? []).length > 0)) {
     const { taken, leftAlone } = report.runtime;
-    lines.push("", taken === null ? "Today's runtime: none of this user's taken." : `Today's runtime: took ${taken.name}, ${taken.why}.`);
+    lines.push("", taken === null ? "The previous runtime: none of this user's taken." : `The previous runtime: took ${taken.name}, ${taken.why}.`);
     for (const r of leftAlone)
       lines.push(`  Left alone: ${r.name}, ${r.why}.`);
     for (const r of report.runtime.archived ?? [])
@@ -202960,7 +202960,7 @@ function reportText(report) {
     for (const g of report.given ?? [])
       lines.push(`  ${g.path}: ${g.fate}, ${g.line} (${g.found} thing(s) found${g.found === 0 ? ": nothing found under that path" : ""})`);
   }
-  lines.push("", `Today's readers tried ${report.standIn.writes.length} write(s), kept in memory and never made:`);
+  lines.push("", `The previous build's readers tried ${report.standIn.writes.length} write(s), kept in memory and never made:`);
   for (const w of report.standIn.writes)
     lines.push(`  ${w.store}: ${w.op} ${w.path}${w.to ? ` to ${w.to}` : ""}`);
   const m = report.lumiverse;
@@ -202985,7 +202985,7 @@ function reportText(report) {
   }
   if (report.identifier !== undefined) {
     const taken = report.runtime?.taken ?? null;
-    lines.push("", "The swap, once you choose to make it:", ...swapSteps({ identifier: report.identifier }));
+    lines.push("", "The switch, once you choose to make it:", ...swapSteps({ identifier: report.identifier }));
     lines.push("", ...goingBack({ identifier: report.identifier, runtime: taken === null ? null : { name: taken.name, source: taken.source }, downRun: false }));
   }
   if (report.landed) {
@@ -203006,9 +203006,9 @@ function reportText(report) {
     if ((w.copied ?? []).length > 0)
       lines.push(`Worlds new to RPE, put whole: ${(w.copied ?? []).join(", ")}.`);
     if ((w.followed ?? []).length > 0)
-      lines.push(`Changed on today's side since a run put them, and followed in RPE (RPE's copy was still the run's): ${(w.followed ?? []).join(", ")}.`);
+      lines.push(`Changed on the previous build's side since a run put them, and followed in RPE (RPE's copy was still the run's): ${(w.followed ?? []).join(", ")}.`);
     for (const k of w.kept ?? [])
-      lines.push(`The world ${k.world}: its ${k.file} was changed in RPE since a run put it, and is kept as RPE has it${k.newer ? "; today's side changed it too, and today's newer file is in RPE's copy of today's worlds and in the backup" : ""}.`);
+      lines.push(`The world ${k.world}: its ${k.file} was changed in RPE since a run put it, and is kept as RPE has it${k.newer ? "; the previous build's side changed it too, and its newer file is in RPE's copy of the previous build's worlds and in the backup" : ""}.`);
     for (const id3 of w.removed ?? [])
       lines.push(`The world ${id3} was removed in RPE since a run put it, and stays removed; its revisions are kept for the chats that play them.`);
   }
@@ -203021,19 +203021,19 @@ function reportText(report) {
     else if (ownFiles.leftOut > 0)
       lines.push("", `${ownFiles.leftOut} of your own file(s) have names that would leave the folder they go in: not written, in the backup.`);
     if (ownFiles !== null && ownFiles.removed + ownFiles.changed > 0)
-      lines.push("", `Files an earlier run wrote into the file tree that today's side no longer has: ${ownFiles.removed} removed${ownFiles.changed > 0 ? `; ${ownFiles.changed} changed in RPE since, left as they are` : ""}.`);
+      lines.push("", `Files an earlier run wrote into the file tree that the previous build's side no longer has: ${ownFiles.removed} removed${ownFiles.changed > 0 ? `; ${ownFiles.changed} changed in RPE since, left as they are` : ""}.`);
     for (const g of report.carried.worlds.gone ?? [])
-      lines.push("", g.kept ? `The world ${g.world} was deleted on today's side since an earlier run: RPE keeps its copy, since a chat carried from today's side plays it.` : `The world ${g.world} was deleted on today's side since an earlier run, and no chat carried from today's side plays it: RPE's copy of it is gone too.`);
+      lines.push("", g.kept ? `The world ${g.world} was deleted on the previous build's side since an earlier run: RPE keeps its copy, since a chat carried from the previous build plays it.` : `The world ${g.world} was deleted on the previous build's side since an earlier run, and no chat carried from the previous build plays it: RPE's copy of it is gone too.`);
     const choices = report.carried.modelChoices ?? [];
     if (choices.length > 0) {
-      lines.push("", "Model choices, each where today's build kept it:");
+      lines.push("", "Model choices, each where the previous build kept it:");
       for (const c of choices)
-        lines.push(`  ${c.where} (connection ${c.connection}${c.model === null ? "" : `, model ${c.model}`}): ${c.carried !== null ? `RPE's connection ${c.carried.id} (${c.carried.how})` : `no match in RPE${c.to === null ? "; RPE has no place for that work, which its default connection does" : `; pick one of RPE's for his agent ${c.to.agent} on the Migration page, until then its default connection does that work`}`}`);
+        lines.push(`  ${c.where} (connection ${c.connection}${c.model === null ? "" : `, model ${c.model}`}): ${c.carried !== null ? `RPE's connection ${c.carried.id} (${c.carried.how})` : `no match in RPE${c.to === null ? "; RPE has no place for that work, which its default connection does" : `; pick one of RPE's for your agent ${c.to.agent} on the Migration page, until then its default connection does that work`}`}`);
     }
     if (ownFiles !== null) {
       const apart = ownFiles.textsSetApart ?? [];
       if (apart.length > 0) {
-        lines.push("", "His texts that today's build would not send, or whose id no build had, attached as set apart:");
+        lines.push("", "Your texts that the previous build would not send, or whose id no build had, attached as set apart:");
         for (const t of apart)
           lines.push(`  ${t.id}: ${t.reason.replaceAll("_", " ")}${t.missing.length > 0 ? ` (${t.missing.join(", ")})` : ""}`);
       }
@@ -203041,33 +203041,33 @@ function reportText(report) {
         lines.push("", `Texts that are no text, kept in the backup: ${(ownFiles.textsNotText ?? []).join(", ")}.`);
       const dead = ownFiles.deadTools ?? [];
       if (dead.length > 0) {
-        lines.push("", "Tools his agents name that no longer exist:");
+        lines.push("", "Tools your agents name that no longer exist:");
         for (const d of dead)
           lines.push(`  ${d.agent}: ${d.tool}`);
       } else if (ownFiles.toolsChecked === false && ownFiles.agents > 0)
-        lines.push("", "His agents' tools were not checked: this run was not given the tree's list of tools.");
+        lines.push("", "Your agents' tools were not checked: this run was not given the tree's list of tools.");
     }
     const pinned = report.carried.pins ?? null;
     if (pinned !== null && pinned.forAuthor.length > 0) {
       lines.push("", "Pins for a role RPE has no agent for, pinned for the Author so they are still used in play:");
       for (const p of pinned.forAuthor)
-        lines.push(`  ${p.file}: pinned for ${p.role} in today's build`);
+        lines.push(`  ${p.file}: pinned for ${p.role} in the previous build`);
     }
     if (pinned !== null && pinned.forOwn.length > 0) {
-      lines.push("", "Pins for one of his own agents, which is carried switched off, so the file is handed to it once he switches it on:");
+      lines.push("", "Pins for one of your own agents, which is carried switched off, so the file is handed to it once you switch it on:");
       for (const p of pinned.forOwn)
         lines.push(`  ${p.file}: ${p.agent}`);
     }
     if (pinned !== null && pinned.carried + pinned.removed + pinned.takenOut > 0)
-      lines.push("", "Today's pin budgets (how much of a pin the old engines gave) are not carried: RPE hands a pinned file whole, and the budgets are archived with the old engines' settings.");
+      lines.push("", "The previous build's pin budgets (how much of a pin the old engines gave) are not carried: RPE hands a pinned file whole, and the budgets are archived with the old engines' settings.");
     if (connections2 !== null)
-      lines.push("", "why" in connections2 ? `Connections: none carried, as ${connections2.why}.` : `Connections carried from runtime ${connections2.runtime}: ${connections2.connections.join(", ") || "none"}; ${connections2.keys} key(s), ${connections2.signins} sign-in(s), ${connections2.headerValues} header value(s); the default ${connections2.default ?? "not set"}${connections2.defaultKept === true ? " (chosen in RPE: kept over today's)" : ""}${connections2.kept > 0 ? `; ${connections2.kept} key(s), sign-in(s) and header value(s) RPE already held, which differ from today's, kept as RPE's` : ""}${connections2.leftOut > 0 ? `; ${connections2.leftOut} entry(s) left out, as today's runtime leaves them out` : ""}.`);
+      lines.push("", "why" in connections2 ? `Connections: none carried, as ${connections2.why}.` : `Connections carried from runtime ${connections2.runtime}: ${connections2.connections.join(", ") || "none"}; ${connections2.keys} key(s), ${connections2.signins} sign-in(s), ${connections2.headerValues} header value(s); the default ${connections2.default ?? "not set"}${connections2.defaultKept === true ? " (chosen in RPE: kept over the previous build's)" : ""}${connections2.kept > 0 ? `; ${connections2.kept} key(s), sign-in(s) and header value(s) RPE already held, which differ from the previous build's, kept as RPE's` : ""}${connections2.leftOut > 0 ? `; ${connections2.leftOut} entry(s) left out, as the previous runtime leaves them out` : ""}.`);
     if (connections2 !== null && !("why" in connections2) && (connections2.changedInRpe ?? []).length > 0)
-      lines.push(`Connections changed or removed in RPE since a run carried them, left as RPE has them (today's copy not taken): ${(connections2.changedInRpe ?? []).join(", ")}.`);
+      lines.push(`Connections changed or removed in RPE since a run carried them, left as RPE has them (the previous build's copy not taken): ${(connections2.changedInRpe ?? []).join(", ")}.`);
     const own3 = report.carried.chatSettings;
     const followed2 = [...connections2 !== null && !("why" in connections2) ? connections2.followed ?? [] : [], ...settings.followed ?? [], ...own3?.followed ?? []];
     if (followed2.length > 0) {
-      lines.push("", "Changed on today's side since an earlier run, and what this run did about each:");
+      lines.push("", "Changed on the previous build's side since an earlier run, and what this run did about each:");
       for (const f of followed2)
         lines.push(`  ${f.what}: ${f.change}; ${f.followed ? "followed in RPE" : "RPE's copy is not what a run put there, left as RPE has it"}`);
     }
@@ -203084,9 +203084,9 @@ function reportText(report) {
     if (settings.carried.length === 0)
       lines.push("  none");
     if ((settings.keptInRpe ?? []).length > 0) {
-      lines.push("", "Settings a run carried before and changed in RPE since, left as RPE has them (today's value not taken):");
+      lines.push("", "Settings a run carried before and changed in RPE since, left as RPE has them (the previous build's value not taken):");
       for (const s of settings.keptInRpe ?? [])
-        lines.push(`  ${s.to} (today's ${s.from})`);
+        lines.push(`  ${s.to} (the previous build's ${s.from})`);
     }
     if ((settings.notCarried ?? []).length > 0) {
       lines.push("", "Settings RPE has a like setting for that means something else or takes no such value, not carried (kept in the backup):");
@@ -203799,7 +203799,7 @@ async function carryChatSettings(input) {
         drop2.add(what);
         if (ours === undefined)
           continue;
-        const change2 = "its own choice was taken away on today's side since an earlier run";
+        const change2 = "its own choice was taken away on the previous build's side since an earlier run";
         if (hashJson(ours) !== was) {
           out.followed.push({ what: `${key} in ${chat}'s RPE.yml`, change: change2, followed: false });
           continue;
@@ -203872,7 +203872,7 @@ var printOf = (id3, value) => hashJson([id3, value]);
 
 class ConnectionsChanged extends Error {
   constructor(path) {
-    super(`today's file ${path} was changed after the run counted it, so its counts would not describe what is carried; nothing is carried until it is run again`);
+    super(`the previous build's file ${path} was changed after the run counted it, so its counts would not describe what is carried; nothing is carried until it is run again`);
     this.name = "ConnectionsChanged";
   }
 }
@@ -203892,9 +203892,9 @@ async function readBook(connectionsFile, secretsFile, serial) {
   const raw = parsed4(await counted4(connectionsFile));
   const secret = secretsFile === undefined ? null : parsed4(await counted4(secretsFile));
   if (raw === undefined || raw !== null && !(isRecord(raw) && raw.lumiah === FORMAT2 && Array.isArray(raw.connections)))
-    return { why: "its connections file isn't a list of connections today's runtime reads" };
+    return { why: "its connections file isn't a list of connections the previous runtime reads" };
   if (secret === undefined || secret !== null && !(isRecord(secret) && secret.lumiah === FORMAT2 && isRecord(secret.keys) && isRecord(secret.signins)))
-    return { why: "its secrets file isn't a set of secrets today's runtime reads" };
+    return { why: "its secrets file isn't a set of secrets the previous runtime reads" };
   const connections2 = [];
   const present2 = new Set;
   const values = {};
@@ -203937,7 +203937,7 @@ async function bookOf(runtime, files, serial) {
   const connectionsFile = at2("connections.json");
   const secretsFile = at2("secrets.json");
   if (connectionsFile === undefined)
-    return secretsFile === undefined ? null : { why: "it has a secrets file and no connections file, and today's runtime reads its keys only with one" };
+    return secretsFile === undefined ? null : { why: "it has a secrets file and no connections file, and the previous runtime reads its keys only with one" };
   return readBook(connectionsFile, secretsFile, serial);
 }
 async function bookTrouble(runtime, files) {
@@ -203974,7 +203974,7 @@ async function carryConnections(port, user, runtime, files, serial, earlier) {
       return true;
     drop2.add(`connection ${c.id}`);
     const follows = hashJson(c) === was2;
-    followed2.push({ what: `connection ${c.id}`, change: "removed on today's side since an earlier run", followed: follows });
+    followed2.push({ what: `connection ${c.id}`, change: "removed on the previous build's side since an earlier run", followed: follows });
     if (follows)
       removed.add(c.id);
     return !follows;
@@ -204032,7 +204032,7 @@ async function carryConnections(port, user, runtime, files, serial, earlier) {
         carried.kept++;
       else if (joins) {
         if (rotated)
-          followed2.push({ what: `the key of connection ${c.id}`, change: "rotated on today's side since an earlier run, and still given for the address it was", followed: true });
+          followed2.push({ what: `the key of connection ${c.id}`, change: "rotated on the previous build's side since an earlier run, and still given for the address it was", followed: true });
         keys[c.id] = key;
         carried.keys++;
         put4.set(what, printOf(c.id, key));
@@ -204048,7 +204048,7 @@ async function carryConnections(port, user, runtime, files, serial, earlier) {
           carried.kept++;
         else if (joins) {
           if (rotated)
-            followed2.push({ what: `the value of header ${name} of connection ${c.id}`, change: "rotated on today's side since an earlier run", followed: true });
+            followed2.push({ what: `the value of header ${name} of connection ${c.id}`, change: "rotated on the previous build's side since an earlier run", followed: true });
           ours[name] = value;
           carried.headerValues++;
           put4.set(what, printOf(c.id, value));
@@ -204420,7 +204420,7 @@ class StandIn {
   }
   refuse(call) {
     this.writes.push({ store: "Lumiverse", op: "refused call", path: call });
-    throw new Error(`The migration reads today's data and nothing else: ${call} isn't something it does.`);
+    throw new Error(`The migration reads the previous build's data and nothing else: ${call} isn't something it does.`);
   }
   makeHost() {
     const { user, extension } = this.sources;
@@ -205121,7 +205121,7 @@ async function carryBuildThings(input) {
     if (item.path === JOBS_FILE) {
       const raw = parsed5(text12);
       if (!isRecord(raw) || raw.v !== 1 || !Array.isArray(raw.jobs)) {
-        damaged(item, "Build's jobs file does not read as today's jobs; no job is made from it, and it is kept whole in the backup");
+        damaged(item, "Build's jobs file does not read as the previous build's jobs; no job is made from it, and it is kept whole in the backup");
         continue;
       }
       for (const job of raw.jobs.flatMap((j) => jobOf3(j) ?? [])) {
@@ -205134,7 +205134,7 @@ async function carryBuildThings(input) {
     } else if (item.path === LORE_IDS_FILE) {
       const read = loreIdsOf(parsed5(text12));
       if (read === null) {
-        damaged(item, "today's lore index ids file does not read as today's id map; no id is carried from it, and it is kept whole in the backup");
+        damaged(item, "the previous build's lore index ids file does not read as its id map; no id is carried from it, and it is kept whole in the backup");
         continue;
       }
       const fresh = db.transaction(() => putCarriedLoreIds(db, user, read.ids))();
@@ -205158,9 +205158,9 @@ async function carryBuildThings(input) {
 // src/migrate/carry.ts
 var IMPORTED2 = {
   "chat-run": "RPE's store: each chat with the world and revision it plays",
-  ledger: "RPE's store: a turn tied to its message for every reply and swipe, its changes what today's fold applied there; each swipe's record as today's build kept it in the migration's imported_record, beside its turn, read-only",
+  ledger: "RPE's store: a turn tied to its message for every reply and swipe, its changes what the previous build's fold applied there; each swipe's record as the previous build kept it in the migration's imported_record, beside its turn, read-only",
   "pack-state": "RPE's store: the changes of each turn, folded by the same packs' handlers",
-  "secret-holdings": "RPE's store: the knowledge events among each turn's changes, folded into the minds state as today",
+  "secret-holdings": "RPE's store: the knowledge events among each turn's changes, folded into the minds state as the previous build does",
   "chat-places": "RPE's store: the chat's own place and map events among each turn's changes",
   "story-record": "RPE's story record and cast, each on the turn whose record held it; each swipe's record also kept word for word beside its turn in the migration's imported_record, read-only",
   unplayed: "Inside each swipe's record, kept word for word beside its turn in the migration's imported_record, read-only",
@@ -205218,7 +205218,7 @@ async function carry(input) {
   const people = new People(db, store, s, now);
   const fate = (chat) => {
     const c = report.imports?.find((i) => i.chatId === chat);
-    const why = c !== undefined ? `${c.outcome}${c.why ? `: ${c.why}` : ""}` : today6.chats.some((row) => row.id === chat) ? "not read: today's build plays no world in it" : "gone from Lumiverse";
+    const why = c !== undefined ? `${c.outcome}${c.why ? `: ${c.why}` : ""}` : today6.chats.some((row) => row.id === chat) ? "not read: the previous build plays no world in it" : "gone from Lumiverse";
     return { why, kept: s.chat(chat) !== null };
   };
   const minds2 = await carryMinds({ db, store, s, chats, areas: turnAreas, people, now, fate });
@@ -205235,34 +205235,34 @@ async function carry(input) {
   const landed = {
     ...IMPORTED2,
     worlds: `RPE's database (world_file): ${worlds.worlds} world(s) with ${worlds.revisions} revision(s), ${worlds.drafts} draft(s) and ${worlds.histories} history file(s), byte for byte, each with its checksum`,
-    "world-contents": "Inside the world documents, as they were: RPE reads them with today's world store, so each world holds what it held",
+    "world-contents": "Inside the world documents, as they were: RPE reads them with the previous build's world store, so each world holds what it held",
     pins: "Inside the world documents they pin, carried with them",
     settings: `RPE-global.yml: ${settings.carried.length} setting(s) carried; ${(settings.notCarried ?? []).length > 0 ? `${(settings.notCarried ?? []).length} not carried, as RPE's like setting means something else or takes no such value; ` : ""}${(settings.archived ?? []).length > 0 ? `${(settings.archived ?? []).length} archived in the backup, as they steered only an old engine, each named with why; ` : ""}${settings.noHome.length} with no setting of the same meaning in RPE, listed by name`,
     "model-choices": `${choices.length} place(s) name a connection: ${choices.length - listed4.length} carried to a connection RPE holds (the same id, or the same provider, model and address), ${listed4.length} listed for you to pick a connection of RPE's, that work using RPE's default connection until you do`,
     "runtime-settings": "RPE-global.yml: the runtime's memory limit as service.memory, and each field of its tuning as the setting of the same meaning (the door's, the calls', the update's and the service's), a time in milliseconds as seconds; those with none are named, and the old link's are archived; its update choice is update.restart",
     "chat-switch": "On each chat's own record in RPE: its seed, when it started, whether the engine was switched on for it, and the engine that played it",
-    loopback: "At the swap (rpe up): the hash of its key among RPE's provider keys, RPE answering at today's address under today's model name; the connection in Lumiverse is left as it is",
-    sessions: `In the migration's imported_record, beside each carried turn and read-only, with the words of every text its record names word for word: ${old.texts} text(s) on ${old.turns} turn(s)${old.missing.length > 0 ? `; ${old.missing.length} text(s) today's clean-up had removed are listed by path as not read` : ""}`,
+    loopback: "At the switch (rpe up): the hash of its key among RPE's provider keys, RPE answering at the previous runtime's address under its model name; the connection in Lumiverse is left as it is",
+    sessions: `In the migration's imported_record, beside each carried turn and read-only, with the words of every text its record names word for word: ${old.texts} text(s) on ${old.turns} turn(s)${old.missing.length > 0 ? `; ${old.missing.length} text(s) the previous build's clean-up had removed are listed by path as not read` : ""}`,
     "mind-files": [
-      `On each character's record in the cast, word for word, per turn, marked imported and not yet filed (the cast's mind part): ${minds2.versions} version(s) of ${files} file(s) of ${characters} character(s), ${minds2.versions - minds2.unlisted} of the ${mindsFound} found in today's areas${minds2.unlisted > 0 ? ` and ${minds2.unlisted} read from the area a turn's record names, which no area document of its chat holds` : ""}`,
+      `On each character's record in the cast, word for word, per turn, marked imported and not yet filed (the cast's mind part): ${minds2.versions} version(s) of ${files} file(s) of ${characters} character(s), ${minds2.versions - minds2.unlisted} of the ${mindsFound} found in the previous build's areas${minds2.unlisted > 0 ? ` and ${minds2.unlisted} read from the area a turn's record names, which no area document of its chat holds` : ""}`,
       ...minds2.untied > 0 ? [`${minds2.untied} version(s) in areas no imported turn ended with (before any turn, a generation that left no reply, or a reply's that a Continue then changed) are in the backup only`] : [],
       ...minds2.shared > 0 ? [`${minds2.shared} version(s) in a branch's own areas, the same as the chat it was made from holds, are on the records of the turns the two share`] : [],
-      ...minds2.gone > 0 ? [`${minds2.gone} version(s) whose text today's clean-up had removed are listed as not read`] : [],
+      ...minds2.gone > 0 ? [`${minds2.gone} version(s) whose text the previous build's clean-up had removed are listed as not read`] : [],
       ...apartText(minds2.apart, "version(s)")
     ].join("; "),
     "story-record": [
-      `${IMPORTED2["story-record"]}: ${story.beats} beat(s), ${story.struck} struck, ${story.futures} draft(s) as proposed futures, ${story.castings} casting(s) in the cast${story.pinned > 0 ? `, ${story.pinned} pinned as the player pinned them` : ""}, ${story.beats + story.struck + story.futures + story.castings} of the ${storyFound} entr(ies) found in today's records`,
+      `${IMPORTED2["story-record"]}: ${story.beats} beat(s), ${story.struck} struck, ${story.futures} draft(s) as proposed futures, ${story.castings} casting(s) in the cast${story.pinned > 0 ? `, ${story.pinned} pinned as you pinned them` : ""}, ${story.beats + story.struck + story.futures + story.castings} of the ${storyFound} entr(ies) found in the previous build's records`,
       ...story.perceptions + story.takenIn + story.exposureLeft + story.digestedUnknown > 0 ? [`${story.perceptions} perception(s) in the cast for whom each beat reached, as its exposure says, and ${story.takenIn} of them marked taken in, for the principals whose mind had taken the beats in (so only later beats reach them as not yet taken in)${story.exposureLeft > 0 ? `; ${story.exposureLeft} exposure(s) naming the world itself or no point of view are in imported_record only` : ""}${story.digestedUnknown > 0 ? `; ${story.digestedUnknown} casting(s) name a beat no carried record holds as the last their mind took in, and mark none` : ""}`] : [],
       ...story.pinsKept.length > 0 ? [`${story.pinsKept.length} casting pin(s) you set or took away in RPE since a run put the one it left stand as you set them: ${story.pinsKept.map((p) => `${p.character} in ${p.chat} (${p.standing ?? "none"})`).join(", ")}`] : [],
-      ...story.leftOut > 0 ? [`${story.leftOut} damaged entr(ies) today's reader leaves out are in imported_record only`] : [],
+      ...story.leftOut > 0 ? [`${story.leftOut} damaged entr(ies) the previous build's reader leaves out are in imported_record only`] : [],
       ...story.shared > 0 ? [`${story.shared} entr(ies) in the records a branch copied from the chat it was made from are carried once, with the turns the two share`] : [],
       ...story.unheld > 0 ? [`${story.unheld} entr(ies) on records no imported turn holds are in the backup only`] : [],
       ...apartText(story.apart, "entr(ies)")
     ].join("; "),
-    "panel-requests": turnThings.tables ? `The turn lane's request table: ${turnThings.requests} request(s) of the ${report.rows.find((r) => r.row === "panel-requests")?.count.found ?? 0} found, each on the turn that answered it, as the request he made${turnThings.requestsUnplaced.length > 0 ? `; ${turnThings.requestsUnplaced.length} on a message whose reply has no turn here are in the backup only` : ""}` : "This run was not given the turn lane's tables: in the backup only",
-    "chips-staged": turnThings.tables ? `The turn lane's chip table: ${turnThings.chips} stored chip(s) and review card(s), each on its turn as today's build kept it, its items and statuses with it${turnThings.chipsLoose > 0 ? ` (${turnThings.chipsLoose} on no turn, their message having none)` : ""}; ${turnThings.staged} change(s) staged for his next message waiting as held requests that go with it` : "This run was not given the turn lane's tables: in the backup only",
-    "approvals-jobs": turnThings.tables ? `Approvals: the turn lane's chip table, ${turnThings.approvals} tool(s) he approved for a chat, each on the turn running then, as history. Jobs: ${jobs.written ? `${jobs.carried} in the job history marked carried, with task, report and transcript, ${jobs.onTurn} of them on the turn that started them${jobs.unfinished > 0 ? `, ${jobs.unfinished} that had not finished as cancelled` : ""}${jobs.left > 0 ? `; ${jobs.left} of chats not carried or no job in the backup only` : ""}` : "in the backup only: this run was not given the turn lane's writer of a carried job"}` : "This run was not given the turn lane's tables: in the backup only",
-    "build-jobs": `Build's own tables: ${build.carried.jobs} job(s) ended with what they had, their proposals still to review${build.carried.interrupted > 0 ? ` (${build.carried.interrupted} cut off while running, as interrupted)` : ""}, and ${build.carried.secrecy} secrecy undo cop(ies) as their books', so Restore still puts a book back${build.carried.keptInRpe > 0 ? `; ${build.carried.keptInRpe} you changed or removed in RPE since a run put them stand as you left them` : ""}${build.carried.unreadable > 0 ? `; ${build.carried.unreadable} file(s) that do not read are listed under what could not be read and archived` : ""}; ${build.carried.loreIds} id(s) of today's lore index kept for the entries they name, so an id one of your notes or mind files names still reaches its entry${build.carried.loreIdsKnown > 0 ? ` (${build.carried.loreIdsKnown} already kept by an earlier run)` : ""}${build.carried.loreIdsLeftOut > 0 ? `; ${build.carried.loreIdsLeftOut} pair(s) of the file that are no id of an entry stay in the backup` : ""}`
+    "panel-requests": turnThings.tables ? `The turn lane's request table: ${turnThings.requests} request(s) of the ${report.rows.find((r) => r.row === "panel-requests")?.count.found ?? 0} found, each on the turn that answered it, as the request you made${turnThings.requestsUnplaced.length > 0 ? `; ${turnThings.requestsUnplaced.length} on a message whose reply has no turn here are in the backup only` : ""}` : "This run was not given the turn lane's tables: in the backup only",
+    "chips-staged": turnThings.tables ? `The turn lane's chip table: ${turnThings.chips} stored chip(s) and review card(s), each on its turn as the previous build kept it, its items and statuses with it${turnThings.chipsLoose > 0 ? ` (${turnThings.chipsLoose} on no turn, their message having none)` : ""}; ${turnThings.staged} change(s) staged for your next message waiting as held requests that go with it` : "This run was not given the turn lane's tables: in the backup only",
+    "approvals-jobs": turnThings.tables ? `Approvals: the turn lane's chip table, ${turnThings.approvals} tool(s) you approved for a chat, each on the turn running then, as history. Jobs: ${jobs.written ? `${jobs.carried} in the job history marked carried, with task, report and transcript, ${jobs.onTurn} of them on the turn that started them${jobs.unfinished > 0 ? `, ${jobs.unfinished} that had not finished as cancelled` : ""}${jobs.left > 0 ? `; ${jobs.left} of chats not carried or no job in the backup only` : ""}` : "in the backup only: this run was not given the turn lane's writer of a carried job"}` : "This run was not given the turn lane's tables: in the backup only",
+    "build-jobs": `Build's own tables: ${build.carried.jobs} job(s) ended with what they had, their proposals still to review${build.carried.interrupted > 0 ? ` (${build.carried.interrupted} cut off while running, as interrupted)` : ""}, and ${build.carried.secrecy} secrecy undo cop(ies) as their books', so Restore still puts a book back${build.carried.keptInRpe > 0 ? `; ${build.carried.keptInRpe} you changed or removed in RPE since a run put them stand as you left them` : ""}${build.carried.unreadable > 0 ? `; ${build.carried.unreadable} file(s) that do not read are listed under what could not be read and archived` : ""}; ${build.carried.loreIds} id(s) of the previous build's lore index kept for the entries they name, so an id one of your notes or mind files names still reaches its entry${build.carried.loreIdsKnown > 0 ? ` (${build.carried.loreIdsKnown} already kept by an earlier run)` : ""}${build.carried.loreIdsLeftOut > 0 ? `; ${build.carried.loreIdsLeftOut} pair(s) of the file that are no id of an entry stay in the backup` : ""}`
   };
   if (connections2 !== null && !("why" in connections2))
     landed.connections = `RPH's two documents, through the models port: ${connections2.connections.length} connection(s) in RPE-global.yml's models; ${connections2.keys} key(s), ${connections2.signins} sign-in(s) and ${connections2.headerValues} header value(s) in the secrets file and nowhere else`;
@@ -205271,13 +205271,13 @@ async function carry(input) {
     const inChat = `that chat's own notes folder, ${tree.notes}/`;
     const alone = `${ownFiles.leftAlone > 0 ? `; ${ownFiles.leftAlone} chat(s) played on RPE keep the notes they have` : ""}${ownFiles.kept > 0 ? `; ${ownFiles.kept} chat(s) this run did not import keep the notes an earlier run wrote` : ""}${ownFiles.heldAsHis > 0 ? `; ${ownFiles.heldAsHis} file(s) RPE already holds as something else (made or changed there since) were left as they are` : ""}`;
     landed["own-agents"] = `${at2}: ${ownFiles.agents} agent(s) in ${IMPORTED_AGENTS}/ and ${ownFiles.skills} skill(s) in ${IMPORTED_SKILLS}/, each in the new header format with the model it is carried to, its effort, tools, limits and what it is given, and the original beside it${ownFiles.toolsChecked ? ownFiles.deadTools.length > 0 ? `; ${ownFiles.deadTools.length} tool name(s) that no longer exist are left out of the headers and listed` : "; every tool name still exists" : "; the tool names were not checked, the run not being given them"}`;
-    landed.texts = `${at2}: ${ownFiles.texts - ownFiles.textsLumiah - ownFiles.textsSetApart.length} edited text(s) of the engine's in ${tree.prompts}/, each named for what it was${ownFiles.textsSetApart.length > 0 ? `; ${ownFiles.textsSetApart.length} set apart in ${tree.prompts}/${SET_APART}/ under the reason, as today's build would not send them or had no text of that id` : ""}${ownFiles.textsShipped.length > 0 ? `; ${ownFiles.textsShipped.length} word for word the shipped text, not his edit, kept in the backup and listed` : ""}${ownFiles.textsLumiah > 0 ? `; ${ownFiles.textsLumiah} of LumiAH's in ${tree.prompts}/${LUMIAH_TEXTS}/` : ""}${ownFiles.textsNotText.length > 0 ? `; ${ownFiles.textsNotText.length} that are no text, in the backup only` : ""}; ${ownFiles.promptSets} prompt set(s) today's turns recorded, word for word, in ${PROMPT_SETS}/, each named by the hash the turns' records give it`;
+    landed.texts = `${at2}: ${ownFiles.texts - ownFiles.textsLumiah - ownFiles.textsSetApart.length} edited text(s) of the engine's in ${tree.prompts}/, each named for what it was${ownFiles.textsSetApart.length > 0 ? `; ${ownFiles.textsSetApart.length} set apart in ${tree.prompts}/${SET_APART}/ under the reason, as the previous build would not send them or had no text of that id` : ""}${ownFiles.textsShipped.length > 0 ? `; ${ownFiles.textsShipped.length} word for word the shipped text, not your edit, kept in the backup and listed` : ""}${ownFiles.textsLumiah > 0 ? `; ${ownFiles.textsLumiah} of LumiAH's in ${tree.prompts}/${LUMIAH_TEXTS}/` : ""}${ownFiles.textsNotText.length > 0 ? `; ${ownFiles.textsNotText.length} that are no text, in the backup only` : ""}; ${ownFiles.promptSets} prompt set(s) the previous build's turns recorded, word for word, in ${PROMPT_SETS}/, each named by the hash the turns' records give it`;
     landed.guidance = `${at2}: GUIDANCE.md (${ownFiles.guidance})`;
     landed["author-notes"] = `Each chat's notes as the reply it shows left them, in ${inChat} (${ownFiles.notes} file(s)); every change a turn made to them is recorded on that turn in RPE's own history of notes (${ownFiles.versions} version(s), ${ownFiles.removals} of them a note removed), so showing an earlier reply puts its notes back${ownFiles.untied > 0 ? `; ${ownFiles.untied} area(s) no imported turn ended with are in the backup only` : ""}${alone}`;
     landed["learned-and-home"] = `Your ~/ files in the global notes folder, ${tree.notes}/ at the user's level, which every chat's agents read and none writes (${ownFiles.home} file(s)); each chat's learned/ in ${inChat}, as learned/ (${ownFiles.learned} file(s))${ownFiles.oldLayout > 0 ? `; ${ownFiles.oldLayout} file(s) an earlier build's run left under ${IMPORTED}/chats/ at the user's level were taken out` : ""}${alone}`;
     landed["agents-workspace"] = `As notes: the agents engine's chat workspace in ${inChat} (${ownFiles.workspace} file(s)), each turn's writes and removals among its versions, and its global workspace in the global notes folder (${ownFiles.global} file(s))${alone}`;
     if (pinned !== null)
-      landed.pins = `${landed.pins ?? "Inside the world documents they pin, carried with them"}; and the files pinned in today's build as pins in \`stack.pins\` of the level's config, each for the agent it is handed to at the start of each run: ${pinned.carried.carried} written${pinned.carried.removed > 0 ? `, ${pinned.carried.removed} taken out that today's side no longer pins` : ""}${pinned.carried.takenOut > 0 ? `, ${pinned.carried.takenOut} not put again, taken out in RPE` : ""}${pinned.carried.forAuthor.length > 0 ? `; ${pinned.carried.forAuthor.length} pinned for the Author, the role they were for having no agent in RPE` : ""}${pinned.carried.forOwn.length > 0 ? `; ${pinned.carried.forOwn.length} for his own definitions, which are carried switched off` : ""}`;
+      landed.pins = `${landed.pins ?? "Inside the world documents they pin, carried with them"}; and the files pinned in the previous build as pins in \`stack.pins\` of the level's config, each for the agent it is handed to at the start of each run: ${pinned.carried.carried} written${pinned.carried.removed > 0 ? `, ${pinned.carried.removed} taken out that the previous build's side no longer pins` : ""}${pinned.carried.takenOut > 0 ? `, ${pinned.carried.takenOut} not put again, taken out in RPE` : ""}${pinned.carried.forAuthor.length > 0 ? `; ${pinned.carried.forAuthor.length} pinned for the Author, the role they were for having no agent in RPE` : ""}${pinned.carried.forOwn.length > 0 ? `; ${pinned.carried.forOwn.length} for your own definitions, which are carried switched off` : ""}`;
   }
   return { landed, carried: { worlds, settings, modelChoices: choices, connections: connections2, ownFiles, pins: pinned?.carried ?? null, minds: minds2, story, turnThings: { ...turnThings, jobs }, chatSettings: chatSettings?.carried ?? null, build: build.carried } };
 }
@@ -205968,7 +205968,7 @@ class CapturingFold {
     this.noted = [];
     const result = out.messages.at(-1);
     if (result === undefined)
-      throw new Error("Today's fold gave no step for the chain's last message.");
+      throw new Error("The previous build's fold gave no step for the chain's last message.");
     const dropped = out.notes.filter((n) => n.kind === "dropped" && n.messageId === m.id).length;
     const violations = out.violations.filter((v) => v.startsWith(`${m.id}:`)).length;
     const changes = result.fold === "user" || result.fold === "paused" ? [] : appliedAt(m, input, result.parentPath, landed, out.resolved);
@@ -206111,7 +206111,7 @@ async function chatsToImport(today6) {
       continue;
     const read = await today6.reader.today(row.id, user);
     if (!read) {
-      notOpened.push({ chatId: row.id, why: "today's reader can't open it: its world can't be read" });
+      notOpened.push({ chatId: row.id, why: "the previous build's reader can't open it: its world can't be read" });
       continue;
     }
     const from = row.metadata.branched_from;
@@ -206324,8 +206324,8 @@ function importOne(s, db, registry2, chat, link2, turnOfShared, keepRun2) {
 }
 function whyNot(error) {
   if (error instanceof StoreInputError)
-    return "the store refused what today's fold gave for it";
-  return "today's fold could not fold it";
+    return "the store refused what the previous build's fold gave for it";
+  return "the previous build's fold could not fold it";
 }
 function importChats(input) {
   const { store, s, db, registry: registry2, run } = input;
@@ -206397,7 +206397,7 @@ function importChats(input) {
     if (byId.has(gone2.chat) || unread.has(gone2.chat) || !s.chat(gone2.chat))
       continue;
     if (input.present.has(gone2.chat)) {
-      reports.push({ chatId: gone2.chat, outcome: "not imported", why: stands(gone2.chat, "today's build plays no world in it now"), ...blank });
+      reports.push({ chatId: gone2.chat, outcome: "not imported", why: stands(gone2.chat, "the previous build plays no world in it now"), ...blank });
       continue;
     }
     if (s.isPlayed(gone2.chat)) {
@@ -210022,7 +210022,7 @@ var HASH64 = "[0-9a-f]{64}";
 var PART = "[A-Za-z0-9._-]{1,128}";
 var TEMPORARY = "a temporary file: a write under way, or one cut short";
 var rule2 = (pattern, row, fate, note3) => [new RegExp(`^${pattern}$`), row, fate, note3];
-var DEPTH_GONE = "today's build has no depth engine, so nothing reads it now";
+var DEPTH_GONE = "the previous build has no depth engine, so nothing reads it now";
 var depth2 = (pattern, what) => rule2(pattern, "depth-engine", undefined, `${what}; ${DEPTH_GONE}`);
 var EXTENSION_WIDE = ["agents/build.json", "diagnostics/backend.log", "loopback/registry.json"];
 var STORAGE_RULES = [
@@ -210086,7 +210086,7 @@ var STORAGE_RULES = [
   depth2(`runs/${SAFE}/layer/seg-\\d+\\.json`, "what the depth engine landed for the chat, which only its own fold read"),
   depth2(`runs/${SAFE}/archive/shard-\\d+\\.json`, "the depth engine's search index of the chat's messages, made from them"),
   depth2("loopback/registry\\.json", "the depth engine's loopback registry: its keys' and relays' hashes"),
-  rule2("rpe/registration\\.json", "rpe-own", undefined, "RPE's own: the light extension's registration with RPE, which the migration leaves as it is")
+  rule2("rpe/registration\\.json", "rpe-own", undefined, "RPE's own: the registration the new build of the extension makes with RPE, which the migration leaves as it is")
 ];
 function chatOf2(path) {
   const run = /^runs\/([^/]+)\//.exec(path);
@@ -210116,7 +210116,7 @@ function classifyStorage(path, context) {
   const aside = /^(.+)\.corrupt-\d+$/.exec(path);
   if (aside) {
     const base = classifyStorage(aside[1] ?? "", context);
-    return base && { row: base.row, fate: "archived", note: "a damaged file today's build had already set aside", unreadable: true };
+    return base && { row: base.row, fate: "archived", note: "a damaged file the previous build had already set aside", unreadable: true };
   }
   const bad2 = /^(harness\/[a-z-]+\.json)\.bad$/.exec(path);
   if (bad2) {
@@ -212656,7 +212656,7 @@ class ChatReader {
     try {
       world = (await this.worlds.get(run2.worldId, userId, run2.revision)).world;
     } catch {
-      this.why.set(chatId, new NotOpened(`its world ${run2.worldId} at revision ${run2.revision} can't be read by today's world store`));
+      this.why.set(chatId, new NotOpened(`its world ${run2.worldId} at revision ${run2.revision} can't be read by the previous build's world store`));
       return null;
     }
     const pinned = new Map([[run2.revision, world]]);
@@ -212723,7 +212723,7 @@ class ChatReader {
     const run2 = readRun(meta);
     const messages = await this.host.chats.messages(chatId, userId);
     const unreadable2 = [];
-    const observed = toChain(messages, (messageId, swipe) => unreadable2.push({ path: `chats/${chatId}/messages/${messageId}`, why: `the engine record of swipe ${swipe} is damaged; today's build ignores it` }));
+    const observed = toChain(messages, (messageId, swipe) => unreadable2.push({ path: `chats/${chatId}/messages/${messageId}`, why: `the engine record of swipe ${swipe} is damaged; the previous build ignores it` }));
     let journal = null;
     let chain = observed;
     let state2 = "none";
@@ -212743,10 +212743,10 @@ class ChatReader {
         chain = core.chain(seen);
       });
       for (let i = failed2;i < this.ledger.errors.length; i++)
-        unreadable2.push({ path: `chats/${chatId}`, why: "today's ledger reader failed on this chat" });
+        unreadable2.push({ path: `chats/${chatId}`, why: "the previous build's ledger reader failed on this chat" });
       if (journal === null) {
         state2 = "not opened";
-        notOpened = this.why.get(chatId)?.why ?? "today's reader didn't open it";
+        notOpened = this.why.get(chatId)?.why ?? "the previous build's reader didn't open it";
         unreadable2.push({ path: `chats/${chatId}`, why: notOpened });
         journal = decoded.journal;
       }
@@ -213065,11 +213065,11 @@ async function readRuntimeFolders(folders, identifier, owner2, mirrorMark) {
     const named3 = owner2.named;
     const found = ours.find((c) => c.name === named3);
     if (found === undefined)
-      out.undecided = unreadable2.includes(named3) ? `The config of the runtime ${named3} can't be read, so this run can't take it: set it up again with today's install line, or run with --no-runtime.` : `There is no runtime ${named3} of this extension in ${folders.configDir}${ours.length > 0 ? `: there are ${ours.map((c) => c.name).join(", ")}` : ""}.`;
+      out.undecided = unreadable2.includes(named3) ? `The config of the runtime ${named3} can't be read, so this run can't take it: set it up again with the previous build's install line, or run with --no-runtime.` : `There is no runtime ${named3} of this extension in ${folders.configDir}${ours.length > 0 ? `: there are ${ours.map((c) => c.name).join(", ")}` : ""}.`;
     else if (!sameUser(found))
       out.undecided = `The runtime ${named3} signs in to Lumiverse as another user, so its connections and keys are not this user's: this run doesn't take it.`;
     else if (regs !== null && !registered(found))
-      out.undecided = `The runtime ${named3} signs in as this user's name, but is not registered with this Lumiverse for this user (another Lumiverse's runtime, or one whose registration was replaced), so its connections and keys may be another's: this run doesn't take it. Register it with this Lumiverse with today's install line, or run with --no-runtime.`;
+      out.undecided = `The runtime ${named3} signs in as this user's name, but is not registered with this Lumiverse for this user (another Lumiverse's runtime, or one whose registration was replaced), so its connections and keys may be another's: this run doesn't take it. Register it with this Lumiverse with the previous build's install line, or run with --no-runtime.`;
     else if (regs === null && known2.size > 0 && !known2.has(addressKey(found.config.base)))
       out.undecided = `The runtime ${named3} signs in as this user's name, and this user's storage holds no registration of a runtime, but its config's Lumiverse address (${found.config.base}) is not this Lumiverse's (${[...known2.values()].join(", ")}, as the working copy this user's storage names reaches it): another Lumiverse's runtime, so its connections and keys may be another's and this run doesn't take it.`;
     else
@@ -213080,11 +213080,11 @@ async function readRuntimeFolders(folders, identifier, owner2, mirrorMark) {
     if (registeredHere.length === 1 && only !== undefined)
       [taken, why] = [only, "registered with this Lumiverse for this user: the registration in their storage holds its secret"];
     else if (registeredHere.length > 1)
-      out.undecided = `Several runtimes of today's build are registered with this Lumiverse for this user (${registeredHere.map((c) => c.name).join(", ")}): say which one this run takes with --runtime <name>.`;
+      out.undecided = `Several runtimes of the previous build are registered with this Lumiverse for this user (${registeredHere.map((c) => c.name).join(", ")}): say which one this run takes with --runtime <name>.`;
     else if (regs === null && ours.some(sameUser))
-      out.undecided = `This user's storage holds no registration of a runtime (harness/registry.json is missing or isn't one today's build reads), so which runtime here is theirs can't be told by it (${ours.filter(sameUser).map((c) => c.name).join(", ")} sign(s) in as their name): say which with --runtime <name>, or that none is with --no-runtime.`;
+      out.undecided = `This user's storage holds no registration of a runtime (harness/registry.json is missing or isn't one the previous build reads), so which runtime here is theirs can't be told by it (${ours.filter(sameUser).map((c) => c.name).join(", ")} sign(s) in as their name): say which with --runtime <name>, or that none is with --no-runtime.`;
     else if (unreadable2.length > 0)
-      out.undecided = `No runtime of today's build is registered with this Lumiverse for this user, and the config of ${unreadable2.join(", ")} can't be read, so whether it is theirs can't be told: set it up again with today's install line, or say that no runtime here is theirs with --no-runtime.`;
+      out.undecided = `No runtime of the previous build is registered with this Lumiverse for this user, and the config of ${unreadable2.join(", ")} can't be read, so whether it is theirs can't be told: set it up again with the previous build's install line, or say that no runtime here is theirs with --no-runtime.`;
   }
   for (const c of ours) {
     if (c === taken)
@@ -213108,13 +213108,13 @@ async function readRuntimeFolders(folders, identifier, owner2, mirrorMark) {
     const verdict2 = answer2 === "mine" ? "his" : answer2 === "theirs" ? "told not his" : verdicts.every((v) => v === "his") ? "his" : elsewhere !== undefined && verdicts.every((v) => v !== "his" && v !== "unknown") ? "not his" : "unknown";
     if (verdict2 === "his") {
       const root = join23(folders.dataDir, "runtimes", name);
-      const note3 = `a file of the runtime folder ${name}, which no config names, so today's build never runs it; its working copy is this user's${answer2 === "mine" ? " (as you said)" : ""}`;
+      const note3 = `a file of the runtime folder ${name}, which no config names, so the previous build never runs it; its working copy is this user's${answer2 === "mine" ? " (as you said)" : ""}`;
       const apart = here.filter((c) => !ofThis.includes(c) || c.user !== null && c.user !== owner2.username).map((c) => `store/${c.folder}/`);
       out.files.push(...(await walk(root)).filter((f) => !apart.some((p) => f.path.startsWith(p))).map((f) => ({ ...f, path: `runtimes/${name}/${f.path}`, disk: join23(root, f.path), working: note3 })));
       for (const c of ofThis) {
         const files = await unsentOf(c.dir);
         if (files.size > 0)
-          out.unsent.push({ runtime: name, files, kept: false, why: "no config names this runtime, so today's runtime never runs it and never sends what its working copy hadn't sent" });
+          out.unsent.push({ runtime: name, files, kept: false, why: "no config names this runtime, so the previous runtime never runs it and never sends what its working copy hadn't sent" });
       }
       out.archived.push({ name, why: answer2 === "mine" ? "no config names it; you said its working copy is this user's" : "no config names it; its working copy's identity says it is this user's" });
     } else if (verdict2 === "told not his" || verdict2 === "not his") {
@@ -213150,7 +213150,7 @@ async function readRuntimeFolders(folders, identifier, owner2, mirrorMark) {
       const identity = parse3(await readText2(join23(copyDir, "identity.json")));
       const copy = isRecord(identity) && identity.v === 1 && identity.kind === "working-copy" && typeof identity.copy === "string" ? identity.copy : null;
       const count2 = isRecord(identity) && typeof identity.count === "number" && Number.isSafeInteger(identity.count) && identity.count >= 0 ? identity.count : 0;
-      const outcome = mark3 === null ? { kept: false, why: "the extension's storage names no runtime as keeping it, so today's runtime would throw its copy away, with what it hadn't sent" } : mark3.copy !== copy ? { kept: true, why: "another copy keeps the extension's storage, and today's runtime sends what it hadn't sent as its own writes" } : count2 < mark3.count ? { kept: false, why: "the copy is behind what the extension's storage took from it (a copy restored or moved), so today's runtime would throw it away, with what it hadn't sent" } : { kept: true, why: "the copy is the one the extension's storage keeps, and today's runtime sends what it hadn't sent" };
+      const outcome = mark3 === null ? { kept: false, why: "the extension's storage names no runtime as keeping it, so the previous runtime would throw its copy away, with what it hadn't sent" } : mark3.copy !== copy ? { kept: true, why: "another copy keeps the extension's storage, and the previous runtime sends what it hadn't sent as its own writes" } : count2 < mark3.count ? { kept: false, why: "the copy is behind what the extension's storage took from it (a copy restored or moved), so the previous runtime would throw it away, with what it hadn't sent" } : { kept: true, why: "the copy is the one the extension's storage keeps, and the previous runtime sends what it hadn't sent" };
       out.unsent.push({ runtime: name, files, ...outcome });
     }
   }
@@ -213229,7 +213229,7 @@ function itemOf3(where, path, size, found, note3) {
 var RUN_KEYS = { v: true, worldId: true, revision: true, runSeed: true, startedAt: true };
 var PREFS_KEYS = { knowledge: true, narrator: true, engine: true, tidy: true };
 var AGENTS_KEYS = { learned: true, assistant: true, rollback: true };
-var ENGINE_FROM = "which engine the chat plays came from your default for new chats, as a build with the depth engine marked it; today's build reads the engine alone, so nothing reads this now";
+var ENGINE_FROM = "which engine the chat plays came from your default for new chats, as a build with the depth engine marked it; the previous build reads the engine alone, so nothing reads this now";
 function chatEntries(chat, identifier) {
   const out = [];
   const at3 = (part) => `chats/${chat.id}/${part}`;
@@ -213237,7 +213237,7 @@ function chatEntries(chat, identifier) {
   if (isRecord(own3)) {
     const run2 = Object.fromEntries(Object.entries(own3).filter(([k]) => Object.hasOwn(RUN_KEYS, k)));
     if (Object.keys(run2).length > 0)
-      out.push(itemOf3("Lumiverse database", at3(`${LEDGER_NAMESPACE}/run`), measured(run2), { row: "chat-run", fate: "carried" }, readRun(chat.metadata) ? undefined : "a run that doesn't read: today's build plays no world in this chat"));
+      out.push(itemOf3("Lumiverse database", at3(`${LEDGER_NAMESPACE}/run`), measured(run2), { row: "chat-run", fate: "carried" }, readRun(chat.metadata) ? undefined : "a run that doesn't read: the previous build plays no world in this chat"));
     for (const [key, value] of Object.entries(own3)) {
       if (Object.hasOwn(RUN_KEYS, key))
         continue;
@@ -213401,11 +213401,11 @@ async function reportOf(today6, options = {}) {
         for (const rec of Object.values(ledger?.swipes ?? {})) {
           const refs = recordBlobs(rec);
           for (const h of refs.agents) {
-            missingBlob(`agents/blobs/${h}`, `a session text a record on chat ${chat.id} names; today's clean-up had removed it`);
+            missingBlob(`agents/blobs/${h}`, `a session text a record on chat ${chat.id} names; the previous build's clean-up had removed it`);
             fromRecords.push(`agents/blobs/${h}`);
           }
           for (const h of refs.harness) {
-            missingBlob(`harness/blobs/${h.slice(0, 2)}/${h}`, `a harness text a record on chat ${chat.id} names; today's clean-up had removed it`);
+            missingBlob(`harness/blobs/${h.slice(0, 2)}/${h}`, `a harness text a record on chat ${chat.id} names; the previous build's clean-up had removed it`);
             fromRecords.push(`harness/blobs/${h.slice(0, 2)}/${h}`);
           }
         }
@@ -213414,7 +213414,7 @@ async function reportOf(today6, options = {}) {
       tally.add("agents-workspace", Object.keys(meta.learned).length);
       tally.add("assistant-threads", meta.assistant.messages.length + Object.keys(meta.assistant.proposals).length);
       for (const h of [...Object.values(meta.learned).map((f) => f.hash), ...meta.assistant.messages, ...Object.values(meta.assistant.proposals)])
-        missingBlob(`agents/blobs/${h}`, `a file chat ${chat.id}'s agents kept; today's clean-up had removed it`);
+        missingBlob(`agents/blobs/${h}`, `a file chat ${chat.id}'s agents kept; the previous build's clean-up had removed it`);
       for (const f of Object.values(meta.learned))
         nameBlob(`agents/blobs/${f.hash}`, "agents-workspace", `a file of chat ${chat.id}'s learned area`);
       for (const h of [...meta.assistant.messages, ...Object.values(meta.assistant.proposals)])
@@ -213429,7 +213429,7 @@ async function reportOf(today6, options = {}) {
       for (const f of Object.values(global.files)) {
         if (!isRecord(f) || typeof f.hash !== "string")
           continue;
-        missingBlob(`agents/blobs/${f.hash}`, "a file of the global workspace; today's clean-up had removed it");
+        missingBlob(`agents/blobs/${f.hash}`, "a file of the global workspace; the previous build's clean-up had removed it");
         nameBlob(`agents/blobs/${f.hash}`, "agents-workspace", "a file of the global workspace");
       }
     }
@@ -213444,14 +213444,14 @@ async function reportOf(today6, options = {}) {
       try {
         const index = await reader.worldStore.index(id3, userId);
         if (!index) {
-          unreadable2.push({ path: `user storage: worlds/${id3}/index.json`, why: "a world index today's world store doesn't read" });
+          unreadable2.push({ path: `user storage: worlds/${id3}/index.json`, why: "a world index the previous build's world store doesn't read" });
           continue;
         }
         const docs = await reader.worldStore.getMany(id3, userId, index.revisions);
         for (const rev of index.revisions) {
           const doc = docs.get(rev);
           if (!doc) {
-            unreadable2.push({ path: `user storage: worlds/${id3}/rev/${rev}.json`, why: "a revision the world's index lists, which today's world store can't read" });
+            unreadable2.push({ path: `user storage: worlds/${id3}/rev/${rev}.json`, why: "a revision the world's index lists, which the previous build's world store can't read" });
             continue;
           }
           countWorldDoc(doc, rev === index.head, tally);
@@ -213466,7 +213466,7 @@ async function reportOf(today6, options = {}) {
         if (isRecord(draft2))
           countWorldDoc(draft2.doc, false, tally);
       } catch {
-        unreadable2.push({ path: `user storage: worlds/${id3}/index.json`, why: "today's world store can't read it" });
+        unreadable2.push({ path: `user storage: worlds/${id3}/index.json`, why: "the previous build's world store can't read it" });
       }
     }
     const versions = { mind: new Set, notes: new Set, home: new Set, guidance: new Set };
@@ -213487,13 +213487,13 @@ async function reportOf(today6, options = {}) {
       nameBlob(indexPath, item.row ?? "learned-and-home", `the index of the area ${item.path} names`);
       const files = areaFiles(await userView.read(indexPath));
       if (files === null) {
-        unreadable2.push({ path: `user storage: ${indexPath}`, why: `the index ${item.path} names; today's clean-up had removed it, or it doesn't read` });
+        unreadable2.push({ path: `user storage: ${indexPath}`, why: `the index ${item.path} names; the previous build's clean-up had removed it, or it doesn't read` });
         continue;
       }
       const chat = area[2] ?? "";
       for (const f of files) {
         const blob2 = `harness/blobs/${f.hash.slice(0, 2)}/${f.hash}`;
-        missingBlob(blob2, `the text of ${f.path} in ${item.path}; today's clean-up had removed it`);
+        missingBlob(blob2, `the text of ${f.path} in ${item.path}; the previous build's clean-up had removed it`);
         const key = `${chat}\x00${f.path}\x00${f.hash}`;
         if (area[3]?.startsWith("area/")) {
           (MIND_FILE.test(f.path) ? versions.mind : versions.notes).add(key);
@@ -213533,11 +213533,11 @@ async function reportOf(today6, options = {}) {
       tally.add("second-copies", copy);
       const file = items.find((i) => i.where === "user storage" && i.path === "agent-acceptance.json");
       if (file !== undefined)
-        file.note = "the authority for the connections acceptance runs guard, which today's guard reads first: settings.json's copy of that list is counted as attached";
+        file.note = "the authority for the connections acceptance runs guard, which the previous build's guard reads first: settings.json's copy of that list is counted as attached";
     }
     for (const w of writes2)
       if (w.op === "move" && w.to !== undefined && /\.corrupt-\d+$/.test(w.to))
-        unreadable2.push({ path: `${w.store}: ${w.path}`, why: "damaged: today's reader sets it aside and starts afresh" });
+        unreadable2.push({ path: `${w.store}: ${w.path}`, why: "damaged: the previous build's reader sets it aside and starts afresh" });
     for (const p of fromRecords)
       nameBlob(p, "sessions", "a session, summary or transcript text a record names");
     for (const item of items) {
@@ -213549,7 +213549,7 @@ async function reportOf(today6, options = {}) {
         item.fate = ROW[by.row].fate;
         item.note = by.why;
       } else if (/^(agents\/blobs\/[0-9a-f]{32}|harness\/blobs\/[0-9a-f]{2}\/[0-9a-f]{64})$/.test(item.path))
-        item.note = "no record, area or file names it; today's clean-up removes a text nothing names after a week, so it is kept whole here";
+        item.note = "no record, area or file names it; the previous build's clean-up removes a text nothing names after a week, so it is kept whole here";
     }
     const given = options.given ?? [];
     const gave = given.map(() => 0);
@@ -213729,7 +213729,7 @@ async function rowsGiven(paths) {
 class MigrationStopped extends Error {
   step;
   constructor(step2, cause) {
-    super(`while ${step2}: ${cause instanceof Error ? cause.message : String(cause)}. Today's data is as it was and the backup it took is kept; run again, and the run finishes what this one left, with nothing duplicated`, { cause });
+    super(`while ${step2}: ${cause instanceof Error ? cause.message : String(cause)}. The previous build's data is as it was and the backup it took is kept; run again, and the run finishes what this one left, with nothing duplicated`, { cause });
     this.step = step2;
     this.name = "MigrationStopped";
   }
@@ -213784,7 +213784,7 @@ async function migrate3(sources, options) {
       if (options.runs)
         migrations.add(options.runs.tables.area, options.runs.tables.migrations);
       migrate(db, migrations, { user: owner2, version: options.version ?? "dev", backups: paths.backups, now: () => now().getTime() });
-      step2 = "reading the chats as today's build does";
+      step2 = "reading the chats as the previous build does";
       const registry2 = createRegistry(ALL_PACKS);
       const { chats, notOpened } = await chatsToImport(today6);
       const worlds = new Map;
@@ -213885,13 +213885,13 @@ async function idle(identifier, name, config3, io) {
   let now = await underWay(config3, io);
   if (!busy2(now))
     return true;
-  io.out(`Today's runtime ${name} ${said4(now)}: waiting up to ${Math.round(drainMs / 1000)} seconds (its own "Wait before restart" setting) for it to be idle.`);
+  io.out(`The previous runtime ${name} ${said4(now)}: waiting up to ${Math.round(drainMs / 1000)} seconds (its own "Wait before restart" setting) for it to be idle.`);
   for (let waited = 0;waited < drainMs && busy2(now); waited += drainPollMs) {
     await io.sleep(drainPollMs);
     now = await underWay(config3, io);
   }
   if (busy2(now))
-    for (const line3 of stopAfterSwitch({ identifier }, `Today's runtime ${name} still ${said4(now)} after ${Math.round(drainMs / 1000)} seconds, and the swap stops nothing while it is busy. Run rpe up again once it is idle.`))
+    for (const line3 of stopAfterSwitch({ identifier }, `The previous runtime ${name} still ${said4(now)} after ${Math.round(drainMs / 1000)} seconds, and the switch stops nothing while it is busy. Run rpe up again once it is idle.`))
       io.out(line3);
   return !busy2(now);
 }
@@ -213927,19 +213927,19 @@ async function otherBuildInstalled(input) {
   const stop = (why) => stopAfterSwitch({ identifier }, why).join(`
 `);
   if (installed2 === null)
-    return `Lumiverse has no extension (${identifier}) installed: it was removed, not switched to the new build. Removing an extension deletes its own folder and the storage in it (each user's folder for it stays), so what the migration reads there is gone, and the swap does not run the migration again over storage that is gone. The real run's backup holds a copy of it. The swap stopped nothing: today's service runs, and today's data is as it was. Install the new build's extension in Lumiverse from its branch (${NEW_BUILD_BRANCH}, until it is main), approve its five permissions (${LIGHT_PERMISSIONS.join(", ")}), then run rpe up again.`;
+    return `Lumiverse has no extension (${identifier}) installed: it was removed, not switched to the new build. Removing an extension deletes its own folder and the storage in it (each user's folder for it stays), so what the migration reads there is gone, and the switch does not run the migration again over storage that is gone. The real run's backup holds a copy of it. The switch stopped nothing: the previous build's service runs, and its data is as it was. Install the new build's extension in Lumiverse from its branch (${NEW_BUILD_BRANCH}, until it is main), approve its five permissions (${LIGHT_PERMISSIONS.join(", ")}), then run rpe up again.`;
   if (todaysBuildInstalled(installed2.permissions))
-    return `Lumiverse still has today's build of the extension (${identifier}) installed: its manifest asks for the permissions the previous build asks for. Switch the installed extension to the new build's branch in Lumiverse and approve its permissions first, then run rpe up again. Nothing was stopped or changed.`;
+    return `Lumiverse still has the previous build of the extension (${identifier}) installed: its manifest asks for the permissions the previous build asks for. Switch the installed extension to the new build's branch in Lumiverse and approve its permissions first, then run rpe up again. Nothing was stopped or changed.`;
   if (granted2 === null)
-    return stop(`Lumiverse does not say which permissions it has granted the extension (${identifier}), so the swap cannot tell whether the light extension can play. In Lumiverse's extension settings, check that ${LIGHT_PERMISSIONS.join(", ")} are granted, then run rpe up again.`);
+    return stop(`Lumiverse does not say which permissions it has granted the extension (${identifier}), so the switch cannot tell whether the new build of the extension can play. In Lumiverse's extension settings, check that ${LIGHT_PERMISSIONS.join(", ")} are granted, then run rpe up again.`);
   const missing2 = granted2 === undefined ? [] : LIGHT_PERMISSIONS.filter((p) => !granted2.includes(p));
   if (missing2.length > 0)
-    return stop(`Lumiverse has not granted the extension (${identifier}) ${missing2.join(", ")}, and the light extension cannot play without ${missing2.length === 1 ? "it" : "them"}: the swap stops here, before stopping today's service. In Lumiverse's extension settings, grant ${missing2.length === 1 ? "it" : "each of them"}, then run rpe up again.`);
+    return stop(`Lumiverse has not granted the extension (${identifier}) ${missing2.join(", ")}, and the new build of the extension cannot play without ${missing2.length === 1 ? "it" : "them"}: the switch stops here, before stopping the previous build's service. In Lumiverse's extension settings, grant ${missing2.length === 1 ? "it" : "each of them"}, then run rpe up again.`);
   const repo = join26(input.lumiverse, "extensions", identifier, "repo");
   const backend = join26(repo, "dist", "backend.js");
   const what = `Switch the installed extension to the new build's branch in Lumiverse, or put the new build's files in its folder (${repo}) and switch the extension off and on in Lumiverse so that it runs them, then run rpe up again.`;
   if (version === FROM_SOURCES)
-    return stop(`This rpe runs from its sources and has no build of its own, so whether the extension Lumiverse has installed (${identifier}) is this build can't be told: run the swap with a built copy, such as ${join26(repo, "dist", "rpe.js")} once the extension holds the new build.`);
+    return stop(`This rpe runs from its sources and has no build of its own, so whether the extension Lumiverse has installed (${identifier}) is this build can't be told: run the switch with a built copy, such as ${join26(repo, "dist", "rpe.js")} once the extension holds the new build.`);
   const text13 = await readText2(backend);
   if (text13 === null)
     return stop(`Lumiverse has the extension (${identifier}) installed, and its backend is not at ${backend}, where Lumiverse loads it from. ${what}`);
@@ -213979,13 +213979,13 @@ async function swapCheck(input, io) {
   };
   const { previous } = earlierRuns(dataPaths(options.data).database, sources.userId);
   if (previous === null)
-    return stop(`No real run of your own data has been made in this data folder (${options.data}), and the swap goes ahead only once the migration has been proven on it: it stops before it stops anything. Run rpe migrate (rpe migrate --rehearse shows first what it would do), read its report, then run rpe up again.`);
+    return stop(`No real run of your own data has been made in this data folder (${options.data}), and the switch goes ahead only once the migration has been proven on it: it stops before it stops anything. Run rpe migrate (rpe migrate --rehearse shows first what it would do), read its report, then run rpe up again.`);
   if (!passed(previous))
-    return stop(`The last real run in this data folder (read at ${previous.at}) did not pass its report: some row's things are not all carried, attached, archived or kept in the backup, or something found is not classified. The swap goes ahead only once the migration has been proven on your data: run rpe migrate again and read its report, then run rpe up again.`);
+    return stop(`The last real run in this data folder (read at ${previous.at}) did not pass its report: some row's things are not all carried, attached, archived or kept in the backup, or something found is not classified. The switch goes ahead only once the migration has been proven on your data: run rpe migrate again and read its report, then run rpe up again.`);
   const gate = await migrate3(sources, { ...options, rehearse: true });
   if (gate.report.refusals.length > 0) {
     io.out(reportText(gate.report).replace(/\n$/, ""));
-    return stop("The swap stopped before it stopped anything: the run would be refused, as the report says.");
+    return stop("The switch stopped before it stopped anything: the run would be refused, as the report says.");
   }
   const today6 = await openToday(sources);
   let registry2 = null;
@@ -214016,12 +214016,12 @@ async function swapRun(plan2, rpe, io) {
   const { identifier } = plan2.sources;
   const mark2 = rpe.mark;
   if (plan2.connections.length > 0 && mark2 === undefined)
-    throw new Error("the swap was given connections to take and no way to mark them as RPE's");
+    throw new Error("the switch was given connections to take and no way to mark them as RPE's");
   if (took !== null) {
     if (!await idle(identifier, took.name, took.config, io))
       return false;
     if (took.unit === null && await underWay(took.config, io) !== null) {
-      for (const line3 of stopAfterSwitch({ identifier, branch: plan2.branch }, `Today's runtime ${took.name} answers at ${took.config.listen}:${took.config.port}, but runs under no unit rpe up can stop: stop it where it runs, then run rpe up again.`))
+      for (const line3 of stopAfterSwitch({ identifier, branch: plan2.branch }, `The previous runtime ${took.name} answers at ${took.config.listen}:${took.config.port}, but runs under no unit rpe up can stop: stop it where it runs, then run rpe up again.`))
         io.out(line3);
       return false;
     }
@@ -214033,14 +214033,14 @@ async function swapRun(plan2, rpe, io) {
     if (told2 !== null)
       return;
     told2 = signal3;
-    io.out(`Told to stop (${signal3}): the swap ends once the step under way is done, and puts back what it did.`);
+    io.out(`Told to stop (${signal3}): the switch ends once the step under way is done, and puts back what it did.`);
   });
   const going = () => {
     if (told2 !== null)
       throw new Error(`it was told to stop (${told2})`);
   };
   let ran = null;
-  io.out(`${took === null ? "The swap starts now, and RPE answers" : `Today's runtime ${took.name} stops now, and RPE answers in its place`} once the migration has run again: do not interrupt the swap. Interrupted all the same, it puts back what it did before it ends.`);
+  io.out(`${took === null ? "The switch starts now, and RPE answers" : `The previous runtime ${took.name} stops now, and RPE answers in its place`} once the migration has run again: do not interrupt the switch. Interrupted all the same, it puts back what it did before it ends.`);
   try {
     for (const unit3 of [rpe.installed ? rpe.service.unit : null, took?.unit ?? null]) {
       if (unit3 === null)
@@ -214069,9 +214069,9 @@ async function swapRun(plan2, rpe, io) {
     const database = dataPaths(plan2.options.data).database;
     try {
       onRpe(database, (db) => keepSwap(db, plan2.sources.userId, record4));
-      undo2.push({ what: "the swap's record is taken out", run: async () => onRpe(database, (db) => dropSwap(db, plan2.sources.userId, record4.at)) });
+      undo2.push({ what: "the switch's record is taken out", run: async () => onRpe(database, (db) => dropSwap(db, plan2.sources.userId, record4.at)) });
     } catch (error) {
-      io.out(`The swap's record could not be kept (${error instanceof Error ? error.message : String(error)}): going back will not name the chats moved onto RPE's connections since, nor RPE's own earlier connection.`);
+      io.out(`The switch's record could not be kept (${error instanceof Error ? error.message : String(error)}): going back will not name the chats moved onto RPE's connections since, nor RPE's own earlier connection.`);
     }
     const putBack = await rpe.takeOver();
     undo2.push({ what: "RPE's config is as it was", run: putBack });
@@ -214092,14 +214092,14 @@ async function swapRun(plan2, rpe, io) {
       const runs3 = await registeredBuild(rpe.extension, rpe, io, until, () => told2 !== null);
       going();
       if (runs3 === null)
-        throw new Error(`the light extension did not register with RPE within ${Math.round(rpe.startMs / 1000)} seconds of RPE's service starting, so RPE could not play`);
+        throw new Error(`the new build of the extension did not register with RPE within ${Math.round(rpe.startMs / 1000)} seconds of RPE's service starting, so RPE could not play`);
       if (runs3 !== rpe.extension.build)
         throw new Error(`the extension Lumiverse runs is build ${runs3}, not this build (${rpe.extension.build}): Lumiverse loads the backend when the extension starts, and it started another`);
     }
     if (took?.unit)
       await mustRun(io.systemctl, ["disable", took.unit]);
   } catch (error) {
-    io.out(`The swap did not go through: ${told2 !== null ? `it was told to stop (${told2})` : error instanceof Error ? error.message : String(error)}.`);
+    io.out(`The switch did not go through: ${told2 !== null ? `it was told to stop (${told2})` : error instanceof Error ? error.message : String(error)}.`);
     const putBack = [];
     const failed2 = [];
     for (const step2 of undo2.reverse()) {
@@ -214114,15 +214114,15 @@ async function swapRun(plan2, rpe, io) {
     for (const line3 of failed2)
       io.out(`Could not be put back, do it by hand: ${line3}.`);
     if (failed2.length === 0)
-      for (const line3 of stopAfterSwitch({ identifier, branch: plan2.branch }, "Nothing of today's was changed."))
+      for (const line3 of stopAfterSwitch({ identifier, branch: plan2.branch }, "Nothing of the previous build's was changed."))
         io.out(line3);
     return false;
   } finally {
     letGo();
   }
-  io.out(`Started ${rpe.service.unit}, RPE's service: RPE answers at ${base}${took === null ? "" : `, where today's runtime ${took.name} did${rpe.todays ? `, under its model name (${took.loopback.model})` : ""}${took.loopback.keyHash === null ? "" : `${rpe.todays ? " and" : ","} with its key`}`}.`);
+  io.out(`Started ${rpe.service.unit}, RPE's service: RPE answers at ${base}${took === null ? "" : `, where the previous runtime ${took.name} did${rpe.todays ? `, under its model name (${took.loopback.model})` : ""}${took.loopback.keyHash === null ? "" : `${rpe.todays ? " and" : ","} with its key`}`}.`);
   if (took?.unit)
-    io.out(`Stopped and switched off ${took.unit}, today's service. Its unit, and today's runtime's config and folders, stay as they were, for going back.`);
+    io.out(`Stopped and switched off ${took.unit}, the previous build's service. Its unit, and the previous runtime's config and folders, stay as they were, for going back.`);
   if (ran !== null)
     for (const line3 of offRpeLines(plan2, ran))
       io.out(line3);
@@ -214136,7 +214136,7 @@ function onRpe(file, use) {
     db.close();
   }
 }
-var ENGINE_WORDS = { classic: "the classic pipeline", agents: "the agents engine", harness: "today's harness engine" };
+var ENGINE_WORDS = { classic: "the classic pipeline", agents: "the agents engine", harness: "the harness engine" };
 function offRpeLines(plan2, report) {
   const chats = report.offRpe ?? [];
   if (chats.length === 0)
@@ -214156,10 +214156,10 @@ function offRpeLines(plan2, report) {
   const engines = new Map((report.chats ?? []).map((c) => [c.chatId, c.engine]));
   const rpe = plan2.connections.length === 0 ? "the connection RPE answers on" : `one of RPE's connections (${plan2.connections.map((c) => `"${c.name}"`).join(", ")})`;
   return [
-    `${chats.length === 1 ? "One chat was" : `${chats.length} chats were`} on today's build and ${chats.length === 1 ? "is" : "are"} on none of RPE's connections: RPE plays only what reaches it on its own connections, and writes nothing into your chats. In Lumiverse, choose ${rpe} as each one's connection, and it is on RPE.`,
+    `${chats.length === 1 ? "One chat was" : `${chats.length} chats were`} on the previous build and ${chats.length === 1 ? "is" : "are"} on none of RPE's connections: RPE plays only what reaches it on its own connections, and writes nothing into your chats. In Lumiverse, choose ${rpe} as each one's connection, and it is on RPE.`,
     ...chats.map((c) => {
       const engine = engines.get(c.chat) ?? null;
-      return `  ${names2.get(c.chat) ?? c.chat}, played by ${engine === null ? "today's build" : ENGINE_WORDS[engine]}: ${c.pinned === null ? "on no connection of its own, so it follows the one active for you" : `on ${names2.get(`connection ${c.pinned}`) ?? `the connection ${c.pinned}`}`}`;
+      return `  ${names2.get(c.chat) ?? c.chat}, played by ${engine === null ? "the previous build" : ENGINE_WORDS[engine]}: ${c.pinned === null ? "on no connection of its own, so it follows the one active for you" : `on ${names2.get(`connection ${c.pinned}`) ?? `the connection ${c.pinned}`}`}`;
     })
   ];
 }
@@ -214239,7 +214239,7 @@ async function unmark(ids2, paths, config3, io) {
   for (const id3 of ids2) {
     try {
       if (await markConnection(call, id3, false))
-        io.out(`Took RPE's mark off the connection ${id3} in Lumiverse: nothing else of it was changed, and it is as it was before the swap.`);
+        io.out(`Took RPE's mark off the connection ${id3} in Lumiverse: nothing else of it was changed, and it is as it was before the switch.`);
     } catch (error) {
       io.out(`RPE's mark stays on the connection ${id3} in Lumiverse: ${error instanceof Error ? error.message : String(error)}.`);
     }
@@ -214273,7 +214273,7 @@ async function downCommand(argv, io) {
         lumiverse.close();
       }
     } catch (error) {
-      io.out(`Lumiverse's chats could not be read at ${swap.lumiverse} (${error instanceof Error ? error.message : String(error)}): the chats moved onto RPE's connections since the swap are not named below.`);
+      io.out(`Lumiverse's chats could not be read at ${swap.lumiverse} (${error instanceof Error ? error.message : String(error)}): the chats moved onto RPE's connections since the switch are not named below.`);
     }
   }
   if (swap !== null && swap.taken.length > 0)
@@ -214366,11 +214366,11 @@ var USAGE2 = [
   "  --lumiverse         Lumiverse's data folder (the one holding lumiverse.db)",
   "  --user              the id of the Lumiverse user whose data moves",
   "  --data              RPE's data folder: the only place the real run writes (default: RPE's own)",
-  "  --runtime-config    today's runtime's config folder (default: as today's runtime finds it, ~/.config/lumiah)",
-  "  --runtime-data      today's runtime's data folder (default: as today's runtime finds it, ~/.local/share/lumiah)",
-  "  --runtime           the runtime of today's build that is this user's (default: the one they registered",
+  "  --runtime-config    the previous runtime's config folder (default: as the previous runtime finds it, ~/.config/lumiah)",
+  "  --runtime-data      the previous runtime's data folder (default: as the previous runtime finds it, ~/.local/share/lumiah)",
+  "  --runtime           the runtime of the previous build that is this user's (default: the one they registered",
   "                      with this Lumiverse); every other runtime there is left alone",
-  "  --no-runtime        the server runs no runtime of today's build for this user",
+  "  --no-runtime        the server runs no runtime of the previous build for this user",
   "  --mine <name>       a runtime folder no config names holds this user's working copy (give it again for each folder)",
   "  --theirs <name>     a runtime folder no config names is not this user's: it is left alone",
   "  --identifier        the extension's identifier in Lumiverse (default: lumi_rp_engine)",
@@ -214428,7 +214428,7 @@ ${USAGE2}`);
     const { report, ran } = await migrate3({ lumiverse, identifier: values.identifier ?? IDENTIFIER, userId: user, runtime, ...values.runtime !== undefined ? { runtimeName: values.runtime } : {}, ...Object.keys(folders).length > 0 ? { runtimeFolders: folders } : {} }, { data, rehearse: switches.has("rehearse"), version: io.env.LRE_BUILD_ID ?? "dev", env: io.env, tree, ...settings ? { settings } : {}, ...runs3 ? { runs: runs3 } : {} });
     io.out(switches.has("json") ? `${JSON.stringify(report, null, 2)}
 ` : reportText(report));
-    return switches.has("rehearse") || ran ? 0 : 1;
+    return (switches.has("rehearse") ? report.refusals.length === 0 : ran) ? 0 : 1;
   } catch (error) {
     io.err(`The migration stopped: ${error instanceof Error ? error.message : String(error)}`);
     return 1;
@@ -222094,7 +222094,7 @@ var TELL_GROUP_DEFS = Object.fromEntries(OFFSTAGE_GROUPS.map((group) => [
     takes: { type: "yesNo" },
     perConnection: false,
     name: `Tell the Author: ${OFFSTAGE_GROUP_LABEL[group]}`,
-    about: "Whether a tap of this group is told to the next turn's Author when he made no choice of his own on it.",
+    about: "Whether a tap of this group is told to the next turn's Author when you made no choice of your own on it.",
     effect: "use"
   }
 ]));
@@ -222126,7 +222126,7 @@ var TIDY_DEFS = {
     takes: { type: "texts" },
     perConnection: false,
     name: "Tidy-up findings left as they are",
-    about: "The keys of the tidy-up's findings he told it to leave alone (Leave it): they are not listed again.",
+    about: "The keys of the tidy-up's findings you told it to leave alone (Leave it): they are not listed again.",
     effect: "turn"
   },
   leftMost: {
@@ -222376,7 +222376,7 @@ function updatesSince(updates, written3, changed2) {
 async function recordWritten(writes2, user, file, at3) {
   await writes2.run((db) => {
     db.run("INSERT INTO tree_written (user, file, seen, at) VALUES (?1, ?2, COALESCE((SELECT MAX(seq) FROM tree_default WHERE user = ?1), 0), ?3) ON CONFLICT (user, file) DO UPDATE SET seen = excluded.seen, at = excluded.at", [user, file, at3]);
-  }, "keeping when the user wrote a file");
+  }, "keeping when you wrote a file");
 }
 function linesOf3(text13) {
   const lines = text13.split(`
@@ -222719,10 +222719,10 @@ var TREE_SETTING_DEFS = {
   listPage: { key: "files.list.page", default: TREE_DEFAULTS.listPage, takes: { type: "whole", least: 1 }, perConnection: false, name: "Entries a Files page lists", about: "Files and folders the Files page lists in one page of a folder, or of a search, when it asks for no number.", effect: "use" },
   listMost: { key: "files.list.maxPage", default: TREE_DEFAULTS.listMost, takes: { type: "whole", least: 1 }, perConnection: false, name: "Most entries a Files page lists", about: "The most files and folders one page of the Files page's listing gives, whatever number it asks for.", effect: "use" },
   readLines: { key: "files.readLines", default: TREE_DEFAULTS.readLines, takes: { type: "whole", least: 1 }, perConnection: false, name: "Lines of a file read at once", about: "Lines of a file the Files page reads in one go when it names none: a long file is read a part at a time, never whole.", effect: "use" },
-  suggestionsOpenMost: { key: "suggestions.maxOpen", default: TREE_DEFAULTS.suggestionsOpenMost, takes: { type: "whole", least: 0 }, perConnection: false, name: "Open suggestions kept", about: "The most suggestions of a chat that wait for the user at once; past it an agent's new suggestion is not kept, and the agent is told so.", effect: "use" },
+  suggestionsOpenMost: { key: "suggestions.maxOpen", default: TREE_DEFAULTS.suggestionsOpenMost, takes: { type: "whole", least: 0 }, perConnection: false, name: "Open suggestions kept", about: "The most suggestions of a chat that wait for you at once; past it an agent's new suggestion is not kept, and the agent is told so.", effect: "use" },
   suggestionsDecidedKept: { key: "suggestions.decidedKept", default: TREE_DEFAULTS.suggestionsDecidedKept, takes: { type: "whole", least: 0 }, perConnection: false, name: "Decided suggestions kept", about: "How many accepted and dismissed suggestions of a chat are kept, the oldest going after each decision and when the Storage page prunes them.", effect: "use" },
   chatsListed: { key: "storage.page", default: TREE_DEFAULTS.chatsListed, takes: { type: "whole", least: 1 }, perConnection: false, name: "Chats a Storage page lists", about: "Chats the Storage page lists in one page, with what each takes on the disk and in the database.", effect: "use" },
-  recheckHours: { key: "storage.recheckHours", default: TREE_DEFAULTS.recheckHours, takes: { type: "whole", least: 1 }, perConnection: false, name: "Hours between checks of the kept sizes", about: "How often what each chat's folder takes, as RPE keeps it, is checked against the disk in the background, so an edit made in his own editor shows.", effect: "use" }
+  recheckHours: { key: "storage.recheckHours", default: TREE_DEFAULTS.recheckHours, takes: { type: "whole", least: 1 }, perConnection: false, name: "Hours between checks of the kept sizes", about: "How often what each chat's folder takes, as RPE keeps it, is checked against the disk in the background, so an edit made in your own editor shows.", effect: "use" }
 };
 var NAMES2 = { type: "texts" };
 var FILE_SETTINGS = [
@@ -223741,7 +223741,7 @@ CREATE INDEX suggestion_chat ON suggestion (user, chat, state);
   },
   {
     version: 8,
-    name: "every change an update made to a default, and when the user wrote their own files",
+    name: "every change an update made to a default, and when you wrote your own files",
     sql: `
 CREATE TABLE tree_default_updates (
   seq INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -223766,7 +223766,7 @@ CREATE TABLE tree_written (
   },
   {
     version: 9,
-    name: "chats Lumiverse deleted, and when the user last pruned",
+    name: "chats Lumiverse deleted, and when you last pruned",
     sql: `
 ALTER TABLE tree_chat ADD COLUMN deleted INTEGER;
 CREATE TABLE tree_prune (
@@ -224452,6 +224452,11 @@ import { join as join37 } from "path";
 function levelsOf(ctx) {
   return ctx.layers.map((l) => l.level).filter((level3) => levelBase(ctx.loc, level3) !== null);
 }
+function isStandardFolder(layers, at3) {
+  const layer2 = layers.find((l) => l.level === at3.level);
+  const [first] = at3.rest;
+  return layer2 !== undefined && at3.rest.length === 1 && (kindAt(layer2, first) !== undefined || first === NOTES_FOLDER && (at3.level === "global" || at3.level === "chat"));
+}
 function pageOf(all2, keyOf6, ask) {
   const from = ask.after === undefined ? 0 : all2.findIndex((i) => keyOf6(i) > ask.after);
   if (from < 0)
@@ -224465,8 +224470,11 @@ async function listFolder(ctx, folder, ask) {
   const at3 = await locate2(loc, top ? "" : folder);
   if (!at3.ok)
     throw new RouteError(at3.reason === "invalid" ? 400 : 404, `The tree has no folder ${folder} that a page can reach.`);
-  if (!top && at3.at.is !== "folder")
+  if (!top && at3.at.is !== "folder") {
+    if (at3.at.is === "none" && isStandardFolder(ctx.layers, at3.at))
+      return { folder: at3.at.path, items: [], next: null, levels: levelsOf(ctx), stopped: null };
     throw new RouteError(404, `The tree has no folder ${folder}.`);
+  }
   const names2 = [];
   if (at3.at.disk !== null) {
     for (const e of await entriesOf2(loc, at3.at.level, at3.at.rest, at3.at.disk))
@@ -225343,7 +225351,7 @@ async function planPrune(deps, user, ask) {
         await rm16(join39(deps.backups, backup.name), { force: true });
       else
         await takePlanned(planned2);
-      await deps.writes.run((db) => db.run("INSERT INTO tree_prune (user, at) VALUES (?, ?) ON CONFLICT (user) DO UPDATE SET at = excluded.at", [user, deps.now()]), "keeping when the user last pruned");
+      await deps.writes.run((db) => db.run("INSERT INTO tree_prune (user, at) VALUES (?, ?) ON CONFLICT (user) DO UPDATE SET at = excluded.at", [user, deps.now()]), "keeping when you last pruned");
     }
   };
 }
@@ -225765,7 +225773,7 @@ var DEFS2 = {
     takes: { type: "yesNo" },
     perConnection: false,
     name: "Hidden messages readable",
-    about: "Agents may read the messages the player hid from the prompt.",
+    about: "Agents may read the messages you hid from the prompt.",
     effect: "turn",
     row: "Hidden messages readable by agents"
   },
@@ -225909,7 +225917,7 @@ var DEFS2 = {
     takes: { type: "whole", least: 1 },
     perConnection: false,
     name: "Longest request",
-    about: "The most characters a request beside his words may hold (what was pressed and on what, or a composer control's choice and words); one past it is not kept, and the answer says so.",
+    about: "The most characters a request may hold beside your words (what was pressed and on what, or a composer control's choice and words); one past it is not kept, and the answer says so.",
     effect: "use"
   },
   storyFrom: {
@@ -225926,8 +225934,8 @@ var DEFS2 = {
     default: TURN_DEFAULTS.storyNewest,
     takes: { type: "oneOf", values: STORY_NEWEST },
     perConnection: false,
-    name: "His newest message",
-    about: "With the story made of the replies: whether his newest message is the turn's direction (directive) or left out (leave_out). A briefing fact the guidance reads.",
+    name: "Your newest message",
+    about: "With the story made of the replies: whether your newest message is the turn's direction (directive) or left out (leave_out). A briefing fact the guidance reads.",
     effect: "turn"
   },
   gapSnippet: {
@@ -225945,7 +225953,7 @@ var DEFS2 = {
     takes: { type: "oneOf", values: LANE_PERMISSIONS },
     perConnection: false,
     name: "Write permission, the story lane",
-    about: "What the agents' writes to the story record do: go ahead (auto), wait for his word on the turn's card (confirm), or are left out (never).",
+    about: "What the agents' writes to the story record do: go ahead (auto), wait for your word on the turn's card (confirm), or are left out (never).",
     effect: "turn"
   },
   permissionEngine: {
@@ -225954,7 +225962,7 @@ var DEFS2 = {
     takes: { type: "oneOf", values: LANE_PERMISSIONS },
     perConnection: false,
     name: "Write permission, the engine lane",
-    about: "What the agents' writes to the world's state do: go ahead (auto), wait for his word on the turn's card (confirm), or are left out (never).",
+    about: "What the agents' writes to the world's state do: go ahead (auto), wait for your word on the turn's card (confirm), or are left out (never).",
     effect: "turn"
   },
   permissionExternal: {
@@ -225963,7 +225971,7 @@ var DEFS2 = {
     takes: { type: "oneOf", values: LANE_PERMISSIONS },
     perConnection: false,
     name: "Permission for tools that reach outside RPE",
-    about: "What a call of a tool outside RPE (the web, a command, an MCP server) does: go ahead (auto), wait for his word (confirm), or is refused (never).",
+    about: "What a call of a tool outside RPE (the web, a command, an MCP server) does: go ahead (auto), wait for your word (confirm), or is refused (never).",
     effect: "turn"
   }
 };
@@ -227077,6 +227085,219 @@ function summarizedOf(tag, steps) {
   return out;
 }
 
+// src/turn/runs.ts
+var RUN_ROWS = "SELECT r.*, u.calls, u.input, u.cache_read, u.cache_write, u.output, u.reasoning, u.lore_searches, u.lore_reads FROM turn_run r LEFT JOIN usage u ON u.user = r.user AND u.run = r.id";
+function recordOf3(user, r) {
+  return {
+    id: r.id,
+    traceRun: r.trace_run,
+    user,
+    turn: r.turn,
+    chat: r.chat,
+    session: r.session,
+    generation: r.generation,
+    target: r.target,
+    swipe: r.swipe,
+    kind: r.kind,
+    status: r.status,
+    received: r.received,
+    started: r.started,
+    firstWord: r.first_word,
+    released: r.released,
+    finished: r.finished,
+    ended: r.ended,
+    intent: r.intent_time === null ? null : JSON.parse(r.intent_time),
+    thinking: r.thinking === null ? [] : JSON.parse(r.thinking),
+    withoutIntent: r.without_intent === 1,
+    intake: r.intake === null ? null : JSON.parse(r.intake),
+    wait: r.wait === null ? null : JSON.parse(r.wait),
+    folder: r.folder === null ? null : JSON.parse(r.folder),
+    usage: r.calls === null ? null : { calls: r.calls, input: r.input ?? 0, cacheRead: r.cache_read ?? 0, cacheWrite: r.cache_write ?? 0, output: r.output ?? 0, ...r.reasoning !== null ? { reasoning: r.reasoning } : {} },
+    lookups: { searches: r.lore_searches ?? 0, reads: r.lore_reads ?? 0 },
+    reply: r.reply,
+    progress: JSON.parse(r.progress),
+    error: r.error === null ? null : JSON.parse(r.error),
+    stoppedBy: r.stopped_by === null ? null : JSON.parse(r.stopped_by),
+    lastText: r.last_text === 1,
+    notGiven: r.not_given === null ? [] : JSON.parse(r.not_given),
+    base: r.base,
+    saved: r.saved,
+    settled: r.settled,
+    held: r.held,
+    mark: r.mark,
+    intentRecord: r.intent_record
+  };
+}
+var CARRIED_SESSION = "";
+function keepCarriedRun(db, run2) {
+  db.run("INSERT OR REPLACE INTO turn_run (user, id, turn, chat, session, kind, status, received, released, finished, ended, settled, reply, base, saved) VALUES (?, ?, ?, ?, ?, 'new', 'released', ?, ?, ?, ?, ?, ?, '', ?)", [
+    run2.user,
+    `carried-${run2.turn}`,
+    run2.turn,
+    run2.chat,
+    CARRIED_SESSION,
+    run2.at,
+    run2.at,
+    run2.at,
+    run2.at,
+    run2.at,
+    run2.released,
+    run2.saved
+  ]);
+}
+var key = (user, id3) => `${user}\x00${id3}`;
+
+class Runs {
+  db;
+  writes;
+  #running = new Map;
+  constructor(db, writes2) {
+    this.db = db;
+    this.writes = writes2;
+  }
+  put(into, r) {
+    into.run(`INSERT INTO turn_run (user, id, trace_run, turn, chat, session, generation, target, swipe, kind, status, received, started, first_word, released, finished, ended, intent_time, thinking, without_intent, intake, wait, folder, reply, progress, error, stopped_by, last_text, not_given, base, saved, settled, held, mark, intent_record)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (user, id) DO UPDATE SET trace_run = excluded.trace_run, session = excluded.session, generation = excluded.generation, target = excluded.target, swipe = excluded.swipe, kind = excluded.kind,
+         status = excluded.status, received = excluded.received, started = excluded.started, first_word = excluded.first_word, released = excluded.released, finished = excluded.finished, ended = excluded.ended,
+         intent_time = excluded.intent_time, thinking = excluded.thinking, without_intent = excluded.without_intent, intake = excluded.intake, wait = excluded.wait, folder = excluded.folder,
+         reply = excluded.reply, progress = excluded.progress, error = excluded.error, stopped_by = excluded.stopped_by, last_text = excluded.last_text, not_given = excluded.not_given, base = excluded.base, saved = excluded.saved,
+         settled = COALESCE(turn_run.settled, excluded.settled), mark = excluded.mark, intent_record = COALESCE(excluded.intent_record, turn_run.intent_record)`, [
+      r.user,
+      r.id,
+      r.traceRun,
+      r.turn,
+      r.chat,
+      r.session,
+      r.generation,
+      r.target,
+      r.swipe,
+      r.kind,
+      r.status,
+      r.received,
+      r.started,
+      r.firstWord,
+      r.released,
+      r.finished,
+      r.ended,
+      r.intent === null ? null : JSON.stringify(r.intent),
+      JSON.stringify(r.thinking),
+      r.withoutIntent ? 1 : 0,
+      r.intake === null ? null : JSON.stringify(r.intake),
+      r.wait === null ? null : JSON.stringify(r.wait),
+      r.folder === null ? null : JSON.stringify(r.folder),
+      r.reply,
+      JSON.stringify(r.progress),
+      r.error === null ? null : JSON.stringify(r.error),
+      r.stoppedBy === null ? null : JSON.stringify(r.stoppedBy),
+      r.lastText ? 1 : 0,
+      JSON.stringify(r.notGiven),
+      r.base,
+      r.saved,
+      r.settled,
+      r.held,
+      r.mark,
+      r.intentRecord
+    ]);
+    const { usage: usage3 } = r;
+    if (usage3 === null)
+      return;
+    into.run(`INSERT OR REPLACE INTO usage (user, run, turn, chat, at, calls, input, cache_read, cache_write, output, reasoning, lore_searches, lore_reads) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [r.user, r.id, r.turn, r.chat, r.ended ?? r.received, usage3.calls, usage3.input, usage3.cacheRead, usage3.cacheWrite, usage3.output, usage3.reasoning ?? null, r.lookups.searches, r.lookups.reads]);
+  }
+  join(into, r, to) {
+    into.run("UPDATE turn_run SET turn = ? WHERE user = ? AND id = ?", [to, r.user, r.id]);
+    into.run("UPDATE usage SET turn = ? WHERE user = ? AND run = ?", [to, r.user, r.id]);
+    const live = this.#running.get(key(r.user, r.turn));
+    if (live?.id === r.id) {
+      this.#running.delete(key(r.user, r.turn));
+      live.turn = to;
+      this.#running.set(key(r.user, to), live);
+    }
+    r.turn = to;
+  }
+  keepIntent(into, r, text13) {
+    into.run("UPDATE turn_run SET intent_record = ? WHERE user = ? AND id = ?", [text13, r.user, r.id]);
+    const live = this.#running.get(key(r.user, r.turn));
+    if (live?.id === r.id)
+      live.intentRecord = text13;
+    r.intentRecord = text13;
+  }
+  byHeld(user, turn) {
+    for (const r of this.#running.values())
+      if (r.user === user && r.held === turn)
+        return r;
+    const row = this.db.query(`${RUN_ROWS} WHERE r.user = ? AND r.held = ? ORDER BY r.received DESC LIMIT 1`).get(user, turn);
+    return row === null ? null : recordOf3(user, row);
+  }
+  async save(r, label5) {
+    const copy = { ...r, progress: [...r.progress], lookups: { ...r.lookups } };
+    await this.writes.run((into) => this.put(into, copy), label5);
+  }
+  hold(run2) {
+    this.#running.set(key(run2.user, run2.turn), run2);
+    run2.over.finally(() => {
+      if (this.#running.get(key(run2.user, run2.turn)) === run2)
+        this.#running.delete(key(run2.user, run2.turn));
+    });
+  }
+  running(user, turn) {
+    return this.#running.get(key(user, turn));
+  }
+  ofChat(user, chat) {
+    return [...this.#running.values()].filter((r) => r.user === user && r.chat === chat);
+  }
+  chatsGoing() {
+    return [...new Set([...this.#running.values()].map((r) => r.chat))];
+  }
+  started(record4) {
+    const turn = record4.scope.turn;
+    if (record4.event.kind !== "run_started" || record4.event.run !== "turn" || turn === undefined)
+      return;
+    const run2 = this.running(record4.scope.user, turn);
+    if (run2 !== undefined)
+      run2.traceRun = record4.run;
+  }
+  record(user, turn) {
+    const live = this.running(user, turn);
+    if (live !== undefined)
+      return live;
+    const row = this.db.query(`${RUN_ROWS} WHERE r.user = ? AND r.turn = ? ORDER BY r.received DESC, r.rowid DESC LIMIT 1`).get(user, turn);
+    return row === null ? null : recordOf3(user, row);
+  }
+  reply(user, turn) {
+    return this.ofTurn(user, turn).findLast((r) => r.kind !== "settle") ?? null;
+  }
+  ofTurn(user, turn) {
+    const live = this.running(user, turn);
+    return this.db.query(`${RUN_ROWS} WHERE r.user = ? AND r.turn = ? ORDER BY r.received, r.rowid`).all(user, turn).map((r) => live !== undefined && live.id === r.id ? live : recordOf3(user, r));
+  }
+  countOf(user, turns) {
+    return this.db.query("SELECT count(*) AS n FROM turn_run WHERE user = ? AND turn IN (SELECT value FROM json_each(?))").get(user, JSON.stringify(turns))?.n ?? 0;
+  }
+  byGeneration(user, generation) {
+    for (const r of this.#running.values())
+      if (r.user === user && r.generation === generation)
+        return r;
+    const row = this.db.query(`${RUN_ROWS} WHERE r.user = ? AND r.generation = ? ORDER BY r.received DESC LIMIT 1`).get(user, generation);
+    return row === null ? null : recordOf3(user, row);
+  }
+  ofChatKept(user, chat, limit3, before2) {
+    const from = before2 === undefined ? null : this.db.query("SELECT max(received) AS received FROM turn_run WHERE user = ? AND chat = ? AND turn = ?").get(user, chat, before2);
+    const latest = "NOT EXISTS (SELECT 1 FROM turn_run n WHERE n.user = r.user AND n.turn = r.turn AND (n.received > r.received OR (n.received = r.received AND n.rowid > r.rowid))) AND EXISTS (SELECT 1 FROM turn t WHERE t.user = r.user AND t.id = r.turn)";
+    const rows = from === null || from.received === null ? this.db.query(`${RUN_ROWS} WHERE r.user = ? AND r.chat = ? AND ${latest} ORDER BY r.received DESC, r.rowid DESC LIMIT ?`).all(user, chat, limit3) : this.db.query(`${RUN_ROWS} WHERE r.user = ? AND r.chat = ? AND r.received < ? AND ${latest} ORDER BY r.received DESC, r.rowid DESC LIMIT ?`).all(user, chat, from.received, limit3);
+    return rows.map((r) => this.running(user, r.turn) ?? recordOf3(user, r));
+  }
+  chats(user) {
+    return this.db.query("SELECT chat, max(received) AS last FROM turn_run WHERE user = ? AND session <> ? GROUP BY chat ORDER BY last DESC").all(user, CARRIED_SESSION);
+  }
+  unsettled(user, chat) {
+    return this.db.query(`${RUN_ROWS} WHERE r.user = ? AND r.chat = ? AND r.settled IS NULL AND r.generation IS NOT NULL ORDER BY r.received, r.rowid`).all(user, chat).filter((r) => this.running(user, r.turn)?.id !== r.id).map((r) => recordOf3(user, r));
+  }
+  leftGoing() {
+    return this.db.query(`${RUN_ROWS} WHERE r.status = 'running' ORDER BY r.received, r.rowid`).all().filter((r) => this.running(r.user, r.turn)?.id !== r.id).map((r) => recordOf3(r.user, r));
+  }
+}
+
 // src/turn/scan.ts
 init_json();
 var SCAN_SETTING = "worldInfoSettings";
@@ -227586,6 +227807,7 @@ class TurnLane {
       if (this.#lateLore.get(chatKey)?.generation === tag.generation)
         this.#lateLore.delete(chatKey);
     };
+    let held4 = false;
     try {
       if (intake.waiting) {
         const line3 = lines(await loadGuidance(this.#d.files, { user, chat, session: NO_SESSION }).part(PARTS4.progress))?.line("waiting_previous");
@@ -227703,6 +227925,7 @@ ${begun.id}`, stopped.length);
         throw error;
       });
       admitted();
+      held4 = true;
       lap("begin");
       this.#d.prompts.mapFile(user, chat);
       let request;
@@ -227723,7 +227946,7 @@ ${begun.id}`, stopped.length);
             return said5(lines(notices)?.line(r.kind === "depth" ? "depth_asked" : "swipe_asked", { [r.kind === "depth" ? "depth" : "mode"]: choice, ...typed2 !== null && typed2.trim() !== "" ? { words: typed2 } : {} }));
           }
           const tap = r.asked;
-          const values = Object.entries(tap.values).map(([key, value]) => `${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`);
+          const values = Object.entries(tap.values).map(([key2, value]) => `${key2}: ${typeof value === "string" ? value : JSON.stringify(value)}`);
           return said5(lines(notices)?.line("panel_request", { what: tap.what, from: tap.from, ...tap.on !== null ? { on: tap.on } : {}, ...tap.action !== null ? { action: tap.action } : {}, ...values.length > 0 ? { values: values.join(", ") } : {}, ...r.played ? { sent: true } : {} }));
         });
         const typed = tagged.feedback;
@@ -227778,6 +228001,7 @@ ${begun.id}`, stopped.length);
         run2.status = "failed";
         run2.error = { code: "failed", detail: words13(error) };
         run2.ended = this.#d.clock.now();
+        this.#runEnded(run2, lines(errors));
         run2.intake = took;
         run2.wait = waits;
         await this.#d.runs.save(run2, "keeping a turn's run that never began").catch((e) => this.#d.log.error("A turn's run could not be kept.", { turn: run2.turn, error: words13(e) }));
@@ -227810,6 +228034,10 @@ ${begun.id}`, stopped.length);
         this.#early.delete(tag.generation);
         this.changed(early);
       }
+    } catch (error) {
+      if (!held4)
+        this.#d.log.warn(`A turn was not begun: ${words13(error)}`, { chat, kind: tag.kind, generation: tag.generation });
+      throw error;
     } finally {
       admitted();
       this.#early.delete(tag.generation);
@@ -227880,11 +228108,11 @@ ${begun.id}`, stopped.length);
         this.#project(user, chat);
   }
   #generatingIn(user, chat) {
-    const key = `${user}\x00${chat}`;
-    let going = this.#generating.get(key);
+    const key2 = `${user}\x00${chat}`;
+    let going = this.#generating.get(key2);
     if (going === undefined) {
       going = new Set;
-      this.#generating.set(key, going);
+      this.#generating.set(key2, going);
     }
     return going;
   }
@@ -228077,6 +228305,7 @@ ${turn}`) ?? 0;
         run2.status = "failed";
         run2.error = { code: "failed", detail: words13(error) };
         run2.ended = this.#d.clock.now();
+        this.#runEnded(run2, lines(errors));
         await this.#d.runs.save(run2, "keeping a Settle now run that never began").catch((e) => this.#d.log.error("A turn's run could not be kept.", { turn: run2.turn, error: words13(e) }));
         over.resolve();
         throw error;
@@ -228147,14 +228376,14 @@ ${turn}`) ?? 0;
     return { user, chat: parent.chat, session: there.id, turn: parent.id };
   }
   #queue(user, chat) {
-    const key = `${user}\x00${chat}`;
-    const before2 = this.#intakes.get(key);
+    const key2 = `${user}\x00${chat}`;
+    const before2 = this.#intakes.get(key2);
     const mine = Promise.withResolvers();
     const tail = (before2 ?? Promise.resolve()).then(() => mine.promise);
-    this.#intakes.set(key, tail);
+    this.#intakes.set(key2, tail);
     tail.then(() => {
-      if (this.#intakes.get(key) === tail)
-        this.#intakes.delete(key);
+      if (this.#intakes.get(key2) === tail)
+        this.#intakes.delete(key2);
     });
     return { waiting: before2 !== undefined, turn: before2 ?? Promise.resolve(), done: () => mine.resolve() };
   }
@@ -228249,8 +228478,11 @@ ${turn}`) ?? 0;
     this.#deletedTold.delete(chatKey);
     await Promise.all([...gone2].filter((turn) => told2?.has(turn) !== true).map((turn) => this.#cancel(user, chat, turn)));
     const shown5 = [report.swiped?.to ?? null, ...report.flipped.map((f) => f.to)].filter((turn) => turn !== null);
-    for (const turn of shown5)
-      await this.#d.harness().turnShown({ user, chat, session: this.#d.runs.record(user, turn)?.session ?? NO_SESSION, turn });
+    for (const turn of shown5) {
+      const session = this.#d.runs.record(user, turn)?.session;
+      if (session !== undefined && session !== CARRIED_SESSION)
+        await this.#d.harness().turnShown({ user, chat, session, turn });
+    }
   }
   async#compare(user, chat, steps, writing2, replaced2, heardUpTo) {
     const store2 = this.#d.store.user(user);
@@ -228285,7 +228517,9 @@ ${turn}`) ?? 0;
     const run2 = this.#d.runs.running(user, turn);
     if (run2 !== undefined)
       run2.stop.abort(new Error(await turnErrorWords(this.#d.files, { user, chat }, "left_path")));
-    await this.#d.harness().turnLeft({ user, chat, session: run2?.session ?? this.#d.runs.record(user, turn)?.session ?? NO_SESSION, turn });
+    const session = run2?.session ?? this.#d.runs.record(user, turn)?.session;
+    if (session !== undefined && session !== CARRIED_SESSION)
+      await this.#d.harness().turnLeft({ user, chat, session, turn });
     await run2?.over;
   }
   async#previous(user, chat, settings, progress, out, signal3) {
@@ -228781,6 +229015,7 @@ ${parent}`);
       if (holding !== undefined)
         clock.clearTimeout(holding);
       run2.ended ??= clock.now();
+      this.#runEnded(run2, ending.errors);
       replied.resolve();
       try {
         await this.#d.runs.save(run2, "keeping a turn's run");
@@ -228815,6 +229050,18 @@ ${parent}`);
   #errorWords(e, errors) {
     const fields3 = { ...e.detail !== undefined ? { detail: e.detail } : {}, ...e.limit !== undefined ? { limit: e.limit.limit, per: e.limit.per, max: e.limit.max, value: e.limit.value } : {} };
     return errors?.line(e.code, fields3) ?? "";
+  }
+  #runEnded(run2, errors) {
+    if (run2.status === "released" && run2.stoppedBy === null)
+      return;
+    const e = run2.error;
+    const why = e === null ? `no reason was given (the run's status is ${run2.status})` : this.#errorWords(e, errors) || `${e.code}${e.detail !== undefined ? `: ${e.detail}` : ""}`;
+    const how = run2.stoppedBy !== null ? "stopped where it stood" : run2.status === "limit" ? "at a limit" : run2.status === "no-reply" ? "with no reply" : run2.status === "stopped" ? "stopped" : "failed";
+    const fields3 = { turn: run2.turn, run: run2.id, chat: run2.chat, kind: run2.kind, generation: run2.generation, status: run2.status };
+    if (run2.status === "stopped" && run2.stoppedBy === null)
+      this.#d.log.info(`A turn's run ended ${how}: ${why}`, fields3);
+    else
+      this.#d.log.warn(`A turn's run ended ${how}: ${why}`, fields3);
   }
   async#ended(user, change2) {
     const run2 = this.#d.runs.byGeneration(user, change2.generation);
@@ -229284,6 +229531,15 @@ function turnEvents(deps) {
         } catch (error) {
           deps.log.error("A job's end could not be recorded, so what it changed does not take effect.", { job: job.id, error: error instanceof Error ? error.message : String(error) });
           return;
+        }
+        const hit = job.limit;
+        if (job.state !== "done" || hit !== undefined) {
+          const why = job.state === "failed" ? "its agent could not go on; the harness's line with this job's id, just before this one, says why" : hit !== undefined ? `it reached the limit ${hit.limit} per ${hit.per}: ${hit.value} against ${hit.max}` : job.state === "cancelled" ? "it was cancelled" : job.state === "off-path" ? "its turn left the chat's path" : job.state === "interrupted" ? "RPE stopped while it ran" : `it ended as ${job.state}`;
+          const fields3 = { job: job.id, chat: scope2.chat ?? null, turn: scope2.turn ?? null, kind: job.check !== undefined ? "tag-check" : "job", agent: job.agent, state: job.state };
+          if (job.state === "failed" || hit !== undefined)
+            deps.log.warn(`A job ended ${hit !== undefined ? "at a limit" : job.state}: ${why}`, fields3);
+          else
+            deps.log.info(`A job ended ${job.state}: ${why}`, fields3);
         }
       }
       deps.jobTold(job);
@@ -229839,11 +230095,11 @@ class Run2 {
   #take(rules) {
     this.#rules = rules;
     for (const rule3 of rules) {
-      const key = `${rule3.path}
+      const key2 = `${rule3.path}
 ${rule3.text.text}`;
-      if (this.#checked.has(key))
+      if (this.#checked.has(key2))
         continue;
-      this.#checked.add(key);
+      this.#checked.add(key2);
       this.problems.push(...checkFacts(rule3, this.#defs));
     }
   }
@@ -229857,25 +230113,25 @@ ${rule3.text.text}`;
     return this.#rules.filter((rule3) => rule3.agents === "all" || rule3.agents.includes(agent.definition));
   }
   #may(rule3, agent) {
-    const key = `${rule3.name} ${agent.definition}`;
-    const last = this.#memory.fired[key];
+    const key2 = `${rule3.name} ${agent.definition}`;
+    const last = this.#memory.fired[key2];
     switch (rule3.repeat.per) {
       case "always":
         return true;
       case "turn":
         return !this.#thisRun.has(`${rule3.name} ${agent.id}`);
       case "session":
-        return !this.#memory.session.fired.includes(key);
+        return !this.#memory.session.fired.includes(key2);
       case "turns":
         return last === undefined || this.#memory.turns - last >= rule3.repeat.turns;
     }
   }
   #mark(rule3, agent) {
-    const key = `${rule3.name} ${agent.definition}`;
+    const key2 = `${rule3.name} ${agent.definition}`;
     this.#thisRun.add(`${rule3.name} ${agent.id}`);
-    this.#memory.fired[key] = this.#memory.turns;
-    if (!this.#memory.session.fired.includes(key))
-      this.#memory.session.fired.push(key);
+    this.#memory.fired[key2] = this.#memory.turns;
+    if (!this.#memory.session.fired.includes(key2))
+      this.#memory.session.fired.push(key2);
   }
   async#read(agent, names2, rules) {
     if (names2.length === 0)
@@ -230173,9 +230429,9 @@ function parseHooks(file) {
       const timeout = given3.timeout;
       if (timeout !== undefined && (typeof timeout !== "number" || !Number.isInteger(timeout) || timeout < 1))
         return problem("`timeout` is a whole number of seconds, 1 or more, so it is left out.");
-      for (const key of Object.keys(given3))
-        if (!HOOK_FIELDS.includes(key))
-          problem(`\`${key}\` is not a field a hook has, and is not read. Its fields are: ${HOOK_FIELDS.join(", ")}.`);
+      for (const key2 of Object.keys(given3))
+        if (!HOOK_FIELDS.includes(key2))
+          problem(`\`${key2}\` is not a field a hook has, and is not read. Its fields are: ${HOOK_FIELDS.join(", ")}.`);
       named4.add(name);
       hooks.push({ name, on, command, ...typeof timeout === "number" ? { timeout } : {}, path: file.path, level: file.level, line: line3 ?? 1 });
     });
@@ -230222,9 +230478,9 @@ function parseManifest(file, name) {
   if (command === undefined === (address === undefined))
     problem("A tool runs a `command` or calls an `address`: one of the two.");
   else if (command !== undefined) {
-    for (const key of ["method", "headers"])
-      if (raw[key] !== undefined)
-        problem(`\`${key}\` goes with \`address\`, and is not read for a command.`);
+    for (const key2 of ["method", "headers"])
+      if (raw[key2] !== undefined)
+        problem(`\`${key2}\` goes with \`address\`, and is not read for a command.`);
     runs3 = { command };
   } else if (address !== undefined) {
     let url2;
@@ -230467,7 +230723,7 @@ function parseRule(file, name, replaces) {
   const at3 = { path: file.path, level: file.level };
   const split = splitHeader(file.text, at3);
   const read3 = { description: "", agents: [], problems: [...split.problems] };
-  const problem = (key, message) => read3.problems.push(problemAt(at3, key === undefined ? undefined : fieldLine(split.lines, key) ?? 2, message));
+  const problem = (key2, message) => read3.problems.push(problemAt(at3, key2 === undefined ? undefined : fieldLine(split.lines, key2) ?? 2, message));
   if (!split.has) {
     read3.problems.push(problemAt(at3, 1, "A rule starts with a header between two `---` lines: a description, who it is for (`agents:`), and what makes it fire if it is not always on. Its text follows the header."));
     return read3;
@@ -230477,9 +230733,9 @@ function parseRule(file, name, replaces) {
     return read3;
   read3.problems.push(...unknownFields(split, RULE_FIELDS, at3, "a rule"));
   let broken = false;
-  const fail = (key, message) => {
+  const fail = (key2, message) => {
     broken = true;
-    problem(key, message);
+    problem(key2, message);
   };
   if (typeof h.description === "string")
     read3.description = h.description.trim();
@@ -230494,7 +230750,7 @@ function parseRule(file, name, replaces) {
   const needs2 = nameList(h.needs);
   if (needs2 === undefined)
     fail("needs", "`needs:` names the files the rule is in force only while they are: a rule's name or an instruction file's, `needs: TURN`.");
-  const triggers = ["condition", "question", "at", "every"].filter((key) => Object.hasOwn(h, key));
+  const triggers = ["condition", "question", "at", "every"].filter((key2) => Object.hasOwn(h, key2));
   if (triggers.length > 1)
     fail(triggers[1], `A rule fires on one thing: a pattern (\`condition:\`), a question, a moment (\`at:\`) or a count of turns (\`every:\`). This one has ${triggers.map((t) => `\`${t}:\``).join(" and ")}.`);
   let fact2;
@@ -230897,8 +231153,8 @@ class Tree {
       if (stack === undefined || stack === null)
         continue;
       const block = blockOf(lines2, CONFIG_SECTION, 1);
-      const fieldAt = (key) => block === undefined ? undefined : fieldLine(block.lines, key, block.firstLine) ?? block.field;
-      const itemsOf2 = (key) => block !== undefined && fieldLine(block.lines, key, block.firstLine) !== undefined ? new WrittenItems(block.lines, key, block.firstLine) : new WrittenItems(lines2, CONFIG_SECTION, 1);
+      const fieldAt = (key2) => block === undefined ? undefined : fieldLine(block.lines, key2, block.firstLine) ?? block.field;
+      const itemsOf2 = (key2) => block !== undefined && fieldLine(block.lines, key2, block.firstLine) !== undefined ? new WrittenItems(block.lines, key2, block.firstLine) : new WrittenItems(lines2, CONFIG_SECTION, 1);
       if (!isMapping2(stack)) {
         this.problems.push(problemAt(at3, block?.field, "`stack` holds `off`, `layered`, `added`, `instructions` and `pins` as a mapping of keys: `stack: { off: [rules/perceptions-owed, WORLD] }`."));
         continue;
@@ -231006,11 +231262,11 @@ class TreeGuidance {
     this.#tree = new Tree(files, scope2);
     this.#options = options;
   }
-  #once(key, make2) {
-    let made2 = this.#memo.get(key);
+  #once(key2, make2) {
+    let made2 = this.#memo.get(key2);
     if (made2 === undefined) {
       made2 = make2();
-      this.#memo.set(key, made2);
+      this.#memo.set(key2, made2);
     }
     return made2;
   }
@@ -231106,14 +231362,14 @@ class TreeGuidance {
       return withLeft({ ref: ref2, replaces: [], off, ...file !== undefined ? { file, item: file.text } : {} });
     }));
   }
-  async#otherInForce(key) {
-    const slash = key.indexOf("/");
+  async#otherInForce(key2) {
+    const slash = key2.indexOf("/");
     if (slash === -1) {
-      const files = await this.#instructions(key);
+      const files = await this.#instructions(key2);
       return files.length === 0 ? undefined : files.some((f) => f.left === undefined);
     }
-    const kind = key.slice(0, slash);
-    const name = key.slice(slash + 1);
+    const kind = key2.slice(0, slash);
+    const name = key2.slice(slash + 1);
     const found = kind === "agents" ? await this.#definition(name) : kind === "skills" ? await this.#skill(name) : kind === "prompts" || kind === "tools" ? await this.#part(kind, name) : undefined;
     return found === undefined ? undefined : found.item !== undefined && !found.off;
   }
@@ -231126,8 +231382,8 @@ class TreeGuidance {
           found.set(name, f);
       const layers = await this.layers();
       const ruleNamed = (need2) => {
-        const key = writtenKey2(need2, layers);
-        const bare = key.startsWith(`${RULES3}/`) ? key.slice(RULES3.length + 1) : key;
+        const key2 = writtenKey2(need2, layers);
+        const bare = key2.startsWith(`${RULES3}/`) ? key2.slice(RULES3.length + 1) : key2;
         return found.has(bare) ? bare : undefined;
       };
       const others = new Map;
@@ -231655,25 +231911,25 @@ function partFields(store2, scope2, log) {
     flushing = false;
     const writes2 = [...pending2.entries()];
     pending2.clear();
-    for (const [key, kept4] of writes2) {
+    for (const [key2, kept4] of writes2) {
       try {
         if (kept4.whole !== undefined)
-          await store2.set({ user: scope2.user }, key, kept4.whole);
+          await store2.set({ user: scope2.user }, key2, kept4.whole);
         else
-          await store2.update({ user: scope2.user }, key, (current3) => ({ ...typeof current3 === "object" && current3 !== null && !Array.isArray(current3) ? current3 : {}, ...kept4.lines }));
+          await store2.update({ user: scope2.user }, key2, (current3) => ({ ...typeof current3 === "object" && current3 !== null && !Array.isArray(current3) ? current3 : {}, ...kept4.lines }));
       } catch (error) {
-        log.warn("The values a part was rendered with could not be kept; its preview shows the ones before.", { key, error: error instanceof Error ? error.message : String(error) });
+        log.warn("The values a part was rendered with could not be kept; its preview shows the ones before.", { key: key2, error: error instanceof Error ? error.message : String(error) });
       }
     }
   };
   return (kind, name, fields3, line3) => {
-    const key = fieldsKey(scope2.chat, kind, name);
-    const kept4 = pending2.get(key) ?? { lines: {} };
+    const key2 = fieldsKey(scope2.chat, kind, name);
+    const kept4 = pending2.get(key2) ?? { lines: {} };
     if (line3 === undefined)
       kept4.whole = asJson(fields3);
     else
       kept4.lines[line3] = asJson(fields3);
-    pending2.set(key, kept4);
+    pending2.set(key2, kept4);
     if (flushing)
       return;
     flushing = true;
@@ -231760,9 +232016,9 @@ function envApiKeyAuth(name, envVars) {
     name,
     login: async (interaction) => {
       interaction.signal.throwIfAborted();
-      const key = await interaction.prompt({ type: "secret", message: `Enter ${name}` });
+      const key2 = await interaction.prompt({ type: "secret", message: `Enter ${name}` });
       interaction.signal.throwIfAborted();
-      return { type: "api_key", key };
+      return { type: "api_key", key: key2 };
     },
     resolve: async ({ ctx, credential, signal: signal3 }) => {
       signal3.throwIfAborted();
@@ -232059,16 +232315,16 @@ class Resolver {
         this.dynamicAnchors.set(`${b}#${node.$dynamicAnchor}`, node);
       }
     }
-    for (const key of SCHEMA_KEYWORDS)
-      this.index(node[key], b);
-    for (const key of MAP_KEYWORDS) {
-      const map = node[key];
+    for (const key2 of SCHEMA_KEYWORDS)
+      this.index(node[key2], b);
+    for (const key2 of MAP_KEYWORDS) {
+      const map = node[key2];
       if (isSchemaObject(map))
         for (const k of Object.keys(map))
           this.index(map[k], b);
     }
-    for (const key of ARRAY_KEYWORDS) {
-      const list3 = node[key];
+    for (const key2 of ARRAY_KEYWORDS) {
+      const list3 = node[key2];
       if (Array.isArray(list3))
         for (const s of list3)
           this.index(s, b);
@@ -232086,8 +232342,8 @@ class Resolver {
     let node = root;
     let b = base2;
     for (const raw of fragment.split("/").slice(1)) {
-      const key = raw.replace(/~1/g, "/").replace(/~0/g, "~");
-      node = typeof node === "object" && node !== null && Object.hasOwn(node, key) ? node[key] : undefined;
+      const key2 = raw.replace(/~1/g, "/").replace(/~0/g, "~");
+      node = typeof node === "object" && node !== null && Object.hasOwn(node, key2) ? node[key2] : undefined;
       if (node === undefined)
         throw new Error(`Unresolved $ref #${fragment} in ${base2}`);
       if (typeof node === "object" && node !== null)
@@ -232231,34 +232487,34 @@ class Coercer {
       return value;
     const required = new Set(Array.isArray(schema.required) ? schema.required : []);
     let out;
-    const set3 = (key, next) => {
-      if (next === (out ?? value)[key])
+    const set3 = (key2, next) => {
+      if (next === (out ?? value)[key2])
         return;
       out ??= { ...value };
-      out[key] = next;
+      out[key2] = next;
     };
-    for (const [key, property] of Object.entries(properties)) {
-      if (!Object.hasOwn(value, key))
+    for (const [key2, property] of Object.entries(properties)) {
+      if (!Object.hasOwn(value, key2))
         continue;
       const isRef = isSchemaObject(property) && typeof property.$ref === "string";
-      if (value[key] === null && !required.has(key) && !isRef && this.passes(property, b, null) === false) {
+      if (value[key2] === null && !required.has(key2) && !isRef && this.passes(property, b, null) === false) {
         out ??= { ...value };
-        delete out[key];
+        delete out[key2];
         continue;
       }
-      set3(key, this.dropOptionalNulls(value[key], property, b));
+      set3(key2, this.dropOptionalNulls(value[key2], property, b));
     }
     if (patterns.length > 0 || additional !== undefined) {
-      for (const key of Object.keys(value)) {
-        let matched = Object.hasOwn(properties, key);
+      for (const key2 of Object.keys(value)) {
+        let matched = Object.hasOwn(properties, key2);
         for (const [pattern, item] of patterns) {
-          if (!pattern.test(key))
+          if (!pattern.test(key2))
             continue;
           matched = true;
-          set3(key, this.dropOptionalNulls((out ?? value)[key], item, b));
+          set3(key2, this.dropOptionalNulls((out ?? value)[key2], item, b));
         }
         if (!matched && additional !== undefined)
-          set3(key, this.dropOptionalNulls(value[key], additional, b));
+          set3(key2, this.dropOptionalNulls(value[key2], additional, b));
       }
     }
     return out ?? value;
@@ -232373,24 +232629,24 @@ class Coercer {
     const patterns = isSchemaObject(node.patternProperties) ? Object.entries(node.patternProperties).map(([pattern, schema]) => [sharedRegex(pattern), schema]) : [];
     const additional = isSchemaObject(node.additionalProperties) ? node.additionalProperties : undefined;
     let out;
-    for (const key of Object.keys(value)) {
-      if (value[key] === undefined)
+    for (const key2 of Object.keys(value)) {
+      if (value[key2] === undefined)
         continue;
-      let next = value[key];
-      let matched = Object.hasOwn(properties, key);
+      let next = value[key2];
+      let matched = Object.hasOwn(properties, key2);
       if (matched)
-        next = this.convert(properties[key], base2, next);
+        next = this.convert(properties[key2], base2, next);
       for (const [pattern, schema] of patterns) {
-        if (!pattern.test(key))
+        if (!pattern.test(key2))
           continue;
         matched = true;
         next = this.convert(schema, base2, next);
       }
       if (!matched && additional !== undefined)
         next = this.convert(additional, base2, next);
-      if (next !== value[key]) {
+      if (next !== value[key2]) {
         out ??= { ...value };
-        out[key] = next;
+        out[key2] = next;
       }
     }
     return out ?? value;
@@ -232440,26 +232696,26 @@ class Coercer {
     const patterns = isSchemaObject(schema.patternProperties) ? Object.entries(schema.patternProperties).map(([pattern, item]) => [sharedRegex(pattern), item]) : [];
     const additional = isSchemaObject(schema.additionalProperties) ? schema.additionalProperties : undefined;
     let out;
-    const set3 = (key, next) => {
-      if (next === (out ?? value)[key])
+    const set3 = (key2, next) => {
+      if (next === (out ?? value)[key2])
         return;
       out ??= { ...value };
-      out[key] = next;
+      out[key2] = next;
     };
-    for (const [key, property] of Object.entries(properties)) {
-      if (key in value)
-        set3(key, this.coerceTypes(value[key], property, base2));
+    for (const [key2, property] of Object.entries(properties)) {
+      if (key2 in value)
+        set3(key2, this.coerceTypes(value[key2], property, base2));
     }
-    for (const key of Object.keys(value)) {
-      let matched = Object.hasOwn(properties, key);
+    for (const key2 of Object.keys(value)) {
+      let matched = Object.hasOwn(properties, key2);
       for (const [pattern, item] of patterns) {
-        if (!pattern.test(key))
+        if (!pattern.test(key2))
           continue;
         matched = true;
-        set3(key, this.coerceTypes((out ?? value)[key], item, base2));
+        set3(key2, this.coerceTypes((out ?? value)[key2], item, base2));
       }
       if (!matched && additional !== undefined)
-        set3(key, this.coerceTypes(value[key], additional, base2));
+        set3(key2, this.coerceTypes(value[key2], additional, base2));
     }
     return out ?? value;
   }
@@ -233138,11 +233394,11 @@ function notCheck(check4) {
 function ifCheck(cond, then, otherwise) {
   return (v) => cond(v) ? then(v) : otherwise(v);
 }
-function taggedCheck(key, tags, checks) {
+function taggedCheck(key2, tags, checks) {
   return (v) => {
     if (!isObject7(v))
       return false;
-    const tag = v[key];
+    const tag = v[key2];
     for (let i = 0;i < tags.length; i++)
       if (tags[i] === tag)
         return checks[i](v);
@@ -233194,10 +233450,10 @@ function merge4(a, b) {
     for (const i of b.indexes)
       addIndex(a, i);
 }
-function addProp(a, key) {
+function addProp(a, key2) {
   if (a.props === null)
     a.props = new Set;
-  a.props.add(key);
+  a.props.add(key2);
 }
 function addIndex(a, index) {
   if (a.indexes === null)
@@ -233329,8 +233585,8 @@ function annotateIf(cond, then, otherwise) {
     return otherwise === undefined || otherwise(v, a);
   };
 }
-function annotateDependent(key, check4) {
-  return (v, a) => !isObject7(v) || !Object.hasOwn(v, key) || check4(v, a);
+function annotateDependent(key2, check4) {
+  return (v, a) => !isObject7(v) || !Object.hasOwn(v, key2) || check4(v, a);
 }
 function unevaluatedProperties(check4) {
   return (v, a) => {
@@ -233513,12 +233769,12 @@ class Compiler {
   dynamicLookup(name, compile2) {
     const found = new Map;
     return (uri) => {
-      const key = `${uri}#${name}`;
-      let check4 = found.get(key);
+      const key2 = `${uri}#${name}`;
+      let check4 = found.get(key2);
       if (check4 === undefined) {
-        const target = this.r.dynamicAnchors.get(key);
+        const target = this.r.dynamicAnchors.get(key2);
         check4 = target === undefined ? null : compile2(target, this.r.baseOf.get(target) ?? uri);
-        found.set(key, check4);
+        found.set(key2, check4);
       }
       return check4;
     };
@@ -233539,11 +233795,11 @@ class Compiler {
     const first = resolved[0].properties;
     if (!isSchemaObject(first))
       return;
-    for (const key of Object.keys(first)) {
-      const tags = resolved.map((s) => tagOf(s, key));
+    for (const key2 of Object.keys(first)) {
+      const tags = resolved.map((s) => tagOf(s, key2));
       if (tags.some((t) => t === undefined) || new Set(tags).size !== tags.length)
         continue;
-      return taggedCheck(key, tags, branches.map((s) => this.check(s, base2)));
+      return taggedCheck(key2, tags, branches.map((s) => this.check(s, base2)));
     }
     return;
   }
@@ -233835,11 +234091,11 @@ function anyOf(checks) {
   return types2.length === 0 ? anyCheck(rest) : maskedAnyCheck(typeMask(types2), rest);
 }
 var BARE_TYPES = new Map([...TYPE_CHECKS].map(([type, check4]) => [check4, type]));
-function tagOf(branch, key) {
+function tagOf(branch, key2) {
   const properties = branch.properties;
-  if (branch.type !== "object" || !Array.isArray(branch.required) || !branch.required.includes(key))
+  if (branch.type !== "object" || !Array.isArray(branch.required) || !branch.required.includes(key2))
     return;
-  const tag = isSchemaObject(properties) ? properties[key] : undefined;
+  const tag = isSchemaObject(properties) ? properties[key2] : undefined;
   if (!isSchemaObject(tag) || !Object.hasOwn(tag, "const"))
     return;
   return typeof tag.const === "object" && tag.const !== null ? undefined : tag.const;
@@ -234144,14 +234400,14 @@ class Explainer {
     const first = resolved[0];
     if (!isSchemaObject(first) || !isSchemaObject(first.properties))
       return;
-    for (const key of Object.keys(first.properties)) {
+    for (const key2 of Object.keys(first.properties)) {
       const values = resolved.map((s) => {
-        const tag = isSchemaObject(s) && isSchemaObject(s.properties) ? s.properties[key] : undefined;
+        const tag = isSchemaObject(s) && isSchemaObject(s.properties) ? s.properties[key2] : undefined;
         return isSchemaObject(tag) ? tag.const : undefined;
       });
       const primitive = values.every((x) => x !== undefined && (typeof x !== "object" || x === null));
       if (primitive && new Set(values).size === values.length)
-        return { key, values };
+        return { key: key2, values };
     }
     return;
   }
@@ -234198,8 +234454,8 @@ function containsMessage(min, max) {
 function isBound(value) {
   return typeof value === "number" || typeof value === "bigint";
 }
-function pointer(path2, key) {
-  return `${path2}/${String(key).replace(/~/g, "~0").replace(/\//g, "~1")}`;
+function pointer(path2, key2) {
+  return `${path2}/${String(key2).replace(/~/g, "~0").replace(/\//g, "~1")}`;
 }
 function typeName(v) {
   if (v === null)
@@ -234943,8 +235199,8 @@ function addressed(value) {
     const { inlineData: _, ...rest } = value;
     return { ...rest, fileData: { fileUri: inline2.data } };
   }
-  for (const [key, item] of Object.entries(value))
-    value[key] = addressed(item);
+  for (const [key2, item] of Object.entries(value))
+    value[key2] = addressed(item);
   return value;
 }
 
@@ -235000,8 +235256,8 @@ function promptMessages(prompt, model2, at3, mark2) {
 init_models();
 
 // node_modules/rp-harness/src/model/json.ts
-function own3(record4, key) {
-  return record4 !== undefined && Object.hasOwn(record4, key) ? record4[key] : undefined;
+function own3(record4, key2) {
+  return record4 !== undefined && Object.hasOwn(record4, key2) ? record4[key2] : undefined;
 }
 function isTokenCount(value) {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
@@ -235042,9 +235298,9 @@ function anthropicApiKeyAuth() {
     name: "Anthropic API key",
     login: async (interaction) => {
       interaction.signal.throwIfAborted();
-      const key = await interaction.prompt({ type: "secret", message: "Enter Anthropic API key" });
+      const key2 = await interaction.prompt({ type: "secret", message: "Enter Anthropic API key" });
       interaction.signal.throwIfAborted();
-      return { type: "api_key", key };
+      return { type: "api_key", key: key2 };
     },
     resolve: async ({ ctx, credential, signal: signal3 }) => {
       signal3.throwIfAborted();
@@ -235415,6 +235671,26 @@ function bodyWords(text13) {
   const status3 = typeof inner.code === "number" && inner.code >= 100 && inner.code <= 599 ? inner.code : undefined;
   return { words: kind !== undefined && !message.includes(kind) ? `${message} (${kind})` : message, ...status3 !== undefined ? { status: status3 } : {} };
 }
+var BUN_ADVICE = /\s*For more information, pass `verbose: true` in the second argument to fetch\(\)\.?/g;
+var NETWORK = [
+  { is: /\b(?:ENOTFOUND|EAI_AGAIN)\b|\bgetaddrinfo\b|could not be resolved/i, words: (at3) => at3 === undefined ? "The provider's name could not be resolved" : `The name ${at3} could not be resolved` },
+  { is: /\bECONNREFUSED\b|\bConnectionRefused\b|Unable to connect\b|connection refused/i, words: (at3) => at3 === undefined ? "The connection was refused" : `The connection to ${at3} was refused` },
+  { is: /\b(?:ECONNRESET|ECONNABORTED|EPIPE|ConnectionClosed)\b|socket connection was closed|socket hang up|other side closed|connection (?:was )?reset/i, words: () => "The connection was closed or reset" },
+  { is: /\b(?:ETIMEDOUT|ESOCKETTIMEDOUT|TimeoutError)\b|(?:operation|request|connection) timed out/i, words: () => "The request timed out" }
+];
+var NETWORK_CODE = /\b(?:E(?:CONNRESET|CONNABORTED|PIPE|NOTFOUND|AI_AGAIN|CONNREFUSED|TIMEDOUT|SOCKETTIMEDOUT)|ConnectionRefused|ConnectionClosed|TimeoutError)\b/;
+var NETWORK_AT = /\b(?:getaddrinfo|connect) E[A-Z_]+ (\S+)/;
+var NETWORK_FILLER = /The socket connection was closed unexpectedly|Unable to connect\. Is the computer able to access the url\?|Connection error|fetch failed|The operation timed out|Request timed out/gi;
+function networkWords(text13) {
+  const plain6 = text13.replace(BUN_ADVICE, "").trim();
+  const net = NETWORK.find((n) => n.is.test(plain6));
+  if (net === undefined)
+    return plain6;
+  const at3 = NETWORK_AT.exec(plain6)?.[1]?.replace(/[.,;:]+$/, "");
+  const code2 = NETWORK_CODE.exec(plain6)?.[0];
+  const kept4 = plain6.replace(NETWORK_AT, "").replace(NETWORK_FILLER, "").replace(new RegExp(NETWORK_CODE.source, "g"), "").replace(/\(\s*\)/g, "").replace(/^[\s:;,.()-]+|[\s:;,.()-]+$/g, "");
+  return `${net.words(at3)}${/[\p{L}\p{N}]/u.test(kept4) ? `: ${kept4}` : ""}${code2 !== undefined ? ` (${code2})` : ""}`;
+}
 function failureWords(text13) {
   const trimmed3 = text13.trim();
   const found = LEADING_STATUS.exec(trimmed3) ?? PREFIXED_STATUS.exec(trimmed3);
@@ -235427,7 +235703,7 @@ function failureWords(text13) {
   const body = bodyWords(head.trim());
   status3 ??= body?.status;
   const words14 = body !== null ? `${body.words}${tail}` : rest;
-  return status3 !== undefined ? `${status3}: ${words14}` : words14;
+  return status3 !== undefined ? `${status3}: ${words14}` : body !== null ? words14 : networkWords(words14);
 }
 var REDIRECT_REFUSED = /\bUnexpectedRedirect\b/;
 var REDIRECT_WORDS = "the server answered with a redirect to another address, which isn't followed, so that the connection's key and headers never go with it: give the connection the address it moved to.";
@@ -235752,9 +236028,9 @@ class Book {
     const secrets = { keys: {}, headers: {}, places: {}, signins: {}, tools: {} };
     if (isRecord3(raw)) {
       if (isRecord3(raw.keys)) {
-        for (const [id3, key] of Object.entries(raw.keys))
-          if (typeof key === "string")
-            secrets.keys[id3] = key;
+        for (const [id3, key2] of Object.entries(raw.keys))
+          if (typeof key2 === "string")
+            secrets.keys[id3] = key2;
       }
       if (isRecord3(raw.headers)) {
         for (const [id3, values3] of Object.entries(raw.headers)) {
@@ -236041,7 +236317,7 @@ class Book {
       await this.writeSecrets(undefined, undefined, undefined, tools);
     });
   }
-  async save(input, key, id3, floor) {
+  async save(input, key2, id3, floor) {
     return this.serial(async () => {
       const secrets = await this.secretsNow();
       await this.readAgain();
@@ -236059,23 +236335,23 @@ class Book {
           throw new Error(`The id "${id3}" is the saved connection ${isRecord3(holder) && typeof holder.name === "string" ? `"${holder.name}"` : "this build can't read"}'s already: a connection is made under an id no other has.`);
       }
       const connection = checked2(input, input.id ?? (typeof id3 === "string" ? id3 : id3()));
-      if (key !== undefined && key !== null && (typeof key !== "string" || key.trim() === ""))
+      if (key2 !== undefined && key2 !== null && (typeof key2 !== "string" || key2.trim() === ""))
         throw new Error("A key can't be empty: leave it out to keep the one there is.");
-      if (typeof key === "string" && key.trim().length < floor)
+      if (typeof key2 === "string" && key2.trim().length < floor)
         throw new Error(`A key needs ${floor} characters at least: a key is taken out of whatever a server says back (some repeat a key they refuse), and a shorter one only where it stands as a word of its own. ${settingWords(MODELS.secretFloor)} says how many. For a server that takes any key, choose No key: its calls then send "none".`);
       const before2 = at3 === -1 ? undefined : kept4.connections[at3];
       const place3 = placeOf(connection.provider, connection.baseUrl);
       const elsewhere = before2 !== undefined && this.heldFor(connection) !== undefined;
-      const giving = typeof key === "string" || Object.values(input.headers ?? {}).some((value) => typeof value === "string");
+      const giving = typeof key2 === "string" || Object.values(input.headers ?? {}).some((value) => typeof value === "string");
       const carried = before2 !== undefined && !(elsewhere && giving);
       const headers = headersOf(input.headers, before2?.headers, carried);
       const samePlace2 = before2 !== undefined && placeOf(before2.provider, before2.baseUrl) === place3;
       const saved = { ...connection, ...headers !== undefined ? { headers } : {}, ...samePlace2 && before2?.reported !== undefined ? { reported: before2.reported } : {} };
       const keys = { ...secrets.keys };
-      if (saved.auth !== "key" || key === null || key === undefined && !carried)
+      if (saved.auth !== "key" || key2 === null || key2 === undefined && !carried)
         delete keys[saved.id];
-      else if (typeof key === "string")
-        keys[saved.id] = key.trim();
+      else if (typeof key2 === "string")
+        keys[saved.id] = key2.trim();
       const places2 = { [saved.id]: elsewhere && !giving ? own3(secrets.places, saved.id) ?? null : place3 };
       await this.writeConnections([saved], [], kept4.default ?? saved.id, { keys, places: places2 });
       this.places.set(saved.id, place3);
@@ -236516,7 +236792,7 @@ function writtenCalls(text13, names2) {
   take(blocksOf2(rest, DEEPSEEK_CALL), ({ name, body }) => named4(name.trim(), unfenced(body)));
   take(blocksOf2(rest, TAGGED_CALL), json12);
   take(blocksOf2(rest, FUNCTION_CALLS), ({ body }) => {
-    const invoked = blocksOf2(body, INVOKE).map(({ name, body: inner }) => ({ name, args: Object.fromEntries(blocksOf2(inner, PARAMETER).map(({ name: key, body: value }) => [key, writtenValue(value)])) }));
+    const invoked = blocksOf2(body, INVOKE).map(({ name, body: inner }) => ({ name, args: Object.fromEntries(blocksOf2(inner, PARAMETER).map(({ name: key2, body: value }) => [key2, writtenValue(value)])) }));
     return invoked.length > 0 && invoked.every((c) => names2.has(c.name)) ? invoked : null;
   });
   take(blocksOf2(rest, LLAMA_CALL), ({ name, body }) => named4(name, body.trim()));
@@ -236571,7 +236847,7 @@ function sessionKey(user, session) {
 }
 function throttleOf(settings, connection) {
   const set3 = settings.throttles.connections;
-  const own4 = [connection.id, connection.name].flatMap((key) => Object.hasOwn(set3, key) ? [set3[key]] : []);
+  const own4 = [connection.id, connection.name].flatMap((key2) => Object.hasOwn(set3, key2) ? [set3[key2]] : []);
   const requestsPerMinute = own4.find((t) => t?.requestsPerMinute !== undefined)?.requestsPerMinute;
   const tokensPerMinute = own4.find((t) => t?.tokensPerMinute !== undefined)?.tokensPerMinute;
   const atOnce = own4.find((t) => t?.atOnce !== undefined)?.atOnce ?? settings.throttles.atOnce;
@@ -237018,7 +237294,7 @@ async function makeCall(deps, shape3, context2, ask, terms2, signal3, out) {
   } catch (error3) {
     if (signal3?.aborted === true)
       return endWith(out, emptyAnswer(model2, "aborted", stopWords(signal3), deps.now()));
-    endWith(out, emptyAnswer(model2, "error", redact(errorWords(error3), await secrets(), settings), deps.now()));
+    endWith(out, emptyAnswer(model2, "error", redact(networkWords(errorWords(error3)), await secrets(), settings), deps.now()));
   } finally {
     watch?.stop();
     hold?.settle(spent);
@@ -237163,13 +237439,13 @@ async function embed(deps, texts3, signal3) {
   const signing = await deps.book.signing(connection);
   if ("waits" in signing)
     return failed2(signing.waits);
-  const key = connection.auth === "key" ? signing.key : undefined;
-  if (connection.auth === "key" && key === undefined)
+  const key2 = connection.auth === "key" ? signing.key : undefined;
+  if (connection.auth === "key" && key2 === undefined)
     return failed2(`The connection "${connection.name}" has no key: add one on the Connections page.`);
   const base2 = addressOf3(deps, kind, connection);
   const google = wire.shape === "google" ? model2.startsWith("models/") ? model2 : `models/${model2}` : undefined;
-  const url2 = google !== undefined ? `${base2}/${google.split("/").map(encodeURIComponent).join("/")}:batchEmbedContents${key === undefined ? "" : `?key=${encodeURIComponent(key)}`}` : `${base2}${wire.shape === "openai" ? wire.path : ""}`;
-  const signs = key === undefined || google !== undefined ? {} : { authorization: `Bearer ${key}` };
+  const url2 = google !== undefined ? `${base2}/${google.split("/").map(encodeURIComponent).join("/")}:batchEmbedContents${key2 === undefined ? "" : `?key=${encodeURIComponent(key2)}`}` : `${base2}${wire.shape === "openai" ? wire.path : ""}`;
+  const signs = key2 === undefined || google !== undefined ? {} : { authorization: `Bearer ${key2}` };
   const headers = { "content-type": "application/json", accept: "application/json", ...signs, ...signing.headers };
   const bodyOf = (batch) => JSON.stringify(google !== undefined ? { requests: batch.map((text13) => ({ model: google, content: { parts: [{ text: text13 }] } })) } : { model: model2, input: batch });
   const once = async (batch) => {
@@ -237449,10 +237725,10 @@ function toolChoiceOf(raw) {
 var NUMBERS = ["temperature", "top_p", "top_k", "min_p", "frequency_penalty", "presence_penalty", "repetition_penalty", "seed"];
 function samplingOf3(body) {
   const out = {};
-  for (const key of NUMBERS) {
-    const v = body[key];
+  for (const key2 of NUMBERS) {
+    const v = body[key2];
     if (typeof v === "number" && Number.isFinite(v))
-      out[key] = v;
+      out[key2] = v;
   }
   const stop2 = typeof body.stop === "string" ? [body.stop] : Array.isArray(body.stop) ? body.stop.filter((s) => typeof s === "string") : [];
   if (stop2.length > 0)
@@ -237703,16 +237979,16 @@ async function passRequest(deps, request2, sink, signal3) {
 // node_modules/rp-harness/src/model/refusals.ts
 class Refusals {
   #seen = new Map;
-  note(key, now) {
-    this.#seen.set(key, now);
+  note(key2, now) {
+    this.#seen.set(key2, now);
   }
-  stands(key, now, ms2) {
-    const at3 = this.#seen.get(key);
+  stands(key2, now, ms2) {
+    const at3 = this.#seen.get(key2);
     if (at3 === undefined)
       return false;
     if (now - at3 < ms2)
       return true;
-    this.#seen.delete(key);
+    this.#seen.delete(key2);
     return false;
   }
 }
@@ -238140,9 +238416,9 @@ function createModelLayer(deps) {
     const signing = await book.signing(c);
     if ("waits" in signing)
       throw new Error(signing.waits);
-    const key = c.auth === "key" ? signing.key : undefined;
+    const key2 = c.auth === "key" ? signing.key : undefined;
     const anthropic = api3 === "anthropic-messages";
-    const signs = key === undefined ? {} : anthropic ? { "x-api-key": key } : { authorization: `Bearer ${key}` };
+    const signs = key2 === undefined ? {} : anthropic ? { "x-api-key": key2 } : { authorization: `Bearer ${key2}` };
     const wait = deadline(settings, (ms2) => `it didn't answer within ${ms2}.`);
     try {
       const response = await deps.fetch(`${c.baseUrl ?? ""}${anthropic ? "/v1/models" : "/models"}`, { headers: { accept: "application/json", ...anthropic ? { "anthropic-version": "2023-06-01" } : {}, ...signs, ...signing.headers }, redirect: "error", signal: wait.signal });
@@ -238178,10 +238454,10 @@ function createModelLayer(deps) {
       const views = await Promise.all((await book.connections()).map((c) => viewOf2(book, c, chosen)));
       return { connections: views, default: chosen, providers: KINDS7.map((k) => ({ id: k.id, name: k.name, auth: [...k.auth], apis: [...k.apis], needsBaseUrl: k.needsBaseUrl, embeds: k.embeddings !== undefined })) };
     },
-    async save(user, input, key, id3) {
+    async save(user, input, key2, id3) {
       const { book } = deskOf(user);
       const { secretFloor } = await deps.settings({ user });
-      const saved = await book.save(input, key, id3 ?? deps.id, secretFloor);
+      const saved = await book.save(input, key2, id3 ?? deps.id, secretFloor);
       return viewOf2(book, saved, await book.defaultId());
     },
     remove: (user, id3) => deskOf(user).book.remove(id3),
@@ -238735,7 +239011,7 @@ function order2(a, b) {
 }
 
 // node_modules/rp-harness/src/prompt/shape.ts
-function recordOf3(prompt) {
+function recordOf4(prompt) {
   const preset = prompt.preset;
   return {
     preset: preset === null ? null : { id: preset.id, ...preset.name !== undefined ? { name: preset.name } : {}, ...preset.revision !== undefined ? { revision: preset.revision } : {} },
@@ -238818,7 +239094,7 @@ function noticesOf(prompt, before2) {
   return notices;
 }
 function frontOf(prompt, before2) {
-  const now = recordOf3(prompt);
+  const now = recordOf4(prompt);
   const units = (record4, message) => record4.slices.flatMap((slice2) => slice2.spans.filter((span) => span.message === message).map((span) => ({ marker: slice2.marker, ...span }))).sort((a, b) => a.start - b.start);
   const first = (from) => {
     for (let message = from;message < now.messages.length; message++) {
@@ -239012,16 +239288,32 @@ class TurnPrompt {
 }
 
 // node_modules/rp-harness/src/prompt/memory.ts
+var KEPT_FILE = "kept-prompt.json";
 function keyOf7(scope2) {
   return `prompt/turns/${textHash3(`${scope2.user}
 ${scope2.chat}`)}`;
 }
 function keptOf2(value) {
   const turns = typeof value === "object" && value !== null && !Array.isArray(value) ? value["turns"] : undefined;
-  return Array.isArray(turns) ? turns : [];
+  if (!Array.isArray(turns))
+    return [];
+  return turns.flatMap((k) => {
+    if (typeof k !== "object" || k === null || Array.isArray(k))
+      return [];
+    const { turn, session, folder } = k;
+    return typeof turn === "string" && typeof session === "string" && typeof folder === "string" ? [{ turn, session, folder }] : [];
+  });
 }
-async function sessionsFolder(files, scope2) {
-  return (await files.places(scope2)).session.replace(/[^/]+\/$/, "");
+function heldOf(text13) {
+  try {
+    const value = JSON.parse(text13);
+    if (typeof value !== "object" || value === null || Array.isArray(value))
+      return;
+    const { messages, record: record4 } = value;
+    return Array.isArray(messages) && typeof record4 === "object" && record4 !== null ? value : undefined;
+  } catch {
+    return;
+  }
 }
 
 class PromptMemory {
@@ -239031,65 +239323,46 @@ class PromptMemory {
     this.#store = store2;
     this.#files = files;
   }
-  async#folderKept(scope2, turn) {
-    const found = await this.#files.find(scope2, { by: "glob", pattern: `*/turns/${turn}/**`, path: await sessionsFolder(this.#files, scope2), limit: 1 });
-    return found.status === "found" && found.hits.length > 0;
-  }
-  async#turnsKept(scope2) {
-    const folder = await sessionsFolder(this.#files, scope2);
-    const found = await this.#files.find(scope2, { by: "list", path: folder, depth: 3, limit: Number.POSITIVE_INFINITY });
-    if (found.status !== "found" || found.stopped !== undefined)
+  async#file(scope2, kept4) {
+    const at3 = { user: scope2.user, chat: scope2.chat, session: kept4.session, turn: kept4.turn };
+    const file = await this.#files.read(at3, `${kept4.folder}${KEPT_FILE}`).catch(() => {
       return;
-    const turns = new Set;
-    for (const hit of found.hits) {
-      const turn = hit.type === "folder" && hit.path.startsWith(folder) ? /^[^/]+\/turns\/([^/]+)\/?$/.exec(hit.path.slice(folder.length))?.[1] : undefined;
-      if (turn !== undefined)
-        turns.add(turn);
-    }
-    return turns;
+    });
+    return file?.status === "refused" ? undefined : file;
+  }
+  async#found(scope2, turn) {
+    const all2 = keptOf2(await this.#store.get(scope2, keyOf7(scope2)));
+    const kept4 = turn === undefined ? all2.at(-1) : all2.find((k) => k.turn === turn);
+    const file = kept4 === undefined ? undefined : await this.#file(scope2, kept4);
+    const held4 = file?.status === "read" ? heldOf(file.text) : undefined;
+    return kept4 === undefined || held4 === undefined ? undefined : { kept: kept4, held: held4 };
   }
   async before(scope2, parent) {
     if (parent === null)
       return;
-    const kept4 = keptOf2(await this.#store.get(scope2, keyOf7(scope2)));
-    const found = parent === undefined ? kept4.at(-1) : kept4.find((k) => k.turn === parent);
-    if (found === undefined || !await this.#folderKept(scope2, found.turn))
-      return;
-    return found.record;
+    return (await this.#found(scope2, parent))?.held.record;
   }
   async keep(scope2, record4, messages, located) {
     const turn = scope2.turn;
     if (turn === undefined)
       return;
-    const folders = await this.#turnsKept(scope2);
-    const gone2 = [];
-    await this.#store.update(scope2, keyOf7(scope2), (current3) => {
-      const kept4 = keptOf2(current3).filter((k) => {
-        const stays = k.turn !== turn && (folders === undefined || folders.has(k.turn));
-        if (!stays && k.turn !== turn)
-          gone2.push(k.turn);
-        return stays;
-      });
-      kept4.push({ turn, record: record4 });
-      return { turns: kept4 };
-    });
+    const [folder, earlier] = await Promise.all([this.#files.places(scope2).then((places2) => places2.turn), this.#store.get(scope2, keyOf7(scope2)).then(keptOf2)]);
+    if (folder === undefined)
+      return;
+    const looked = await Promise.all(earlier.map(async (k) => k.turn !== turn && (await this.#file(scope2, k))?.status === "missing" ? [k.turn] : []));
+    const gone2 = new Set(looked.flat());
     const texts3 = messages.map((m) => ({ role: m.role, content: messageText(m), ...m.name !== undefined ? { name: m.name } : {} }));
-    await this.#store.set(scope2, heldKey(scope2, turn), { messages: texts3, located });
-    await Promise.all(gone2.map((old) => this.#store.delete(scope2, heldKey(scope2, old))));
+    const written3 = await this.#files.write(scope2, `${folder}${KEPT_FILE}`, { op: "write", text: JSON.stringify({ messages: texts3, located, record: record4 }) }, "harness");
+    if (written3.status !== "written")
+      throw new Error(`The host did not let RPH write ${folder}${KEPT_FILE} (${written3.status}).`);
+    await this.#store.update(scope2, keyOf7(scope2), (current3) => ({ turns: [...keptOf2(current3).filter((k) => k.turn !== turn && !gone2.has(k.turn)), { turn, session: scope2.session, folder }] }));
   }
   async held(scope2, turn) {
-    const kept4 = keptOf2(await this.#store.get(scope2, keyOf7(scope2)));
-    const at3 = turn ?? kept4.at(-1)?.turn;
-    if (at3 === undefined || !await this.#folderKept(scope2, at3))
+    const found = await this.#found(scope2, turn);
+    if (found === undefined)
       return;
-    const value = await this.#store.get(scope2, heldKey(scope2, at3));
-    if (typeof value !== "object" || value === null || Array.isArray(value) || !Array.isArray(value["messages"]))
-      return;
-    return { turn: at3, messages: value["messages"], located: value["located"] };
+    return { turn: found.kept.turn, session: found.kept.session, messages: found.held.messages, located: found.held.located };
   }
-}
-function heldKey(scope2, turn) {
-  return `${keyOf7(scope2)}/${textHash3(turn)}`;
 }
 function mapOf(text13) {
   if (text13 === undefined)
@@ -239131,7 +239404,7 @@ async function promptTurn(input) {
   const corrected2 = prompt.corrected();
   await Promise.all([
     env4.prompt.saveLocated(scope2, located).catch(told2("The host could not keep where the prompt's slices were found.")),
-    memory2.keep(scope2, recordOf3(prompt), input.messages, located).catch(told2("What this turn's prompt held could not be kept.")),
+    memory2.keep(scope2, recordOf4(prompt), input.messages, located).catch(told2("What this turn's prompt held could not be kept.")),
     corrected2 === undefined ? undefined : env4.prompt.saveMap(scope2, corrected2, input.by).catch(told2("The host could not keep the prompt map as the breakdown corrected it."))
   ]);
   return { prompt, located };
@@ -239277,8 +239550,8 @@ function listing(prompt, words14, notices) {
       continue;
     }
     flush();
-    const key = slice2.from === "unclaimed" ? "map_unclaimed" : "map_slice";
-    rows.push(words14(key, {
+    const key2 = slice2.from === "unclaimed" ? "map_unclaimed" : "map_slice";
+    rows.push(words14(key2, {
       marker: slice2.marker,
       kind: slice2.kind,
       length: prompt.text(slice2).length,
@@ -239299,7 +239572,7 @@ async function keptPrompt(env4, scope2, turn) {
   const held4 = await new PromptMemory(env4.store, env4.files).held(scope2, turn);
   if (held4 === undefined)
     return;
-  const prompt = await TurnPrompt.read({ env: env4, scope: { ...scope2, turn: held4.turn }, messages: held4.messages });
+  const prompt = await TurnPrompt.read({ env: env4, scope: { ...scope2, session: held4.session, turn: held4.turn }, messages: held4.messages });
   return { prompt, shown: { turn: held4.turn, notices: held4.located.notices, front: held4.located.front } };
 }
 function splitAt(texts3, spans, words14) {
@@ -241980,11 +242253,11 @@ class AgentRunner {
     const most = this.#o.terms.repeats;
     if (most === undefined || this.#carriers.has(name))
       return;
-    const key = JSON.stringify([name, args]);
+    const key2 = JSON.stringify([name, args]);
     const writes2 = this.#o.gate?.writes?.() ?? 0;
     const last = this.#last;
-    const count2 = last !== undefined && last.key === key && last.writes === writes2 ? last.count + 1 : 1;
-    this.#last = { key, writes: writes2, count: count2 };
+    const count2 = last !== undefined && last.key === key2 && last.writes === writes2 ? last.count + 1 : 1;
+    this.#last = { key: key2, writes: writes2, count: count2 };
     return count2 >= most ? { limit: "repeats", per: "agent", max: most, value: count2, agent: this.agent } : undefined;
   }
   async#blocked(stint, call, answer3, added) {
@@ -243050,7 +243323,7 @@ function suggest(deps) {
       }
       const book = text13(given3, "book")?.trim() || undefined;
       const title = text13(given3, "title")?.trim() || undefined;
-      const keys = textsOf2(given3["keys"]).map((key) => key.trim()).filter((key) => key !== "");
+      const keys = textsOf2(given3["keys"]).map((key2) => key2.trim()).filter((key2) => key2 !== "");
       const draft2 = "newLore" in handed ? { ...book !== undefined ? { book } : {}, ...title !== undefined ? { title } : {}, ...keys.length > 0 ? { keys } : {} } : {};
       const was = "lore" in handed ? text13(given3, "was") : undefined;
       const filed = await deps.env.events.suggestion(at3.scope, ctx.agent, { target: handed, text: text13(given3, "text") ?? "", reason: text13(given3, "reason") ?? "", ...Object.keys(draft2).length > 0 ? { draft: draft2 } : {}, ...was !== undefined && was !== "" ? { was } : {} });
@@ -243098,11 +243371,11 @@ class Reach {
   #state(thing) {
     if (this.#switches === undefined)
       return Promise.resolve("off");
-    const key = JSON.stringify([thing.kind, thing.name, thing.target]);
-    let state3 = this.#asked.get(key);
+    const key2 = JSON.stringify([thing.kind, thing.name, thing.target]);
+    let state3 = this.#asked.get(key2);
     if (state3 === undefined) {
       state3 = this.#switches.state(this.#user, thing);
-      this.#asked.set(key, state3);
+      this.#asked.set(key2, state3);
     }
     return state3;
   }
@@ -243141,7 +243414,7 @@ var plainRank = (tools, words14) => {
 function isObject8(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
-function key(name) {
+function key2(name) {
   return /^[A-Za-z_$][\w$]*$/.test(name) ? name : JSON.stringify(name);
 }
 function objectOf2(schema, untyped) {
@@ -243149,7 +243422,7 @@ function objectOf2(schema, untyped) {
   if (!isObject8(properties))
     return "object";
   const needed3 = new Set(Array.isArray(schema.required) ? schema.required : []);
-  return `{${Object.entries(properties).map(([name, inner]) => `${key(name)}${needed3.has(name) ? "" : "?"}: ${typeOf(inner, untyped)}`).join(", ")}}`;
+  return `{${Object.entries(properties).map(([name, inner]) => `${key2(name)}${needed3.has(name) ? "" : "?"}: ${typeOf(inner, untyped)}`).join(", ")}}`;
 }
 function arrayOf(schema, untyped) {
   const item = typeOf(schema.items, untyped);
@@ -243234,11 +243507,11 @@ function toolSearch(deps) {
         const thing = waitingOn.get(tool);
         if (thing === undefined)
           continue;
-        const key2 = `${thing.kind}
+        const key3 = `${thing.kind}
 ${thing.name}`;
-        const entry = waiting.get(key2) ?? { name: thing.name, tools: [] };
+        const entry = waiting.get(key3) ?? { name: thing.name, tools: [] };
         entry.tools.push(tool.name);
-        waiting.set(key2, entry);
+        waiting.set(key3, entry);
       }
       const untyped = words14("untyped") ?? "";
       const lines4 = [
@@ -244570,20 +244843,20 @@ class SessionBook {
     this.#d = d;
   }
   async hold(scope2) {
-    const key2 = JSON.stringify([scope2.user, scope2.chat ?? null, scope2.session]);
-    let kept4 = this.#files.get(key2);
+    const key3 = JSON.stringify([scope2.user, scope2.chat ?? null, scope2.session]);
+    let kept4 = this.#files.get(key3);
     if (kept4 === undefined) {
       kept4 = { file: this.#read(sessionScope(scope2, scope2.session)), holds: 0 };
-      this.#files.set(key2, kept4);
+      this.#files.set(key3, kept4);
     }
-    this.#idle.delete(key2);
+    this.#idle.delete(key3);
     kept4.holds += 1;
     const held4 = kept4;
     let file;
     try {
       file = await held4.file;
     } catch (error3) {
-      this.#let(key2, held4);
+      this.#let(key3, held4);
       throw error3;
     }
     let released = false;
@@ -244595,7 +244868,7 @@ class SessionBook {
         released = true;
         if (file.takeChanged())
           this.#d.changed?.(file);
-        this.#let(key2, held4);
+        this.#let(key3, held4);
       }
     };
   }
@@ -244607,33 +244880,33 @@ class SessionBook {
       release2();
     }
   }
-  #let(key2, kept4) {
+  #let(key3, kept4) {
     kept4.holds -= 1;
     if (kept4.holds > 0)
       return;
     const drop2 = () => {
-      if (kept4.holds === 0 && this.#files.get(key2) === kept4)
-        this.#files.delete(key2);
+      if (kept4.holds === 0 && this.#files.get(key3) === kept4)
+        this.#files.delete(key3);
     };
     kept4.file.then(async (file) => {
       await file.settled();
-      if (file.unwritten || kept4.holds > 0 || this.#files.get(key2) !== kept4)
+      if (file.unwritten || kept4.holds > 0 || this.#files.get(key3) !== kept4)
         return;
       if (file.unreadable !== undefined && "reason" in file.unreadable)
         return drop2();
-      this.#idle.delete(key2);
-      this.#idle.add(key2);
+      this.#idle.delete(key3);
+      this.#idle.add(key3);
       this.#trim();
     }, drop2);
   }
   #trim() {
-    for (const key2 of this.#idle) {
+    for (const key3 of this.#idle) {
       if (this.#idle.size <= this.held)
         return;
-      this.#idle.delete(key2);
-      const kept4 = this.#files.get(key2);
+      this.#idle.delete(key3);
+      const kept4 = this.#files.get(key3);
       if (kept4 !== undefined && kept4.holds === 0)
-        this.#files.delete(key2);
+        this.#files.delete(key3);
     }
   }
   async settled() {
@@ -245620,7 +245893,7 @@ async function prepareJob(core, ask) {
     late: (agent2, judged) => env4.log.info("A rule's question was answered yes after its agent's work had ended; its text went to no agent.", { job: ask.id, agent: agent2.id, rule: judged.fired.firing.rule })
   });
   let turnPrompt;
-  const prompt = () => turnPrompt ??= scope2.turn === undefined ? Promise.resolve(undefined) : keptPrompt(env4, scope2, scope2.turn).then((kept4) => kept4?.prompt);
+  const prompt = () => turnPrompt ??= scope2.chat === undefined ? Promise.resolve(undefined) : keptPrompt(env4, scope2, scope2.turn).then((kept4) => kept4?.prompt);
   const team = new Team({
     env: env4,
     trace,
@@ -245938,13 +246211,13 @@ function keepsTags(text14, tags) {
 function plain6(text14) {
   return /^[A-Za-z_][\w./@-]*$/.test(text14) && !/^(?:y|n|yes|no|true|false|on|off|null)$/i.test(text14) ? text14 : JSON.stringify(text14);
 }
-function block(key2, value, indent) {
+function block(key3, value, indent) {
   const pad = " ".repeat(indent);
   if (isRecord3(value) && Object.keys(value).length > 0)
-    return [`${pad}${plain6(key2)}:`, ...Object.entries(value).flatMap(([k, v]) => block(k, v, indent + 2))];
+    return [`${pad}${plain6(key3)}:`, ...Object.entries(value).flatMap(([k, v]) => block(k, v, indent + 2))];
   if (value === null)
-    return [`${pad}${plain6(key2)}: ~`];
-  return [`${pad}${plain6(key2)}: ${typeof value === "string" ? plain6(value) : JSON.stringify(value)}`];
+    return [`${pad}${plain6(key3)}: ~`];
+  return [`${pad}${plain6(key3)}: ${typeof value === "string" ? plain6(value) : JSON.stringify(value)}`];
 }
 function withForm(text14, connection, form) {
   const rows = normalized(text14).replace(/\n+$/, "").split(`
@@ -245976,7 +246249,7 @@ function withForm(text14, connection, form) {
 async function tagChecks(core, user) {
   const { store: store2 } = core.env;
   const keys = await store2.list({ user }, RECORDS);
-  const found = await Promise.all(keys.map((key2) => store2.get({ user }, key2)));
+  const found = await Promise.all(keys.map((key3) => store2.get({ user }, key3)));
   return found.filter((value) => isRecord3(value) && typeof value["connection"] === "string").map((value) => value);
 }
 async function prepareTagCheck(core, ask, named4) {
@@ -246108,9 +246381,9 @@ function badLimit(limits3) {
 }
 function added(had, more) {
   const sum2 = { ...had };
-  for (const [key2, value] of Object.entries(more))
+  for (const [key3, value] of Object.entries(more))
     if (value !== undefined)
-      sum2[key2] = (sum2[key2] ?? 0) + value;
+      sum2[key3] = (sum2[key3] ?? 0) + value;
   return sum2;
 }
 
@@ -246504,7 +246777,7 @@ class Jobs2 {
     const live = {
       view: view2,
       prepared,
-      connections: own4.map(({ key: key2, counts: counts4 }) => ({ key: key2, ...counts4.atOnce !== undefined ? { atOnce: counts4.atOnce } : {} })),
+      connections: own4.map(({ key: key3, counts: counts4 }) => ({ key: key3, ...counts4.atOnce !== undefined ? { atOnce: counts4.atOnce } : {} })),
       ...view2.limits?.askAt !== undefined ? { askAt: view2.limits.askAt } : {},
       controller: new AbortController,
       done: promise,
@@ -246526,8 +246799,8 @@ class Jobs2 {
     }
   }
   #count(user, settings, own4) {
-    const counts4 = [...settings.jobs.perDay !== undefined ? [{ max: settings.jobs.perDay }] : [], ...own4.flatMap(({ key: key2, counts: counts5 }) => counts5.perDay !== undefined ? [{ max: counts5.perDay, connection: key2 }] : [])];
-    return this.#core.usage.countJob(user, counts4, own4.map(({ key: key2 }) => key2));
+    const counts4 = [...settings.jobs.perDay !== undefined ? [{ max: settings.jobs.perDay }] : [], ...own4.flatMap(({ key: key3, counts: counts5 }) => counts5.perDay !== undefined ? [{ max: counts5.perDay, connection: key3 }] : [])];
+    return this.#core.usage.countJob(user, counts4, own4.map(({ key: key3 }) => key3));
   }
   #next() {
     for (const live of [...this.#queue]) {
@@ -246538,7 +246811,7 @@ class Jobs2 {
       const running2 = [...this.#live.values()].filter((other) => (other.view.state === "running" || other.view.state === "asking") && other.view.scope.user === user);
       if (running2.length >= live.prepared.settings.jobs.atOnce)
         continue;
-      const full = live.connections.some(({ key: key2, atOnce }) => atOnce !== undefined && running2.filter((other) => other.connections.some((c) => c.key === key2)).length >= atOnce);
+      const full = live.connections.some(({ key: key3, atOnce }) => atOnce !== undefined && running2.filter((other) => other.connections.some((c) => c.key === key3)).length >= atOnce);
       if (full)
         continue;
       this.#queue.splice(this.#queue.indexOf(live), 1);
@@ -247070,8 +247343,8 @@ class McpServers {
       return { not: state3 };
     if (this.#closed)
       return { failed: "the harness is closing" };
-    const key2 = McpServers.key(user, server);
-    let kept4 = this.#kept.get(key2);
+    const key3 = McpServers.key(user, server);
+    let kept4 = this.#kept.get(key3);
     if (kept4 === undefined) {
       const named4 = "command" in server.runs ? server.env : server.runs.headers;
       const values3 = {};
@@ -247084,21 +247357,21 @@ class McpServers {
       const secrets = Object.values(values3);
       const client = McpClient.start(server, { values: values3, startMs: terms2.startMs, readMost: terms2.answerMax });
       kept4 = { client, secrets };
-      this.#kept.set(key2, kept4);
+      this.#kept.set(key3, kept4);
       const mine = kept4;
       client.then((started2) => {
-        this.#failed.delete(key2);
+        this.#failed.delete(key3);
         started2.ended.then((why) => {
-          if (this.#kept.get(key2) !== mine)
+          if (this.#kept.get(key3) !== mine)
             return;
-          this.#kept.delete(key2);
+          this.#kept.delete(key3);
           if (!this.#closed)
             this.#log.warn("An MCP server stopped; it is started again when next needed.", { server: server.name, why: redact(why, secrets, terms2.secrets) });
         });
       }, (error3) => {
-        if (this.#kept.get(key2) === mine)
-          this.#kept.delete(key2);
-        this.#failed.set(key2, redact(errorText3(error3), secrets, terms2.secrets));
+        if (this.#kept.get(key3) === mine)
+          this.#kept.delete(key3);
+        this.#failed.set(key3, redact(errorText3(error3), secrets, terms2.secrets));
       });
     }
     try {
@@ -247315,23 +247588,23 @@ function standing4(log3, to) {
       out.set(entry.key, entry);
   return out;
 }
-function nameOf12(key2, text14) {
-  const base2 = key2.replaceAll("/", "-");
+function nameOf12(key3, text14) {
+  const base2 = key3.replaceAll("/", "-");
   const hash = createHash17("sha256").update(text14).digest("hex").slice(0, 16);
   const dot = base2.lastIndexOf(".");
   return dot > 0 ? `${base2.slice(0, dot)}-${hash}${base2.slice(dot)}` : `${base2}-${hash}.md`;
 }
-async function keepCached(file, d, turn, key2, text14, meta) {
-  const name = nameOf12(key2, text14);
-  const now = standing4(file.log, file.log.tip(turn) ?? file.log.leaf).get(key2);
+async function keepCached(file, d, turn, key3, text14, meta) {
+  const name = nameOf12(key3, text14);
+  const now = standing4(file.log, file.log.tip(turn) ?? file.log.leaf).get(key3);
   if (now?.file === name && JSON.stringify(now.meta ?? {}) === JSON.stringify(meta ?? {}))
     return now;
   const written3 = await d.files.write(d.scope, `${d.places.session}${CACHE}${name}`, { op: "write", text: text14 }, "harness");
   if (written3.status !== "written") {
-    d.log.warn("What the session's cache keeps could not be written; the scene goes on without it.", { session: d.scope.session, key: key2, status: written3.status });
+    d.log.warn("What the session's cache keeps could not be written; the scene goes on without it.", { session: d.scope.session, key: key3, status: written3.status });
     return;
   }
-  return file.add({ type: "cached", parent: file.log.tip(turn) ?? file.log.leaf, turn, key: key2, file: name, ...meta !== undefined ? { meta } : {} });
+  return file.add({ type: "cached", parent: file.log.tip(turn) ?? file.log.leaf, turn, key: key3, file: name, ...meta !== undefined ? { meta } : {} });
 }
 async function readCached(d, entry) {
   const read3 = await d.files.read(d.scope, `${d.places.session}${CACHE}${entry.file}`);
@@ -247990,11 +248263,11 @@ function keyOf8(scope2) {
 class Sessions6 {
   #sessions = new Map;
   of(scope2) {
-    const key2 = keyOf8(scope2);
-    let state3 = this.#sessions.get(key2);
+    const key3 = keyOf8(scope2);
+    let state3 = this.#sessions.get(key3);
     if (state3 === undefined) {
       state3 = { openings: new Map, memories: new Map, unregistered: new Map, handles: new Map };
-      this.#sessions.set(key2, state3);
+      this.#sessions.set(key3, state3);
     }
     return state3;
   }
@@ -249666,7 +249939,7 @@ ${text14}` } : { op: "write", text: text14 };
 function listed6(entry) {
   return /^[A-Za-z0-9_@./-]+$/.test(entry) ? entry : JSON.stringify(entry);
 }
-function withOff(text14, key2, on, layers, at3) {
+function withOff(text14, key3, on, layers, at3) {
   const lines4 = normalized(text14).split(`
 `);
   const parsed7 = parseYaml(lines4, 1, at3, "the config");
@@ -249681,12 +249954,12 @@ function withOff(text14, key2, on, layers, at3) {
   const entries5 = nameList(isMapping2(stack) ? stack[CONFIG_KEYS.off] : undefined);
   if (entries5 === undefined)
     throw new Error(`\`stack.off\` in ${at3.path} is not a list, so the rule was not switched: mend the file first.`);
-  const named4 = entries5.filter((entry) => writtenKey2(entry, layers) === key2);
+  const named4 = entries5.filter((entry) => writtenKey2(entry, layers) === key3);
   if (on && named4.length === 0)
     return text14;
-  const kept4 = entries5.filter((entry) => writtenKey2(entry, layers) !== key2);
+  const kept4 = entries5.filter((entry) => writtenKey2(entry, layers) !== key3);
   if (!on)
-    kept4.push(named4[0] ?? key2);
+    kept4.push(named4[0] ?? key3);
   const list3 = `[${kept4.map(listed6).join(", ")}]`;
   const start2 = lines4.findIndex((line3) => new RegExp(`^${CONFIG_SECTION}[ \\t]*:`).test(line3));
   if (start2 === -1) {
@@ -249968,9 +250241,9 @@ function countsOf(value) {
   const connections2 = {};
   const kept4 = value["connections"];
   if (isObject11(kept4)) {
-    for (const [key2, count2] of Object.entries(kept4))
+    for (const [key3, count2] of Object.entries(kept4))
       if (typeof count2 === "number")
-        connections2[key2] = count2;
+        connections2[key3] = count2;
   }
   return { all: typeof value["all"] === "number" ? value["all"] : 0, connections: connections2 };
 }
@@ -250043,9 +250316,9 @@ class UsageBook {
     this.#runs.set(run2, { run: run2, total: emptyUsage(), agents: new Map });
   }
   gauge(scope2, run2, agent2, window2, reserve) {
-    const key2 = gaugeKey(scope2, agent2);
-    this.#gauges.set(key2, { used: 0, window: window2, reserve });
-    this.#gauged.set(run2, [...this.#gauged.get(run2) ?? [], key2]);
+    const key3 = gaugeKey(scope2, agent2);
+    this.#gauges.set(key3, { used: 0, window: window2, reserve });
+    this.#gauged.set(run2, [...this.#gauged.get(run2) ?? [], key3]);
   }
   record(record4) {
     const { event, agent: agent2 } = record4;
@@ -250091,8 +250364,8 @@ class UsageBook {
       this.#spend(record4.scope.user, { at: record4.at, in: kind, usage: rest });
   }
   end(run2) {
-    for (const key2 of this.#gauged.get(run2) ?? [])
-      this.#gauges.delete(key2);
+    for (const key3 of this.#gauged.get(run2) ?? [])
+      this.#gauges.delete(key3);
     this.#gauged.delete(run2);
     const book = this.#runs.get(run2);
     const user = book?.user;
@@ -250141,7 +250414,7 @@ class UsageBook {
       if (value >= max)
         return { limit: "jobs", per: "day", max, value, ...connection !== undefined ? { connection } : {} };
     }
-    const started2 = { at: now, all: 1, connections: Object.fromEntries(connections2.map((key2) => [key2, 1])) };
+    const started2 = { at: now, all: 1, connections: Object.fromEntries(connections2.map((key3) => [key3, 1])) };
     day3.starts.push(started2);
     this.#pend(this.#keepIn(user, day3, now, (doc) => ({ ...doc, starts: [...hourStarts(doc).map(startedValue), startedValue(started2)] })), "A job's start could not be kept in the day's count of jobs.", { at: now });
     return;
@@ -250190,10 +250463,10 @@ class UsageBook {
   async#readOlder(user, since) {
     const { store: store2 } = this.#d;
     const now = this.#d.clock.now();
-    const older = [...(await store2.list({ user }, OLD_DAYS)).map((key2) => [key2, "day"]), ...(await store2.list({ user }, OLD_JOB_DAYS)).map((key2) => [key2, "jobs"])];
-    for (const [key2, kind] of older) {
-      const value = await store2.get({ user }, key2);
-      const end2 = dayEnd(key2.slice(kind === "day" ? OLD_DAYS.length : OLD_JOB_DAYS.length));
+    const older = [...(await store2.list({ user }, OLD_DAYS)).map((key3) => [key3, "day"]), ...(await store2.list({ user }, OLD_JOB_DAYS)).map((key3) => [key3, "jobs"])];
+    for (const [key3, kind] of older) {
+      const value = await store2.get({ user }, key3);
+      const end2 = dayEnd(key3.slice(kind === "day" ? OLD_DAYS.length : OLD_JOB_DAYS.length));
       if (end2 !== undefined && end2 > since) {
         const at3 = Math.min(end2, now);
         const usage3 = olderTokens(value, user);
@@ -250207,16 +250480,16 @@ class UsageBook {
           });
         }
       }
-      await store2.delete({ user }, key2);
+      await store2.delete({ user }, key3);
     }
   }
   async#letGo(user) {
     const since = this.#d.clock.now() - DAY_MS4;
-    const gone2 = (await this.#d.store.list({ user }, HOURS)).filter((key2) => {
-      const start2 = Date.parse(`${key2.slice(HOURS.length)}:00:00Z`);
+    const gone2 = (await this.#d.store.list({ user }, HOURS)).filter((key3) => {
+      const start2 = Date.parse(`${key3.slice(HOURS.length)}:00:00Z`);
       return !Number.isNaN(start2) && start2 + HOUR_MS2 <= since;
     });
-    await Promise.all(gone2.map((key2) => this.#d.store.delete({ user }, key2)));
+    await Promise.all(gone2.map((key3) => this.#d.store.delete({ user }, key3)));
   }
   async#keepRun(user, book) {
     const { store: store2, files, log: log3 } = this.#d;
@@ -250298,16 +250571,16 @@ function createHarness(env4, options = {}) {
     parts: partsApi(env4),
     async answer(req, sink, signal3) {
       const turn = new Turn(core, req, sink);
-      const key2 = turnKey2(req.scope);
-      turns.set(key2, turn);
+      const key3 = turnKey2(req.scope);
+      turns.set(key3, turn);
       const answered2 = layer2.turnStarting(req.scope.user).then(() => turn.answer(signal3));
       answering2.add(answered2);
       try {
         return await answered2;
       } finally {
         answering2.delete(answered2);
-        if (turns.get(key2) === turn)
-          turns.delete(key2);
+        if (turns.get(key3) === turn)
+          turns.delete(key3);
       }
     },
     async turnLeft(scope2) {
@@ -250665,16 +250938,16 @@ class Approvals {
     const { chat: chat2 } = scope2;
     const turn = scope2.turn ?? null;
     const id3 = `ap-${this.deps.now().toString(36)}-${(this.next++).toString(36)}`;
-    const key2 = `${scope2.user}\x00${id3}`;
+    const key3 = `${scope2.user}\x00${id3}`;
     const { promise: answered2, resolve: resolve9, reject: reject26 } = Promise.withResolvers();
-    this.waiting.set(key2, { chat: chat2, turn, resolve: resolve9, reject: reject26 });
-    await this.deps.writes.run((db) => db.run("INSERT INTO approval (user, id, chat, turn, job, agent, call, tool, lane, args, asked, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'waiting')", [scope2.user, id3, chat2, turn, ask.agent.job ?? null, JSON.stringify(ask.agent), ask.callId, ask.tool, ask.lane, JSON.stringify(ask.args), ask.at]), "keeping a question for his word");
+    this.waiting.set(key3, { chat: chat2, turn, resolve: resolve9, reject: reject26 });
+    await this.deps.writes.run((db) => db.run("INSERT INTO approval (user, id, chat, turn, job, agent, call, tool, lane, args, asked, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'waiting')", [scope2.user, id3, chat2, turn, ask.agent.job ?? null, JSON.stringify(ask.agent), ask.callId, ask.tool, ask.lane, JSON.stringify(ask.args), ask.at]), "keeping a question for your word");
     this.deps.changed?.(chat2, turn);
     const takeDown = () => {
-      const held4 = this.waiting.get(key2);
+      const held4 = this.waiting.get(key3);
       if (held4 === undefined)
         return;
-      this.waiting.delete(key2);
+      this.waiting.delete(key3);
       this.deps.writes.run((db) => db.run("UPDATE approval SET state = 'taken_down' WHERE user = ? AND id = ? AND state = 'waiting'", [scope2.user, id3]), "taking a question down").then(() => this.deps.changed?.(chat2, turn)).catch((error3) => this.deps.log.warn("Taking an approval question down failed.", { error: error3 }));
       held4.reject(signal3.reason);
     };
@@ -250689,14 +250962,14 @@ class Approvals {
     }
   }
   async answer(user, id3, answer3) {
-    const key2 = `${user}\x00${id3}`;
-    const held4 = this.waiting.get(key2);
+    const key3 = `${user}\x00${id3}`;
+    const held4 = this.waiting.get(key3);
     if (held4 === undefined) {
       const row = this.deps.db.query("SELECT state FROM approval WHERE user = ? AND id = ?").get(user, id3);
       return { ok: false, why: row === null ? "unknown" : "settled" };
     }
-    this.waiting.delete(key2);
-    await this.deps.writes.run((db) => db.run("UPDATE approval SET state = 'answered', answer = ?, answered = ? WHERE user = ? AND id = ? AND state = 'waiting'", [JSON.stringify(answer3), this.deps.now(), user, id3]), "keeping his word on a question");
+    this.waiting.delete(key3);
+    await this.deps.writes.run((db) => db.run("UPDATE approval SET state = 'answered', answer = ?, answered = ? WHERE user = ? AND id = ? AND state = 'waiting'", [JSON.stringify(answer3), this.deps.now(), user, id3]), "keeping your word on a question");
     held4.resolve(answer3);
     this.deps.changed?.(held4.chat, held4.turn);
     return { ok: true };
@@ -250999,7 +251272,7 @@ var REQUESTS_KIND = liveKind("requests", {
 function requestText(asked4) {
   return "what" in asked4 ? `${asked4.what}${asked4.on ?? ""}` : `${asked4.choice}${asked4.words ?? ""}`;
 }
-var recordOf4 = (r) => ({ id: r.id, chat: r.chat, kind: r.kind, asked: JSON.parse(r.asked), played: r.played === 1, message: r.message, turn: r.turn, at: r.at });
+var recordOf5 = (r) => ({ id: r.id, chat: r.chat, kind: r.kind, asked: JSON.parse(r.asked), played: r.played === 1, message: r.message, turn: r.turn, at: r.at });
 var WAITS = "(r.turn IS NULL OR NOT EXISTS (SELECT 1 FROM turn t WHERE t.user = r.user AND t.id = r.turn AND t.status <> 'dropped'))";
 
 class Requests {
@@ -251018,7 +251291,7 @@ class Requests {
     return this.#pending(user, chat2).filter((r) => !r.played);
   }
   #pending(user, chat2) {
-    return this.db.query(`SELECT r.* FROM request r WHERE r.user = ? AND r.chat = ? AND ${WAITS} ORDER BY r.at, r.rowid`).all(user, chat2).map(recordOf4);
+    return this.db.query(`SELECT r.* FROM request r WHERE r.user = ? AND r.chat = ? AND ${WAITS} ORDER BY r.at, r.rowid`).all(user, chat2).map(recordOf5);
   }
   async hold(user, chat2, ask, at3) {
     const request2 = { id: crypto.randomUUID(), chat: chat2, kind: ask.kind, asked: ask.asked, played: ask.played === true, message: ask.message ?? null, turn: null, at: at3 };
@@ -251026,7 +251299,7 @@ class Requests {
       if (!request2.played)
         db.run(`DELETE FROM request WHERE user = ? AND chat = ? AND kind = ? AND played = 0 AND rowid IN (SELECT r.rowid FROM request r WHERE r.user = ? AND r.chat = ? AND ${WAITS})`, [user, chat2, ask.kind, user, chat2]);
       db.run("INSERT INTO request (user, id, chat, kind, asked, played, message, turn, at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)", [user, request2.id, chat2, request2.kind, JSON.stringify(request2.asked), request2.played ? 1 : 0, request2.message, at3]);
-    }, "holding what the player asked for");
+    }, "holding what you asked for");
     this.changed(user, chat2);
     return request2;
   }
@@ -251034,11 +251307,11 @@ class Requests {
     const sent = await this.writes.run((db) => {
       db.run(`UPDATE request SET played = 1, message = ?, turn = NULL WHERE rowid IN (SELECT r.rowid FROM request r WHERE r.user = ? AND r.chat = ? AND r.id = ? AND r.played = 0 AND ${WAITS})`, [message, user, chat2, id3]);
       return db.query("SELECT r.* FROM request r WHERE r.user = ? AND r.chat = ? AND r.id = ? AND r.played = 1 AND r.message IS ?").get(user, chat2, id3, message);
-    }, "sending what the player asked for as his message");
+    }, "sending what you asked for as your message");
     if (sent === null)
       return null;
     this.changed(user, chat2);
-    return recordOf4(sent);
+    return recordOf5(sent);
   }
   async withdraw(user, chat2, id3) {
     const out = await this.writes.run((db) => {
@@ -251049,238 +251322,25 @@ class Requests {
         return { kept: row.turn };
       db.run("DELETE FROM request WHERE user = ? AND id = ?", [user, id3]);
       return { withdrawn: true };
-    }, "withdrawing what the player asked for");
+    }, "withdrawing what you asked for");
     if (out !== null && "withdrawn" in out)
       this.changed(user, chat2);
     return out;
   }
   ofTurn(user, turn, message) {
-    return this.db.query("SELECT r.* FROM request r WHERE r.user = ?1 AND (r.turn = ?2 OR (r.played = 1 AND ?3 IS NOT NULL AND r.message = ?3)) ORDER BY r.at, r.rowid").all(user, turn, message).map(recordOf4);
+    return this.db.query("SELECT r.* FROM request r WHERE r.user = ?1 AND (r.turn = ?2 OR (r.played = 1 AND ?3 IS NOT NULL AND r.message = ?3)) ORDER BY r.at, r.rowid").all(user, turn, message).map(recordOf5);
   }
   forTurn(user, chat2, attempts) {
     const waiting = this.#pending(user, chat2);
     if (attempts === null)
       return waiting.filter((r) => r.kind !== "swipe");
-    const told2 = this.db.query("SELECT r.* FROM request r WHERE r.user = ? AND r.chat = ? AND r.turn IN (SELECT value FROM json_each(?)) ORDER BY r.at, r.rowid").all(user, chat2, JSON.stringify(attempts)).map(recordOf4);
+    const told2 = this.db.query("SELECT r.* FROM request r WHERE r.user = ? AND r.chat = ? AND r.turn IN (SELECT value FROM json_each(?)) ORDER BY r.at, r.rowid").all(user, chat2, JSON.stringify(attempts)).map(recordOf5);
     return [...told2.filter((r) => r.kind !== "swipe"), ...waiting.filter((r) => r.kind === "swipe")];
   }
   tell(into, user, ids2, turn) {
     if (ids2.length === 0)
       return;
     into.run(`UPDATE request SET turn = ? WHERE rowid IN (SELECT r.rowid FROM request r WHERE r.user = ? AND r.id IN (SELECT value FROM json_each(?)) AND ${WAITS})`, [turn, user, JSON.stringify(ids2)]);
-  }
-}
-
-// src/turn/runs.ts
-var RUN_ROWS = "SELECT r.*, u.calls, u.input, u.cache_read, u.cache_write, u.output, u.reasoning, u.lore_searches, u.lore_reads FROM turn_run r LEFT JOIN usage u ON u.user = r.user AND u.run = r.id";
-function recordOf5(user, r) {
-  return {
-    id: r.id,
-    traceRun: r.trace_run,
-    user,
-    turn: r.turn,
-    chat: r.chat,
-    session: r.session,
-    generation: r.generation,
-    target: r.target,
-    swipe: r.swipe,
-    kind: r.kind,
-    status: r.status,
-    received: r.received,
-    started: r.started,
-    firstWord: r.first_word,
-    released: r.released,
-    finished: r.finished,
-    ended: r.ended,
-    intent: r.intent_time === null ? null : JSON.parse(r.intent_time),
-    thinking: r.thinking === null ? [] : JSON.parse(r.thinking),
-    withoutIntent: r.without_intent === 1,
-    intake: r.intake === null ? null : JSON.parse(r.intake),
-    wait: r.wait === null ? null : JSON.parse(r.wait),
-    folder: r.folder === null ? null : JSON.parse(r.folder),
-    usage: r.calls === null ? null : { calls: r.calls, input: r.input ?? 0, cacheRead: r.cache_read ?? 0, cacheWrite: r.cache_write ?? 0, output: r.output ?? 0, ...r.reasoning !== null ? { reasoning: r.reasoning } : {} },
-    lookups: { searches: r.lore_searches ?? 0, reads: r.lore_reads ?? 0 },
-    reply: r.reply,
-    progress: JSON.parse(r.progress),
-    error: r.error === null ? null : JSON.parse(r.error),
-    stoppedBy: r.stopped_by === null ? null : JSON.parse(r.stopped_by),
-    lastText: r.last_text === 1,
-    notGiven: r.not_given === null ? [] : JSON.parse(r.not_given),
-    base: r.base,
-    saved: r.saved,
-    settled: r.settled,
-    held: r.held,
-    mark: r.mark,
-    intentRecord: r.intent_record
-  };
-}
-var CARRIED_SESSION = "";
-function keepCarriedRun(db, run2) {
-  db.run("INSERT OR REPLACE INTO turn_run (user, id, turn, chat, session, kind, status, received, released, finished, ended, settled, reply, base, saved) VALUES (?, ?, ?, ?, ?, 'new', 'released', ?, ?, ?, ?, ?, ?, '', ?)", [
-    run2.user,
-    `carried-${run2.turn}`,
-    run2.turn,
-    run2.chat,
-    CARRIED_SESSION,
-    run2.at,
-    run2.at,
-    run2.at,
-    run2.at,
-    run2.at,
-    run2.released,
-    run2.saved
-  ]);
-}
-var key2 = (user, id3) => `${user}\x00${id3}`;
-
-class Runs3 {
-  db;
-  writes;
-  #running = new Map;
-  constructor(db, writes2) {
-    this.db = db;
-    this.writes = writes2;
-  }
-  put(into, r) {
-    into.run(`INSERT INTO turn_run (user, id, trace_run, turn, chat, session, generation, target, swipe, kind, status, received, started, first_word, released, finished, ended, intent_time, thinking, without_intent, intake, wait, folder, reply, progress, error, stopped_by, last_text, not_given, base, saved, settled, held, mark, intent_record)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT (user, id) DO UPDATE SET trace_run = excluded.trace_run, session = excluded.session, generation = excluded.generation, target = excluded.target, swipe = excluded.swipe, kind = excluded.kind,
-         status = excluded.status, received = excluded.received, started = excluded.started, first_word = excluded.first_word, released = excluded.released, finished = excluded.finished, ended = excluded.ended,
-         intent_time = excluded.intent_time, thinking = excluded.thinking, without_intent = excluded.without_intent, intake = excluded.intake, wait = excluded.wait, folder = excluded.folder,
-         reply = excluded.reply, progress = excluded.progress, error = excluded.error, stopped_by = excluded.stopped_by, last_text = excluded.last_text, not_given = excluded.not_given, base = excluded.base, saved = excluded.saved,
-         settled = COALESCE(turn_run.settled, excluded.settled), mark = excluded.mark, intent_record = COALESCE(excluded.intent_record, turn_run.intent_record)`, [
-      r.user,
-      r.id,
-      r.traceRun,
-      r.turn,
-      r.chat,
-      r.session,
-      r.generation,
-      r.target,
-      r.swipe,
-      r.kind,
-      r.status,
-      r.received,
-      r.started,
-      r.firstWord,
-      r.released,
-      r.finished,
-      r.ended,
-      r.intent === null ? null : JSON.stringify(r.intent),
-      JSON.stringify(r.thinking),
-      r.withoutIntent ? 1 : 0,
-      r.intake === null ? null : JSON.stringify(r.intake),
-      r.wait === null ? null : JSON.stringify(r.wait),
-      r.folder === null ? null : JSON.stringify(r.folder),
-      r.reply,
-      JSON.stringify(r.progress),
-      r.error === null ? null : JSON.stringify(r.error),
-      r.stoppedBy === null ? null : JSON.stringify(r.stoppedBy),
-      r.lastText ? 1 : 0,
-      JSON.stringify(r.notGiven),
-      r.base,
-      r.saved,
-      r.settled,
-      r.held,
-      r.mark,
-      r.intentRecord
-    ]);
-    const { usage: usage3 } = r;
-    if (usage3 === null)
-      return;
-    into.run(`INSERT OR REPLACE INTO usage (user, run, turn, chat, at, calls, input, cache_read, cache_write, output, reasoning, lore_searches, lore_reads) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [r.user, r.id, r.turn, r.chat, r.ended ?? r.received, usage3.calls, usage3.input, usage3.cacheRead, usage3.cacheWrite, usage3.output, usage3.reasoning ?? null, r.lookups.searches, r.lookups.reads]);
-  }
-  join(into, r, to) {
-    into.run("UPDATE turn_run SET turn = ? WHERE user = ? AND id = ?", [to, r.user, r.id]);
-    into.run("UPDATE usage SET turn = ? WHERE user = ? AND run = ?", [to, r.user, r.id]);
-    const live = this.#running.get(key2(r.user, r.turn));
-    if (live?.id === r.id) {
-      this.#running.delete(key2(r.user, r.turn));
-      live.turn = to;
-      this.#running.set(key2(r.user, to), live);
-    }
-    r.turn = to;
-  }
-  keepIntent(into, r, text14) {
-    into.run("UPDATE turn_run SET intent_record = ? WHERE user = ? AND id = ?", [text14, r.user, r.id]);
-    const live = this.#running.get(key2(r.user, r.turn));
-    if (live?.id === r.id)
-      live.intentRecord = text14;
-    r.intentRecord = text14;
-  }
-  byHeld(user, turn) {
-    for (const r of this.#running.values())
-      if (r.user === user && r.held === turn)
-        return r;
-    const row = this.db.query(`${RUN_ROWS} WHERE r.user = ? AND r.held = ? ORDER BY r.received DESC LIMIT 1`).get(user, turn);
-    return row === null ? null : recordOf5(user, row);
-  }
-  async save(r, label5) {
-    const copy = { ...r, progress: [...r.progress], lookups: { ...r.lookups } };
-    await this.writes.run((into) => this.put(into, copy), label5);
-  }
-  hold(run2) {
-    this.#running.set(key2(run2.user, run2.turn), run2);
-    run2.over.finally(() => {
-      if (this.#running.get(key2(run2.user, run2.turn)) === run2)
-        this.#running.delete(key2(run2.user, run2.turn));
-    });
-  }
-  running(user, turn) {
-    return this.#running.get(key2(user, turn));
-  }
-  ofChat(user, chat2) {
-    return [...this.#running.values()].filter((r) => r.user === user && r.chat === chat2);
-  }
-  chatsGoing() {
-    return [...new Set([...this.#running.values()].map((r) => r.chat))];
-  }
-  started(record4) {
-    const turn = record4.scope.turn;
-    if (record4.event.kind !== "run_started" || record4.event.run !== "turn" || turn === undefined)
-      return;
-    const run2 = this.running(record4.scope.user, turn);
-    if (run2 !== undefined)
-      run2.traceRun = record4.run;
-  }
-  record(user, turn) {
-    const live = this.running(user, turn);
-    if (live !== undefined)
-      return live;
-    const row = this.db.query(`${RUN_ROWS} WHERE r.user = ? AND r.turn = ? ORDER BY r.received DESC, r.rowid DESC LIMIT 1`).get(user, turn);
-    return row === null ? null : recordOf5(user, row);
-  }
-  reply(user, turn) {
-    return this.ofTurn(user, turn).findLast((r) => r.kind !== "settle") ?? null;
-  }
-  ofTurn(user, turn) {
-    const live = this.running(user, turn);
-    return this.db.query(`${RUN_ROWS} WHERE r.user = ? AND r.turn = ? ORDER BY r.received, r.rowid`).all(user, turn).map((r) => live !== undefined && live.id === r.id ? live : recordOf5(user, r));
-  }
-  countOf(user, turns) {
-    return this.db.query("SELECT count(*) AS n FROM turn_run WHERE user = ? AND turn IN (SELECT value FROM json_each(?))").get(user, JSON.stringify(turns))?.n ?? 0;
-  }
-  byGeneration(user, generation) {
-    for (const r of this.#running.values())
-      if (r.user === user && r.generation === generation)
-        return r;
-    const row = this.db.query(`${RUN_ROWS} WHERE r.user = ? AND r.generation = ? ORDER BY r.received DESC LIMIT 1`).get(user, generation);
-    return row === null ? null : recordOf5(user, row);
-  }
-  ofChatKept(user, chat2, limit5, before2) {
-    const from = before2 === undefined ? null : this.db.query("SELECT max(received) AS received FROM turn_run WHERE user = ? AND chat = ? AND turn = ?").get(user, chat2, before2);
-    const latest = "NOT EXISTS (SELECT 1 FROM turn_run n WHERE n.user = r.user AND n.turn = r.turn AND (n.received > r.received OR (n.received = r.received AND n.rowid > r.rowid))) AND EXISTS (SELECT 1 FROM turn t WHERE t.user = r.user AND t.id = r.turn)";
-    const rows = from === null || from.received === null ? this.db.query(`${RUN_ROWS} WHERE r.user = ? AND r.chat = ? AND ${latest} ORDER BY r.received DESC, r.rowid DESC LIMIT ?`).all(user, chat2, limit5) : this.db.query(`${RUN_ROWS} WHERE r.user = ? AND r.chat = ? AND r.received < ? AND ${latest} ORDER BY r.received DESC, r.rowid DESC LIMIT ?`).all(user, chat2, from.received, limit5);
-    return rows.map((r) => this.running(user, r.turn) ?? recordOf5(user, r));
-  }
-  chats(user) {
-    return this.db.query("SELECT chat, max(received) AS last FROM turn_run WHERE user = ? AND session <> ? GROUP BY chat ORDER BY last DESC").all(user, CARRIED_SESSION);
-  }
-  unsettled(user, chat2) {
-    return this.db.query(`${RUN_ROWS} WHERE r.user = ? AND r.chat = ? AND r.settled IS NULL AND r.generation IS NOT NULL ORDER BY r.received, r.rowid`).all(user, chat2).filter((r) => this.running(user, r.turn)?.id !== r.id).map((r) => recordOf5(user, r));
-  }
-  leftGoing() {
-    return this.db.query(`${RUN_ROWS} WHERE r.status = 'running' ORDER BY r.received, r.rowid`).all().filter((r) => this.running(r.user, r.turn)?.id !== r.id).map((r) => recordOf5(r.user, r));
   }
 }
 
@@ -251942,7 +252002,7 @@ function buildTurns(app, options) {
     await generated.write(user, chat2, PROMPT_MAP_FILENAME, `${part.render(promptMapFields(map2, layout2)).text.trim()}
 `);
   }, app.log, (chat2, layout2, prompt) => options.lumiverse()?.hints?.named(chat2, layout2, prompt) ?? layout2);
-  const runs3 = new Runs3(app.db, app.writes);
+  const runs3 = new Runs(app.db, app.writes);
   const requests = new Requests(app.db, app.writes, (chat2, waiting) => REQUESTS_KIND.publish(app.live, chat2, { waiting }));
   const marks = new TurnMarks(app.db, app.writes);
   const since = new SinceKept(app.db);
@@ -251953,7 +252013,8 @@ function buildTurns(app, options) {
   const stateIndex = new StateIndex({ store: store2, index: app.index, log: (message) => app.log.warn(message), ...global.numbers(STATE_SEARCH_SETTING_DEFS) });
   store2.onWrite((user, chats2) => stateIndex.notify(user, chats2));
   const memorySearch = new MemorySearch(app.index);
-  const config3 = async (at3) => readConfig(await portTexts(files, { ...at3, session: NO_SESSION }), app.log, LORE_SETTINGS);
+  const chatLevels = (at3) => ({ user: at3.user, chat: at3.chat, session: NO_SESSION });
+  const config3 = async (at3) => readConfig(await portTexts(files, chatLevels(at3)), app.log, LORE_SETTINGS);
   const loreSettings = loreSettingsFor(config3);
   const secretSettings2 = secretSettingsFor(config3);
   const entryNumbers = new EntryNumbers(app.db, app.writes);
@@ -251964,7 +252025,7 @@ function buildTurns(app, options) {
     turns: prompts.lore,
     numbers: entryNumbers,
     settingsFor: loreSettings,
-    lines: (at3) => loreLines(loadGuidance(files, { ...at3, session: NO_SESSION })),
+    lines: (at3) => loreLines(loadGuidance(files, chatLevels(at3))),
     away: (input) => app.workers.run("catalogue", input),
     meaning: {
       find: (at3, text14, limit5) => meaning.nearest(at3.user, at3.chat, "lore", text14, limit5, async () => (await lore2.catalog(at3)).map((e) => ({ id: e.id, revision: hashJson([e.revision, e.title, e.text]), text: `${e.title}
@@ -251982,7 +252043,7 @@ ${e.text}` })))
         const folders = chats.folders(user, chat2);
         return folders === null ? null : join43(app.paths.files, CHATS_FOLDER, folders.character, folders.chat);
       },
-      lines: (at3) => loreLines(loadGuidance(files, { ...at3, session: NO_SESSION }))
+      lines: (at3) => loreLines(loadGuidance(files, chatLevels(at3)))
     },
     now: () => clock.now(),
     settingsFor: loreSettings,
@@ -252000,7 +252061,7 @@ ${e.text}` })))
     books: options.projectionBooks,
     enabled: async (user, chat2) => (await loreSettings({ user, chat: chat2 })).projection,
     made: madeOf3({ store: store2, lore: lore2 }),
-    lines: (at3) => loreLines(loadGuidance(files, { ...at3, session: NO_SESSION })),
+    lines: (at3) => loreLines(loadGuidance(files, chatLevels(at3))),
     now: () => clock.now()
   });
   const overlay = overlayCheck(worlds);
@@ -252170,7 +252231,7 @@ ${e.text}` })))
   for (const user of storeUsers(app.db)) {
     harness.jobs.list({ user, limit: 1 }).catch((error3) => app.log.error("the jobs a restart cut off could not be listed at RPE's start", { user, error: error3 instanceof Error ? error3.message : String(error3) }));
   }
-  const secretMarks = (at3) => secretMarkLines(loadGuidance(files, { ...at3, session: NO_SESSION }));
+  const secretMarks = (at3) => secretMarkLines(loadGuidance(files, chatLevels(at3)));
   const given3 = (scope2, agent2, refs, moment) => givenViews(eventsDeps, joined6(scope2), agent2, refs, moment);
   return { lane, store: store2, harness, env: env4, facts, files, chats, prompts, runs: runs3, requests, approvals, writes: app.writes, marks, trace, lore: lore2, secretSettings: secretSettings2, secretMarks, loreIndex, notes, suggestions, projection, meaning, stateIndex, given: given3, sources, placeSources, castKnowledge };
 }
@@ -252213,8 +252274,15 @@ function givenRoutes(turns) {
         const store2 = turns.store.user(user);
         if (store2.chat(params.chat) === null)
           throw new RouteError(404, `RPE holds no chat ${params.chat}.`);
-        const turn = store2.path(params.chat).findLast((e) => e.turn !== null)?.turn ?? null;
-        const scope2 = { user, chat: params.chat, session: NO_SESSION, ...turn !== null ? { turn } : {} };
+        const path7 = store2.path(params.chat);
+        let run2 = null;
+        for (let at3 = path7.length - 1;at3 >= 0 && run2 === null; at3--) {
+          const turn2 = path7[at3]?.turn ?? null;
+          const record4 = turn2 === null ? null : turns.runs.record(user, turn2);
+          run2 = record4 === null || record4.session === CARRIED_SESSION ? null : record4;
+        }
+        const turn = run2?.turn ?? null;
+        const scope2 = run2 === null ? { user, chat: params.chat, session: NO_SESSION } : { user, chat: params.chat, session: run2.session, turn: run2.turn };
         const definitions = await turns.harness.definitions.list(scope2);
         return {
           chat: params.chat,
@@ -252371,8 +252439,13 @@ function rulesRoutes(turns) {
           throw new RouteError(404, `Chat ${params.chat} has no turn ${body.turn}.`);
         if (row.joined !== null)
           throw new JoinedTurnError(body.turn, row.joined);
+        const run2 = turns.runs.record(user, body.turn);
+        if (run2 === null)
+          throw new RouteError(404, `Chat ${params.chat} has no turn ${body.turn}.`);
+        if (run2.session === CARRIED_SESSION)
+          throw new RouteError(404, `Turn ${body.turn} was carried by the migration and played in no session of RPE's, so no rule can be tested against it.`);
         try {
-          return await turns.harness.rules.test({ user, chat: params.chat, session: NO_SESSION, turn: body.turn }, params.name, body.turn);
+          return await turns.harness.rules.test({ user, chat: params.chat, session: run2.session, turn: body.turn }, params.name, body.turn);
         } catch (error3) {
           throw new RouteError(404, error3 instanceof Error ? error3.message : String(error3));
         }
@@ -252467,7 +252540,7 @@ async function recordOwnerEdit(deps, user, chat2, request2, tell2, resolve9) {
       ...store2.map((c) => ({ lane: "engine", op: c.op, value: c.value, by: PLAYER4, source: PLAYER4, cite, precision: c.precision ?? null, standing: c.standing ?? null }))
     ]);
     return { undo: edit, advised };
-  }, "recording an edit of his");
+  }, "recording an edit of yours");
   if (out.undo !== null)
     stateChanged(deps.live, chat2);
   return out;
@@ -252742,9 +252815,18 @@ function oldBlocks(layout2) {
 }
 function promptRoutes(turns) {
   const scopeOf3 = (user, chat2, turn) => {
-    if (turn === undefined)
-      return { user, chat: chat2, session: NO_SESSION };
-    const row = turns.store.user(user).turn(turn);
+    const store2 = turns.store.user(user);
+    if (turn === undefined) {
+      const path7 = store2.chat(chat2) === null ? [] : store2.path(chat2);
+      for (let at3 = path7.length - 1;at3 >= 0; at3--) {
+        const newest2 = path7[at3]?.turn ?? null;
+        const run3 = newest2 === null || store2.turn(newest2)?.joined !== null || turns.prompts.located(user, newest2) === null ? null : turns.runs.record(user, newest2);
+        if (newest2 !== null && run3 !== null)
+          return { user, chat: chat2, session: run3.session, turn: newest2 };
+      }
+      throw new RouteError(404, `RPE keeps no turn's prompt for chat ${chat2}.`);
+    }
+    const row = store2.turn(turn);
     if (row !== null && row.chat === chat2 && row.joined !== null)
       throw new JoinedTurnError(turn, row.joined);
     const run2 = turns.runs.record(user, turn);
@@ -252752,11 +252834,11 @@ function promptRoutes(turns) {
       throw new RouteError(404, `Chat ${chat2} has no turn ${turn}.`);
     return { user, chat: chat2, session: run2.session, turn };
   };
-  const shown6 = async (user, chat2, turn) => {
-    const map2 = await turns.harness.promptMap.show(scopeOf3(user, chat2, turn));
+  const shown6 = async (scope2) => {
+    const map2 = await turns.harness.promptMap.show(scope2);
     if (map2 === undefined)
-      throw new RouteError(404, turn === undefined ? `RPE keeps no turn's prompt for chat ${chat2}.` : `RPE no longer keeps the prompt of turn ${turn}.`);
-    const carried2 = turns.prompts.carried(user, map2.turn);
+      throw new RouteError(404, `RPE no longer keeps the prompt of turn ${scope2.turn}.`);
+    const carried2 = turns.prompts.carried(scope2.user, map2.turn);
     return {
       turn: map2.turn,
       preset: map2.preset,
@@ -252785,7 +252867,7 @@ function promptRoutes(turns) {
       query: turnQuery,
       reply: promptShownReply,
       joined: true,
-      handle: ({ user, params, query: query5 }) => shown6(user, params.chat, query5.turn)
+      handle: ({ user, params, query: query5 }) => shown6(scopeOf3(user, params.chat, query5.turn))
     }),
     route({
       method: "GET",
@@ -252817,10 +252899,11 @@ function promptRoutes(turns) {
       reply: promptShownReply,
       joined: true,
       handle: async ({ user, params, query: query5, body }) => {
-        const edited3 = await turns.harness.promptMap.edit(scopeOf3(user, params.chat, query5.turn), body, { id: PLAYER4, definition: PLAYER4 });
+        const scope2 = scopeOf3(user, params.chat, query5.turn);
+        const edited3 = await turns.harness.promptMap.edit(scope2, body, { id: PLAYER4, definition: PLAYER4 });
         if (edited3.status === "refused")
           throw new RouteError(400, edited3.words);
-        return shown6(user, params.chat, query5.turn);
+        return shown6(scope2);
       }
     })
   ];
@@ -253024,7 +253107,7 @@ function reviewRoutes(turns) {
           throw new RouteError(404, `RPE holds no chat ${params.chat} of yours.`);
         const word = answerOf(body);
         if (word === null)
-          throw new RouteError(400, "His word is go, true or false, and with false a reason.");
+          throw new RouteError(400, "Your word is go, true or false, and with false a reason.");
         const done = await turns.approvals.answer(user, params.approval, word);
         return done.ok ? { answered: true, state: "answered" } : { answered: false, state: done.why };
       }
@@ -253816,7 +253899,7 @@ ALTER TABLE turn_prompt ADD COLUMN persona TEXT;
   },
   {
     version: 3,
-    name: "the player's message each turn answered, as it was sent it",
+    name: "your message each turn answered, as it was sent it",
     sql: `
 ALTER TABLE turn_prompt ADD COLUMN answered TEXT;
 ALTER TABLE turn_prompt ADD COLUMN answered_hash TEXT;
@@ -253937,7 +254020,7 @@ ALTER TABLE turn_run ADD COLUMN story_mark INTEGER;
   },
   {
     version: 5,
-    name: "the player's messages as RPE read them, and what the player asked for through a panel",
+    name: "your messages as RPE read them, and what you asked for through a panel",
     sql: `
 CREATE TABLE player_text (
   user TEXT NOT NULL,
@@ -254160,7 +254243,7 @@ DELETE FROM turn_told WHERE kind IN ('consent', 'gap-check', 'rule') AND json_va
   },
   {
     version: 17,
-    name: "what the player asks for beside his words, kept with the turn that answered it",
+    name: "what you ask for beside your words, kept with the turn that answered it",
     sql: `
 CREATE TABLE request (
   user TEXT NOT NULL,
@@ -254203,7 +254286,7 @@ INSERT OR IGNORE INTO turn_mark (user, turn, kind, message, at)
   },
   {
     version: 19,
-    name: "no copy of the player's messages",
+    name: "no copy of your messages",
     sql: `
 DROP TABLE player_text;
 `
@@ -254221,7 +254304,7 @@ DROP TABLE turn_job;
   },
   {
     version: 21,
-    name: "the questions he is asked before a write goes ahead, and the cards of the turns carried in",
+    name: "the questions you are asked before a write goes ahead, and the cards of the turns carried in",
     sql: `
 CREATE TABLE approval (
   user TEXT NOT NULL,
@@ -254343,9 +254426,6 @@ class KeptAnswers {
       return null;
     this.#byChat.delete(chat2);
     return kept4.answer;
-  }
-  answered(chat2, generation) {
-    return this.#byChat.get(chat2)?.generation === generation;
   }
 }
 function pointOf(generation, path7) {
@@ -255285,7 +255365,7 @@ class HeardGenerations {
   }
   heard(change2) {
     if (change2.kind === "generation-started") {
-      this.#byChat.set(change2.chat, { generation: change2.generation, ours: change2.model !== null && this.deps.rpeModel(change2.model), lore: null, tagged: false, untagged: 0 });
+      this.#byChat.set(change2.chat, { generation: change2.generation, model: change2.model, lore: null, tagged: false, untagged: 0 });
     } else if (change2.kind === "lore-activated") {
       const told2 = this.deps.tell(change2.chat, change2.lore);
       const running2 = this.#byChat.get(change2.chat);
@@ -255297,8 +255377,8 @@ class HeardGenerations {
       if (running2 === undefined || running2.generation !== change2.generation)
         return null;
       this.#byChat.delete(change2.chat);
-      if (!running2.tagged && (running2.ours || this.deps.asked(change2.chat, change2.generation))) {
-        this.deps.untaggedEnd({ chat: change2.chat, generation: change2.generation, untagged: running2.untagged, stopped: change2.stopped === true });
+      if (!running2.tagged && running2.untagged > 0) {
+        this.deps.untaggedEnd({ chat: change2.chat, generation: change2.generation, model: running2.model, untagged: running2.untagged, stopped: change2.stopped === true });
       }
     }
     return null;
@@ -255321,10 +255401,10 @@ class HeardGenerations {
     this.#targets.delete(change2.chat);
     return change2.stopped === true && change2.message === null ? { ...change2, message: kept5.message } : change2;
   }
-  untagged() {
+  untagged(model2) {
     let awaiting = false;
-    for (const [chat2, running2] of this.#byChat) {
-      if (running2.tagged || !(running2.ours || this.deps.asked(chat2, running2.generation)))
+    for (const running2 of this.#byChat.values()) {
+      if (running2.tagged || model2 === null || running2.model !== model2)
         continue;
       running2.untagged++;
       awaiting = true;
@@ -256464,7 +256544,7 @@ function providerEndpoint(deps) {
     const now = deps.clock.now();
     const read3 = readTag(body);
     if ("absent" in read3) {
-      const awaited = deps.heard.untagged();
+      const awaited = deps.heard.untagged(typeof body.model === "string" ? body.model : null);
       return awaited && deps.untaggedWhileAwaited() === "fail" ? failUntagged(deps, body, request2.signal, now) : passThrough(deps, body, request2.signal, now);
     }
     if ("invalid" in read3)
@@ -257374,7 +257454,7 @@ function createWrites(deps) {
         throw new LumiverseError("protocol", "Lumiverse answered a book's creation with no id.");
       const had = await chatBooksNow(session, chat2);
       if (had === null)
-        throw new LumiverseError("protocol", `The chat ${chat2} is not one of this user's: the book made for it was not attached.`, 404);
+        throw new LumiverseError("protocol", `The chat ${chat2} is not one of yours: the book made for it was not attached.`, 404);
       await attach2(chat2, [...had.filter((b) => b !== id3), id3]);
       return id3;
     },
@@ -257461,9 +257541,7 @@ function lumiverseDoor(lanes, deps) {
   let activations = null;
   const heard = new HeardGenerations({
     tell: async (chat2, lore2) => activations === null ? [...lore2] : activations.tell(chat2, lore2),
-    rpeModel: (model2) => rpeModels().includes(model2),
-    asked: (chat2, generation) => answers.answered(chat2, generation),
-    untaggedEnd: ({ chat: chat2, generation, untagged, stopped }) => log3(`generation ${generation} of chat ${chat2} on RPE's connection ${stopped ? "was stopped" : "ended"} with no tagged request; ${untagged} request${untagged === 1 ? "" : "s"} with no tag came on RPE's connection meanwhile.`)
+    untaggedEnd: ({ chat: chat2, generation, model: model2, untagged, stopped }) => log3(`generation ${generation} of chat ${chat2} ${stopped ? "was stopped" : "ended"} with no tagged request, and ${untagged} request${untagged === 1 ? "" : "s"} with no tag came on RPE's connection for its model${model2 === null ? "" : ` ${model2}`} while it ran: if it was a reply on RPE's connection, RPE did not play it.`)
   });
   const settings = () => deps.settings === undefined ? LUMIVERSE_DEFAULTS : lumiverseSettings(deps.settings.shared());
   const status3 = { registered: false, why: NOT_HEARD, missing: null, stopped: null };
@@ -258310,7 +258388,7 @@ class WorldChats {
       throw new WorldError("not_found", `revision ${to} of the world is not one of its revisions`);
     const marker = validMarkerBody({ kind: "migrate", to, merge: picks });
     if (marker === null)
-      throw new WorldError("bad_request", "his picks are not picks of an Upgrade");
+      throw new WorldError("bad_request", "your picks are not picks of an Upgrade");
     const waiting = this.deps.turning(user, chat2);
     if (state3.revision === to && Object.keys(picks).length === 0)
       return { revision: to, edit: null, applied: true, waiting };
@@ -258536,7 +258614,7 @@ function worldsArea(takes4) {
     },
     service() {
       if (made2 === null)
-        throw new Error("The worlds area is not mounted yet, so his worlds cannot be read or written.");
+        throw new Error("The worlds area is not mounted yet, so your worlds cannot be read or written.");
       return made2;
     }
   };
@@ -259031,8 +259109,8 @@ var JOB_LIMIT_DEFAULTS = Object.freeze({
 });
 var GLOBAL6 = ["shipped", "global"];
 var JOB_SETTING_DEFS = {
-  running: { key: "build.jobs.atOnce", default: JOB_LIMIT_DEFAULTS.running, takes: { type: "whole", least: 1 }, levels: GLOBAL6, perConnection: false, name: "Jobs running at once", about: "The most jobs one user may have running in Build at once; another is refused until one ends or is cancelled.", effect: "use" },
-  kept: { key: "build.jobs.kept", default: JOB_LIMIT_DEFAULTS.kept, takes: { type: "whole", least: 1 }, levels: GLOBAL6, perConnection: false, name: "Ended jobs kept", about: "How many ended jobs Build keeps per user, the newest, each with its result; running ones are always kept.", effect: "use" },
+  running: { key: "build.jobs.atOnce", default: JOB_LIMIT_DEFAULTS.running, takes: { type: "whole", least: 1 }, levels: GLOBAL6, perConnection: false, name: "Jobs running at once", about: "The most jobs you may have running in Build at once; another is refused until one ends or is cancelled.", effect: "use" },
+  kept: { key: "build.jobs.kept", default: JOB_LIMIT_DEFAULTS.kept, takes: { type: "whole", least: 1 }, levels: GLOBAL6, perConnection: false, name: "Ended jobs kept", about: "How many of your ended jobs Build keeps, the newest, each with its result; running ones are always kept.", effect: "use" },
   idChars: { key: "build.jobs.maxIdChars", default: JOB_LIMIT_DEFAULTS.idChars, takes: { type: "whole", least: 1 }, advice: [{ below: 8, says: "Ids of fewer than 8 characters are refused, and most of the ids Build's jobs name are longer." }], levels: GLOBAL6, perConnection: false, name: "Longest id a job's input names", about: "The longest id (a world, a book, a map, a person) a job's input may name; a longer one is refused.", effect: "use" },
   turns: { key: "build.playtest.maxTurns", default: JOB_LIMIT_DEFAULTS.turns, takes: { type: "whole", least: 1 }, levels: GLOBAL6, perConnection: false, name: "Turns in a Playtest", about: "The most typed turns one Playtest takes; the rest are cut.", effect: "use" },
   turnChars: { key: "build.playtest.maxTurnChars", default: JOB_LIMIT_DEFAULTS.turnChars, takes: { type: "whole", least: 1 }, levels: GLOBAL6, perConnection: false, name: "Characters in a Playtest turn", about: "The longest a typed turn of a Playtest may be, in characters; a longer one is cut.", effect: "use" },
@@ -260898,7 +260976,7 @@ function entryView(e) {
 var engineWrote = (e) => engineWroteEntry(e.extensions);
 async function listBooks2(books, user, chat2) {
   if (books.list === undefined)
-    throw new Error("The door's books give no list of the user's books.");
+    throw new Error("The door's books give no list of your books.");
   return await books.list(user, chat2);
 }
 
@@ -262361,15 +262439,15 @@ async function answerPaused(input) {
     const paused = await reader.pausedOn(id3, user);
     const message2 = input.message ?? paused[0];
     if (message2 === undefined || !paused.includes(message2))
-      throw new NotPaused(`Chat ${chat2} is not paused on ${input.message === undefined ? "any question" : `message ${input.message}`} in today's data.`);
+      throw new NotPaused(`Chat ${chat2} is not paused on ${input.message === undefined ? "any question" : `message ${input.message}`} in the previous build's data.`);
     const answer4 = { chat: chat2, message: message2, choice: input.choice, at: input.now };
     const before2 = await reader.today(id3, user);
     if (before2 === null)
-      throw new NotPaused(`Today's reader can't open chat ${chat2}.`);
+      throw new NotPaused(`The previous build's reader can't open chat ${chat2}.`);
     const came = await reader.answer(id3, user, answer4);
     const after3 = await reader.today(id3, user);
     if (after3 === null)
-      throw new NotPaused(`Today's reader can't open chat ${chat2}.`);
+      throw new NotPaused(`The previous build's reader can't open chat ${chat2}.`);
     const was = new CapturingFold(input.registry);
     const now = new CapturingFold(input.registry);
     const tied2 = new Map(importedTurns(db, s.id, chat2).map((t) => [`${t.message}:${t.swipe}`, t.turn]));
@@ -262717,7 +262795,7 @@ function targetOf3(path7, folders2) {
 async function switchOn(path7, deps) {
   const to = targetOf3(path7, deps.folders);
   if (to === null)
-    throw new SwitchOnRefused(path7, `only his GUIDANCE.md and his agents and skills under ${IMPORTED}/ are switched on`);
+    throw new SwitchOnRefused(path7, `only your GUIDANCE.md and your agents and skills under ${IMPORTED}/ are switched on`);
   const attached = await readText(join45(deps.root, path7));
   if (attached === null)
     throw new SwitchOnRefused(path7, "the file is not there");
@@ -262837,7 +262915,7 @@ function migrateRoutes(deps) {
         const folders2 = needs2(presses?.folders, "the file tree's folders");
         const write = needs2(presses?.writeAsUser, "the file tree's writer");
         if (!/^[^/\\]+$/.test(body.agent))
-          throw new RouteError(400, `${body.agent} names no agent of his.`);
+          throw new RouteError(400, `${body.agent} names no agent of yours.`);
         const written3 = [];
         for (const path7 of [`${IMPORTED}/${IMPORTED_AGENTS}/${body.agent}.md`, `${folders2.agents}/${body.agent}.md`]) {
           const text14 = await readText(join46(deps.paths.files, path7));
@@ -262864,7 +262942,7 @@ function migrateRoutes(deps) {
         const last = lastReport(deps.db, user);
         const lumiverse = last?.sources?.lumiverse ?? migrationPage(page(user)).sources.lumiverse;
         if (lumiverse === null)
-          throw new RouteError(409, "No run has read today's data here, and RPE's config names no Lumiverse database: run the migration first.");
+          throw new RouteError(409, "No run has read the previous build's data here, and RPE's config names no Lumiverse database: run the migration first.");
         try {
           const done2 = await answerPaused({
             db: deps.db,
@@ -262875,7 +262953,7 @@ function migrateRoutes(deps) {
             ...body.message === undefined ? {} : { message: body.message },
             choice: body.choice,
             now: p.now(),
-            write: (work) => p.write(work, "landing his answer to a paused chat")
+            write: (work) => p.write(work, "landing your answer to a paused chat")
           });
           return { ...done2, landed: JSON.parse(JSON.stringify(done2.landed)) };
         } catch (error4) {
@@ -263147,7 +263225,7 @@ function goingBackRoutes(deps) {
         if (!body.sure)
           throw new RouteError(400, "Confirm that you will not go back: nothing is kept otherwise.");
         const at3 = new Date(deps.now()).toISOString();
-        return { said: await deps.writes.run((db) => sayNoGoingBack(db, user, at3), "his word that he will not go back") };
+        return { said: await deps.writes.run((db) => sayNoGoingBack(db, user, at3), "your word that you will not go back") };
       }
     }),
     route({
@@ -263160,13 +263238,13 @@ function goingBackRoutes(deps) {
       long: true,
       handle: async ({ user, params }) => {
         if (noGoingBack(deps.db, user) === null)
-          throw new RouteError(409, "Nothing that today's build put in Lumiverse is removed until you have said, on this page, that you will not go back.");
+          throw new RouteError(409, "Nothing that the previous build put in Lumiverse is removed until you have said, on this page, that you will not go back.");
         const d = deps.door();
         if (d === null)
           throw new RouteError(409, "RPE is not set up for a Lumiverse, so it reaches no book of yours.");
         const book = (await d.books()).find((b) => b.id === params.book);
         if (book === undefined || !isEngineBook(book))
-          throw new RouteError(404, `${params.book} is no engine book of today's build in Lumiverse: only those are removed here.`);
+          throw new RouteError(404, `${params.book} is no engine book of the previous build in Lumiverse: only those are removed here.`);
         try {
           return { ...await d.removeBook(user, book.id), failed: null };
         } catch (error4) {
@@ -264216,7 +264294,7 @@ function gmRoutes(deps) {
         }
         const player = routinePlayerView(ctx, params.entity);
         if (player === null)
-          throw new RouteError(404, `Chat ${params.chat} has no one ${params.entity} his character knows.`);
+          throw new RouteError(404, `Chat ${params.chat} has no one ${params.entity} your character knows.`);
         return { player };
       })
     }),
@@ -265084,7 +265162,7 @@ class PlayService {
       if (unreversed.length > 0)
         throw new Refused3("conflict", { line: "no_undo_for", codes: { parts: unreversed.map((c) => c.op) } });
       return changes2.length > 0;
-    }, "undoing an edit of his");
+    }, "undoing an edit of yours");
   }
   async refusalWords(error4) {
     return "words" in error4.why ? error4.why.words : await this.words(error4.why.line, error4.why.fields, error4.why.codes);
@@ -265848,9 +265926,9 @@ function refusalWords(refusal10) {
     case "not-at-limit":
       return `job ${refusal10.id} did not stop at one of its limits, so more of one would not let it go on.`;
     case "hook":
-      return `his hook ${refusal10.hook} kept it from starting: ${refusal10.reason}`;
+      return `your hook ${refusal10.hook} kept it from starting: ${refusal10.reason}`;
     case "connection":
-      return `there is no connection ${refusal10.connection} of his to check.`;
+      return `there is no connection ${refusal10.connection} of yours to check.`;
     case "part":
       return `the part ${refusal10.part} is missing, switched off, or not as a tag check needs it.`;
   }
@@ -266299,13 +266377,13 @@ function sessionRoutes(deps) {
           throw new RouteError(409, `Chat ${params.chat} has played no turn, so a close has no turn to hang after.`);
         if (s.turn(turn)?.chat !== params.chat)
           throw new RouteError(409, `The newest turn on chat ${params.chat}'s path is another chat's, which a close would change as well: play a turn here first.`);
-        const closed = await writes2.run(() => closeOpenScene(turns.store, user, params.chat), "his close of a scene");
+        const closed = await writes2.run(() => closeOpenScene(turns.store, user, params.chat), "your close of a scene");
         let after3;
         try {
           after3 = await asked4(() => sessions.close({ user, chat: params.chat, session: view2.id, turn }, { by: "user" }));
         } catch (error4) {
           if (closed !== null)
-            await writes2.run(() => turns.store.user(user).undo(closed.change, "player"), "taking back his close of a scene");
+            await writes2.run(() => turns.store.user(user).undo(closed.change, "player"), "taking back your close of a scene");
           throw error4;
         }
         return { session: shown6(user, after3), scene: closed?.scene ?? null, change: closed?.change ?? null };
@@ -266327,7 +266405,7 @@ function sessionRoutes(deps) {
           throw new RouteError(409, `A turn of chat ${params.chat} is running: take the close back when it has ended.`);
         const change2 = body.change;
         if (change2 !== undefined)
-          await writes2.run(() => turns.store.user(user).undo(change2, "player"), "taking back his close of a scene");
+          await writes2.run(() => turns.store.user(user).undo(change2, "player"), "taking back your close of a scene");
         return { session: shown6(user, await asked4(() => sessions.reopen({ user, chat: params.chat, session: view2.id }))) };
       }
     }),
@@ -266463,7 +266541,7 @@ function turnArea(takes5) {
     list: async (user, chat2) => {
       const now = booksNow();
       if (now.list === undefined)
-        throw new Error("The door's books give no list of the user's books.");
+        throw new Error("The door's books give no list of your books.");
       return await now.list(user, chat2);
     },
     found: async (user, ids2, words18, limit5) => {
@@ -267192,7 +267270,7 @@ function compose(options = {}) {
     list: async (user, chat2) => {
       const now = booksNow();
       if (now.list === undefined)
-        throw new Error("The door's books give no list of the user's books.");
+        throw new Error("The door's books give no list of your books.");
       return await now.list(user, chat2);
     },
     found: async (user, ids2, words18, limit5) => {
@@ -267604,7 +267682,7 @@ async function statusCommand(paths, config3, io, version) {
       return ofKind.map((key3) => {
         const made2 = new Date(key3.made).toISOString().slice(0, 10);
         if (key3.taken)
-          return `${kind2} taken from today's connection (taken ${made2})`;
+          return `${kind2} taken from the previous build's connection (taken ${made2})`;
         if (kind2 === "provider")
           return `${kind2} ends ${key3.last4} (made ${made2})`;
         return `${kind2} made ${made2}${kind2 === "extension" ? ", which RPE remakes at every start" : key3.ends === null ? ", no end" : `, runs out ${atWords(key3.ends)}`}`;
@@ -267727,7 +267805,7 @@ async function ownConnection(call2, apiUrl, line4, current3) {
   }
   const named4 = `"${settled3.name}" (${settled3.id})`;
   if (settled3.todays !== null)
-    io.out(`The connection ${settled3.todays} that RPE's config named is the one today's build made for its runtime: it is left as it is, for going back.`);
+    io.out(`The connection ${settled3.todays} that RPE's config named is the one the previous build made for its runtime: it is left as it is, for going back.`);
   if (settled3.made)
     io.out(`Made RPE's connection in Lumiverse, ${named4}: OpenAI-compatible, at ${apiUrl}, with a new provider key only it holds.`);
   else if (settled3.changed.length > 0)
@@ -267885,7 +267963,7 @@ async function swapUp(line4, io, version) {
     return 1;
   };
   if (existing !== null && existing.unit !== service2.unit)
-    return stop2(`RPE's service for this data folder is ${existing.unit}, and --name asks for ${service2.unit}: the swap starts RPE's own service again, so run it without --name. Nothing was stopped or changed.`);
+    return stop2(`RPE's service for this data folder is ${existing.unit}, and --name asks for ${service2.unit}: the switch starts RPE's own service again, so run it without --name. Nothing was stopped or changed.`);
   const answer6 = await serverAnswer(current3, io);
   if (answer6 !== null && "rpe" in answer6 && existing === null)
     return stop2(`RPE is running at ${serverUrl(current3)}, outside a service: stop it (${runLine(io, paths, "serve")}), then run ${runLine(io, paths, "up")} again. Nothing was stopped or changed.`);
@@ -267897,8 +267975,8 @@ async function swapUp(line4, io, version) {
   if (standing10 !== null) {
     const runtimeFlags = [...switches.has("no-runtime") ? ["--no-runtime"] : [], ...["runtime", "runtime-config", "runtime-data", "identifier"].flatMap((flag3) => flags[flag3] === undefined ? [] : [`--${flag3}`, flags[flag3]])];
     const migrateLine = runLine(io, paths, "migrate", "--lumiverse", lumiverse, "--user", user, ...runtimeFlags);
-    io.out(`The swap stands: RPE's service ${standing10.unit} runs, and RPE answers at ${standing10.at}, where today's runtime ${standing10.runtime} answered${standing10.todays === null ? "" : `; today's service ${standing10.todays} is switched off`}; the extension Lumiverse has installed is this build (${version}). Nothing was stopped or changed, and the migration was not made again.`);
-    io.out(`${runLine(io, paths, "migrate")} carries what changed on today's side since the last run (read at ${standing10.since}): stop RPE's service (systemctl --user stop ${standing10.unit}), run ${migrateLine}, then start it again (systemctl --user start ${standing10.unit}).`);
+    io.out(`The switch stands: RPE's service ${standing10.unit} runs, and RPE answers at ${standing10.at}, where the previous runtime ${standing10.runtime} answered${standing10.todays === null ? "" : `; the previous build's service ${standing10.todays} is switched off`}; the extension Lumiverse has installed is this build (${version}). Nothing was stopped or changed, and the migration was not made again.`);
+    io.out(`${runLine(io, paths, "migrate")} carries what changed on the previous build's side since the last run (read at ${standing10.since}): stop RPE's service (systemctl --user stop ${standing10.unit}), run ${migrateLine}, then start it again (systemctl --user start ${standing10.unit}).`);
     const left2 = await extensionLeft(call2);
     if (left2.length > 0)
       sayLeft(left2, io);
@@ -267911,10 +267989,10 @@ async function swapUp(line4, io, version) {
   const own5 = taken.length > 0 ? null : await ownConnection(call2, `${localUrl(plan2.at.address, plan2.at.port)}/v1`, { paths, config: current3, io, version, what: "rpe up" }, current3);
   const ids2 = taken.length > 0 ? taken.map((c) => c.id) : [own5?.id ?? ""];
   for (const c of taken)
-    io.out(`RPE answers on "${c.name}" (${c.id}), a connection in Lumiverse that reached today's runtime, under its model name (${c.model}): it is left as it is, and the chats that use it go on working once RPE answers in today's runtime's place.`);
+    io.out(`RPE answers on "${c.name}" (${c.id}), a connection in Lumiverse that reached the previous runtime, under its model name (${c.model}): it is left as it is, and the chats that use it go on working once RPE answers in the previous runtime's place.`);
   const earlier = current3.lumiverse.connections.filter((id3) => taken.length > 0 && !ids2.includes(id3));
   for (const id3 of earlier)
-    io.out(`The connection ${id3} in Lumiverse, RPE's own until now, is played no longer once RPE answers in today's runtime's place: the chats on it belong on ${taken.length === 1 ? `"${taken[0]?.name}"` : "one of the connections above"}.`);
+    io.out(`The connection ${id3} in Lumiverse, RPE's own until now, is played no longer once RPE answers in the previous runtime's place: the chats on it belong on ${taken.length === 1 ? `"${taken[0]?.name}"` : "one of the connections above"}.`);
   const ctx = { paths, config: current3, io, version, what: "rpe up" };
   await line4.prepare();
   const ran = await swapRun(plan2, {
@@ -268091,7 +268169,7 @@ function withoutSystemd(why, io, paths, bun, appFile) {
   return [
     `--systemd installs a systemd service, and ${why}, so none is installed here; ${appFile === undefined ? "" : "RPE's own copy is, and "}RPE runs in the foreground below instead.`,
     `To keep RPE running here, have your system start this line when you log in and again whenever it stops: ${keep2}`,
-    `On macOS that is launchd, on Windows Task Scheduler, in a container a second process or a compose service that shares Lumiverse's network (127.0.0.1 is then the same for both); docs/install.md, "Keep it running", has the entries.`,
+    `On macOS that is launchd, on Windows Task Scheduler, in a container a second process or a compose service that shares Lumiverse's network (127.0.0.1 is then the same for both); docs/install.md, "Keep it running on macOS, Windows and in a container", has the entries.`,
     appFile === undefined ? "RPE does not restart itself onto an update there: stop it and start it again after you update the extension." : `RPE does not restart itself onto an update there: after you update the extension, run ${runLine(io, paths, "up", "--systemd")} again, which puts the new build in RPE's copy, then restart RPE.`
   ];
 }
@@ -268266,7 +268344,7 @@ async function upCommand(argv, io, options, serveHere) {
   const runtime = switches.has("no-runtime") ? null : { configDir: flags["runtime-config"] ?? folders2.configDir, dataDir: flags["runtime-data"] ?? folders2.dataDir };
   const swapping = flags.lumiverse !== undefined || lumiverse !== null && userId !== null && await todaysRuntimeFound({ lumiverse, identifier, userId, runtime, ...flags.runtime === undefined ? {} : { runtimeName: flags.runtime } });
   if (!swapping && (switches.has("no-runtime") || flags.runtime !== undefined || flags["runtime-config"] !== undefined || flags["runtime-data"] !== undefined))
-    io.err("--runtime, --no-runtime, --runtime-config and --runtime-data say where today's build is, and rpe up found none of today's runtime of yours here: it is the install.");
+    io.err("--runtime, --no-runtime, --runtime-config and --runtime-data say where the previous build is, and rpe up found none of the previous build's runtime of yours here: it is the install.");
   const found = database ?? here?.database ?? null;
   const listens = swapping ? undefined : port !== current3.port || listen !== undefined && listen !== current3.address ? { address: listen ?? current3.address, port } : undefined;
   const saved = { ...found !== null && found !== current3.lumiverse.database ? { set: { database: found } } : {}, ...listens === undefined ? {} : { listens } };
@@ -268297,7 +268375,7 @@ async function upCommand(argv, io, options, serveHere) {
   };
   if (swapping) {
     if (lumiverse === null)
-      throw new UsageError("rpe up needs Lumiverse's data folder to swap: --lumiverse <folder>.");
+      throw new UsageError("rpe up needs Lumiverse's data folder for the switch: --lumiverse <folder>.");
     return await swapUp({ flags, switches, paths, current: current3, call: call2, service: service2, existing, unitText, lumiverse, prepare: prepare2 }, io, version);
   }
   if (portNote !== null)
@@ -268361,7 +268439,7 @@ var USAGE3 = [
   "                                 --port, --listen, --allow-http, --bun, --memory: as the install line of",
   "                                 the previous build took them",
   "                                 With the previous build's runtime of yours in Lumiverse's data folder",
-  "                                 and the extension switched to the new build, rpe up is the swap: wait",
+  "                                 and the extension switched to the new build, rpe up is the switch: wait",
   "                                 for the previous build to be idle, stop its service, migrate again, and",
   "                                 start RPE's service in its place, at its address, so every connection",
   "                                 in Lumiverse that reached it goes on working; then switch its service",
@@ -268396,7 +268474,7 @@ var USAGE3 = [
   "  rpe deny <name> [--user <id>]  switch it off",
   "  rpe backup [--out <file>]      one archive of the database and the file tree",
   "  rpe migrate [--rehearse] --lumiverse <folder> --user <id> [...]",
-  "                                 carry today's build's data into RPE; --rehearse writes nothing",
+  "                                 carry the previous build's data into RPE; --rehearse writes nothing",
   "                                 (rpe migrate alone lists the rest)",
   "  rpe check [--into <folder>] [--within <seconds>]",
   "                                 whether this build starts on the data folder: it is started, as serve",
@@ -268553,4 +268631,4 @@ if (Bun.isMainThread)
     stopped,
     fetch: (url2, init) => fetch(url2, init),
     invoked: invokedAs(process.execPath, Bun.main)
-  }, { version: "cb71de2f", areas: compose().areas, appFile: Bun.main, host: { platform: process.platform, uid: process.getuid?.() ?? null, bun: process.execPath } });
+  }, { version: "aa4a6d28", areas: compose().areas, appFile: Bun.main, host: { platform: process.platform, uid: process.getuid?.() ?? null, bun: process.execPath } });
