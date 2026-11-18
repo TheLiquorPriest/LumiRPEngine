@@ -13,6 +13,7 @@ import { type AppConfig, type DataPaths, SHIPPED_FOLDER } from "../app/config";
 import { readText } from "../app/disk";
 import type { Registry } from "../engine/registry-impl";
 import { JoinedTurnError, type Store } from "../store";
+import { DatabaseNotRead } from "../adapter/lumiverse/migration-reads";
 import { answerPaused, NotPaused } from "./answers";
 import { rowsGiven } from "./migrate";
 import { oldRecord, oldRecords } from "./old-records";
@@ -216,7 +217,7 @@ export function migrateRoutes(deps: MigrateRoutesDeps) {
           });
           return { ...done, landed: JSON.parse(JSON.stringify(done.landed)) };
         } catch (error) {
-          if (error instanceof NotPaused) throw new RouteError(409, error.message);
+          if (error instanceof NotPaused || error instanceof DatabaseNotRead) throw new RouteError(409, error.message);
           throw error;
         }
       },

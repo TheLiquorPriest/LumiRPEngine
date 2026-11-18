@@ -172,6 +172,9 @@ function objectOf(text: unknown): JsonObject {
   return isRecord(value) ? (value as JsonObject) : {};
 }
 
+/** Lumiverse's database is one RPE does not read (a table or column the migration needs is not there): its message says which, in RPE's words. */
+export class DatabaseNotRead extends Error {}
+
 const OF_CHAT = "FROM messages m JOIN chats c ON c.id = m.chat_id WHERE m.chat_id = ? AND c.user_id = ?";
 
 /** Opens the migration's reads of `opened`, for `user`'s rows only. Closing them closes the database. */
@@ -185,13 +188,13 @@ export function migrationReads(opened: OpenedDatabase, user: string): MigrationR
     const schema = db.query<{ schema: number }, []>(SCHEMA).get()?.schema ?? -1;
     let state = checks.get(read);
     if (state === undefined) checks.set(read, (state = { checked: null, refusedAt: null, refusal: "" }));
-    if (state.refusedAt === schema) throw new Error(state.refusal);
+    if (state.refusedAt === schema) throw new DatabaseNotRead(state.refusal);
     if (state.checked !== schema) {
       const difference = migrationSchemaDifference(db, read);
       if (difference !== null) {
         state.refusedAt = schema;
         state.refusal = `RPE does not read Lumiverse's database: it was made by a Lumiverse RPE does not know: ${difference}.`;
-        throw new Error(state.refusal);
+        throw new DatabaseNotRead(state.refusal);
       }
       state.checked = schema;
     }
