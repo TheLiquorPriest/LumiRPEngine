@@ -589,6 +589,8 @@ Lane: engine. Needs: `action`. Takes its provenance.
 | `params` | object | act: the action's own arguments, as name: value: a person, thing or place by name; an amount in the world's main coin; a list of words or ids, read as if joined by commas; a list or object the argument holds (payment tiers), as it is. |
 | `outcome` | text | quest: met or failed: how the stage a move leaves went, with why, or the stage named when the quest stands on it or was opened in play. act: the outcome you ruled, one of the action's own; left out, an action of one outcome takes it and one with a check has its check rolled by the world's rules. |
 
+Reports its code (`src/iface/ops-act.ts`) can give: `fight_cost_not_left`.
+
 Worked example:
 
 ```json
@@ -1689,7 +1691,7 @@ Worked example:
 
 #### fight_start
 
-Starts a fight between the two sides named, or adds people to one under way. A fight is exactly the people named, at the place named or where they all stand; no one is added, and no initiative is rolled unless asked. The answer gives the fights as they now stand: the sides, the order, whose turn it is and the round, and lists the world's rules that hear the start without running them.
+Starts a fight between the two sides named, or adds people to one under way. A fight is exactly the people named, at the place named or where they all stand; no one is added, and no initiative is rolled unless asked, or, where the world's tabletop rules are on and no order is given, from each fighter's sheet. The answer gives the fights as they now stand: the sides, the order, whose turn it is and the round, and lists the world's rules that hear the start without running them.
 
 Writes the engine lane.
 

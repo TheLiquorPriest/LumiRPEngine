@@ -316,6 +316,7 @@ Version 1 · realism domain none · requires none.
 - `budget_left(e, budget)`
 - `can_fight(e)`
 - `encounter_round()`
+- `has_acted(e)`
 - `has_turn(e)`
 - `in_encounter(e)`
 - `is_ally(a, b)`

@@ -142,6 +142,8 @@ export interface EventTypeDef<E extends LedgerEvent = LedgerEvent> {
    * The Undo leaves such an event as it is and says why, beside the rest it takes back.
    */
   irreversible?: string;
+  /** A record of what an action worked out (its rolls, its numbers and where they came from): said in the answer of the call that records it. */
+  told?: true;
 }
 
 /** An extra validation on an event type (`CoreRegistry.guard`). */

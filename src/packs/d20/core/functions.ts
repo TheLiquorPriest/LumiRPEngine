@@ -86,6 +86,6 @@ export const D20_FORMULAS: Readonly<Record<string, Fn>> = {
   total: withRules(0, (ctx, rules, [who, name, key]) => totalOf(ctx, rules, str(who), str(name), key === undefined || key === null ? {} : { key, skill: key, weapon: key })),
   has_trait: withRules(false, (ctx, rules, [who, id]) => traitsHeld(ctx, rules, str(who)).some((t) => t.id === str(id))),
   under: withRules(false, (ctx, _rules, [who, id]) => conditionsHeld(ctx, str(who)).some((c) => c.id === str(id))),
-  size_mod: withRules(0, (ctx, rules, [who, to]) => modifiersOf(ctx, rules, str(who)).reduce((n, m) => n + (m.source === "size" && m.to === str(to) ? m.value : 0), 0)),
+  size_mod: withRules(0, (ctx, rules, [who, to]) => modifiersOf(ctx, rules, str(who), [], (t) => t === str(to)).reduce((n, m) => n + (m.source === "size" ? m.value : 0), 0)),
   rest_minutes: withRules(0, (_ctx, rules, [hours]) => 60 * (numberIn(hours ?? null) ?? rules.hp.rest.hours)),
 };

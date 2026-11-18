@@ -28,7 +28,7 @@ import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
 import type { ActionDef, CombatDef } from "../../../shared/world";
 import { checkOf, readyCheck, rollCheck } from "../../../engine/checks";
 import type { Value } from "../../../engine/expr";
-import { labelOf, mutableSlice, numOf, objOf, own, sliceRecord, strOf } from "../../../engine/pack-kit";
+import { labelOf, mutableSlice, numOf, objOf, optionalService, own, sliceRecord, strOf } from "../../../engine/pack-kit";
 import type { EffectContext, EventTypeDef, PackDef, ReadContext, Rejection } from "../../../engine/registry";
 import type { Rng } from "../../../engine/rng";
 import { placeOfEntity, truthy } from "../../../engine/scope";
@@ -424,7 +424,10 @@ export const combatPack: PackDef = {
         if (!rules || !enc) return reject("no_fight", say("why_no_fight_is_under_way"));
         if (enc.order[enc.turn]?.id !== who) return reject("not_your_turn", who === ctx.world.pov ? say("why_it_isnt_your_turn") : say("why_it_isnt_actor_s_turn", { actor: labelOf(ctx, who) }));
         const next = nextTurn(ctx, rules, enc);
-        return next ? [next] : reject("no_one", say("why_no_one_is_left_to_take_a"));
+        if (!next) return reject("no_one", say("why_no_one_is_left_to_take_a"));
+        // What the turn brings of itself by the world's tabletop rules, for whom it comes to (a dying fighter's roll, a length counted in turns).
+        const actor = strOf(next.type === "combat.turn" && "data" in next ? next.data.actor : undefined);
+        return [next, ...(optionalService(ctx, "d20.upkeep")?.(ctx, actor, ctx.rng.fork("upkeep")) ?? [])];
       },
     });
     r.effect({ type: "combat.spend", args: ["who?", "cost"], resolve: (a, ctx) => spendFor(ctx, strOf(a.who) || ctx.world.pov, { combat: { cost: counts(a.cost) ?? {} } }) });
@@ -473,6 +476,14 @@ export const combatPack: PackDef = {
     });
     r.formula("encounter_round", (ctx) => encounterOf(ctx.state)?.round ?? 0);
     r.formula("budget_left", (ctx, e, budget) => own(fighterArg(ctx, e)?.f.left ?? {}, String(budget ?? "")) ?? 0);
+    // Whether someone in a fight under way has had a turn of theirs come in it (flat-footed until then, by a ruleset that says so); null for one in no fight.
+    r.formula("has_acted", (ctx, e) => {
+      const id = String(e ?? "");
+      const enc = fightsOf(ctx.state).find((f) => fighterOf(f, id) !== undefined);
+      if (!enc) return null;
+      const at = enc.order.findIndex((f) => f.id === id);
+      return enc.round > 1 || at <= enc.turn || enc.log.some((l) => l.actor === id);
+    });
 
     // A fight's own actions; only worlds with combat rules offer them (`offersAction`).
     r.action({

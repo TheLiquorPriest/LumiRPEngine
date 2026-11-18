@@ -40,6 +40,7 @@ function record(type: string): EventTypeDef<PackEvent> {
     validate: (e, ctx) => (typeof e.data.who === "string" && own(ctx.state.entities, e.data.who) ? null : { code: "missing_entity", reason: say("why_no_entity_who", { who: String(e.data.who ?? "") }) }),
     apply: () => undefined,
     describe: (e, ctx) => say(`ev_${type.replace(".", "_")}`, fieldsOf(e, ctx)),
+    told: true,
     ...(own(ROLLS, type) ? { irreversible: "roll" } : { reverse: () => [] }),
   };
 }

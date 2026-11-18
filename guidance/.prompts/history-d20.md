@@ -93,6 +93,14 @@ d20_trait_on: has {{trait}} now{{#text}}: {{text}}{{/text}}{{#unmet}} (it requir
 d20_trait_off: no longer has {{trait}}
 d20_ranks: has {{to}} ranks in {{skill}} (from {{from}}); at most {{most}}{{#over}}, so this is over the most{{/over}}{{#class_skill}}, a class skill{{/class_skill}}; {{left}} skill points left
 d20_stat_as: {{fields}} values of the sheet and {{attacks}} attacks
+d20_upkeep_stable: dying, rolled {{total}} and is stable
+d20_upkeep_lost: dying, rolled {{total}} and lost {{lost}} hit points, {{from}} to {{to}}
+d20_upkeep_saved: {{name}} ended on a save: {{save}}
+d20_upkeep_ended: {{name}} ran out
+d20_mod_to: {{value}}{{#type}} {{type}}{{/type}} to {{to}}
+d20_sheet_rounds: {{loaded}} of {{magazine}} rounds loaded
+d20_ruleset_skill: {{skill}} [{{id}}] ({{ability}}{{#trained}}, only with ranks in it{{/trained}}{{#armor}}, armour's check penalty applies{{/armor}})
+d20_ruleset_use: Every number of these rules comes from a sheet: read one with the tool sheet. A check, a save, an attack, harm, healing, a condition or an effect, a night's rest, a reload, experience, a level, a trait, ranks or a sheet from the bestiary is the action of that id, carried out with the world_apply operation act; it works the numbers out and answers with each one's parts. A difficulty is a number or one of the difficulties above.
 why_d20_no_rules: This world has no tabletop rules (its ruleset has no d20 part), so there is nothing to work this out by.
 why_d20_off: The tabletop rules are switched off in this chat; switch them on to use them.
 why_d20_no_skill: {{said}} is no skill or ability of this ruleset. Skills: {{skills}}.{{#abilities}} Abilities: {{abilities}}.{{/abilities}}

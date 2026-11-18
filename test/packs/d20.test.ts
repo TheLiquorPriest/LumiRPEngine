@@ -84,7 +84,7 @@ function d20World(): WorldDoc {
   w.tables["t.armor"] = table("t.armor", { chain_shirt: { label: "Chain shirt", bonus: 4, type: "armor", max_dex: 4, check: -2 }, heavy_shield: { label: "Heavy shield", bonus: 2, type: "shield", check: -2 } });
   w.tables["t.weapons"] = table("t.weapons", { longsword: { label: "Longsword", damage: { medium: "1d8" }, threat: 19, multiplier: 2, proficiency: "martial", held: "one", types: ["slashing"] } });
   w.tables["t.traits"] = table("t.traits", { dodge: { label: "Dodge", kind: "feat", modifiers: [{ to: "ac", value: 1, type: "dodge" }] }, weapon_focus: { label: "Weapon Focus", kind: "feat", modifiers: [{ to: "attack.weapon.{choice}", value: 1 }] } });
-  w.tables["t.conditions"] = table("t.conditions", { shaken: { label: "Shaken", modifiers: [{ to: "attack", value: -2 }, { to: "save", value: -2 }] }, dying: { label: "Dying" }, dead: { label: "Dead" }, disabled: { label: "Disabled" } });
+  w.tables["t.conditions"] = table("t.conditions", { shaken: { label: "Shaken", modifiers: [{ to: "attack", value: -2 }, { to: "save", value: -2 }, { to: "ability_check", value: -2 }] }, dying: { label: "Dying" }, dead: { label: "Dead" }, disabled: { label: "Disabled" } });
   w.tables["t.classes"] = table("t.classes", { fighter: { label: "Fighter", hit_die: 10, tracks: { attack: "good", fort: "save_good" }, skill_points: 2, proficiency: ["simple", "martial"] }, rogue: { label: "Rogue", hit_die: 6, tracks: { attack: "average", fort: "save_poor" }, skill_points: 8, proficiency: ["simple"] } });
   w.tables["t.tracks"] = table("t.tracks", { "1": { good: 1, average: 0, save_good: 2, save_poor: 0 }, "2": { good: 2, average: 1, save_good: 3, save_poor: 0 }, "3": { good: 3, average: 2, save_good: 3, save_poor: 1 } });
   const wren = w.entities.wren;
@@ -155,5 +155,14 @@ describe("the d20 layer's sums", () => {
     expect(JSON.stringify(conditions)).toContain("dying");
     const more = run(doc, state, "d20.harm", "bram", { amount: 30 });
     expect(more.some((e) => e.type === "engine.life")).toBe(true);
+  });
+
+  test("a Strength check while shaken: 20 on the die, +2 Strength, -2 shaken, 20", () => {
+    const doc = d20World();
+    doc.entities.wren!.fields.conditions = [{ id: "shaken" }];
+    const reg = registry();
+    const events = run(doc, initialState(doc, "t", reg), "d20.check", "wren", { skill: "str" });
+    const record = events.find((e) => e.type === "d20.check");
+    expect(JSON.stringify(record)).toContain('"total":20');
   });
 });

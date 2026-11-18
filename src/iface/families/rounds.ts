@@ -10,7 +10,7 @@ import { isRecord } from "../../shared/json";
 import type { LedgerEvent } from "../../shared/ledger";
 import { mapSettingsOf } from "../../shared/maps";
 import { applyEffects } from "../../engine/effects";
-import { own } from "../../engine/pack-kit";
+import { optionalService, own } from "../../engine/pack-kit";
 import type { ReadContext } from "../../engine/registry";
 import { createRng } from "../../engine/rng";
 import { fieldDef } from "../../engine/scope";
@@ -130,7 +130,7 @@ const round: WriteDef = {
     o.after(fightAfter(o, []));
     const from = w.events.length;
     const rounds0 = fight.round;
-    for (const act of acts) {
+    for (const [i, act] of acts.entries()) {
       const enc = fightById(w.state, fight.id);
       if (enc === null) break;
       // What the fight's rules would turn away is said, and the act is recorded all the same.
@@ -152,6 +152,11 @@ const round: WriteDef = {
       if (next !== null) {
         const moved = o.draft.applyAll([next]);
         if (moved) return notApplicable(o, moved.code);
+        // What the turn brings of itself by the world's tabletop rules, for whom it comes to (a dying fighter's roll, a length counted in turns).
+        const actor = "data" in next && typeof next.data.actor === "string" ? next.data.actor : "";
+        const kept = optionalService(w.ctx, "d20.upkeep")?.(w.ctx, actor, createRng(o.draft.seed(o.n)).fork(`upkeep:${i}`)) ?? [];
+        const bad = kept.length > 0 ? o.draft.applyAll(kept) : null;
+        if (bad) return notApplicable(o, bad.code);
       }
     }
     // Where the fight is on a grid that counts rounds, the rounds that went by are seconds on the clock; on any other, a fight takes no clock time.

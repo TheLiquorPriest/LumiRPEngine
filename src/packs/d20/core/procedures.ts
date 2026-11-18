@@ -19,6 +19,8 @@ import { ALIVE } from "../../../shared/world";
 import type { ConditionHeld, D20Def, EffectHeld, Modifier, NaturalAttack, ShotDef, TraitHeld } from "../../../shared/d20";
 import { D20_ACTIONS, D20_EVENTS, D20_FIELDS } from "../../../shared/d20";
 import { parseDice, rollDice, DiceError } from "../../../engine/dice";
+import { readyCheck, rollCheck } from "../../../engine/checks";
+import { passOutcomes } from "../../../engine/adjudication";
 import type { EnvVars } from "../../../engine/expr";
 import { fieldBounds } from "../../../engine/effects";
 import { lifeOf } from "../../../engine/life";
@@ -344,14 +346,17 @@ const check: Procedure = (s, who, p, rng, ruled) => {
   const skill = rowOf(s.ctx, rules, "skills", said);
   const ability = skill ? null : abilityNamed(s.ctx, rules, who, said);
   if (!skill && ability === null) return reject("d20_no_skill", say("why_d20_no_skill", { said, skills: Object.keys(rowsOf(s.ctx, rules, "skills")).join(", "), abilities: rules.abilities.join(", ") }));
-  const given = givenMods(p.mods, skill ? `skill.${skill.id}` : `ability_check.${ability ?? ""}`);
+  // An ability's check: its modifier, and what modifies `ability_check.<id>` (a condition's penalty to every check, the ability's own).
+  const name = skill ? `skill.${skill.id}` : `ability_check.${ability ?? ""}`;
+  const given = givenMods(p.mods, name);
   const explainOf = (id: EntityId): Explained => {
     if (skill) return explain(s.ctx, rules, id, "skill", { skill: skill.id, key: skill.id, weapon: skill.id }) ?? { total: 0, parts: [] };
     const m = modOf(s.ctx, rules, id, ability ?? "");
-    return { total: m, parts: [{ value: m, words: say("d20_part_ability", { value: signed(m), ability: ability ?? "" }) }] };
+    const mods = stacked(s.ctx, rules, id, name);
+    return { total: m + sumOf(mods), parts: [{ value: m, words: say("d20_part_ability", { value: signed(m), ability: ability ?? "" }) }, ...(mods.length > 0 ? [{ value: sumOf(mods), words: mods.map(modWords).join(", "), mods }] : [])] };
   };
   const mine = explainOf(who);
-  const extra = given.length > 0 ? sumOf(stacked(s.ctx, rules, who, skill ? `skill.${skill.id}` : "check", undefined, given)) - sumOf(stacked(s.ctx, rules, who, skill ? `skill.${skill.id}` : "check")) : 0;
+  const extra = given.length > 0 ? sumOf(stacked(s.ctx, rules, who, name, undefined, given)) - sumOf(stacked(s.ctx, rules, who, name)) : 0;
   const notes: string[] = [];
   if (skill && skill.row.trained === true && (own(ranksOf(s.ctx, who), skill.id) ?? 0) <= 0) notes.push(say("d20_untrained", { skill: labelOfRow(skill.row, skill.id) }));
   // Helpers: each rolls the same check, and each who reaches the ruleset's mark adds its bonus.
@@ -780,7 +785,7 @@ const condition: Procedure = (s, who, p) => {
   }
   const l = lengthOf(s, p);
   s.set(who, D20_FIELDS.conditions, [...rest, { id: hit.id, ...l, ...(text(p.why) !== "" ? { why: text(p.why) } : {}) }] as unknown as JsonValue);
-  const mods = modifiersIn(hit.row.modifiers).map((m) => `${typeof m.value === "number" ? signed(m.value) : m.value} ${m.type ?? ""} ${m.to}`.replace(/\s+/g, " ").trim());
+  const mods = modifiersIn(hit.row.modifiers).map((m) => say("d20_mod_to", { value: typeof m.value === "number" ? signed(m.value) : m.value, type: m.type ?? "", to: m.to }));
   s.record(D20_EVENTS.condition, { who, told: say("d20_condition_on", { condition: label, ...(mods.length > 0 ? { mods: mods.join(", ") } : {}), ...(textIn(hit.row.text) !== "" ? { text: textIn(hit.row.text) } : {}), length: lengthWords(l, s.ctx.state.clock) }), ...(text(p.why) !== "" ? { why: text(p.why) } : {}) });
   return null;
 };
@@ -803,7 +808,7 @@ const effect: Procedure = (s, who, p) => {
   const l = lengthOf(s, p);
   const held: EffectHeld = { label, modifiers: mods, ...l, ...(text(p.why) !== "" ? { why: text(p.why) } : {}) };
   s.set(who, D20_FIELDS.effects, [...rest, held] as unknown as JsonValue);
-  s.record(D20_EVENTS.effect, { who, told: say("d20_effect_on", { label, mods: mods.map((m) => `${signed(Number(m.value))}${m.type !== undefined ? ` ${m.type}` : ""} to ${m.to}`).join(", "), length: lengthWords(l, s.ctx.state.clock) }), ...(text(p.why) !== "" ? { why: text(p.why) } : {}) });
+  s.record(D20_EVENTS.effect, { who, told: say("d20_effect_on", { label, mods: mods.map((m) => say("d20_mod_to", { value: signed(Number(m.value)), type: m.type ?? "", to: m.to })).join(", "), length: lengthWords(l, s.ctx.state.clock) }), ...(text(p.why) !== "" ? { why: text(p.why) } : {}) });
   return null;
 };
 
@@ -916,7 +921,8 @@ const award: Procedure = (s, who, p) => {
       if (!row) continue;
       for (const one of all) {
         const byLevel = isRecord(row.by_level) ? numberIn(row.by_level[String(levelsOf(s.ctx, one))] ?? null) : null;
-        const share = byLevel ?? Math.floor((numberIn(row.xp) ?? 0) / all.length);
+        // A challenge's worth by a level is the whole of those who overcame it, shared among them, as its worth without one is.
+        const share = Math.floor((byLevel ?? numberIn(row.xp) ?? 0) / all.length);
         each.set(one, (each.get(one) ?? 0) + share);
       }
     }
@@ -1066,5 +1072,69 @@ export const D20_PROCEDURES: readonly EffectDef[] = D20_ACTIONS.map((id) => ({
   resolve: (args, ctx) => run(id, args, ctx),
 }));
 
-/** What a procedure is handed for `settle` and the turn's upkeep. */
-export { Scratch, settle, harmOne };
+/**
+ * What a creature's turn in a fight brings of itself, as the ruleset says (§4.5): a dying creature that is not stable makes the
+ * ruleset's stabilising roll, and passing it is stable, else loses the ruleset's points; each condition and effect counted in turns
+ * loses one and ends at none; each that lasts until a save has the save tried. Arithmetic the turn triggers, never a decision; said
+ * as one record. None in a world without the rules on, or for one who has nothing of it.
+ */
+export function upkeep(base: ReadContext, who: EntityId, rng: Rng): LedgerEvent[] {
+  const rules = rulesOf(base.world);
+  if (rules === null || !isOn(base) || !own(base.state.entities, who)) return [];
+  const s = new Scratch({ ...base, rng, params: {} }, rules);
+  const told: string[] = [];
+  const dying = rules.hp.dying;
+  const held = conditionsHeld(s.ctx, who);
+  if (dying && held.some((c) => c.id === dying.state) && !held.some((c) => c.id === dying.stable)) {
+    const ready = readyCheck(s.ctx.registry, s.ctx, dying.roll, { self: who, actor: who });
+    if (!("code" in ready)) {
+      const rolled = rollCheck(ready, rng.fork("stabilize"));
+      if (passOutcomes(dying.roll, ready.bands).includes(rolled.outcome)) {
+        const raw = own(s.ctx.state.entities, who)?.fields[D20_FIELDS.conditions];
+        s.set(who, D20_FIELDS.conditions, [...(Array.isArray(raw) ? raw : []), { id: dying.stable }] as JsonValue);
+        told.push(say("d20_upkeep_stable", { total: rolled.total }));
+      } else {
+        const hp = hpOf(s, who);
+        const to = hp.min !== undefined ? Math.max(hp.min, hp.now - dying.lose) : hp.now - dying.lose;
+        s.set(who, rules.hp.field, to);
+        told.push(say("d20_upkeep_lost", { total: rolled.total, lost: hp.now - to, from: hp.now, to }));
+      }
+    }
+  }
+  for (const field of [D20_FIELDS.conditions, D20_FIELDS.effects]) {
+    const raw = own(s.ctx.state.entities, who)?.fields[field];
+    if (!Array.isArray(raw)) continue;
+    let changed = false;
+    const next: JsonValue[] = [];
+    for (const item of raw) {
+      if (!isRecord(item)) {
+        next.push(item);
+        continue;
+      }
+      const name = typeof item.label === "string" && field === D20_FIELDS.effects ? item.label : labelOfRow(own(rowsOf(s.ctx, rules, "conditions"), text(item.id)), text(item.id));
+      const save = isRecord(item.save) && typeof item.save.save === "string" && typeof item.save.dc === "number" ? { save: item.save.save, dc: item.save.dc } : null;
+      if (save !== null) {
+        const r = rollSave(s, who, save.save, save.dc, [], rng.fork(`ends:${name}`));
+        if (r.outcome === "success") {
+          changed = true;
+          told.push(say("d20_upkeep_saved", { name, save: r.words }));
+          continue;
+        }
+      }
+      if (typeof item.rounds === "number") {
+        changed = true;
+        if (item.rounds <= 1) {
+          told.push(say("d20_upkeep_ended", { name }));
+          continue;
+        }
+        next.push({ ...item, rounds: item.rounds - 1 });
+        continue;
+      }
+      next.push(item);
+    }
+    if (changed) s.set(who, field, next);
+  }
+  settle(s, who);
+  if (told.length > 0) s.record(D20_EVENTS.upkeep, { who, told: told.join("; ") });
+  return s.events;
+}

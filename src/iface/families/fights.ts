@@ -16,6 +16,7 @@ import type { StoreState } from "../../store/types";
 import { oneOf, TEXT, TEXTS, YES_NO } from "../kit";
 import { find, findOptional, isUnread, named, notOneOf, type OpContext, type Unread } from "../ops";
 import { effectChange, notApplicable, readTool, type WriteDef, writeTool } from "./run";
+import { isOn as rulesOn } from "../../packs/d20/core/model";
 
 const FAMILY = "fights";
 
@@ -98,7 +99,8 @@ const start: WriteDef = {
     const from = w.events.length;
     const args: JsonObject = { with: party, foes };
     if (ranking.length > 0) args.order = ranking;
-    if (o.args.roll_initiative === true) args.roll_initiative = true;
+    // Under the world's tabletop rules, initiative is rolled from the sheet unless the call gives the order or says not to.
+    if (o.args.roll_initiative === true || (o.args.roll_initiative === undefined && ranking.length === 0 && rulesOn(w.ctx))) args.roll_initiative = true;
     if (joined !== undefined) args.fight = joined.id;
     else if (at !== undefined) args.at = at.id;
     const refused = effectChange(o, { type: joined === undefined ? "combat.start" : "combat.join", args });

@@ -45,15 +45,20 @@ function worked(ctx: ReadContext, who: EntityId, v: number | string | undefined,
   }
 }
 
-/** Every modifier a creature has from anything, with `given` ones added, each worked out; those whose `when` does not hold are left out. */
-export function modifiersOf(ctx: ReadContext, rules: D20Def, who: EntityId, given: readonly Modifier[] = []): Counted[] {
+/**
+ * The modifiers a creature has from anything, with `given` ones added, each worked out; those whose `when` does not hold are left
+ * out. `wants` picks the names asked for before any value or `when` is worked out, so a modifier whose value asks for another total
+ * (a finesse's Dexterity, a grace's Charisma) works out only the modifiers that total needs.
+ */
+export function modifiersOf(ctx: ReadContext, rules: D20Def, who: EntityId, given: readonly Modifier[] = [], wants: (to: string) => boolean = () => true): Counted[] {
   const out: Counted[] = [];
   const add = (mods: readonly Modifier[], source: ModifierSource, from: string, choice?: string): void => {
     for (const m of mods) {
+      const to = choice !== undefined ? m.to.replace("{choice}", choice) : m.to;
+      if (!wants(to)) continue;
       if (m.when !== undefined && !worked(ctx, who, m.when, false)) continue;
       const value = Number(worked(ctx, who, m.value, 0));
       if (!Number.isFinite(value)) continue;
-      const to = choice !== undefined ? m.to.replace("{choice}", choice) : m.to;
       out.push({ to, value, type: typeof m.type === "string" && m.type !== "" ? m.type : null, source, from, ...(m.note !== undefined ? { note: m.note } : {}), ...(m.limit === true ? { limit: true as const } : {}), ...(Array.isArray(m.bypass) ? { bypass: m.bypass } : {}), counted: true });
     }
   };
@@ -114,7 +119,7 @@ function bears(to: string, names: readonly string[]): boolean {
  */
 export function stacked(ctx: ReadContext, rules: D20Def, who: EntityId, to: string, filter?: { types: readonly string[]; keep: boolean }, given: readonly Modifier[] = []): Counted[] {
   const names = namesOf(to);
-  const mods = modifiersOf(ctx, rules, who, given).filter((m) => m.limit !== true && m.value !== 0 && bears(m.to, names) && (filter === undefined || filter.types.includes(m.type ?? "untyped") === filter.keep));
+  const mods = modifiersOf(ctx, rules, who, given, (t) => bears(t, names)).filter((m) => m.limit !== true && m.value !== 0 && (filter === undefined || filter.types.includes(m.type ?? "untyped") === filter.keep));
   const stack = new Set(rules.bonuses.stack);
   const best = new Map<string, Counted>();
   for (const m of mods) {
@@ -138,7 +143,7 @@ export function sumOf(mods: readonly Counted[]): number {
 /** The lowest limit of a name a creature has, or null where none applies. */
 export function limitOf(ctx: ReadContext, rules: D20Def, who: EntityId, name: string): number | null {
   let low: number | null = null;
-  for (const m of modifiersOf(ctx, rules, who)) if (m.limit === true && m.to === name && (low === null || m.value < low)) low = m.value;
+  for (const m of modifiersOf(ctx, rules, who, [], (t) => t === name)) if (m.limit === true && (low === null || m.value < low)) low = m.value;
   return low;
 }
 
@@ -209,14 +214,17 @@ function abilityLabel(ctx: ReadContext, who: EntityId, id: string): string {
 /** A term in words: what the layer's own functions are, said by name; any other term as its formula writes it. */
 function termWords(ctx: ReadContext, who: EntityId, n: Node, value: number, vars: EnvVars): string {
   const v = signed(value);
+  // An argument as a word: a string, a bound name, else what it works out to (an ability read off a table); its source if none.
   const lit = (i: number): string => {
     const a = n.k === "call" ? n.args[i] : undefined;
-    if (a?.k === "str") return a.v;
-    if (a?.k === "id" && a.path.length === 1) {
+    if (!a) return "";
+    if (a.k === "str") return a.v;
+    if (a.k === "id" && a.path.length === 1) {
       const bound = own(vars, a.path[0] ?? "");
       if (typeof bound === "string") return bound;
     }
-    return a ? sourceOf(a) : "";
+    const worked = runProgram({ source: "", root: a, nodeCount: 64 }, scopeEnv({ reg: ctx.registry, ctx, bindings: { self: who }, vars }));
+    return typeof worked === "string" && worked !== "" ? worked : sourceOf(a);
   };
   if (n.k === "num") return say("d20_part_base", { value: v });
   if (n.k === "call") {
@@ -238,6 +246,14 @@ function termWords(ctx: ReadContext, who: EntityId, n: Node, value: number, vars
         return say("d20_part_total", { value: v, name: lit(1) });
       case "limit":
         return say("d20_part_limit", { value: v, name: lit(1) });
+      case "min":
+      case "max": {
+        // The argument that won, in its own words: Dexterity under armour's limit reads as Dexterity, or as the limit.
+        const env = scopeEnv({ reg: ctx.registry, ctx, bindings: { self: who }, vars });
+        const won = n.args.find((a) => Number(runProgram({ source: "", root: a, nodeCount: 64 }, env)) === value);
+        if (won) return termWords(ctx, who, won, value, vars);
+        break;
+      }
     }
   }
   return say("d20_part_formula", { value: v, formula: sourceOf(n) });
