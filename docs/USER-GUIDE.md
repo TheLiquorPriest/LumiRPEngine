@@ -464,6 +464,20 @@ Each lane's writes go ahead, wait for your word, or are left out, by the **Write
 
 A write that waits shows under its turn's reply with **Go ahead** and **No**, and on the turn's page under **The review card**: each change by lane with **Undo it**, and **Questions asked on it** with **Let it go ahead** and **Do not**.
 
+## Lore
+
+RPE uses your lore; it does not replace it. Lore comes from two places: **your books** in Lumiverse (every book the chat reads, or the ones **Books the lore reads**, `lore.books`, names), and **the world's own lore**, the entries the world's document holds, which Build writes and **Save to lore…** adds to. An id says which an entry is (`e-112` a book entry, `w-31` a world entry). Lumiverse still puts your activated entries into the prompt as it always does.
+
+**The lore map.** At the start of every turn, the Author's briefing maps the lore: each entry activated in the prompt, with what it is and what it defines; entries the story has since moved past, with the note; the world's own entries whose keys match the recent chat; and, up to 12 (**Lore map, bound entries**, `lore.index.bound`), entries bound to who and what is on the horizon that did not activate. The agents read any entry in full, and search every book the chat reads and the world's lore, when they need more.
+
+**The index.** The **Lore** page shows your books and the world's lore as RPE understands them: the index, a page at a time and searchable, each entry with its book, its kind, a line saying what it is, what it defines and the records it is bound to. An entry no indexing run has read yet shows its title and keys. The lines come from an indexing job: **Index now** starts one, on the connection the indexer's definition names (its `model:` is `default`, your default connection, unless you name another); the Author starts one when its briefing says entries are not indexed; and an entry whose lines were written for an earlier revision is marked **out of date**, with **Index again**. You can set an entry's kind, its line and its related entries yourself; each is yours from then on, over any run's, with a way back to the run's.
+
+**Where the story moved past an entry.** When a turn leaves an entry behind (the inn it describes has burned), the Author writes an **overlay**: a note tied to that turn, which the lore map gives from then on. The entry itself is not touched. The Lore page lists each overlay on the chat's path with its turn.
+
+**Proposals.** RPE never writes your books by itself. When something the story made belongs in your books, an agent drafts the entry or the edit and offers it (the skill `lore-proposals`). **Proposals waiting on you** shows each one with the passage as it stands beside what would replace it: **Approve**, **Approve with my edits** (its book, title, keys and text are yours to change first) or **Reject**. **What RPE wrote to your lore** lists every write it made, newest first, each with **Put it back**, after a question that says what that does. A write checks that the entry is as it was read, and keeps a copy of what it was.
+
+**This chat's projection book.** Off as shipped. Switched on (**Projection book**, `lore.projection`, for this chat), RPE keeps a book of the chat's own, attached to it, that carries what the story changed and made into Lumiverse's own activation: notes on your entries, the people it brought in, the canon it set down. It is rewritten after scenes and when the chat's path changes, and a branch gets its own. **Apply now** makes or rewrites it at once, or takes it away when it is off. Your own books are never touched.
+
 ## Model use
 
 LumiRPEngine does most of its work without the AI. When it does ask a model, it uses small, focused calls, each with its own job. **Model use** presets set which steps may call a model, when, and how many calls a phase may spend. **Settings → Model use** shows them as four cards, **Lean**, **Standard**, **Full** and **Custom**, each saying in plain words what the preset does and then its limits; tap a card to use that preset, and the one in use is marked **In use**.
