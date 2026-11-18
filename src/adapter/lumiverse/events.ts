@@ -21,7 +21,7 @@ import type { FeedbackPosition } from "./feedback";
 import type { LumiverseReads, LvStep } from "./reads";
 import { type LvMessage, messageFrom } from "./rows";
 import type { LumiverseSocket } from "./socket";
-import type { TagLore } from "./wire";
+import { type TagLore, textHash } from "./wire";
 
 /** A message's showing swipe as a change gives it: its date as `swipe_dates` holds it, and the hash of its text (`messageFrom`). */
 export type ShownSwipe = LvMessage["shown"];
@@ -36,9 +36,11 @@ export type ChatChange =
   | { kind: "message-deleted"; chat: string; message: string }
   /**
    * A message shows another swipe, gained or lost one, or had a swipe's text written: `swipe` is the one it shows now, `shown` that
-   * swipe as it is now; `updated` where the swipe written is the one it shows.
+   * swipe as it is now; `updated` where the swipe written is the one it shows; `staged` where Lumiverse added it an empty swipe and
+   * shows it, as a swipe or a regenerate does before its generation is told begun (`services/generate.service.ts:1699-1720`,
+   * `:2036-2055`), for that generation to write.
    */
-  | { kind: "message-swiped"; chat: string; message: string; swipe: number; shown: ShownSwipe; updated?: true }
+  | { kind: "message-swiped"; chat: string; message: string; swipe: number; shown: ShownSwipe; updated?: true; staged?: true }
   /** `chat` was made from `from`, each message of `from` up to the fork given a new id: old id to new. */
   | { kind: "chat-forked"; from: string; chat: string; ids: Record<string, string> }
   /** A message was put before one already in the chat (`MESSAGE_SENT` with `inserted`), or the reconcile found one on the path that RPE did not know, before one it did: its hidden mark and the swipe it shows. */
@@ -68,6 +70,8 @@ export interface ChatChanges {
 export const REGEN_FEEDBACK_NAME = "Regen Feedback";
 
 const str = (v: unknown): string | null => (typeof v === "string" && v !== "" ? v : null);
+/** The hash of a swipe with nothing written in it. */
+const EMPTY_HASH = textHash("");
 
 /** One event as a change; null for an event that is none of these, or that names no chat. */
 export function changeOf(event: string, payload: unknown): ChatChange | null {
@@ -104,7 +108,9 @@ export function changeOf(event: string, payload: unknown): ChatChange | null {
       const m = messageFrom(message);
       // A swipe's text written (`updateSwipe`, `action: "updated"`) is an edit of what shows only where the swipe written is the one shown.
       const updated = payload.action === "updated" && payload.swipeId === m.swipe;
-      return { kind: "message-swiped", chat, message: m.id, swipe: m.swipe, shown: m.shown, ...(updated ? { updated: true as const } : {}) };
+      // An empty swipe added and shown is the one a swipe or a regenerate stages for its generation to write (`addSwipe(…, "")`, `services/generate.service.ts:1699-1720`, `:1936`).
+      const staged = payload.action === "added" && payload.swipeId === m.swipe && m.shown.hash === EMPTY_HASH;
+      return { kind: "message-swiped", chat, message: m.id, swipe: m.swipe, shown: m.shown, ...(updated ? { updated: true as const } : {}), ...(staged ? { staged: true as const } : {}) };
     }
     case "CHAT_FORKED": {
       const from = str(payload.sourceChatId);

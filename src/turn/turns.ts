@@ -886,9 +886,11 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     } else if (change.kind === "message-deleted") work = this.#deleted(user, change.chat, change.message).then(() => this.#atRest(user, change.chat));
     else if (change.kind === "message-edited") work = this.#edited(user, change.chat, change.message, change.hidden, change.shown);
     // A swipe flipped, added or deleted changes only which swipe shows, which the question's path carries; his edit of the swipe that
-    // shows, through the swipe route and outside a generation, is his edit.
+    // shows, through the swipe route and outside a generation, is his edit. The empty swipe a swipe or a regenerate stages is told
+    // before its generation is, and is the one it is about to write: that generation's own intake compares the path, the reply held
+    // as it showed before; compared now, the staged swipe would be read as another swipe the player turned to.
     else if (change.kind === "message-swiped" && change.updated === true) work = this.#edited(user, change.chat, change.message, null, change.shown);
-    else if (change.kind === "message-swiped") work = this.#atRest(user, change.chat);
+    else if (change.kind === "message-swiped" && change.staged !== true) work = this.#atRest(user, change.chat);
     // A message put in before the newest: the comparison between turns places it and keeps it to be told at the next turn's start.
     else if (change.kind === "message-inserted") work = this.#atRest(user, change.chat);
     else if (change.kind === "chat-forked") work = this.#forked(user, change.chat, change.from, change.ids);
@@ -2408,7 +2410,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       if (intake.waiting) return;
       const steps = await reads.path(chat);
       if (steps === null) return;
-      // A swipe or a regenerate adds its empty swipe, shown, and Lumiverse tells it before the generation that writes it: a generation heard while the path was read is the turn's own to compare, not a swipe the player flipped to.
+      // A generation told begun while the path was read is the one to compare it, at its intake, with what it writes left out.
       if (this.#generatingIn(user, chat).size > 0 || this.#d.runs.ofChat(user, chat).length > 0) return;
       await this.#compare(user, chat, steps, null, null, store.heardCount(chat));
       await this.#d.notes.follow(user, chat, { turns: store.line(chat).map((l) => l.turn), branchOf: store.chat(chat)?.sourceChat ?? null });

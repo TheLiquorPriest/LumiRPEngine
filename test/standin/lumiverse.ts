@@ -153,6 +153,12 @@ export class StandIn extends ChatRows {
   tokenizerFails = false;
   /** The models its tokenizer knows (`countForModel`, `services/tokenizer.service.ts`): a reply's token count is worked out only for these, else only the provider's own count is used. Counts are the stand-in's own, a quarter of the characters. */
   readonly tokenizedModels = new Set<string>();
+  /**
+   * By chat: the background work its earlier generations left going (cortex cache warming, databank retrieval: `services/chat-background.service.ts`), which a
+   * generation tears down once its swipe is staged, before it is told begun (`abortChatBackground`, `services/generate.service.ts:1722-1727`). A test puts its own
+   * here to hold a generation between the two, as that teardown can for up to two seconds.
+   */
+  readonly background = new Map<string, Set<Promise<unknown>>>();
 
   /** `computeMessageTokenCount` (`services/message-token-count.ts:51-66`): none for no text, for the user's switch off (`showMessageTokenCount`), for no connection or for a model it has no tokenizer for; else the stand-in's count. */
   protected override countTokens(user: string, connection: string | undefined, text: string): number | null {
@@ -273,6 +279,17 @@ export class StandIn extends ChatRows {
     return { live, done: finished.resolve };
   }
 
+  /** `abortChatBackground` (`services/chat-background.service.ts:74-90`): the chat's background work is waited for, two seconds at most on the host's clock, and let go. */
+  private async abortChatBackground(chat: Chat): Promise<void> {
+    const tasks = this.background.get(chat.id);
+    if (tasks === undefined || tasks.size === 0) return;
+    const patience = Promise.withResolvers<void>();
+    const timer = this.clock.setTimeout(patience.resolve, TEARDOWN_WAIT_MS);
+    await Promise.race([Promise.allSettled([...tasks]), patience.promise]);
+    this.clock.clearTimeout(timer);
+    this.background.delete(chat.id);
+  }
+
   private async run(input: GenerateInput, chat: Chat, connection: Connection, preset: Preset, live: ActiveGeneration | null, started?: (generationId: string | null) => void): Promise<Outcome> {
     const type = input.type ?? "normal";
     const dryRun = live === null;
@@ -327,6 +344,19 @@ export class StandIn extends ChatRows {
     const speakerCard = this.library.charactersByIds(chat.user, [speakerId]).get(speakerId);
     const speakerName = speakerCard === undefined ? "Assistant" : effectiveName(speakerCard);
     if (!dryRun) {
+      if (type === "swipe" || type === "regenerate") {
+        // The reply being replaced gets a new empty swipe, shown, and is left out of the prompt (`:1699-1720`, `prompt-assembly.service.ts:1900-1904`).
+        const last = swipeTarget;
+        if (last) {
+          // A background swipe leaves the swipe the reader has selected (`:1716`, `:1936`; `chats.service.ts:3301-3344`).
+          swipeAt = this.addSwipeRow(home, last.id, "", !backgroundSwipe) ?? (last.swipeId ?? 0) + 1;
+          if (!backgroundSwipe) last.swipeId = swipeAt;
+          target = { message: last.id, swipe: swipeAt };
+          excluded = last.id;
+        }
+      }
+      // The swipe staged first, the chat's background work is torn down (`:1722-1727`): its swipe is told that long before the generation is.
+      await this.abortChatBackground(chat);
       if (type === "normal") {
         // A new reply's message is made empty before the prompt, and left out of it (`:1988-2006`).
         staged = crypto.randomUUID();
@@ -337,16 +367,6 @@ export class StandIn extends ChatRows {
         this.emit("MESSAGE_SENT", { chatId: chat.id, message: this.messageRow(staged) ?? m }, chat.user);
         target = { message: staged, swipe: 0 };
         excluded = staged;
-      } else if (type === "swipe" || type === "regenerate") {
-        // The reply being replaced gets a new empty swipe, shown, and is left out of the prompt (`:1699-1720`, `prompt-assembly.service.ts:1900-1904`).
-        const last = swipeTarget;
-        if (last) {
-          // A background swipe leaves the swipe the reader has selected (`:1716`, `:1936`; `chats.service.ts:3301-3344`).
-          swipeAt = this.addSwipeRow(home, last.id, "", !backgroundSwipe) ?? (last.swipeId ?? 0) + 1;
-          if (!backgroundSwipe) last.swipeId = swipeAt;
-          target = { message: last.id, swipe: swipeAt };
-          excluded = last.id;
-        }
       } else if (type === "continue" && goesOn !== null) {
         target = { message: goesOn.id, swipe: goesOn.swipeId ?? 0 };
       }
