@@ -1,8 +1,8 @@
-// Character minds: GM → Minds (the minds pack's tab), Play → What you know, Settings → Minds and
-// Build → World → Minds. Built on the tokens only.
+// Character minds: GM → Minds (the minds pack's tab), Play → What you know, and the notes under Build's Needs and
+// Routines parts. Built on the tokens only.
 
 export const MINDS_CSS = `
-/* Settings → Minds (settings/minds.tsx) and Build → World → Minds (build/minds-editor.tsx) */
+/* The notes under Build's Needs and Routines parts */
 .lre-minds-note{margin:0;font-size:var(--lre-fs-sm);line-height:1.4;color:var(--lre-muted);overflow-wrap:anywhere}
 .lre-minds-body{display:flex;flex-direction:column;gap:var(--lre-s1);min-width:0}
 .lre-minds-body>.lre-row,.lre-minds-limit>.lre-row,.lre-minds-group>.lre-row,.lre-minds-override>.lre-row{border-bottom:0}
@@ -38,31 +38,6 @@ textarea.lre-input.lre-minds-prompt-input{min-height:200px;font-family:var(--lre
 .lre-minds-var{display:contents}
 .lre-minds-var dt{font:var(--lre-fs-sm)/1.45 var(--lre-mono)}
 .lre-minds-var dd{margin:0;color:var(--lre-muted);overflow-wrap:anywhere}
-.lre-minds-choices{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:var(--lre-s2);min-width:0}
-.lre-minds-choice{display:flex;flex-direction:column;align-items:stretch;gap:var(--lre-s1);min-width:0;min-height:var(--lre-tap-lg);padding:var(--lre-s3);border:1px solid var(--lre-hairline);border-radius:var(--lre-r-xl);background:transparent;color:inherit;font:inherit;text-align:left;transition:background-color var(--lre-fast),border-color var(--lre-fast)}
-.lre-minds-choice:hover:not(:disabled):not([aria-checked=true]){background:var(--lre-hover)}
-.lre-minds-choice[aria-checked=true]{border-color:var(--lre-accent);background:var(--lre-accent-soft);box-shadow:inset 0 0 0 1px var(--lre-accent)}
-.lre-minds-choice:disabled{cursor:progress}
-.lre-minds-choice-head{display:flex;align-items:center;justify-content:space-between;gap:var(--lre-s2);min-width:0}
-.lre-minds-choice-name{font-size:var(--lre-fs-md);font-weight:600}
-.lre-minds-choice-mark{display:inline-flex;align-items:center;gap:var(--lre-s1);font-size:var(--lre-fs-sm);font-weight:600;color:var(--lre-accent-text)}
-.lre-minds-choice-text{font-size:var(--lre-fs-sm);color:var(--lre-muted);overflow-wrap:anywhere}
-.lre-minds-choice[aria-checked=true] .lre-minds-choice-text{color:var(--lre-fg)}
-.lre-minds-fields{display:flex;flex-direction:column;min-width:0}
-.lre-minds-build .lre-form-group>.lre-disclosure{border-top:1px solid var(--lre-hairline)}
-.lre-minds-fields>.lre-field:not(:last-child){border-bottom:1px solid var(--lre-hairline)}
-.lre-minds-roles{display:flex;flex-direction:column;gap:var(--lre-s2);min-width:0;padding-top:var(--lre-s3);border-top:1px solid var(--lre-hairline)}
-.lre-minds-role{display:flex;align-items:flex-start;gap:var(--lre-s1);min-width:0}
-.lre-minds-role-field{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
-.lre-minds-role-field>.lre-row{padding:0;border-bottom:0;flex-wrap:nowrap}
-.lre-minds-role-field>.lre-row>.k{min-width:0}
-.lre-minds-tpl{display:flex;flex-direction:column;gap:var(--lre-s2);min-width:0}
-.lre-minds-tpl+.lre-minds-tpl{padding-top:var(--lre-s3);border-top:1px solid var(--lre-hairline)}
-.lre-minds-tpl-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--lre-s2);min-height:var(--lre-tap);min-width:0}
-.lre-minds-tpl-text{flex:1 1 12rem;min-width:0;display:flex;flex-direction:column;gap:2px}
-.lre-minds-tpl-head>.lre-btn{flex:none}
-/* Settings → Minds → Knowledge: a knowledge text's wording (settings/minds.tsx) */
-textarea.lre-input.lre-minds-text-input{min-height:var(--lre-tap);font-family:var(--lre-font);font-size:var(--lre-fs-md);line-height:1.45}
 /* Play → What you know (packs/minds/ui/known.tsx) */
 .lre-known-tags{display:flex;flex-wrap:wrap;align-items:center;gap:var(--lre-s1) var(--lre-s2);min-width:0}
 .lre-known-kept{font-size:var(--lre-fs-sm);color:var(--lre-muted);overflow-wrap:anywhere}

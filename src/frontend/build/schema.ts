@@ -533,7 +533,7 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
   ],
 };
 
-/** The schema-driven singletons; Tiers, Ruleset, the lore lookup table, Minds, the routine settings and Needs have their own editors (`tiers-editor.tsx`, `ruleset-editor.tsx`, `lookup-editor.tsx`, `minds-editor.tsx`, `routine-settings.tsx`, `needs-editor.tsx`). */
+/** The schema-driven singletons; Tiers, Ruleset, the lore lookup table, the routine settings and Needs have their own editors (`tiers-editor.tsx`, `ruleset-editor.tsx`, `lookup-editor.tsx`, `routine-settings.tsx`, `needs-editor.tsx`), and Minds and Pinned lore have none (`UNREAD_PARTS`). */
 export const PART_SPECS: Record<Exclude<WorldPart, "tiers" | "loreIndex" | "ruleset" | "minds" | "lorePins" | "routineSettings" | "needs">, FieldSpec[]> = {
   calendar: [
     { kind: "enum", key: "system", label: "System", values: ["gregorian", "custom"] },

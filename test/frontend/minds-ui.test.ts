@@ -1,13 +1,11 @@
-// The minds screens that remain (DESIGN §24): Play → What you know, and Build → World → Minds saving its defaults as no config.
+// The minds screen that remains (DESIGN §24): Play → What you know.
 
 import { describe, expect, test } from "bun:test";
 import { Badge, Empty } from "../../src/frontend/components";
 import { ActionRow } from "../../src/frontend/gm/ui";
 import type { PanelProps } from "../../src/frontend/registry";
 import { decodeKnownView, KnownPanel } from "../../src/packs/minds/ui/known";
-import { mindsPartValue } from "../../src/frontend/build/minds-editor";
-import type { KnownItem, WorldMindsConfig } from "../../src/shared/minds";
-import { DEFAULT_WORLD_MINDS } from "../../src/shared/minds";
+import type { KnownItem } from "../../src/shared/minds";
 import { propsOf } from "../support/tree";
 
 describe("Play → What you know", () => {
@@ -22,16 +20,5 @@ describe("Play → What you know", () => {
     const on = panel({ tracking: true, items: [item] });
     expect(propsOf(on, ActionRow).map((p) => [p.title, p.subtitle])).toEqual([[item.claim, "Told by Priya Nair · Tue 07:42"]]);
     expect(propsOf(on, Badge).map((p) => p.children)).toEqual(["Suspicion", "Unsure"]);
-  });
-});
-
-describe("Build → World → Minds", () => {
-  test("the defaults save as no config; anything else saves whole, an unset selector left out", () => {
-    expect(mindsPartValue(structuredClone(DEFAULT_WORLD_MINDS) as WorldMindsConfig)).toEqual({});
-    const edited: WorldMindsConfig = { ...structuredClone(DEFAULT_WORLD_MINDS), secrecy: "brief", always: { tag: ["lead"] } } as WorldMindsConfig;
-    const value = mindsPartValue(edited);
-    expect(value.secrecy).toBe("brief");
-    expect(value.always).toEqual({ tag: ["lead"] });
-    expect("never" in value).toBe(false);
   });
 });

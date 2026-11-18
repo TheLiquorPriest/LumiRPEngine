@@ -46,18 +46,21 @@ export const COLLECTION_INFO: Readonly<Record<WorldCollection, CollectionInfo>> 
   tracks: { label: "Tracks", hint: "Quests, secrets, puzzles, agendas", noun: "track", icon: "flag" },
   lore: { label: "Lore", hint: "Entries, lookup table, indexing", noun: "lore entry", icon: "book" },
   tables: { label: "Data tables", hint: "Prices, jobs, regions…", noun: "data table", icon: "table" },
-  sections: { label: "Sections", hint: "What the narrator reads", noun: "section", icon: "scroll" },
-  steps: { label: "Step templates", hint: "Prompted model steps", noun: "step template", icon: "sparkle" },
+  sections: { label: "Sections", hint: "Kept in the file, not used by this build", noun: "section", icon: "scroll" },
+  steps: { label: "Step templates", hint: "Kept in the file, not used by this build", noun: "step template", icon: "sparkle" },
   packs: { label: "Packs", hint: "Enabled domain packs", noun: "pack", icon: "box" },
 };
 
 /**
- * What Build does not draw an editor of, because nothing RPE keeps reads what it would edit (R-50): Step templates and Sections
- * (the narrator's section guidance) were read by the classic pipeline alone, and a lore pin to a step by its steps. The world
- * document keeps their fields (the format is kept, §15.2); their names stay here for a Problems row that points at one.
+ * What Build does not draw an editor of, because nothing RPE runs reads what it would edit (R-50). Collections: Step templates and
+ * Sections, the texts of the previous build's own model steps and prompt sections. Parts: a lore pin to a step, and Minds, the
+ * previous build's ladder of how closely a character thinks (its thresholds and focus weights, who is always or never given a mind)
+ * with what each person knew from the start. A character's base, mind, memories and relationships are rows an agent keeps, with no
+ * ladder over them, and no call of RPE reads `world.minds`. The world document keeps these fields as the file has them (the format
+ * is kept, §15.2); their names stay here for a Problems row that points at one.
  */
 export const UNREAD_COLLECTIONS: Readonly<Partial<Record<WorldCollection, true>>> = { sections: true, steps: true };
-export const UNREAD_PARTS: Readonly<Partial<Record<WorldPart, true>>> = { lorePins: true };
+export const UNREAD_PARTS: Readonly<Partial<Record<WorldPart, true>>> = { lorePins: true, minds: true };
 
 /** The needs by their one name, as a list ("Hunger, fatigue, social and fun"), so the hint names them as the page does. */
 const NEED_LIST = NEED_IDS.map((need, i) => (i === 0 ? NEED_WORDS[need].name : NEED_WORDS[need].name.toLowerCase()))
@@ -73,7 +76,7 @@ export const PART_INFO: Readonly<Record<WorldPart, { label: string; hint: string
   time: { label: "Time defaults", hint: "How time passes in new chats", icon: "clock" },
   ruleset: { label: "Ruleset", hint: "Character fields, checks, levels, the sheet and combat", icon: "shield" },
   loreIndex: { label: "Lore lookup table", hint: "Terms and topics that lead to lore entries", icon: "search" },
-  minds: { label: "Minds", hint: "How closely characters think, and what each knows from the start", icon: "sparkle" },
+  minds: { label: "Minds", hint: "Kept in the file, not used by this build", icon: "sparkle" },
   lorePins: { label: "Pinned lore", hint: "Lore every call for a character, at a place, or of a step always reads", icon: "pin" },
   routineSettings: { label: "Routines and the story", hint: "What routines are at each level, how firmly they hold against the story, and who invites whom", icon: "route" },
   needs: { label: "Needs", hint: `${NEED_LIST}: each on or off, how fast it grows, when the narrator is told and when it alerts`, icon: "sliders" },

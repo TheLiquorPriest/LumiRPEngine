@@ -41,7 +41,6 @@ import { WorldChatsSection } from "./upgrade";
 import { CommitPanel, RevisionsSection, UncommittedPanel } from "./history";
 import { JOB_INFO, jobStore, JobStatusBadge, JobView, keptJobs } from "./jobs";
 import { LookupTableEditor } from "./lookup-editor";
-import { MindsEditor } from "./minds-editor";
 import { NeedsEditor } from "./needs-editor";
 import { LoreEditor, LoreList } from "./lore-editor";
 import { SecrecyPage } from "./lore-secrecy";
@@ -888,8 +887,7 @@ function PartView(props: { part: WorldPart }) {
   if (props.part === "tiers") return <TiersEditor doc={draft.doc} lint={draft.lint} save={(value) => send({ type: "lre.editor", worldId: draft.worldId, base: draft.base, op: "set", part: "tiers", value })} />;
   if (props.part === "loreIndex") return <LookupTableEditor doc={draft.doc} lint={draft.lint} save={(value) => send({ type: "lre.editor", worldId: draft.worldId, base: draft.base, op: "set", part: "loreIndex", value })} />;
   if (props.part === "ruleset") return <RulesetEditor />;
-  if (props.part === "minds") return <MindsEditor />;
-  if (props.part === "lorePins") return null;
+  if (props.part === "minds" || props.part === "lorePins") return null;
   if (props.part === "routineSettings") return <RoutineSettingsEditor />;
   if (props.part === "needs") return <NeedsEditor />;
   return <SchemaPartView part={props.part} />;
