@@ -3,10 +3,10 @@
 // beside it, which holds where no level sets one; and the way back to it. A value set at any level stands over the header. The same
 // settings are side by side for every agent on the Settings page, a row for each.
 
-import type { DefinitionLimitsView, ListedDefinition } from "rp-harness/contract";
+import type { ListedDefinition } from "rp-harness/contract";
 import { useState } from "preact/hooks";
 import { Banner, Section } from "../../../frontend/components";
-import type { SettingView } from "../../../shared/api";
+import type { DefinitionLimitsView, SettingView } from "../../../shared/api";
 import type { SettingsShown } from "../settings";
 import { LevelBar } from "../settings/levelbar";
 import { type ChangeLevel, numberWords } from "../settings/model";

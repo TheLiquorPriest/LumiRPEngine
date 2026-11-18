@@ -2,9 +2,8 @@
 // default or deleted, an example copied into force, its file opened on Files, switched on and off for this chat or every chat, its own firings,
 // and the tester that runs it as its file stands against a past turn of the chat, writing nothing. Every refusal is shown in RPE's words.
 
-import type { RuleTest } from "rp-harness/contract";
 import { useState } from "preact/hooks";
-import type { TurnRow } from "../../../shared/api";
+import type { RuleTest, TurnRow } from "../../../shared/api";
 import { useApp } from "../../app";
 import { Badge, Banner, Button, Section } from "../../../frontend/components";
 import { replyOf } from "../../client";

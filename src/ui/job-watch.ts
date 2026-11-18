@@ -3,8 +3,7 @@
 // of no chat (as the Live page reads them), folded by the live model; and the job is read once from its route (as the Jobs page reads it) at
 // the start, after a hole or a lost word, and when it ends failed, so that what a failed job's last call said is known. Nothing polls.
 
-import type { Usage } from "rp-harness/contract";
-import { type JobState, type JobView, LIVE_JOBS, type LiveEvent } from "../shared/api";
+import { type JobState, type JobView, LIVE_JOBS, type LiveEvent, type Usage } from "../shared/api";
 import type { RpeClient } from "./client";
 import { applyRecord, EMPTY_LIVE, holeIn, type LiveModel, readTrace, type RunNode, runOf, runTotals } from "./live-model";
 import { errorWords } from "./words";

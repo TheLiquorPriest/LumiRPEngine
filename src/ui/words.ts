@@ -1,7 +1,6 @@
 // Numbers, times, counts and the tree's levels as the pages say them.
 
-import type { LayerLevel, Usage } from "rp-harness/contract";
-import type { LimitHit } from "../shared/api";
+import type { LayerLevel, LimitHit, Usage } from "../shared/api";
 
 /** The levels of the agents' tree, as the Files and Settings pages name them. */
 export const LEVEL_WORDS: Readonly<Record<LayerLevel, string>> = { shipped: "Shipped", global: "Yours", character: "This character's", chat: "This chat's" };

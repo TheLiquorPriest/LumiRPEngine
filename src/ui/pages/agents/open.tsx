@@ -6,9 +6,9 @@
 // level, a shipped one reset to its default, a copy of it made as a new agent, its file opened on Files. A change to its tools or to
 // what it is given holds from the next session, or at once by Apply now.
 
-import type { ListedDefinition, RegisteredTool } from "rp-harness/contract";
+import type { ListedDefinition } from "rp-harness/contract";
 import { useState } from "preact/hooks";
-import type { ConnectionShown, StackReply } from "../../../shared/api";
+import type { ConnectionShown, RegisteredTool, StackReply } from "../../../shared/api";
 import { useApp } from "../../app";
 import { Badge, Banner, Button, Disclosure, Section } from "../../../frontend/components";
 import { useRead } from "../../reading";
