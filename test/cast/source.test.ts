@@ -1,5 +1,7 @@
 // The cast's writes name where they come from: a write that names no source is applied and marked unsourced, one citing a lore
-// entry keeps it on its change, a memory with the source character is not marked. Every name and word here is made up.
+// entry keeps it on its change. A character's own agent writing its own mind (a memory, a perception taken in, an entry of the mind,
+// a relationship, a dream) writes the character's own: one that names no source is recorded as the character's, never marked, and
+// its answer shows the source each write was recorded with. Every name and word here is made up.
 
 import { describe, expect, test } from "bun:test";
 import type { AgentRef, JsonObject, ToolResult } from "rp-harness/contract";
@@ -30,8 +32,10 @@ describe("a cast write's source", () => {
     const lived = await b.play("remember", { memories: [{ text: "She went pale.", gist: "Wren went pale.", source: "character" }] }, turn.id, BRAM);
     expect(lived.error).toBeUndefined();
     expect(lived.marks).toBeUndefined();
+    // Named or not, a memory of its own is the character's.
     const unnamed = await b.play("remember", { memories: [{ text: "He said nothing.", gist: "Silence." }] }, turn.id, BRAM);
-    expect(unnamed.marks).toContain("unsourced");
+    expect(unnamed.marks).toBeUndefined();
+    expect(said(unnamed)).not.toContain("names no source");
 
     // What the store keeps on each change: the source's kind, and what it cites.
     const rows = b.t.s.changes(turn.id).filter((c) => c.op === "cast.write");
@@ -40,5 +44,34 @@ describe("a cast write's source", () => {
     expect(kept).toContainEqual(["knowledge", "lore", { lore: "e-12" }]);
     expect(kept).toContainEqual(["perception", null, null]);
     expect(kept).toContainEqual(["memory", "character", null]);
+  });
+
+  test("a character's own agent spends no call on sources: what it writes of its own mind is the character's, and the answer says so", async () => {
+    const b = await openBench();
+    const turn = await b.t.begin();
+    expect((await b.play("cast_update", { operations: [{ op: "cast", who: "Bram", as: "principal", source: "author" }] }, turn.id)).error).toBeUndefined();
+    const perceived = await b.play("perceive", { perceptions: [{ who: "Bram", reach: "whole", content: "Wren leaves in the gale.", source: "prose" }, { who: "Bram", reach: "part", content: "A door bangs somewhere.", source: "prose" }] }, turn.id);
+    const [seen, banged] = [...new Set(JSON.stringify(perceived.content).match(/p-\d+/g) ?? [])];
+    if (seen === undefined || banged === undefined) throw new Error("two perceptions were written");
+    // A memory from the first, and the second taken in with nothing to remember; an entry of the mind and a relationship from the first; then a dream.
+    const writes = [
+      await b.play("remember", { memories: [{ text: "She went out into the gale.", gist: "Wren left.", from: [seen] }, { taken: [banged] }] }, turn.id, BRAM),
+      await b.play("mind_set", { entries: [{ kind: "feeling", text: "Uneasy.", from: [seen] }] }, turn.id, BRAM),
+      await b.play("relate", { relationships: [{ with: "Wren", text: "I worry for her.", from: [seen] }] }, turn.id, BRAM),
+      await b.play("dream", {}, turn.id, BRAM),
+    ];
+    for (const r of writes) {
+      expect(r.error).toBeUndefined();
+      expect(r.marks).toBeUndefined();
+      expect(said(r)).not.toContain("names no source");
+    }
+    // Each answer shows the source its writes were recorded with.
+    expect(said(writes[0]!)).toContain('\\"source\\":\\"character\\"');
+    expect(said(writes[1]!)).toContain('\\"source\\":\\"character\\"');
+    expect(said(writes[2]!)).toContain('\\"source\\":\\"character\\"');
+    // What the store keeps: every write of its own, the taken-in mark and the dream's settling among them, is the character's.
+    const own = b.t.s.changes(turn.id).filter((c) => c.op === "cast.write" && c.handle === BRAM.id);
+    expect(own.length).toBeGreaterThanOrEqual(5);
+    expect(own.filter((c) => c.source !== "character").map((c) => (c.value as JsonObject).part)).toEqual([]);
   });
 });

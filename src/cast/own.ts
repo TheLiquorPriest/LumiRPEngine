@@ -17,7 +17,7 @@ import type { Reply } from "../iface/kit";
 import { isRecord } from "../shared/json";
 import { type CastCall, type CastToolSpec, itemView, readingOr } from "./kit";
 import { type CastRow, type CastWrite, type CastWriter, MIND_KINDS, RELATIONSHIP_DIMENSIONS, relationshipItemId, writeCast } from "./record";
-import { PROVENANCE_READS, readSource, sourceLines, stampOn } from "./source";
+import { PROVENANCE_READS, readOwnSource, sourceLines, sourceShown, stampOn } from "./source";
 import { towardOf } from "./refs";
 import { worldAt } from "./secrets";
 import { listOf, nearOwn, notAnItem, ownIds, readFields, selfOr, unchecked } from "./self";
@@ -34,7 +34,7 @@ const FROM_PARTS = ["perception", "memory"] as const;
 const RELATIONSHIP: Readonly<Record<string, Kind>> = { with: "name", text: "text", ...Object.fromEntries(RELATIONSHIP_DIMENSIONS.map((d) => [d, "dimension"])), from: "texts", drop: "flag", why: "text" };
 const RELATIONSHIP_READS: Reads = { reads: [...Object.keys(RELATIONSHIP), ...PROVENANCE_READS], needs: ["with"], newNeeds: [] };
 
-/** Writes what a call read, and answers with each item it wrote as it now stands, and with what was left out. */
+/** Writes what a call read, and answers with each item it wrote as it now stands, with the source it was recorded with, and with what was left out. */
 async function writeOwn(call: CastCall, reply: Reply, writer: CastWriter, items: readonly ItemRead[], writes: readonly CastWrite[], reads: Reads, key: string): Promise<Reply> {
   if (items.some((it) => it.fatal.length > 0)) return refused(reply, items, () => reads);
   const rows: CastRow[] = await call.deps.writes.run(() => writeCast(call.deps.store, writer, writes), call.tool);
@@ -42,9 +42,10 @@ async function writeOwn(call: CastCall, reply: Reply, writer: CastWriter, items:
   sourceLines(reply, items);
   const after = readingOr(call, reply);
   if (after === null) return reply;
+  const sources = new Map(rows.map((r, i) => [r.item, sourceShown(writes[i])]));
   const shown = [...new Set(rows.map((r) => r.item))].flatMap((id) => {
     const item = after.record.items.get(id);
-    return item === undefined ? [] : [itemView(after, item)];
+    return item === undefined ? [] : [{ ...itemView(after, item), source: sources.get(id) ?? null }];
   });
   return reply.data({ [key]: shown });
 }
@@ -70,7 +71,7 @@ async function mindSet(args: JsonObject, call: CastCall): Promise<Reply> {
     items.push(it);
     const value: JsonObject = {};
     readFields(call, it, given, ENTRY, value);
-    readSource(call, it, given);
+    readOwnSource(call, it, given);
     const { id, ...fields } = value;
     // An entry to change is one of the character's own on this path, of a kind the mind holds; a file carried from the earlier build is none of them.
     const item = id === undefined ? undefined : self.reading.record.items.get(id as string);
@@ -129,7 +130,7 @@ async function relate(args: JsonObject, call: CastCall): Promise<Reply> {
     const value: JsonObject = {};
     readFields(call, it, given, RELATIONSHIP, value);
     outsideDimensions(it, given);
-    readSource(call, it, given);
+    readOwnSource(call, it, given);
     if (typeof value.with !== "string") {
       needed(it, ["with"]);
       continue;

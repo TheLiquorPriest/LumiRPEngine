@@ -29,6 +29,21 @@ export function readSource(call: CastCall, it: ItemRead, given: JsonObject): voi
   it.prov = prov;
 }
 
+/**
+ * Reads the provenance of an item a character's own agent writes of its own mind (a memory, a realization, a dream, an entry of the
+ * mind, a relationship, a perception taken in): it is the character's own by what it is, so one that names no source is recorded as
+ * the character's, never marked unsourced. A source it names stands; an argument that cannot be read is left out and said on it.
+ */
+export function readOwnSource(call: CastCall, it: ItemRead, given: JsonObject): void {
+  readSource(call, it, given);
+  const prov = it.prov;
+  if (prov === undefined || prov.source !== null) return;
+  it.prov = { ...prov, source: { from: "character" }, marks: prov.marks.filter((m) => m !== MARKS.unsourced) };
+}
+
+/** The source an item's write was recorded with, as an answer shows it beside the item: its kind, or null for none. */
+export const sourceShown = (write: { stamp?: Stamp } | undefined): string | null => write?.stamp?.source ?? null;
+
 /** What a write carries to the store: its item's provenance as a change keeps it; none where the writer's own stands. */
 export const stampOn = (prov: Provenance | undefined): { stamp?: Stamp } => (prov === undefined ? {} : { stamp: stampOf(prov) });
 

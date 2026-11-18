@@ -11,7 +11,7 @@
 //                              them). RPE's own records (the knowledge switch at a turn's start) and the rows a write brings with it
 //                              (a holding a perception gives) are no agent's call, and a job's are its own
 //   unsourced.writes           of those, the ones with no source: the agent's own the facts are read for, every agent's where none is
-//                              named, so a reminder counts only what the agent it reminds can put right
+//                              named, so a reminder counts only what the agent it reminds can put right; a job's agent's, its job's
 //   turn.owes.reply            1 while the run owes the player a reply it has not released; 0 for a run that owes none (Settle now). A
 //                              release is marked on the run the moment its first text reaches RPE (`turns.ts`), so nothing waits for it
 //   turn.owes.record           1 while the run owes the player a reply and has recorded nothing (`turn.recorded` is 0); 0 for a run
@@ -108,7 +108,7 @@ export function turnFacts(store: Store, deps: TurnFactsDeps): FactSource {
     defs: [
       { name: "turns.since.engine.change", counts: "Turns RPE played on this turn's own line, this one once its reply is saved, since the last one that recorded a change in the engine lane; every turn RPE played on it when none has. A turn a migration carried is not counted: the previous build played it." },
       { name: "turn.recorded", counts: "Things the agents' own calls of this turn have recorded so far in any lane: the engine's changes, and the story's and the cast's records; for a continue, since it began. RPE's own records and the rows a write brings with it are none of them; a job's are its own." },
-      { name: "unsourced.writes", counts: "This turn's writes with no source, counted as turn.recorded counts them: those of the agent the facts are read for (a rule due for it), every agent's where none is named." },
+      { name: "unsourced.writes", counts: "This turn's writes with no source, counted as turn.recorded counts them: those of the agent the facts are read for (a rule due for it), every agent's where none is named; for an agent in a job, its own writes in that job." },
       { name: "turn.owes.reply", counts: "1 while this run owes the player a reply it has not released; 0 once it has, and for a run that owes none (a Settle now run)." },
       { name: "turn.owes.record", counts: "1 while this run owes the player a reply and has recorded nothing in any lane (turn.recorded is 0); 0 once it has, and for a run that owes no reply." },
       { name: "turn.last.without.intent", counts: "1 when the last reply released on the turn before this one on its line (for a continue, on the turn it goes on with) went out with no intent record taken before it; 0 otherwise, and where no reply was released on that turn." },
@@ -150,8 +150,13 @@ export function turnFacts(store: Store, deps: TurnFactsDeps): FactSource {
         out["turns.since.engine.change"] = { count: user.playedOf(newest === null ? turns : turns.slice(turns.lastIndexOf(newest) + 1)).size };
       }
       if (names.includes("turn.recorded")) out["turn.recorded"] = { count: recorded() };
-      // A reminder counts what the agent it reminds can put right: its own writes, by its handle.
-      if (names.includes("unsourced.writes")) out["unsourced.writes"] = { count: mine().filter((c) => c.source === null && (agent === undefined || c.handle === agent.id)).length };
+      // A reminder counts what the agent it reminds can put right: its own writes, by its handle. A job's agent's are its job's (on the
+      // turn that started it, or his own where none did), never the turn's: a handle is its run's own, and a turn's agent can have the same.
+      if (names.includes("unsourced.writes")) {
+        const job = agent?.job;
+        const own = job === undefined ? mine() : [...(turn === null ? [] : user.changes(turn)), ...(known ? user.ownerChanges(scope.chat) : [])].filter((c) => c.job === job && byAgent(c) && c.source !== "import");
+        out["unsourced.writes"] = { count: own.filter((c) => c.source === null && (agent === undefined || c.handle === agent.id)).length };
+      }
       if (names.includes("previous.run.stopped")) out["previous.run.stopped"] = { count: turn === null ? 0 : deps.stopped(scope.user, turn) };
       if (names.includes("story.from") || names.includes("story.newest")) {
         const story = await deps.story(scope);

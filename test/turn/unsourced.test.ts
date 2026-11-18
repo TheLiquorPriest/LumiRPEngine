@@ -69,4 +69,21 @@ describe("unsourced.writes", () => {
     // Between the turns, the person's own.
     expect(listed.filter((l) => l.turn === null).map((l) => [l.change.by, l.why])).toEqual([["player", ["unsourced"]]]);
   });
+
+  test("for an agent in a job, counts its own writes in that job, never a turn's agent's that has the same handle", async () => {
+    const b = await openBench();
+    const u = b.t.store.user(USER);
+    const turn = await b.t.begin();
+    const value = { type: MINDS_EVENTS.knowledge, data: { on: true, threshold: 0.8 } };
+    const write = (handle: string, job: string | null) => b.t.writes.run(() => u.record(u.writeTarget({ chat: CHAT, turn: turn.id, job }), [{ lane: KNOWLEDGE_LANE, op: MINDS_EVENTS.knowledge, value, by: "character", handle }]));
+    // The turn's own character agent, `character-1`, writes two with no source; a job started from the turn, whose agent is `character-1` too, one.
+    await write("character-1", null);
+    await write("character-1", null);
+    await write("character-1", "j-1");
+    const facts = turnFacts(b.t.store, { runs: () => [], stopped: () => 0, story: async () => ({ from: "lumiverse", newest: "directive" }), told: () => new Set() });
+    const read = async (agent: AgentRef) => (await facts.read({ user: USER, chat: CHAT, session: "s-2", turn: turn.id }, ["unsourced.writes"], agent))["unsourced.writes"];
+    expect(await read({ id: "character-1", definition: "character", job: "j-1" })).toEqual({ count: 1 });
+    expect(await read({ id: "character-1", definition: "character" })).toEqual({ count: 2 });
+    expect(await read({ id: "character-1", definition: "character", job: "j-2" })).toEqual({ count: 0 });
+  });
 });

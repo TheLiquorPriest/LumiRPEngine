@@ -15,12 +15,12 @@
 
 import type { JsonObject } from "rp-harness/contract";
 import type { Reply } from "../iface/kit";
-import type { Provenance } from "../iface/source";
+import type { Provenance, Stamp } from "../iface/source";
 import { isRecord } from "../shared/json";
 import { type CastCall, type CastClock, type CastSettings, type CastToolSpec, datedAt, readingOr } from "./kit";
 import { dimmedOf, memoriesNow, type MemoryNow, strongestFirst, touches, weightOf } from "./memory";
 import { type CastWrite, dreamItemId, writeCast } from "./record";
-import { CHARACTER_STAMP, PROVENANCE_READS, readSource, sourceLines, stampOn } from "./source";
+import { CHARACTER_STAMP, PROVENANCE_READS, readOwnSource, sourceLines, sourceShown, stampOn } from "./source";
 import { listOf, nearOwn, notAnItem, ownIds, readFields, type Self, selfOr, strangers, unchecked } from "./self";
 import { CAST_LANE, ignoredOf, type ItemRead, type Kind, leftOut, needed, type Reads, refused } from "./update";
 
@@ -49,14 +49,14 @@ const REFLECT_READS: Reads = { reads: ["from", ...MEMORY_FIELDS, "growth", "top"
 const DREAM_READS: Reads = { reads: ["keep", "fade", "connect", ...PROVENANCE_READS], needs: [], newNeeds: [] };
 const CONNECTION_READS: Reads = { reads: ["memories", ...MEMORY_FIELDS, ...PROVENANCE_READS], needs: ["memories", "text", "gist"], newNeeds: [] };
 
-/** Each memory named, as it stands after the call. */
-function after(call: CastCall, reply: Reply, self: Self, ids: readonly string[]): JsonObject[] | null {
+/** Each memory named, as it stands after the call; one the call wrote (`named`: by id, its write) with the source its write was recorded with. */
+function after(call: CastCall, reply: Reply, self: Self, named: ReadonlyMap<string, { stamp?: Stamp } | undefined>): JsonObject[] | null {
   const reading = readingOr(call, reply);
   if (reading === null) return null;
   const now = new Map(memoriesNow(reading.record, self.character.id, self.now, call.settings).map((m) => [m.item.id, m]));
-  return ids.flatMap((id) => {
+  return [...named].flatMap(([id, write]) => {
     const m = now.get(id);
-    return m === undefined ? [] : [memoryView(m, reading.clock)];
+    return m === undefined ? [] : [{ ...memoryView(m, reading.clock), ...(write !== undefined ? { source: sourceShown(write) } : {}) }];
   });
 }
 
@@ -133,7 +133,7 @@ async function recall(args: JsonObject, call: CastCall): Promise<Reply> {
     );
     saidLeft(reply, call.settings, leaving);
   } else reply.line("recall_not_kept", { lane: CAST_LANE, top: value.top === true });
-  const shown = after(call, reply, self, back.map((m) => m.item.id));
+  const shown = after(call, reply, self, new Map(back.map((m) => [m.item.id, undefined])));
   if (shown === null) return reply;
   reply.data({ cue, memories: shown });
   const rest = touched.length - from - back.length;
@@ -172,7 +172,7 @@ async function remember(args: JsonObject, call: CastCall): Promise<Reply> {
     items.push(it);
     const value: JsonObject = {};
     readFields(call, it, given, { id: "name", ...memoryKinds(call.settings), from: "texts", top: "flag", taken: "texts" }, value);
-    readSource(call, it, given);
+    readOwnSource(call, it, given);
     const { id, taken, ...fields } = value;
     if (id !== undefined && strangers(self, "memory", [id]).length > 0) {
       it.fatal.push({ line: "unknown_id", fields: { n, op: "memory", who: self.character.name, part: "memory", id: JSON.stringify(id), near: nearOwn(self, "memory", String(id)) } });
@@ -204,7 +204,7 @@ async function remember(args: JsonObject, call: CastCall): Promise<Reply> {
   for (const it of items) leftOut(reply, it, MEMORY_READS.reads);
   sourceLines(reply, items);
   saidLeft(reply, call.settings, leaving);
-  const shown = after(call, reply, self, rows.slice(0, writes.length).map((r) => r.item));
+  const shown = after(call, reply, self, new Map(rows.slice(0, writes.length).map((r, i) => [r.item, writes[i]])));
   return shown === null ? reply : reply.data({ memories: shown });
 }
 
@@ -226,7 +226,7 @@ async function reflect(args: JsonObject, call: CastCall): Promise<Reply> {
   const it: ItemRead = { n: 1, op: "reflect", fatal: [], unread: [], ignored: ignoredOf(args, REFLECT_READS.reads) };
   const value: JsonObject = {};
   readFields(call, it, args, { from: "texts", ...memoryKinds(call.settings), growth: "text", top: "flag" }, value);
-  readSource(call, it, args);
+  readOwnSource(call, it, args);
   needed(it, REFLECT_READS.needs.filter((f) => value[f] === undefined));
   if (it.fatal.length > 0) return refused(reply, [it], () => REFLECT_READS);
   const self = selfOr(call, reply);
@@ -248,7 +248,7 @@ async function reflect(args: JsonObject, call: CastCall): Promise<Reply> {
   saidLeft(reply, call.settings, leaving);
   leftOut(reply, it, REFLECT_READS.reads);
   sourceLines(reply, [it]);
-  const shown = after(call, reply, self, [written.id]);
+  const shown = after(call, reply, self, new Map([[written.id, stampOn(it.prov)]]));
   return shown === null ? reply : reply.data({ realization: shown[0] ?? null, ...(written.growth !== null ? { proposed_growth: written.growth } : {}) });
 }
 
@@ -270,7 +270,7 @@ async function dream(args: JsonObject, call: CastCall): Promise<Reply> {
   const it: ItemRead = { n: 1, op: "dream", fatal: [], unread: [], ignored: ignoredOf(args, DREAM_READS.reads) };
   const value: JsonObject = {};
   readFields(call, it, args, { keep: "texts", fade: "texts" }, value);
-  readSource(call, it, args);
+  readOwnSource(call, it, args);
   const items: ItemRead[] = [it];
   const connections: { it: ItemRead; fields: JsonObject }[] = [];
   const connect = listOf(args.connect);
@@ -283,7 +283,7 @@ async function dream(args: JsonObject, call: CastCall): Promise<Reply> {
     const c: ItemRead = { n: i + 1, op: "connection", fatal: [], unread: [], ignored: ignoredOf(given, CONNECTION_READS.reads) };
     const fields: JsonObject = {};
     readFields(call, c, given, { memories: "texts", ...memoryKinds(call.settings) }, fields);
-    readSource(call, c, given);
+    readOwnSource(call, c, given);
     needed(c, CONNECTION_READS.needs.filter((f) => fields[f] === undefined));
     items.push(c);
     connections.push({ it: c, fields });
@@ -328,7 +328,7 @@ async function dream(args: JsonObject, call: CastCall): Promise<Reply> {
   // The dream names where it comes from only when it wrote something of its own: what it settled, dimmed or raised.
   sourceLines(reply, dreamWrites > 0 ? items : items.filter((x) => x !== it));
   const made = rows.filter((r) => !byId.has(r.item)).map((r) => r.item);
-  const shown = after(call, reply, self, [...rows.filter((r) => byId.has(r.item)).map((r) => r.item), ...made]);
+  const shown = after(call, reply, self, new Map([...rows.filter((r) => byId.has(r.item)), ...rows.filter((r) => !byId.has(r.item))].map((r) => [r.item, writes[rows.indexOf(r)]])));
   if (shown === null) return reply;
   return reply.data({
     settled: writes.filter((w) => w.value.settled !== undefined).map((w) => w.item),
