@@ -2100,6 +2100,23 @@ export interface OffRpeShown {
   done: boolean;
 }
 
+/** What a change to a chat's own values came to: whether it was recorded, the id its Undo takes (null where nothing was recorded), and the answer in words. */
+export interface OwnAnswer {
+  applied: boolean;
+  undo: string | null;
+  words: string;
+}
+
+/** One change to what a chat plays by on its own: a realism level for everyone, one band's cap for a part of life, what something you add that the world doesn't have becomes, or when checks roll and when a failed try may be tried again (each as far as it is given); or the claims or the check rules given back to what the chat's world says. */
+export type OwnAsk = { kind: "level"; domain: "money" | "gear" | "vehicles" | "castlife" | "relationships" | "space" | "calendar" | "weather" | "sheets"; to: number } | { kind: "cap"; band: "principal" | "supporting" | "background"; domain: "money" | "gear" | "vehicles" | "castlife" | "relationships" | "space" | "calendar" | "weather" | "sheets"; to: number } | { kind: "claims"; mode?: "real" | "ask" | "hold"; capped?: boolean } | { kind: "claims-world" } | { kind: "checks"; when?: "every" | "risky" | "marked" | "never"; riskyAt?: number; trivialAt?: number | null; impossibleAt?: number | null; retry?: "free" | "changed" | "once"; retryAfter?: number } | { kind: "checks-world" };
+
+/** What a chat plays by on its own now: its realism (the preset its levels match, each part of life's level, each band's cap, the floors the world's ruleset sets, and the world's tiers in each band), what something you add that the world doesn't have becomes (and whether the chat set it), and when checks roll and when a failed try may be tried again (and whether the chat set it). */
+export interface OwnValues {
+  realism: { preset: "story" | "grounded" | "simulation" | "custom"; levels: { [key: string]: number }; caps: { [key: string]: { [key: string]: number } }; floors: { [key: string]: number }; tiers: { [key: string]: string[] } };
+  claims: { mode: "real" | "ask" | "hold"; capped: boolean; own: boolean };
+  checks: { when: "every" | "risky" | "marked" | "never"; riskyAt: number; trivialAt: number | null; impossibleAt: number | null; retry: "free" | "changed" | "once"; retryAfter: number; own: boolean };
+}
+
 /** The proof of a page's nonce, keyed by the hash of its page token. */
 export interface PageProof {
   /** HMAC-SHA-256 of the nonce, keyed by the token's hash, as lowercase hex. */
@@ -4847,7 +4864,27 @@ export interface ApiRoutes {
     reply: TurnReply;
     paged: false;
     long: false;
-    joined: true;
+    joined: false;
+  };
+  /** What a chat plays by on its own now: how closely each part of life is worked out, what something you add that the world doesn't have becomes, and when checks roll. */
+  "GET /api/v1/chats/:chat/own-values": {
+    params: { chat: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: OwnValues;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** One change to what a chat plays by on its own, recorded at once as his own edit from now on, over nothing already recorded, and taken back by the Undo its answer names; a refusal is answered in words with nothing changed. */
+  "POST /api/v1/chats/:chat/own-values": {
+    params: { chat: string };
+    query: Record<string, never>;
+    body: OwnAsk;
+    reply: OwnAnswer;
+    paged: false;
+    long: false;
+    joined: false;
   };
   /** A person's usual day at the chat's head: as far as the player character may know them (`view=player`; one he does not know reads as no one), or the GM's, with why each block is there (`view=gm`, at `day` where given). */
   "GET /api/v1/chats/:chat/people/:entity/day": {
@@ -5167,7 +5204,7 @@ export interface ApiRoutes {
     reply: ValueHistoryReply;
     paged: false;
     long: false;
-    joined: false;
+    joined: true;
   };
   /** What no longer applies at the chat's head on the swipes now showing: each change that stopped applying, with its turn and the codes of why, and the earlier reply whose swipe the later turns were not made on. */
   "GET /api/v1/chats/:chat/state/not-applied": {

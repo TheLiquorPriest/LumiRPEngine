@@ -4,6 +4,8 @@ lines:
   not_world: "This chat does not play a world in RPE."
   no_revision: "The revision of the world this chat plays is not in RPE, so nothing can be changed in it."
   bad_marker: "That time control cannot be read: it names a control of the clock (tick, scale, pause, interrupt, speed_through, montage or unit_cap), what it covers and its value."
+  own_below_floor: "This world's rules play {{domain}} at {{floor}} or higher, so this chat cannot be set lower."
+  own_unreadable: "That cannot be read as a change to what this chat plays by."
   unknown_action: "unknown action {{action}}"
   needs_someone: "{{action}}: it needs someone"
   needs_place: "{{action}}: it needs a place"

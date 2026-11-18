@@ -4,6 +4,7 @@
 import type { Area } from "../app";
 import { gmRoutes } from "./gm-read";
 import { mapWalkRoutes } from "./map-walk";
+import { OwnService, ownRoutes } from "./own";
 import { playRoutes } from "./routes";
 import { thingsRoutes } from "./things";
 import { PlayService, type PlayDeps } from "./service";
@@ -22,6 +23,7 @@ export function playArea(takes: () => PlayTakes): Area {
     mounted: (at) => {
       const taken = takes();
       at.routes.add("play", playRoutes(new PlayService({ writes: at.writes, live: at.live, log: at.log, db: at.db, ...taken })));
+      at.routes.add("play-own", ownRoutes(new OwnService({ store: taken.store, writes: at.writes, live: at.live, guidance: taken.guidance })));
       at.routes.add("play-things", thingsRoutes(taken.store));
       at.routes.add("play-map-walk", mapWalkRoutes(taken.store));
       at.routes.add("play-gm", gmRoutes(taken));

@@ -9,6 +9,7 @@
 // another swipe lists the later changes that no longer apply. Its address is a level and a value
 // (`at: [level, key]`), so a link from a panel lands there.
 
+import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { DueReply, LevelNode, TurnRow, WorldReply } from "../../../shared/api";
 import { useApp } from "../../app";
@@ -22,6 +23,7 @@ import { useUiSetting } from "../../ui-settings";
 import type { NotAppliedReply } from "../../../shared/api";
 import { counted, when } from "../../words";
 import { readTurns } from "../turns";
+import { OwnValuesSection } from "./own";
 import { NodeTree, type WorldSlots } from "./parts";
 import { readDue, readNotApplied, readWorld, type ValuesShown, WORLD_START, type WorldQuery } from "./read";
 import { DueItem, NodeTools, RowTools } from "./tools";
@@ -92,6 +94,8 @@ export interface WorldViewProps {
   onQuery(next: WorldQuery): void;
   /** What stands beside the tree's values and levels, and above it. */
   slots?: WorldSlots;
+  /** What this chat plays by on its own, which stands above the tree and is not behind the gate. */
+  own?: ComponentChildren;
   notApplied?: NotAppliedReply | null;
   due?: DueReply | null;
 }
@@ -104,6 +108,7 @@ export function WorldView(props: WorldViewProps) {
   return (
     <div class="lre-stack rpe-page" data-page="world">
       <PageHeader title="World" subtitle="This chat's world as one tree: any level, to any depth." />
+      {props.own}
       <Gated open={props.gateOpen} onOpen={props.onOpenGate} onClose={props.onCloseGate} why={GATE_WHY}>
         <NotApplied read={props.notApplied ?? null} />
         <div class="lre-stack rpe-controls">
@@ -245,6 +250,7 @@ export function WorldPage(props: { chat: string; at?: readonly string[] }) {
       onOpenGate={() => app.gate.open(chat)}
       onCloseGate={() => app.gate.close(chat)}
       slots={slots}
+      own={<OwnValuesSection chat={chat} />}
       notApplied={notApplied.value}
       due={due.value}
       onQuery={(next) => {

@@ -1,57 +1,34 @@
-// How checks are decided (DESIGN §11), one form for Build's Ruleset part, Settings → Checks and GM →
-// This chat → Checks: a preset (Narrative-first, Balanced, Crunchy, Custom) told in plain lines, and
-// under Custom every value with a plain label and a short help. Shares go in as whole percentages;
-// changing any value makes the policy Custom, as a named preset with values of its own reads.
+// How checks are decided (DESIGN §11), one set of controls for Build's Ruleset part and the World page's For this chat:
+// when a check rolls (every one, only the risky ones, only where marked, never), the lines under which a sure thing passes and a
+// hopeless try fails without a roll, and what a failed try needs before it may be tried again. Shares go in as whole percentages.
+// These are the values RPE's action resolver reads. How a described approach counts and who settles a check (the roll, close calls,
+// the story) were the previous build's judge's: nothing in RPE rates an approach or judges an outcome, so they are kept in the
+// world's file and named once at the foot of Build's sheet (`KeptUnused`), never drawn.
 
 import { ADJUDICATION_PRESET_LABEL, presetAdjudication } from "../shared/adjudication";
-import type { AdjudicationDef, AdjudicationPresetId, CheckAuthority, CheckTiming, DescriptionWeight, RetryRule } from "../shared/world";
+import type { AdjudicationDef, AdjudicationPresetId, CheckTiming, RetryRule } from "../shared/world";
 import { HostSwitch, NumberStepper, Seg } from "./components";
-
-const PRESETS = (["narrative", "balanced", "crunchy", "custom"] as const).map((value) => ({ value, label: ADJUDICATION_PRESET_LABEL[value] }));
+import { KeptUnused } from "./build/form-kit";
 
 const TIMING: Record<CheckTiming, string> = { every: "Every check", risky: "Only risky ones", marked: "Only where marked", never: "Never" };
-const WEIGHT: Record<DescriptionWeight, string> = { none: "Doesn't count", bonus: "Adds a bonus", advantage: "Grants advantage", dc: "Lowers the DC" };
-const AUTHORITY: Record<CheckAuthority, string> = { mechanics: "The roll", hybrid: "The roll, with close calls", narrative: "The story" };
 const RETRY: Record<RetryRule, string> = { free: "Any time", changed: "After a change", once: "Once per scene" };
+
+/** What each way of starting from a named policy is called; the narrative-first preset leaned on the judge, so it is offered only where a world already has it. */
+const START_FROM: readonly Exclude<AdjudicationPresetId, "narrative">[] = ["balanced", "crunchy", "custom"];
 
 const percent = (share: number): number => Math.round(share * 100);
 
-/** The policy in plain lines, as a player reads it: the sure and hopeless tries first, then when the rest roll. */
-export function policyLines(p: AdjudicationDef): string[] {
-  const thresholds = p.trivialAt !== null || p.impossibleAt !== null;
-  const timing: Record<CheckTiming, string> = {
-    every: thresholds ? "Every other check rolls." : "Every check rolls.",
-    risky: `Only risky checks are decided: under ${percent(p.riskyAt)}% to succeed. Likelier ones just succeed.`,
-    marked: "Only checks of marked actions, places and quests are decided; the rest just succeed.",
-    never: "No check is decided; actions just succeed.",
-  };
-  const weight: Record<DescriptionWeight, string> = {
-    none: p.authority === "narrative" ? "" : "How you describe your approach doesn't change a roll.",
-    bonus: `A well-described approach adds up to +${p.description.max} to the roll.`,
-    advantage: `An approach rated ${p.description.advantageAt} of ${p.description.max} or better rolls with advantage.`,
-    dc: `A well-described approach lowers the DC by up to ${p.description.max}.`,
-  };
-  const authority: Record<CheckAuthority, string> = {
-    mechanics: "The roll settles it.",
-    hybrid: `The roll settles it; within ${p.closeBy} of another result, the narrator may add a cost or partial progress.`,
-    narrative: "The story decides, with the odds as guidance: a helper judges your approach and picks the outcome.",
-  };
-  const retry: Record<RetryRule, string> = {
-    free: "Retry a failed check whenever you like.",
-    changed: `A failed try stands until something changes: another way, better odds, a new place, a new round of a fight (or its end), or ${p.retryAfter} minutes.`,
-    once: "A failed try stands until the scene changes.",
-  };
-  return [
-    p.trivialAt === null ? "" : `Sure things (${percent(p.trivialAt)}% or more) pass without a roll.`,
-    p.impossibleAt === null ? "" : `Hopeless tries (${percent(p.impossibleAt)}% or less) fail without a roll.`,
-    timing[p.checks],
-    weight[p.description.weight],
-    authority[p.authority],
-    retry[p.retry],
-  ].filter((line) => line !== "");
+/** The values of a policy that RPE reads: when checks roll, the sure and hopeless lines, and what a retry takes. */
+export interface CheckRules {
+  checks: CheckTiming;
+  riskyAt: number;
+  trivialAt: number | null;
+  impossibleAt: number | null;
+  retry: RetryRule;
+  retryAfter: number;
 }
 
-/** A labelled select over a closed set of values, with a short help under it; the inferred-checks control reuses it. */
+/** A labelled select over a closed set of values, with a short help under it. */
 export function Choice<T extends string>(props: { label: string; help: string; value: T; labels: Record<T, string>; disabled?: boolean; onChange(value: T): void }) {
   const values = Object.keys(props.labels) as T[];
   return (
@@ -80,38 +57,40 @@ function Threshold(props: { label: string; at: string; help: string; value: numb
   );
 }
 
+/** The controls of the values RPE reads; each change comes up as the part it changed. */
+export function CheckRulesForm(props: { value: CheckRules; disabled?: boolean; onChange(patch: Partial<CheckRules>): void }) {
+  const p = props.value;
+  return (
+    <div class="lre-stack" data-lre-check-rules>
+      <Choice label="When checks roll" help="Risky: only when the chance of success is below the line. Marked: only for actions, places and quests marked in Build. A check that isn't rolled succeeds." value={p.checks} labels={TIMING} disabled={props.disabled} onChange={(checks) => props.onChange({ checks })} />
+      {p.checks === "risky" ? <NumberStepper label="Risky below (% to succeed)" value={percent(p.riskyAt)} min={0} max={100} step={1} integer disabled={props.disabled} onChange={(v) => props.onChange({ riskyAt: v / 100 })} /> : null}
+      <Threshold label="Sure things pass without a roll" at="From (% to succeed)" help="A check this likely just succeeds." value={p.trivialAt} fallback={0.95} disabled={props.disabled} onChange={(trivialAt) => props.onChange({ trivialAt })} />
+      <Threshold label="Hopeless tries fail without a roll" at="At or below (% to succeed)" help="A check this unlikely just fails: too hard to try." value={p.impossibleAt} fallback={0.05} disabled={props.disabled} onChange={(impossibleAt) => props.onChange({ impossibleAt })} />
+      <Choice label="Retrying a failed check" help="After a change: the same try fails again until time passes, a fight moves to a new round or ends, the odds change, you try another way or you go somewhere else. Once per scene: until you leave and come back." value={p.retry} labels={RETRY} disabled={props.disabled} onChange={(retry) => props.onChange({ retry })} />
+      {p.retry === "changed" ? <NumberStepper label="Time that counts as a change (minutes)" value={p.retryAfter} min={0} max={10080} step={5} integer disabled={props.disabled} onChange={(retryAfter) => props.onChange({ retryAfter })} /> : null}
+    </div>
+  );
+}
+
+/** What a world's policy holds that RPE does not read, by the key `KeptUnused` names: the judge's approach and the one who settles a check, unset where the policy plays plainly. */
+function keptJudge(p: AdjudicationDef): Record<string, unknown> {
+  return { description: p.description.weight !== "none" ? p.description : undefined, authority: p.authority !== "mechanics" ? p.authority : undefined };
+}
+
+const KEPT_JUDGE = [
+  { key: "description", label: "How a described approach counts: it adds a bonus, grants advantage or lowers the DC" },
+  { key: "authority", label: "Who settles a check: the roll with close calls, or the story" },
+] as const;
+
+/** Build's form: the controls, and a way to start from a named policy; a change to any value makes it Custom. */
 export function AdjudicationForm(props: { value: AdjudicationDef; disabled?: boolean; onChange(next: AdjudicationDef): void }) {
   const p = props.value;
-  const set = (patch: Partial<AdjudicationDef>) => props.onChange({ ...p, ...patch, preset: "custom" });
-  const describe = (patch: Partial<AdjudicationDef["description"]>) => {
-    const description = { ...p.description, ...patch };
-    set({ description: { ...description, advantageAt: Math.min(description.advantageAt, description.max) } });
-  };
   return (
     <div class="lre-stack" data-lre-adjudication-form>
-      <Seg<AdjudicationPresetId> label="Adjudication preset" value={p.preset} options={PRESETS} disabled={props.disabled} onChange={(preset) => props.onChange(preset === "custom" ? { ...p, preset } : presetAdjudication(preset))} />
-      {p.preset !== "custom" ? (
-        <ul class="lre-gm-lines" data-lre-policy-lines>
-          {policyLines(p).map((line) => (
-            <li key={line}>{line}</li>
-          ))}
-        </ul>
-      ) : (
-        <>
-          <p class="lre-gm-note">Any change makes it Custom. Chances are the exact odds the palette shows.</p>
-          <Choice label="When checks roll" help="Risky: only when the chance of success is below the line. Marked: only for actions, places and quests marked in Build. A check that isn't rolled succeeds." value={p.checks} labels={TIMING} disabled={props.disabled} onChange={(checks) => set({ checks })} />
-          {p.checks === "risky" ? <NumberStepper label="Risky below (% to succeed)" value={percent(p.riskyAt)} min={0} max={100} step={1} integer disabled={props.disabled} onChange={(v) => set({ riskyAt: v / 100 })} /> : null}
-          <Threshold label="Sure things pass without a roll" at="From (% to succeed)" help="A check this likely just succeeds." value={p.trivialAt} fallback={0.95} disabled={props.disabled} onChange={(trivialAt) => set({ trivialAt })} />
-          <Threshold label="Hopeless tries fail without a roll" at="At or below (% to succeed)" help="A check this unlikely just fails: too hard to try." value={p.impossibleAt} fallback={0.05} disabled={props.disabled} onChange={(impossibleAt) => set({ impossibleAt })} />
-          <Choice label="How the player's approach counts" help="A helper rates how well the player describes their approach, from 0 up to the most it counts. It shifts a check that rolls." value={p.description.weight} labels={WEIGHT} disabled={props.disabled} onChange={(weight) => describe({ weight })} />
-          {p.description.weight !== "none" ? <NumberStepper label="The most it counts (the rating's top)" value={p.description.max} min={1} max={10} step={1} integer disabled={props.disabled} onChange={(max) => describe({ max })} /> : null}
-          {p.description.weight === "advantage" ? <NumberStepper label="Advantage from a rating of" value={p.description.advantageAt} min={1} max={p.description.max} step={1} integer disabled={props.disabled} onChange={(advantageAt) => describe({ advantageAt })} /> : null}
-          <Choice label="Who settles a check" help="With close calls, a roll near another result lets the narrator add a cost or partial progress. The story: a helper picks the outcome, the odds as guidance; without it, the check succeeds." value={p.authority} labels={AUTHORITY} disabled={props.disabled} onChange={(authority) => set({ authority })} />
-          {p.authority === "hybrid" ? <NumberStepper label="A close call is within (points)" value={p.closeBy} min={0} max={20} step={1} integer disabled={props.disabled} onChange={(closeBy) => set({ closeBy })} /> : null}
-          <Choice label="Retrying a failed check" help="After a change: the same try fails again until time passes, a fight moves to a new round or ends, the odds change, the player tries another way or goes somewhere else. Once per scene: until they leave and come back." value={p.retry} labels={RETRY} disabled={props.disabled} onChange={(retry) => set({ retry })} />
-          {p.retry === "changed" ? <NumberStepper label="Time that counts as a change (minutes)" value={p.retryAfter} min={0} max={10080} step={5} integer disabled={props.disabled} onChange={(retryAfter) => set({ retryAfter })} /> : null}
-        </>
-      )}
+      <Seg<AdjudicationPresetId> label="Start from" value={p.preset} options={START_FROM.map((value) => ({ value, label: ADJUDICATION_PRESET_LABEL[value] }))} disabled={props.disabled} onChange={(preset) => props.onChange(preset === "custom" ? { ...p, preset } : presetAdjudication(preset))} />
+      <p class="lre-gm-note">Any change makes it Custom. Chances are the exact odds the palette shows.</p>
+      <CheckRulesForm value={p} disabled={props.disabled} onChange={(patch) => props.onChange({ ...p, ...patch, preset: "custom" })} />
+      <KeptUnused fields={KEPT_JUDGE} held={keptJudge(p)} />
     </div>
   );
 }

@@ -747,7 +747,7 @@ export function RulesetEditor() {
               <HostSwitch label="This world sets how its checks are decided" checked={value.adjudication !== undefined} disabled={busy} onChange={(on) => update("adjudication", on ? (presetAdjudication("crunchy") as unknown as JsonObject) : undefined)} />
               {value.adjudication === undefined ? (
                 <p class="lre-small lre-muted" style={{ margin: 0 }}>
-                  Not set: every check rolls and the roll settles it, unless a player's own settings decide otherwise for their new chats.
+                  Not set: every check rolls and the roll settles it. A chat can change that for itself on its World page.
                 </p>
               ) : (
                 <AdjudicationForm value={adjudication ?? presetAdjudication("crunchy")} disabled={busy} onChange={(next) => update("adjudication", next as unknown as JsonObject)} />

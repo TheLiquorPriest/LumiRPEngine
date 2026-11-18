@@ -175,7 +175,6 @@ The newest turn on the chat's path in one read, as the turn's own route gives it
 | Body | none |
 | Reply | [`TurnReply`](#turnreply) |
 | The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
-| Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
 ### `GET /api/v1/chats/:chat/prompt`
 
@@ -544,6 +543,34 @@ Keep in the world: the draft patch that copies the picked places, then things, i
 | Reply | `JsonValue` |
 | The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
+### `GET /api/v1/chats/:chat/own-values`
+
+What a chat plays by on its own now: how closely each part of life is worked out, what something you add that the world doesn't have becomes, and when checks roll.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat` |
+| Query | none |
+| Body | none |
+| Reply | [`OwnValues`](#ownvalues) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
+
+### `POST /api/v1/chats/:chat/own-values`
+
+One change to what a chat plays by on its own, recorded at once as his own edit from now on, over nothing already recorded, and taken back by the Undo its answer names; a refusal is answered in words with nothing changed.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
+| Params | `chat` |
+| Query | none |
+| Body | [`OwnAsk`](#ownask) |
+| Reply | [`OwnAnswer`](#ownanswer) |
+| The chat | taken on first, as the route keeps or changes something of it: RPE's record of the chat and its folders are made, by what Lumiverse says of it; a chat Lumiverse does not have is refused with 404 |
+
 ### `GET /api/v1/chats/:chat/people/:entity/day`
 
 A person's usual day at the chat's head: as far as the player character may know them (`view=player`; one he does not know reads as no one), or the GM's, with why each block is there (`view=gm`, at `day` where given).
@@ -671,6 +698,7 @@ The history of one value by turn: every change along the chat's path, at its hea
 | Body | none |
 | Reply | [`ValueHistoryReply`](#valuehistoryreply) |
 | The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
+| Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
 ### `GET /api/v1/chats/:chat/state/not-applied`
 
@@ -7059,6 +7087,38 @@ export interface OffRpeShown {
   played: boolean;
   /** Whether it is done: its line is struck. */
   done: boolean;
+}
+```
+
+### `OwnAnswer`
+
+What a change to a chat's own values came to: whether it was recorded, the id its Undo takes (null where nothing was recorded), and the answer in words.
+
+```ts
+export interface OwnAnswer {
+  applied: boolean;
+  undo: string | null;
+  words: string;
+}
+```
+
+### `OwnAsk`
+
+One change to what a chat plays by on its own: a realism level for everyone, one band's cap for a part of life, what something you add that the world doesn't have becomes, or when checks roll and when a failed try may be tried again (each as far as it is given); or the claims or the check rules given back to what the chat's world says.
+
+```ts
+export type OwnAsk = { kind: "level"; domain: "money" | "gear" | "vehicles" | "castlife" | "relationships" | "space" | "calendar" | "weather" | "sheets"; to: number } | { kind: "cap"; band: "principal" | "supporting" | "background"; domain: "money" | "gear" | "vehicles" | "castlife" | "relationships" | "space" | "calendar" | "weather" | "sheets"; to: number } | { kind: "claims"; mode?: "real" | "ask" | "hold"; capped?: boolean } | { kind: "claims-world" } | { kind: "checks"; when?: "every" | "risky" | "marked" | "never"; riskyAt?: number; trivialAt?: number | null; impossibleAt?: number | null; retry?: "free" | "changed" | "once"; retryAfter?: number } | { kind: "checks-world" };
+```
+
+### `OwnValues`
+
+What a chat plays by on its own now: its realism (the preset its levels match, each part of life's level, each band's cap, the floors the world's ruleset sets, and the world's tiers in each band), what something you add that the world doesn't have becomes (and whether the chat set it), and when checks roll and when a failed try may be tried again (and whether the chat set it).
+
+```ts
+export interface OwnValues {
+  realism: { preset: "story" | "grounded" | "simulation" | "custom"; levels: { [key: string]: number }; caps: { [key: string]: { [key: string]: number } }; floors: { [key: string]: number }; tiers: { [key: string]: string[] } };
+  claims: { mode: "real" | "ask" | "hold"; capped: boolean; own: boolean };
+  checks: { when: "every" | "risky" | "marked" | "never"; riskyAt: number; trivialAt: number | null; impossibleAt: number | null; retry: "free" | "changed" | "once"; retryAfter: number; own: boolean };
 }
 ```
 

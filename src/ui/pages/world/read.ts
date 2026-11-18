@@ -1,7 +1,8 @@
 // What the World page reads and sends: the tree at a level, a value's history, a level's typed systems,
-// what a turn's time brought due, what no longer applies on another swipe, and the owner's own edit.
+// what a turn's time brought due, what no longer applies on another swipe, what the chat plays by on its own,
+// and the owner's own edit.
 
-import type { ApiRoutes, DueReply, EditOpAsk, NotAppliedReply, SystemsReply, TapReply, TurnId, ValueChangeShown, WorldReply } from "../../../shared/api";
+import type { ApiRoutes, DueReply, EditOpAsk, NotAppliedReply, OwnAnswer, OwnAsk, OwnValues, SystemsReply, TapReply, TurnId, ValueChangeShown, WorldReply } from "../../../shared/api";
 import { replyOf, type RpeClient } from "../../client";
 import type { PageOf } from "../../reading";
 import { errorWords } from "../../words";
@@ -69,4 +70,14 @@ export function sendEdit(client: Pick<RpeClient, "call">, chat: string, op: Edit
 /** Takes an edit back, by the id its answer gave. */
 export function sendUndo(client: Pick<RpeClient, "call">, chat: string, undo: string): Promise<TapReply> {
   return client.call("POST /api/v1/chats/:chat/edits/:edit/undo", { chat, edit: undo }).then(replyOf);
+}
+
+/** What this chat plays by on its own now: its realism, what you add that the world doesn't have, and when checks roll. */
+export function readOwn(client: Pick<RpeClient, "call">, chat: string): Promise<OwnValues> {
+  return client.call("GET /api/v1/chats/:chat/own-values", { chat }).then(replyOf);
+}
+
+/** One change to what this chat plays by on its own: recorded as the owner's own edit, from now on, with the Undo its answer names. */
+export function sendOwn(client: Pick<RpeClient, "call">, chat: string, ask: OwnAsk): Promise<OwnAnswer> {
+  return client.call("POST /api/v1/chats/:chat/own-values", { chat }, { body: ask }).then(replyOf);
 }
