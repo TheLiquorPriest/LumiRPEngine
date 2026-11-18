@@ -2,9 +2,8 @@
 // tracks knowledge, what the narrator knows, which engine plays it) as they stood when its engine run
 // started. From that run to its reply's commit, every read of them in the turn's own work is the
 // frame's, so a change made meanwhile, in Settings or GM → This chat, applies from the chat's next
-// turn and never stops this one. The frame rides the turn's asynchronous work: the ledger enters it
-// for the engine run, the guard's write of the turn's sections and the reply's read (`LedgerService`),
-// and everything those start inherits it; the chat's queue runs every other operation outside any.
+// turn and never stops this one. The frame rides the turn's asynchronous work (`inTurn`), and
+// everything that work starts inherits it; the chat's queue runs every other operation outside any.
 // `SettingsStore` and `ChatKnowledge` answer from it for its user and chat; a view, built from the
 // chat as it stands, reads outside it.
 

@@ -674,7 +674,7 @@ export interface Rec {
   finalParts?: Record<string, string>;
   /** A harness turn's own part (`RecHarness`): outside every hash but the tombstone's, written at the turn's close and whenever LumiAH writes its record for the swipe (`LedgerCore.recordHarness`). */
   harness?: RecHarness;
-  /** The story record's part (`RecStory`): outside every hash but the tombstone's, written as its turn commits and by the jobs tied to it (`LedgerService.recordStory`). */
+  /** The story record's part (`RecStory`): outside every hash but the tombstone's, written as its turn commits and by the jobs tied to it. */
   story?: RecStory;
 }
 

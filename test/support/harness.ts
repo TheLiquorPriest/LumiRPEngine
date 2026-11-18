@@ -3,15 +3,12 @@
 import { ChatSnapshots, LedgerService, toChain } from "../../src/migrate/today/ledger-io";
 import { defaultSettings } from "../../src/migrate/today/settings-store";
 import { startMarkersFrom } from "../../src/migrate/today/start-markers";
-import type { TurnFrame } from "../../src/migrate/today/turn-frame";
 import type { ChatId } from "../../src/shared/ids";
 import { hasOwn, isRecord } from "../../src/shared/json";
 import type { ChatRun, HeldWrite } from "../../src/shared/ledger";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
 import type { EditOp } from "../../src/shared/edit-ops";
-import { SECRET_MARK_WORDING } from "../../src/shared/secret-marks";
 import type { UserSettings } from "../../src/migrate/today/user-settings";
-import { NARRATOR_DEFAULTS } from "../../src/shared/narrator-view";
 import type { WorldDoc } from "../../src/shared/world";
 import type { ChainMessage, FoldOutput } from "../../src/engine/ledger/chain";
 import { LedgerFold } from "../../src/engine/ledger/fold";
@@ -58,21 +55,9 @@ export class Harness {
   private seeds = 0;
   /** Makes the next swipe or regenerate a Re-narrate (P3), as the swipe-option chip does. */
   renarrateNext = false;
-  /**
-   * Called once, from the next engine run's pre phase, while that run holds the chat's queue: what
-   * it does happens while the engine runs a turn before its reply (DESIGN §4.3 P2). A write it makes
-   * waits on that queue, so it must not be awaited there.
-   */
-  duringRun: ((chatId: ChatId) => Promise<void> | void) | null = null;
   readonly plays: Plays = { queued: 0, check: 0, failure: 0, interruption: 0 };
-  /** Each engine run that failed, as `step: reason` (a failed run generates nothing). */
-  readonly failures: string[] = [];
   private readonly model: TurnModel;
   private readonly settings: UserSettings;
-  /** What a turn runs on (`TurnHooks.frame`): the user's settings, and a chat with no choices of its own. */
-  private frameOf(chatId: ChatId): TurnFrame {
-    return { userId: this.host.userId, chatId, settings: this.settings, revision: 0, chat: {} };
-  }
 
   constructor(seedMode: WorldDoc["seedMode"] = "fresh", options: HarnessOptions = {}) {
     // Minds' events ride in the generated turns (DESIGN §24): their reducers fold in both folds.
@@ -123,27 +108,6 @@ export class Harness {
     );
     const noop = async (): Promise<void> => undefined;
     this.service.hooks = {
-      beforePlan: async ({ chatId }) => {
-        const during = this.duringRun;
-        this.duringRun = null;
-        await during?.(chatId);
-        return undefined;
-      },
-      afterPlan: async () => undefined,
-      // No sections here: the engine run plans, and its reply starts again (DESIGN §5.1).
-      deliver: async () => ({ bookId: "", fills: new Map(), parts: [], placed: "", wording: SECRET_MARK_WORDING, view: { ...NARRATOR_DEFAULTS } }),
-      fill: async () => "filled" as const,
-      clear: noop,
-      vacate: noop,
-      adopted: noop,
-      failed: async ({ step, reason }) => {
-        this.failures.push(`${step}: ${reason}`);
-      },
-      worldOf: async (chatId) => {
-        const raw = (await this.host.chats.chatMetadata(chatId, this.host.userId))[LEDGER_NAMESPACE];
-        return isRecord(raw) && typeof raw.worldId === "string" ? raw.worldId : null;
-      },
-      frame: async (chatId) => this.frameOf(chatId),
       beforeCommit: noop,
       afterCommit: noop,
       readStopped: noop,
@@ -157,7 +121,6 @@ export class Harness {
     };
     this.service.attach();
     this.host.idle = () => this.service.idle();
-    this.host.claimRestart = async (restart) => this.service.claimRestart(restart.chatId, this.host.userId, restart.session, restart.turn);
   }
 
   async newChat(greeting = "Morning, Sam."): Promise<ChatId> {
