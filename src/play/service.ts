@@ -334,7 +334,7 @@ export class PlayService {
     try {
       const { done, left } = await this.undone(user, chat, edit);
       if (done) stateChanged(this.deps.live, chat);
-      return { applied: done, reports: [], undo: null, words: left.length > 0 ? await this.leftWords(left) : "" };
+      return { applied: done, reports: [], undo: null, words: left.length > 0 ? await this.leftWords(left, done) : "" };
     } catch (error) {
       if (!(error instanceof Refused)) throw error;
       return { applied: false, reports: [], undo: null, words: await this.refusalWords(error) };
@@ -519,11 +519,22 @@ export class PlayService {
       return played(edited([{ op: "fix_item", change }]));
     }
     if ("things" in r) {
-      // Belongings' changes to his things: all or none, one unit with one Undo, as many as the setting `taps.maxThingsPerFix` allows.
+      // Belongings' changes to his things: all or none, as many as the setting `taps.maxThingsPerFix` allows, with one Undo. Each thing's change
+      // is resolved on the state the one before left and is a unit of its own, so an Undo that cannot take one back (something changed it
+      // since) still takes back the others and says which stayed.
       const most = settings.taps.thingsMost;
       const changes = Array.isArray(r.things) ? r.things.map(parseItemFix) : [];
       if (changes.length === 0 || changes.length > most || changes.some((c) => c === null) || typeof r.label !== "string") throw new Refused("bad_request", { line: "things_count", fields: { most } });
-      return played(edited((changes as ItemFix[]).map((change): FixOp => ({ op: "fix_item", change }))));
+      const w = new Working(registry, world, state);
+      const events: LedgerEvent[] = [];
+      for (const [i, change] of (changes as ItemFix[]).entries()) {
+        const made = edited([{ op: "fix_item", change }], w.state);
+        const bad = made.map((e) => w.apply(e)).find((rejected) => rejected !== null);
+        if (bad) throw new Refused("validation", { words: bad.reason });
+        const group = `thing:${hashParts(seed, String(i)).slice(0, 12)}`;
+        events.push(...made.map((e): LedgerEvent => ({ ...e, group })));
+      }
+      return played(events);
     }
     // A field's ✎. A place fixed so is a real move, through the one move path, and leaves the activity behind; only a place the
     // player character may know, for someone it can see: anything else reads as no place at all, as the ✎ never offered it.
@@ -609,7 +620,7 @@ export class PlayService {
    * Records the reversal of every change of an edit (his own, and what the world's defaults gave with it), each unit the last first,
    * in one write. What is taken back is taken back; a part a later change has written since, and a part the store keeps no reverse
    * for, are left as they are and said by name (`left`), never the reason to refuse the rest. Only when nothing at all can be
-   * taken back is nothing recorded and the refusal says why. A reversal the world does not take is a fault, and the write fails with
+   * taken back is nothing recorded, and the answer says what stayed and why. A reversal the world does not take is a fault, and the write fails with
    * it, taking back what the units before recorded. Whether anything was recorded: nothing, for an edit undone already. It finds the
    * edit among his own changes of the chat, which keep their place whatever turns left the path since, and waits for no run.
    */
@@ -628,21 +639,31 @@ export class PlayService {
       for (const c of all) if (!units.has(unitOf(c))) units.set(unitOf(c), c.id);
       const { changes, left } = s.undo([...units.values()].reverse(), PLAYER);
       if (changes.some((c) => !c.applied)) throw new Refused("conflict", { line: "undo_not_applied" });
-      if (changes.length === 0 && left.length > 0) {
-        const parts = left.map((l) => String(l.values?.op ?? ""));
-        throw new Refused("conflict", left.some((l) => l.code === "changed_since") ? { line: "changed_since", codes: { parts } } : { line: "no_undo_for", codes: { parts } });
-      }
-      return { done: changes.length > 0, left };
+      // What stayed is named by what it was done to, as the world calls it now.
+      const entities = s.headState(chat).state.world.entities;
+      const named = left.map((l): Report => {
+        const value = own.find((c) => c.id === l.values?.change)?.value;
+        const data = isRecord(value) && isRecord(value.data) ? value.data : {};
+        const about = isRecord(value) ? [value.entity, value.from, data.entity] : [];
+        const id = about.find((x): x is string => typeof x === "string");
+        const name = id === undefined ? undefined : entities[id]?.name;
+        return name === undefined ? l : { ...l, values: { ...l.values, on: name } };
+      });
+      return { done: changes.length > 0, left: named };
     }, "undoing an edit of yours");
   }
 
-  /** What an Undo that took back some and left some says: that it did not take back all, and which parts stayed and why (each in this area's words). */
-  private async leftWords(left: readonly Report[]): Promise<string> {
-    const named = (code: string): string[] => left.filter((l) => l.code === code).map((l) => String(l.values?.op ?? ""));
-    const changed = named("changed_since");
-    const kept = named("not_reversible");
-    const lines = [await this.words("undone_some"), ...(changed.length > 0 ? [await this.words("undone_left_changed", {}, { parts: changed })] : []), ...(kept.length > 0 ? [await this.words("undone_left_kept", {}, { parts: kept })] : [])];
-    return lines.filter((line) => line !== "").join(SENTENCES);
+  /**
+   * What an Undo that left something says: whether it took back none or took back some, and each part that stayed, by its kind and what it
+   * was done to, with why (each in this area's words).
+   */
+  private async leftWords(left: readonly Report[], took: boolean): Promise<string> {
+    const lines = [await this.words(took ? "undone_some" : "undone_none")];
+    for (const l of left) {
+      const said = await this.words(l.code === "changed_since" ? "undone_left_changed" : "undone_left_kept", typeof l.values?.on === "string" ? { on: l.values.on } : {}, { parts: [String(l.values?.op ?? "")] });
+      lines.push(said.charAt(0).toUpperCase() + said.slice(1));
+    }
+    return [...new Set(lines)].filter((line) => line !== "").join(SENTENCES);
   }
 
   private async refusalWords(error: Refused): Promise<string> {
