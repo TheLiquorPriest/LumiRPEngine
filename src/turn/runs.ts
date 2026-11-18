@@ -7,7 +7,7 @@
 // own, kept beside the earlier ones, and the turn as the pages show it is its latest run.
 
 import type { Database } from "bun:sqlite";
-import type { LimitHit, ReplyError, RunStatus, TraceRecord, TurnKind, Usage } from "rp-harness/contract";
+import type { LimitHit, ReplyError, RunOutcome, RunStatus, TraceRecord, TurnKind, Usage } from "rp-harness/contract";
 import type { Writes } from "./kv";
 
 /** Where a run stands: going on, or how it ended. */
@@ -51,6 +51,16 @@ export interface FolderWrite {
  * reply asked for whole, in milliseconds from the request's arrival.
  */
 export type StoppedBy = { limit: LimitHit } | { hold: number };
+
+/**
+ * Why a run ended, as its record keeps it once the harness tells its end: the error the outcome gives, else the one the run had, else,
+ * for a run that reached a limit after its reply went out (its reply sink was given no error), that limit, so the record names it.
+ */
+export function endedError(outcome: Pick<RunOutcome, "status" | "limit" | "error">, had: ReplyError | null): ReplyError | null {
+  if (outcome.error !== undefined) return outcome.error;
+  if (had !== null) return had;
+  return outcome.status === "limit" && outcome.limit !== undefined ? { code: "limit", limit: outcome.limit } : null;
+}
 
 /**
  * What a run's lead was not given, as facts, each told in its briefing by a line of the notices part (plan §4.2 "A prompt with

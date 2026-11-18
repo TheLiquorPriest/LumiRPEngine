@@ -39,7 +39,7 @@ import { storyAt } from "../story/path";
 import { StoryRecord } from "../story/record";
 import type { TreeNotes, TreeSuggestions } from "../tree";
 import type { Writes } from "./kv";
-import type { Runs } from "./runs";
+import { endedError, type Runs } from "./runs";
 import { turnSettings } from "./settings";
 import { namedIn, stageAt, stageCues } from "./stage";
 import { guidanceTexts } from "./texts";
@@ -454,7 +454,7 @@ export function turnEvents(deps: EventsDeps): TurnEvents {
         run.status = outcome.status;
         run.ended = deps.now();
         run.usage = outcome.usage;
-        if (outcome.error !== undefined) run.error = outcome.error;
+        run.error = endedError(outcome, run.error);
       }
       await tell(scope, "ended", outcome);
     },

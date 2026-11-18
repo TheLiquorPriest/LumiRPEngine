@@ -85,7 +85,9 @@ function unfinishedWhy(turns: Pick<Turns, "runs">, user: string, turn: string, e
   const last = turns.runs.record(user, turn);
   if (last === null || last.status === "running" || last.status === "released" || last.status === "no-reply") return null;
   if (last.kind !== "settle" && last.released === null) return null;
-  const e: ReplyError = last.error ?? { code: last.status === "limit" ? "limit" : last.status === "stopped" ? "stopped" : "failed" };
+  // A record kept before its end named the limit as its error has it only where the limit stopped it.
+  const limit = last.stoppedBy !== null && "limit" in last.stoppedBy ? last.stoppedBy.limit : undefined;
+  const e: ReplyError = last.error ?? (limit !== undefined ? { code: "limit", limit } : { code: last.status === "limit" ? "limit" : last.status === "stopped" ? "stopped" : "failed" });
   return replyErrorWords(e, errors, true) || `${e.code}${e.detail !== undefined ? `: ${e.detail}` : ""}`;
 }
 

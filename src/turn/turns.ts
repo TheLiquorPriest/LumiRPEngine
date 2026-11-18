@@ -56,7 +56,7 @@ import type { TurnMarks } from "./marks";
 import type { ComposerAsk, PanelAsk, Requests } from "./requests";
 import { writeTurnRecord } from "./record";
 import { leftOutOf, maxTokensOf, prefillOf, promptOf, samplingOf, summarizedOf } from "./request";
-import { CARRIED_SESSION, type IntakeStep, type NotGiven, type Run, type RunRecord, type Runs, type Stretch } from "./runs";
+import { CARRIED_SESSION, endedError, type IntakeStep, type NotGiven, type Run, type RunRecord, type Runs, type Stretch } from "./runs";
 import { maskWorldInfoScanExclusions, SCAN_SETTING, scannedSteps, scanSettingsOf } from "./scan";
 import type { Approvals } from "./approvals";
 import { type TurnSettings, turnSettings } from "./settings";
@@ -2097,7 +2097,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         (outcome) => {
           run.status = outcome.status;
           run.usage = outcome.usage;
-          if (outcome.error !== undefined) run.error = outcome.error;
+          run.error = endedError(outcome, run.error);
           if (outcome.limit !== undefined) run.stoppedBy ??= { limit: outcome.limit };
         },
         (error: unknown) => {
