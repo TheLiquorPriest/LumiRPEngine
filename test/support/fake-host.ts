@@ -12,7 +12,6 @@ import type { ListedTool } from "../../src/shared/agents";
 import type { JsonObject, JsonValue } from "../../src/shared/json";
 import type { ChatId, MessageId, UserId } from "../../src/shared/ids";
 import type { BackendToFrontend } from "../../src/shared/protocol";
-import type { GenerateAs } from "../../src/shared/state-view";
 import type { Answers } from "../../src/engine/decide";
 import type {
   ContextHandlerInput,
@@ -38,7 +37,6 @@ import type {
   WorldInfoVerdict,
 } from "../../src/shared/host";
 import { num, str } from "../../src/migrate/today/host-message";
-import { outsideTurns } from "../../src/migrate/today/turn-frame";
 
 export interface FakeMessage {
   id: MessageId;
@@ -168,8 +166,6 @@ export class FakeHost implements HostPort {
   }
   /** What this host does with the handler's answer (`cancelGeneration`, `required`) and frontend pages; a test plays an older host by switching one off. */
   capabilities: HostCapabilities = { cancel: true, required: true, sessions: true };
-  /** The frontend's side of `lre.generate` (DESIGN §5.1): what the engine asked to start, of which page, in order, until `start` plays it. */
-  readonly restarts: { chatId: ChatId; as: GenerateAs; turn: string; session?: string }[] = [];
   private readonly queue: { event: HostEventName; payload: HostEventMap[HostEventName] }[] = [];
   private readonly inFlight = new Map<string, Generation>();
   private nextId = 0;
@@ -422,8 +418,7 @@ export class FakeHost implements HostPort {
     quiet: async (request, _userId, signal) => {
       this.quietCalls.push(request);
       if (!this.quietReply) throw new Error("the fake host makes no model calls");
-      // The model answers from outside the backend, as Lumiverse's does: a script's own requests are no turn's work.
-      const scripted = outsideTurns(() => this.quietReply?.(request) ?? "{}");
+      const scripted = this.quietReply?.(request) ?? "{}";
       const reply = scripted instanceof Promise ? await untilAborted(scripted, signal, (why) => this.quietStopped.push(why)) : scripted;
       if (typeof reply === "string") return { content: reply, finishReason: "stop", tokens: 0 };
       const { content, toolCalls, finishReason, reasoning, thinkingBlocks, reasoningDetails, usage } = reply;
@@ -460,8 +455,6 @@ export class FakeHost implements HostPort {
     send: (message, userId, frontendSessionId) => {
       this.sent.push(message);
       this.sentTo.push({ userId, ...(frontendSessionId !== undefined ? { session: frontendSessionId } : {}) });
-      // The frontend open on the chat starts the generation the engine prepared (`start` plays it).
-      if (message.type === "lre.generate") this.restarts.push({ chatId: message.chatId, as: message.as, turn: message.turn, ...(frontendSessionId !== undefined ? { session: frontendSessionId } : {}) });
       for (const waiter of this.sendWaiters.filter((w) => w.match(message))) {
         this.sendWaiters.splice(this.sendWaiters.indexOf(waiter), 1);
         waiter.resolve(message);
@@ -523,10 +516,7 @@ export class FakeHost implements HostPort {
         if (this.queue.length === 0) return;
         continue;
       }
-      // Events come in from Lumiverse, never inside a turn's work.
-      outsideTurns(() => {
-        for (const h of this.handlers.get(next.event) ?? []) h(next.payload as never, this.userId);
-      });
+      for (const h of this.handlers.get(next.event) ?? []) h(next.payload as never, this.userId);
       await this.idle();
     }
     throw new Error("settle: event storm");
@@ -538,9 +528,7 @@ export class FakeHost implements HostPort {
    * operations behind it.
    */
   deliverNow(): void {
-    outsideTurns(() => {
-      for (let next = this.queue.shift(); next; next = this.queue.shift()) for (const h of this.handlers.get(next.event) ?? []) h(next.payload as never, this.userId);
-    });
+    for (let next = this.queue.shift(); next; next = this.queue.shift()) for (const h of this.handlers.get(next.event) ?? []) h(next.payload as never, this.userId);
   }
 
   // ------------------------------------------------------------------ chat model
@@ -712,7 +700,6 @@ export class FakeHost implements HostPort {
     }
     this.inFlight.clear();
     this.queue.length = 0;
-    this.restarts.length = 0;
     this.reload();
   }
 
@@ -727,28 +714,10 @@ export class FakeHost implements HostPort {
 
   // ------------------------------------------------------------------ generations
 
-  /**
-   * A generation as the player starts it (Send, Regenerate, swipe, Continue). When the guard stops it
-   * to run the engine first, the engine asks a page to start it again (`lre.generate`), as this
-   * plays: that page claims the turn (`claimRestart`) and runs the frontend's Regenerate or Continue,
-   * or for a new reply after a reply the player's Send again. The generation returned is the one the
-   * reply streams in (DESIGN §5.1); a run that failed, or a claim refused, returns the stopped one.
-   */
+  /** A generation as the player starts it (Send, Regenerate, swipe, Continue): the generation the reply streams in, or the stopped one. */
   async start(chatId: ChatId, opts: StartOptions): Promise<Generation> {
-    let g = await this.begin(chatId, opts);
-    for (let round = 0; g.halted === "cancelled" && round < 3; round++) {
-      const at = this.restarts.findIndex((r) => r.chatId === chatId);
-      if (at < 0) return g;
-      const [restart] = this.restarts.splice(at, 1);
-      if (!restart || (restart.as !== "send" && this.claimRestart && !(await this.claimRestart(restart)))) return g;
-      const type: HostGenerationType = restart.as === "continue" ? "continue" : restart.as === "send" ? "normal" : "regenerate";
-      g = await this.begin(chatId, { type, ...(opts.createAtEnd ? { createAtEnd: true } : {}), ...(restart.session !== undefined ? { session: restart.session } : {}) });
-    }
-    return g;
+    return await this.begin(chatId, opts);
   }
-
-  /** How a page claims a prepared turn before it starts it (`lre.restart`); the rig sends the request, the ledger harness asks the service. */
-  claimRestart: ((restart: { chatId: ChatId; turn: string; session?: string }) => Promise<boolean>) | null = null;
 
   /**
    * One generation as Lumiverse runs it, up to its streaming: its target staged, GENERATION_STARTED,

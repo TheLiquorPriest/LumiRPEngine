@@ -26,7 +26,6 @@ import type { HostGenerationType, HostMessage, HostPort } from "../../shared/hos
 import { setAside } from "../../worlds/stored-json";
 import type { LedgerDiagnostics } from "./diagnostics";
 import { STEP_LABEL } from "./diagnostics";
-import { outsideTurns } from "./turn-frame";
 
 /** Resolves a chat's ledger environment; null when the chat is not a world chat. */
 export type EnvResolver = (chatId: ChatId, userId: UserId) => Promise<LedgerEnv | null>;
@@ -784,17 +783,16 @@ export class LedgerService {
 
   /**
    * Runs one operation on the chat's queue, then persists the journal and flushes metadata. `write`
-   * is a write the operation lands (its revision is loaded first). The operation runs outside every
-   * turn's frame, whoever queued it.
+   * is a write the operation lands (its revision is loaded first).
    */
   private async run(chatId: ChatId, userId: UserId | null, op: Op, write?: HeldWrite): Promise<void> {
     this.outstanding++;
     try {
-      const slot = await outsideTurns(() => this.slot(chatId, userId));
+      const slot = await this.slot(chatId, userId);
       if (!slot) return;
       slot.ops++;
       slot.queue = slot.queue
-        .then(() => outsideTurns(async () => {
+        .then(async () => {
           // A kept read answers at once: the op gives way first, so a message waiting runs before its folds.
           await giveWay();
           const observed = this.observe(chatId, slot.userId, await this.host.chats.messages(chatId, slot.userId));
@@ -816,7 +814,7 @@ export class LedgerService {
           if (viewed === slot.viewed) return;
           slot.viewed = viewed;
           this.hooks?.changed(chatId, slot.userId);
-        }))
+        })
         .catch((error: unknown) => {
           const text = `[LumiRPEngine] ledger ${chatId}: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`;
           this.errors.push(text);

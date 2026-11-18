@@ -1,9 +1,8 @@
-// Randomized operation sequences for the ledger gate (DESIGN §14): a seeded generator, a runner
-// that drives the fake host and the real ledger service, invariant checks after every operation,
-// and a shrinker that reduces a failing sequence to a minimal one.
+// The ledger runner (DESIGN §14): it drives the fake host and the real ledger service through a
+// recorded sequence of operations, with invariant checks after every one.
 //
 // Operations carry abstract choices (numbers in [0, 1)) that are resolved against the chat as it
-// stands when they run, so any subsequence is still a valid sequence (shrinking needs that).
+// stands when they run.
 //
 // Checked here (DESIGN §14): L1 reference equality, L7 re-validation, L9 seq, L11 Re-narrate, L16 inert/tombstone
 // notes, L17 tombstones kept, L18 metadata mirrors the journal and survives clobbering and restart,
@@ -11,9 +10,8 @@
 // or removal, L5 off-path commit, L6 P4 re-render, L8 held writes, L13/L14 Continue, L15 stopped
 // Continue, L19 deletion, L34 dry run, L38 assistant edits, L39 user-edit pause, L43 a Re-run
 // carries its fixes, L45 a branch or import folds as its source (an earlier build's chat included), L46 detail materialized once, L49 a
-// request holds on its own path, L50 the pre-reply window, per
-// operation; L31 determinism in properties.test.ts. L4 is the classification these exercise; L10 and
-// L12 are in scenarios.test.ts and reference.test.ts. Pack-dependent invariants arrive with the packs.
+// request holds on its own path, per operation. L4 is the classification these exercise; L10 and
+// L12 are in scenarios.test.ts and reference.test.ts.
 
 import { presetAdjudication } from "../../src/shared/adjudication";
 import { hashJson } from "../../src/shared/hash";
@@ -29,12 +27,9 @@ import { startMarkersFrom } from "../../src/migrate/today/start-markers";
 import { apartHost, applyEvent, applyMarker, eventUnits, EXTERNAL_ACCOUNT_PREFIX, tiesOf, validateEvent, validMarkerBody } from "../../src/engine/events";
 import { touchedField } from "../../src/engine/touched";
 import type { ChainMessage, FoldOutput } from "../../src/engine/ledger/chain";
-import type { WriteResult } from "../../src/engine/ledger/journal";
 import { activeRecord, isLive, isTombstoned, turnPath } from "../../src/engine/ledger/path";
 import { referenceFold } from "../../src/engine/ledger/reference";
-import { createRng, type Rng } from "../../src/engine/rng";
 import type { FakeMessage, Generation } from "./fake-host";
-import { noCoverage, type Coverage } from "./coverage";
 import type { Folds, Harness } from "./harness";
 import { openMoney, POV } from "./test-pack";
 
@@ -158,10 +153,6 @@ const MIND_FIXES: LedgerEvent[][] = [
   [{ type: "minds.intent", data: { entity: "dev", intent: null } }],
 ];
 
-const FIGHT_EVENTS: Record<string, keyof Coverage["fights"]> = { "combat.start": "start", "combat.act": "act", "combat.turn": "turn", "combat.end": "end" };
-const LIFE_EVENTS: Record<string, keyof Coverage["lives"]> = { "engine.life": "life", "engine.told": "told" };
-const MIND_EVENTS: Record<string, keyof Coverage["minds"]> = { "minds.mind": "mind", "minds.memory": "memory", "minds.presence": "presence", "minds.pin": "fix", "minds.refresh": "fix", "minds.plan_edit": "fix", "minds.plan": "fix", "minds.intent": "fix" };
-
 /**
  * The indexes of the source's events a carried copy left out, or null when the copy isn't the source
  * as it was: only a materialization of detail its new prefix already records may leave (L46).
@@ -239,254 +230,6 @@ function clampedStarts(markers: readonly Marker[]): Marker[] {
     const clamped = validMarkerBody(body);
     return clamped ? { ...clamped, seq, at, start: true as const } : mk;
   });
-}
-
-// ------------------------------------------------------------------ generation
-
-export function generate(rng: Rng, length: number, depth = 0): Op[] {
-  const ops: Op[] = [];
-  const r = (): number => rng.next();
-  // Fights draw from a stream of their own, so every other op is generated as before; so do Dev's
-  // money openings (replies naming him, ✎ cash fixes on him) and what is removed while a reply streams.
-  const fights = rng.fork(`fights:${depth}`);
-  const opens = rng.fork(`opens:${depth}`);
-  const removals = rng.fork(`removals:${depth}`);
-  for (let i = 0; i < length; i++) {
-    const roll = r();
-    if (roll < 0.22) ops.push({ op: "send", text: r(), reply: r(), createAtEnd: r() < 0.2, rerender: r() < 0.2, ...(r() < 0.35 ? { money: r() } : {}), ...(r() < 0.2 ? { toll: r() } : {}), ...(fights.next() < 0.3 ? { fight: fights.next() } : {}), ...(opens.next() < 0.15 ? { opens: opens.next() } : {}) });
-    else if (roll < 0.29) ops.push({ op: "regenerate", at: r(), reply: r(), renarrate: r() < 0.5, ...(r() < 0.3 ? { toll: r() } : {}), ...(opens.next() < 0.3 ? { opens: opens.next() } : {}) });
-    else if (roll < 0.35) ops.push({ op: "continue", at: r(), reply: r(), stop: r() < 0.3, rerenderPrefix: r() < 0.2 });
-    else if (roll < 0.38) ops.push({ op: "editAndSend", at: r(), text: r(), reply: r(), branch: r() < 0.3 });
-    else if (roll < 0.45) ops.push({ op: "navigate", at: r(), swipe: r() });
-    else if (roll < 0.49) ops.push({ op: "addSwipe", at: r(), text: r() });
-    else if (roll < 0.52) ops.push({ op: "putSwipe", at: r(), swipe: r(), text: r() });
-    else if (roll < 0.54) ops.push({ op: "deleteSwipe", at: r(), swipe: r() });
-    else if (roll < 0.59) ops.push({ op: "editAssistant", at: r(), text: r() });
-    else if (roll < 0.62) ops.push({ op: "editUser", at: r(), text: r() });
-    else if (roll < 0.65) ops.push({ op: "deleteMessage", at: r() });
-    else if (roll < 0.66) ops.push({ op: "branch", at: r() });
-    else if (roll < 0.67) ops.push({ op: "import" });
-    else if (roll < 0.755) ops.push({ op: "write", kind: r(), a: r(), b: r(), ...(r() < 0.3 ? { gm: r() } : {}), ...(opens.next() < 0.15 ? { open: opens.next() } : {}) });
-    else if (roll < 0.77) ops.push({ op: "upgrade", to: r(), picks: r() });
-    else if (roll < 0.8) ops.push({ op: "fixRerun", gm: r(), a: r(), reply: r(), ...(opens.next() < 0.5 ? { open: opens.next() } : {}), ...(opens.next() < 0.5 ? { opens: opens.next() } : {}) });
-    else if (roll < 0.82) ops.push({ op: "dryRun" });
-    else if (roll < 0.84) ops.push({ op: "restart" });
-    else if (roll < 0.87) ops.push({ op: "clobber", at: r(), echo: r() < 0.5 });
-    else if (roll < 0.93 && depth === 0) ops.push({ op: "excursion", at: r(), inner: generateExcursion(rng, 1 + Math.floor(r() * 4)) });
-    else if (depth === 0) ops.push({ op: "inFlight", type: r(), inner: generateInner(rng, 1 + Math.floor(r() * 3), opens, removals), stop: r() < 0.25, reply: r(), ...(opens.next() < 0.3 ? { opens: opens.next() } : {}) });
-    else ops.push({ op: "write", kind: r(), a: r(), b: r() });
-  }
-  // Life changes and queued turns come after the rest, from a stream of their own, so every operation
-  // before them is generated and runs as before.
-  if (depth === 0) {
-    const lives = rng.fork("lives");
-    ops.push(...generateLives(lives, 1 + Math.floor(lives.next() * 12)));
-    // Minds' turns and GM controls come last, from their own stream, so everything before runs as before.
-    const minds = rng.fork("minds");
-    ops.push(...generateMinds(minds, 1 + Math.floor(minds.next() * 8)));
-    // GM edits that keep their request, and what moves them onto other views, after those, from their own stream.
-    const asked = rng.fork("asked");
-    ops.push(...generateAsked(asked, 1 + Math.floor(asked.next() * 14)));
-    // Purchases an overdraft link covers part of, and their price corrections, after those, from their own stream.
-    const linked = rng.fork("linked");
-    ops.push(...generateLinked(linked, 1 + Math.floor(linked.next() * 14)));
-  }
-  // Drawn from a stream of its own, so the sequence is otherwise as before.
-  if (depth === 0 && rng.fork("earlier-build").next() < 0.25) ops.unshift({ op: "earlierBuild" });
-  return ops;
-}
-
-/**
- * Payments the story made that an overdraft link covers part of (DESIGN §25.10): turns that buy with
- * Dev's account covering part (`LINKED_TEXTS`), his transfer kept apart before the purchase, and
- * price corrections tied to the purchase (`tie`); and around them Dev's money opened on some swipes
- * only and spent by ✎ fixes, deposits and payments, Keep with its conversions, and the swipes,
- * Re-runs and user edits that put those records behind a changed story, where the transfer drops
- * alone or with its purchase, and a correction with the purchase it corrected. It starts by settling
- * a pause an earlier part left, then a turn that pays Sam in and opens Dev's money.
- */
-function generateLinked(rng: Rng, length: number): Op[] {
-  const ops: Op[] = [];
-  const r = (): number => rng.next();
-  ops.push({ op: "write", kind: 0.62 + r() * 0.1, a: r(), b: r() });
-  ops.push({ op: "send", text: r(), reply: r(), createAtEnd: false, rerender: false, money: 1.5 / MONEY_TEXTS.length, opens: r() });
-  for (let i = 0; i < length; i++) {
-    const roll = r();
-    if (roll < 0.3) ops.push(...linkedRebased(rng));
-    else if (roll < 0.42) ops.push({ op: "send", text: r(), reply: r(), createAtEnd: false, rerender: false, linked: r() });
-    else if (roll < 0.5) ops.push({ op: "send", text: r(), reply: r(), createAtEnd: false, rerender: false, money: r(), ...(r() < 0.3 ? { opens: r() } : {}) });
-    else if (roll < 0.58) ops.push({ op: "write", kind: r(), a: r(), b: r(), tie: r() });
-    else if (roll < 0.62) ops.push({ op: "write", kind: r(), a: r(), b: r(), open: r() });
-    else if (roll < 0.7) ops.push({ op: "write", kind: r(), a: r(), b: r(), convert: r() });
-    else if (roll < 0.76) ops.push({ op: "regenerate", at: r(), reply: r(), renarrate: r() < 0.5, ...(r() < 0.3 ? { opens: r() } : {}) });
-    else if (roll < 0.84) ops.push({ op: "navigate", at: 0.5 + r() * 0.5, swipe: r() });
-    else if (roll < 0.88) ops.push({ op: "addSwipe", at: 0.5 + r() * 0.5, text: r() });
-    // Keep (with a conversion when something dropped) or Discard.
-    else if (roll < 0.94) ops.push({ op: "write", kind: 0.62 + r() * 0.23, a: r(), b: r() });
-    else if (roll < 0.97) ops.push({ op: "editUser", at: r(), text: r() });
-    else ops.push({ op: "fixRerun", gm: r(), a: r(), reply: r() });
-  }
-  return ops;
-}
-
-/**
- * A linked purchase put behind a changed story: Sam paid in and Dev's money opened, the lamp (or the
- * map) bought, a reply that loses it, then the same thing bought again with Dev covering part and at
- * times its price corrected; then a swipe added to the reply that lost it, so it is still Sam's there
- * and the second purchase drops, with its transfer and its correction; at times Keep converting one
- * of the lines that dropped, and a switch back.
- */
-function linkedRebased(rng: Rng): Op[] {
-  const r = (): number => rng.next();
-  const at = <T>(items: readonly T[], item: T): number => (items.indexOf(item) + 0.5) / items.length;
-  const lamp = r() < 0.5;
-  const ops: Op[] = [
-    { op: "send", text: r(), reply: r(), createAtEnd: false, rerender: false, money: at(MONEY_TEXTS, "deposit:150"), opens: r() },
-    { op: "send", text: at(USER_TEXTS, lamp ? "buy:lamp:20" : "buy:map:30"), reply: at(REPLIES, "Okay."), createAtEnd: false, rerender: false },
-    { op: "send", text: at(USER_TEXTS, "look around"), reply: at(REPLIES, lamp ? "The lamp slips away. [lose:lamp]" : "You drop the map. [lose:map]"), createAtEnd: false, rerender: false },
-    { op: "send", text: r(), reply: at(REPLIES, "Okay."), createAtEnd: false, rerender: false, linked: at(LINKED_TEXTS, lamp ? "linked:lamp:40:30" : "linked:map:70:40") },
-  ];
-  if (r() < 0.7) ops.push({ op: "write", kind: r(), a: r(), b: r(), tie: r() });
-  ops.push({ op: "addSwipe", at: 0.999, text: r() });
-  if (r() < 0.6) ops.push({ op: "write", kind: r(), a: r(), b: r(), convert: 0.4 + r() * 0.6 });
-  if (r() < 0.4) ops.push({ op: "navigate", at: 0.999, swipe: 0 });
-  return ops;
-}
-
-/**
- * GM edits that keep their request (DESIGN §7, P2): written on the head as the GM view writes them,
- * held through replies in flight, carried by Re-runs, and left behind an earlier reply edited and
- * read again; and around them the turns, swipes and user edits with their Keep that put the records
- * they sit on behind a changed story, where each is worked out again from its request. It starts by
- * settling a pause an earlier part left, since a paused chat refuses every edit.
- */
-function generateAsked(rng: Rng, length: number): Op[] {
-  const ops: Op[] = [];
-  const r = (): number => rng.next();
-  const opens = rng.fork("opens");
-  const removals = rng.fork("removals");
-  ops.push({ op: "write", kind: 0.62 + r() * 0.1, a: r(), b: r() });
-  for (let i = 0; i < length; i++) {
-    const roll = r();
-    if (roll < 0.2) ops.push({ op: "write", kind: r(), a: r(), b: r(), asked: r() });
-    else if (roll < 0.36) ops.push({ op: "send", text: r(), reply: r(), createAtEnd: r() < 0.2, rerender: false, ...(r() < 0.35 ? { money: r() } : {}) });
-    else if (roll < 0.52) ops.push({ op: "askedEarlier", asked: r(), a: r(), at: r(), text: r() });
-    else if (roll < 0.58) ops.push({ op: "editAssistant", at: r() * 0.8, text: r() });
-    // A Re-read, of an edited reply when there is one (`writeFor`).
-    else if (roll < 0.64) ops.push({ op: "write", kind: 0.89 + r() * 0.035, a: r(), b: r() });
-    else if (roll < 0.7) ops.push({ op: "navigate", at: r() * 0.8, swipe: r() });
-    else if (roll < 0.74) ops.push({ op: "addSwipe", at: r() * 0.8, text: r() });
-    else if (roll < 0.79) ops.push({ op: "regenerate", at: r(), reply: r(), renarrate: r() < 0.5 });
-    else if (roll < 0.86) ops.push({ op: "fixRerun", gm: r(), a: r(), reply: r(), asked: r() });
-    else if (roll < 0.89) ops.push({ op: "editUser", at: r(), text: r() });
-    // Keep (with a conversion when something dropped) or Discard.
-    else if (roll < 0.94) ops.push({ op: "write", kind: 0.62 + r() * 0.23, a: r(), b: r() });
-    else {
-      // Two edits while a reply streams, at times: the same one again, which adds nothing, or an
-      // acquaintance begun just before ended with a mood and then ended alone, which the first has
-      // already done, so it is kept with its request alone; then at times the first's Undo, after
-      // which the second still says what it said.
-      const first: Op = { op: "write", kind: r(), a: r(), b: r(), asked: r() };
-      const twice = r();
-      if (twice >= 0.25 && twice < 0.75) ops.push({ ...first, asked: 0.25 + r() * 0.25 });
-      const pair: Op[] = twice < 0.25 ? [first, first] : twice < 0.75 ? [{ ...first, asked: 0.75 + r() * 0.25 }, { ...first, asked: 0.5 + r() * 0.25 }] : [first];
-      // At times the first's Undo waits for the reply too, behind whatever else the reply holds.
-      const held: Op[] = r() < 0.3 ? [{ op: "undoAsked", a: r() * 0.5 }] : [];
-      ops.push({ op: "inFlight", type: r(), inner: [...pair, ...held, ...generateInner(rng, Math.floor(r() * 2), opens, removals)], stop: r() < 0.25, reply: r() });
-      if (r() < 0.4) ops.push({ op: "undoAsked", a: r() * 0.5 });
-    }
-  }
-  return ops;
-}
-
-/**
- * Character minds (DESIGN §24): turns that record a minds round and Dev's mind before the plan, and
- * replies that record who was there and his memory after it; GM minds controls; and around them the
- * Re-runs, Re-narrates, swipes, edits and turns in flight that move those records onto other views.
- */
-function generateMinds(rng: Rng, length: number): Op[] {
-  const ops: Op[] = [];
-  const r = (): number => rng.next();
-  for (let i = 0; i < length; i++) {
-    const roll = r();
-    if (roll < 0.4) ops.push({ op: "send", text: r(), reply: r(), createAtEnd: r() < 0.2, rerender: false, mind: r() });
-    else if (roll < 0.55) ops.push({ op: "regenerate", at: r(), reply: r(), renarrate: r() < 0.5 });
-    else if (roll < 0.7) ops.push({ op: "write", kind: r(), a: r(), b: r(), mind: r() });
-    else if (roll < 0.78) ops.push({ op: "navigate", at: r(), swipe: r() });
-    else if (roll < 0.84) ops.push({ op: "deleteSwipe", at: r(), swipe: r() });
-    else if (roll < 0.9) ops.push({ op: "editUser", at: r(), text: r() });
-    else ops.push({ op: "editAndSend", at: r(), text: r(), reply: r(), branch: r() < 0.3 });
-  }
-  return ops;
-}
-
-/**
- * Life changes and queued turns (DESIGN §8, §11): turns the engine plans with the `life` effect,
- * its rule and a queue of actions (`LIFE_TEXTS`), GM life edits (`LIFE_FIXES`), and around them the
- * Re-runs, Re-narrates, edits, swipes, Keep choices, Upgrades and turns in flight that move a record
- * onto another view, where its life changes re-validate.
- */
-function generateLives(rng: Rng, length: number): Op[] {
-  const ops: Op[] = [];
-  const r = (): number => rng.next();
-  const opens = rng.fork("opens");
-  const removals = rng.fork("removals");
-  for (let i = 0; i < length; i++) {
-    const roll = r();
-    if (roll < 0.4) ops.push({ op: "send", text: r(), reply: r(), createAtEnd: r() < 0.2, rerender: false, life: r() });
-    else if (roll < 0.5) ops.push({ op: "regenerate", at: r(), reply: r(), renarrate: r() < 0.5 });
-    else if (roll < 0.58) ops.push({ op: "write", kind: r(), a: r(), b: r(), life: r() });
-    else if (roll < 0.63) ops.push({ op: "fixRerun", gm: r(), a: r(), reply: r(), life: r() });
-    else if (roll < 0.68) ops.push({ op: "editUser", at: r(), text: r() });
-    else if (roll < 0.72) ops.push({ op: "editAndSend", at: r(), text: r(), reply: r(), branch: r() < 0.3 });
-    else if (roll < 0.77) ops.push({ op: "navigate", at: r(), swipe: r() });
-    else if (roll < 0.8) ops.push({ op: "deleteSwipe", at: r(), swipe: r() });
-    // Keep (with a conversion when something dropped) or Discard.
-    else if (roll < 0.86) ops.push({ op: "write", kind: 0.62 + r() * 0.23, a: r(), b: r() });
-    else if (roll < 0.9) ops.push({ op: "upgrade", to: r(), picks: r() });
-    else ops.push({ op: "inFlight", type: r(), inner: generateInner(rng, 1 + Math.floor(r() * 3), opens, removals, rng.fork(`lives:${i}`)), stop: r() < 0.25, reply: r(), life: r() });
-  }
-  return ops;
-}
-
-/** Operations allowed while switched away (L2): anything that stays on the switched path. */
-function generateExcursion(rng: Rng, length: number): Op[] {
-  const ops: Op[] = [];
-  for (let i = 0; i < length; i++) {
-    const roll = rng.next();
-    if (roll < 0.35) ops.push({ op: "send", text: rng.next(), reply: rng.next(), createAtEnd: false, rerender: false });
-    else if (roll < 0.45) ops.push({ op: "continue", at: 1, reply: rng.next(), stop: false, rerenderPrefix: false });
-    else ops.push({ op: "write", kind: rng.next() * 0.7, a: rng.next(), b: rng.next() });
-  }
-  return ops;
-}
-
-/**
- * Operations interleaved while a reply streams (P2); `opens` and `removals` are the generator's own
- * streams for Dev's money and for swipe deletions, swipe PUTs and message deletions, and `lives`
- * (life changes' turns in flight only) makes some writes GM life edits. A removal often lands on the
- * message the operation before it touched: navigating a message off a swipe, then deleting that
- * swipe, is how a swipe the plan saw goes.
- */
-function generateInner(rng: Rng, length: number, opens: Rng, removals: Rng, lives?: Rng): Op[] {
-  const ops: Op[] = [];
-  for (let i = 0; i < length; i++) {
-    const roll = rng.next();
-    if (roll < 0.4) ops.push({ op: "write", kind: rng.next(), a: rng.next(), b: rng.next(), ...(rng.next() < 0.3 ? { gm: rng.next() } : {}), ...(opens.next() < 0.2 ? { open: opens.next() } : {}), ...(lives && lives.next() < 0.3 ? { life: lives.next() } : {}) });
-    else if (roll < 0.55) ops.push({ op: "navigate", at: rng.next() * 0.8, swipe: rng.next() });
-    else if (roll < 0.7) ops.push({ op: "editAssistant", at: rng.next() * 0.8, text: rng.next() });
-    else if (roll < 0.8) ops.push({ op: "editUser", at: rng.next(), text: rng.next() });
-    else if (roll < 0.9) ops.push({ op: "addSwipe", at: rng.next() * 0.8, text: rng.next() });
-    else ops.push({ op: "clobber", at: rng.next(), echo: rng.next() < 0.5 });
-    if (removals.next() >= 0.35) continue;
-    const last = ops.at(-1);
-    const at = last && "at" in last && removals.next() < 0.6 ? last.at : removals.next() * 0.8;
-    const kind = removals.next();
-    if (kind < 0.6) ops.push({ op: "deleteSwipe", at, swipe: removals.next() });
-    else if (kind < 0.85) ops.push({ op: "putSwipe", at, swipe: removals.next(), text: removals.next() });
-    else ops.push({ op: "deleteMessage", at: removals.next() });
-  }
-  return ops;
 }
 
 // ------------------------------------------------------------------ running
@@ -573,8 +316,6 @@ export class Runner {
   readonly chats: ChatId[] = [];
   current: ChatId = "";
   private readonly memory = new Map<ChatId, ChatMemory>();
-  /** This runner's own coverage counts (no state shared across runs or test files). */
-  readonly coverage: Coverage = noCoverage();
   private ids = 0;
   /**
    * The reply streaming during an inFlight's inner operations. The host doesn't let the player edit
@@ -613,16 +354,6 @@ export class Runner {
     if (!this.h.host.capabilities.cancel) return this.assistants().at(-1);
     const last = this.messages().at(-1);
     return last && !last.isUser ? last : undefined;
-  }
-
-  /** Whether a generation for `messageId` is one the engine refuses: on a host that stops generations, a reply for an earlier message. */
-  private refused(messageId: string, chatId = this.current): boolean {
-    return this.h.host.capabilities.cancel && this.messages(chatId).at(-1)?.id !== messageId;
-  }
-
-  /** Every message's id and swipes, to check a refused reply added or changed none (L47). Its staging may still move the target's selection to its last swipe. */
-  private swipesOf(chatId = this.current): string {
-    return JSON.stringify(this.messages(chatId).map((m) => [m.id, m.swipes]));
   }
 
   /** Assistant messages the player (or a foreign writer) can touch now. */
@@ -664,15 +395,7 @@ export class Runner {
         // The swipe that shows as the swipe is asked for: the one it is made from.
         const shown = target.swipeId;
         this.h.renarrateNext = op.renarrate === true;
-        const refused = this.refused(target.id);
-        const unchanged = this.swipesOf();
         const g = await host.start(chat, { type: "swipe", messageId: target.id });
-        // L47: a reply for an earlier message is refused: nothing is generated and no swipe changes.
-        if (refused) {
-          this.h.renarrateNext = false;
-          if (g.halted !== "cancelled" || this.swipesOf() !== unchanged) throw new InvariantError("L47", "a reply for an earlier message wasn't refused");
-          return;
-        }
         await host.finish(g, op.opens !== undefined ? pick(OPENING_REPLIES, op.opens) : op.toll !== undefined ? pick(TOLL_REPLIES, op.toll) : pick(REPLIES, op.reply));
         this.h.renarrateNext = false;
         if (op.renarrate) await this.checkRenarrate(chat, target.id, g.swipeId, before, tombstones, shown);
@@ -730,13 +453,7 @@ export class Runner {
         }
         host.editMessage(target, userId, pick(USER_TEXTS, op.text));
         await host.settle();
-        const refused = this.refused(assistantId, target);
-        const unchanged = this.swipesOf(target);
         const g = await host.start(target, { type: "swipe", messageId: assistantId });
-        if (refused) {
-          if (g.halted !== "cancelled" || this.swipesOf(target) !== unchanged) throw new InvariantError("L47", "an Edit and Send for an earlier message wasn't refused");
-          return;
-        }
         await host.finish(g, pick(REPLIES, op.reply));
         return;
       }
@@ -986,7 +703,6 @@ export class Runner {
           // L5: back on the chain it was planned on, it folds on its path with nothing of it failing.
           const at = onPlan?.out.messages[onPlan.index];
           if (target && rec && rec.seed !== "" && onPlan && at) {
-            if (onPlan.shifted) this.coverage.shiftedPlans++;
             const failed = onPlan.out.violations.filter((v) => v.startsWith(`${target.id}:`));
             if (at.fold !== "on_path" || failed.length > 0) throw new InvariantError("L5", `${chat}/${target.id}: on the chain it was planned on, the turn folds ${at.fold}${failed.length > 0 ? `: ${failed.join("; ")}` : ""}`);
           }
@@ -1053,7 +769,6 @@ export class Runner {
     const ledger = m ? decodeLedger(m.bag) : null;
     if (!m || !ledger || !before.reference.messages.slice(at + 1).some((x) => x.fold === "on_path")) return { holds: true, clamped: false };
     m.bag = encodeLedger(m.bag, { ...ledger, markers: clampedStarts(ledger.markers) });
-    this.coverage.earlierCopies++;
     return { holds: true, clamped: true };
   }
 
@@ -1237,19 +952,14 @@ export class Runner {
       const asked = asks(fix);
       if (!copy && !dropped) throw new InvariantError("L43", `${chat}/${messageId}: the Re-run neither carried nor dropped fix ${fix.seq}`);
       if (copy && dropped) throw new InvariantError("L43", `${chat}/${messageId}: fix ${fix.seq} was both carried and dropped`);
-      if (dropped) this.coverage.carryDrops++;
       if (!copy) continue;
-      this.coverage.carried++;
       if (copy.at !== made.path) throw new InvariantError("L43", `${chat}/${messageId}: copy ${fix.seq} is not anchored at the record's path`);
       if (asked) {
         if (copy.kind !== "fix" || copy.edit === undefined || hashJson(copy.edit) !== hashJson(fix.edit)) throw new InvariantError("L43", `${chat}/${messageId}: copy ${fix.seq} doesn't keep its source's request`);
-        this.coverage.askedCarried++;
-        if (fix.events.length === 0) this.coverage.askedEmpty++;
         continue;
       }
       const stripped = copy.kind === "fix" ? strippedFrom(fix.events, copy.events) : null;
       if (!stripped) throw new InvariantError("L43", `${chat}/${messageId}: copy ${fix.seq} differs from its source`);
-      if (stripped.length > 0) this.coverage.stripped++;
       // An undo moves up with its event past what left the copy.
       for (const u of sourceUndone) {
         if (u.in !== "post" || u.seq !== fix.seq) continue;
@@ -1390,28 +1100,9 @@ export class Runner {
       const droppedNotes = new Set(reference.notes.filter((n) => n.kind === "dropped").map((n) => `${n.messageId}:${JSON.stringify(n.ref)}`));
       const droppedKeep = new Set(reference.keepReport.filter((k) => k.status === "dropped").map((k) => `${k.messageId}:${JSON.stringify(k.ref)}`));
       if ([...droppedNotes].some((k) => !droppedKeep.has(k)) || [...droppedKeep].some((k) => !droppedNotes.has(k))) throw new InvariantError("L40", `${chatId}: dropped notes and Keep lines differ`);
-      if (reference.keepReport.some((k) => k.status === "dropped" && k.text.includes("can't cover"))) this.coverage.fundsDrops++;
       const chain = await this.h.chain(chatId);
-      for (const m of chain) {
-        const rec = m.ledger?.swipes[String(m.swipeId)];
-        if (m.isUser || !rec) continue;
-        for (const e of rec.events) {
-          const counted = Object.hasOwn(FIGHT_EVENTS, e.type) ? FIGHT_EVENTS[e.type] : undefined;
-          if (counted) this.coverage.fights[counted]++;
-          const life = Object.hasOwn(LIFE_EVENTS, e.type) ? LIFE_EVENTS[e.type] : undefined;
-          if (life) this.coverage.lives[life]++;
-        }
-        for (const e of [...rec.events, ...rec.post.flatMap((p) => p.events)]) {
-          const mind = Object.hasOwn(MIND_EVENTS, e.type) ? MIND_EVENTS[e.type] : undefined;
-          if (mind) this.coverage.minds[mind]++;
-        }
-      }
       const groups = groupsLandWhole(chain, reference);
       if (groups.broken) throw new InvariantError("L41", `${chatId}/${groups.broken}`);
-      this.coverage.groupDrops += groups.drops.groups;
-      this.coverage.apartDrops += groups.drops.apart;
-      this.coverage.apartConverts += groups.drops.apartConverted;
-      this.coverage.tiedDrops += groups.drops.tied;
       // L16: every stored entry that isn't live, and every tombstoned record, has a Journal note.
       const noted = new Set(reference.notes.map((n) => `${n.kind}:${n.messageId}:${JSON.stringify(n.ref)}`));
       for (const [i, r] of reference.messages.entries()) {
@@ -1428,17 +1119,9 @@ export class Runner {
         }
         for (const p of rec?.post ?? []) {
           if (!live(p.at) && !noted.has(`inert:${m.id}:${JSON.stringify({ in: "post", seq: p.seq, index: 0 })}`)) throw new InvariantError("L16", `${chatId}/${m.id}: inert post ${p.seq} has no note`);
-          // A GM edit with its request on a rebased view, which folds it worked out again there; one
-          // with no events of its own was already so where it was made.
-          if (r.fold === "view" && live(p.at) && p.kind === "fix" && p.edit !== undefined) {
-            this.coverage.askedViews++;
-            if (p.events.length === 0) this.coverage.askedEmpty++;
-          }
         }
       }
       if (core.journal.windows.length > 0) throw new InvariantError("P2", `${chatId}: a window is still open between operations`);
-      // L50: every engine run's turn closed or ended by the end of its operation, and with it its pre-reply window; nothing is left held.
-      if ((core.journal.prereply ?? []).length > 0) throw new InvariantError("L50", `${chatId}: a pre-reply window is still open between operations`);
       if (core.journal.held.length > 0) throw new InvariantError("P2", `${chatId}: a write is still held between operations`);
       const memory = this.memory.get(chatId) ?? { start: null, maxSeq: 0, tombstones: 0 };
       // L9: seq never decreases and never names two different entries (a Re-narrate copy keeps its source's seq, P3).
@@ -1487,13 +1170,10 @@ export class Runner {
   }
 }
 
-// ------------------------------------------------------------------ sequences and shrinking
+// ------------------------------------------------------------------ sequences
 
-/**
- * Runs a sequence, checking every invariant after each operation; returns the first failure.
- * With `digest`, appends each chat's final journal, messages and fold (L31 compares two runs).
- */
-export async function runSequence(make: () => Harness, ops: Op[], digest?: string[], coverage?: Coverage): Promise<string | null> {
+/** Runs a sequence, checking every invariant after each operation; returns the first failure. */
+export async function runSequence(make: () => Harness, ops: Op[]): Promise<string | null> {
   const runner = new Runner(make());
   await runner.init();
   try {
@@ -1502,63 +1182,8 @@ export async function runSequence(make: () => Harness, ops: Op[], digest?: strin
       await runner.earlierBuildStarts();
       await runner.check();
     }
-    if (digest) {
-      for (const chatId of runner.chats) {
-        const core = await runner.h.core(chatId);
-        const folds = await runner.h.folds(chatId);
-        digest.push(JSON.stringify(core.journal) + JSON.stringify(runner.h.host.chat(chatId).messages) + hashJson(folds.optimized.state));
-      }
-    }
-    if (coverage) {
-      coverage.fundsDrops += runner.coverage.fundsDrops;
-      coverage.groupDrops += runner.coverage.groupDrops;
-      coverage.apartDrops += runner.coverage.apartDrops;
-      coverage.apartConverts += runner.coverage.apartConverts;
-      coverage.tiedDrops += runner.coverage.tiedDrops;
-      coverage.carried += runner.coverage.carried;
-      coverage.carryDrops += runner.coverage.carryDrops;
-      coverage.stripped += runner.coverage.stripped;
-      coverage.askedCarried += runner.coverage.askedCarried;
-      coverage.askedViews += runner.coverage.askedViews;
-      coverage.askedEmpty += runner.coverage.askedEmpty;
-      coverage.earlierCopies += runner.coverage.earlierCopies;
-      coverage.shiftedPlans += runner.coverage.shiftedPlans;
-      for (const k of ["start", "act", "turn", "end"] as const) coverage.fights[k] += runner.coverage.fights[k];
-      for (const k of ["life", "told"] as const) coverage.lives[k] += runner.coverage.lives[k];
-      for (const k of ["mind", "memory", "presence", "fix"] as const) coverage.minds[k] += runner.coverage.minds[k];
-      for (const k of ["queued", "check", "failure", "interruption"] as const) coverage.queues[k] += runner.h.plays[k];
-    }
     return null;
   } catch (error) {
     return error instanceof Error ? error.message : String(error);
   }
-}
-
-/** Delta debugging: drops chunks of operations while the sequence still fails. */
-export async function shrink(make: () => Harness, ops: Op[], failure: string, budget = 400): Promise<{ ops: Op[]; error: string }> {
-  let current = ops;
-  let error = failure;
-  let chunk = Math.max(1, Math.floor(current.length / 2));
-  let attempts = 0;
-  while (chunk >= 1 && attempts < budget) {
-    let progressed = false;
-    for (let i = 0; i < current.length && attempts < budget; i += chunk) {
-      const candidate = [...current.slice(0, i), ...current.slice(i + chunk)];
-      attempts++;
-      const result = await runSequence(make, candidate);
-      if (result && result.split(":")[0] === error.split(":")[0]) {
-        current = candidate;
-        error = result;
-        progressed = true;
-        i -= chunk;
-      }
-    }
-    if (!progressed) chunk = Math.floor(chunk / 2);
-  }
-  return { ops: current, error };
-}
-
-export function sequenceFor(seed: string, maxLength: number): Op[] {
-  const rng = createRng(seed);
-  return generate(rng, 1 + Math.floor(rng.next() * maxLength));
 }

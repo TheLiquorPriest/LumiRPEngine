@@ -36,7 +36,6 @@ import { RETENTION_DEFAULTS, retentionOf } from "../../shared/stores";
 import { OFFSTAGE_DEFAULTS, offstageSettingsOf } from "../../shared/offstage";
 import type { HostPort } from "../../shared/host";
 import { readStoredJson } from "../../worlds/stored-json";
-import { turnFrame } from "./turn-frame";
 
 const SETTINGS_PATH = "settings.json";
 const LEARNING_PATH = "extraction-learning.json";
@@ -858,7 +857,6 @@ function hasGuardCopy(raw: unknown): boolean {
 export class SettingsStore {
   private readonly settings = new Map<UserId, UserSettings>();
   private readonly learning = new Map<UserId, ExtractionLearning>();
-  private readonly revisions = new Map<UserId, number>();
 
   /** `loaded` hears each user's settings as they are read or set (the context handler's timeout follows them); `guards` keeps the acceptance runs' guard apart from the settings file. */
   constructor(
@@ -867,13 +865,8 @@ export class SettingsStore {
     private readonly guards: AcceptanceGuardStore | null = null,
   ) {}
 
-  /**
-   * The user's settings. Inside a turn's work they are that turn's: as they stood when its engine
-   * run started (`TurnFrame`), so a change saved meanwhile applies from the chat's next turn.
-   */
+  /** The user's settings. */
   async get(userId: UserId): Promise<UserSettings> {
-    const frame = turnFrame();
-    if (frame?.userId === userId) return frame.settings;
     return (await this.read(userId)).settings;
   }
 
@@ -941,31 +934,8 @@ export class SettingsStore {
     await this.host.storage.write(`${SETTINGS_PATH}.tmp`, JSON.stringify(storedForm(next)), userId);
     await this.host.storage.move(`${SETTINGS_PATH}.tmp`, SETTINGS_PATH, userId);
     if (kept || guard) this.settings.set(userId, next);
-    this.revisions.set(userId, (this.revisions.get(userId) ?? 0) + 1);
     this.loaded(userId, next);
     return next;
-  }
-
-  /** How many times the user's settings were set since the backend started (what a finding read from them is kept against); a turn's work reads its frame's. */
-  revision(userId: UserId): number {
-    const frame = turnFrame();
-    return frame?.userId === userId ? frame.revision : (this.revisions.get(userId) ?? 0);
-  }
-
-  /** The settings already loaded for the user (the latest set), without reading storage; a turn's work reads its frame's. */
-  known(userId: UserId): UserSettings | undefined {
-    const frame = turnFrame();
-    return frame?.userId === userId ? frame.settings : this.settings.get(userId);
-  }
-
-  /**
-   * The settings as the user last set them, whatever turn is running, without reading storage.
-   * For what the player decides and must hold from the moment they decide it (the mode of an act
-   * made outside the chat's record, which a turn asks for, commits and has applied at different
-   * times), where `known` gives a turn its own.
-   */
-  latest(userId: UserId): UserSettings | undefined {
-    return this.settings.get(userId);
   }
 
   /**
