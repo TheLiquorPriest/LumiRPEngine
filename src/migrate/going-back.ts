@@ -100,7 +100,7 @@ const NEVER_REMOVE = "Never remove the extension to install it again: removing i
 function switchBack(identifier: string, branch: string, first: number): [branch: string, approve: string] {
   return [
     `  ${first}. In Lumiverse, switch the installed extension (${identifier}) to the branch the previous build is kept on, ${branch}, with Lumiverse's branch switch: switching keeps its storage. ${NEVER_REMOVE} (the migration's backup holds a copy).`,
-    `  ${first + 1}. In Lumiverse's extension settings, the previous build asks again for the ${RETURNING.length} permissions the light build did not: ${ADMIN_APPROVES.join(", ")} wait for an admin's approval, so approve them (or have an admin of this Lumiverse do so); ${BY_THEMSELVES.join(", ")} come back by themselves. Then switch the extension off and on again, so that it starts with them in hand. The ${PREVIOUS_PERMISSIONS.length} permissions it asks for: ${PREVIOUS_PERMISSIONS.join(", ")}.`,
+    `  ${first + 1}. In Lumiverse's extension settings, the previous build asks again for the ${RETURNING.length} permissions the new build did not: ${ADMIN_APPROVES.join(", ")} wait for an admin's approval, so approve them (or have an admin of this Lumiverse do so); ${BY_THEMSELVES.join(", ")} come back by themselves. Then switch the extension off and on again, so that it starts with them in hand. The ${PREVIOUS_PERMISSIONS.length} permissions it asks for: ${PREVIOUS_PERMISSIONS.join(", ")}.`,
   ];
 }
 
@@ -111,25 +111,25 @@ export function goingBack(facts: GoingBackFacts & { downRun?: boolean }): string
   const name = facts.runtime === null ? "<its name>" : shellWord(facts.runtime.name);
   const source = facts.runtime?.source ?? null;
   const script = source === null ? "<the extension's folder>/dist/lumiah.js" : shellWord(source);
-  const down = "RPE's service is stopped and removed, and its data stays where it is: what you played on RPE does not flow back, and a later cutover finds it as you left it.";
+  const down = "RPE's service is stopped and removed, and its data stays where it is: what you played on RPE does not flow back, and a later switch finds it as you left it.";
   const more: string[][] = [];
   const moved = facts.moved ?? [];
   if (moved.length > 0) {
     more.push([
-      "In Lumiverse, give each chat you moved onto one of RPE's connections since the swap the connection it had then: RPE no longer answers there.",
+      "In Lumiverse, give each chat you moved onto one of RPE's connections since the switch the connection it had then: RPE no longer answers there.",
       ...moved.map((c) => `       "${c.name}" (${c.chat}): ${c.had === null ? "no connection of its own, so that it follows the one active for you" : `the connection ${c.had}`}`),
     ]);
   }
   if (facts.own) more.push([`In Lumiverse, give every chat you moved to RPE's connection ${facts.own} the connection it had before: RPE no longer answers there.`]);
   const earlier = facts.earlier ?? [];
-  if (earlier.length > 0) more.push([`In Lumiverse, ${connections(earlier)}, RPE's own before the swap took today's, ${earlier.length === 1 ? "answers" : "answer"} nothing: RPE answered there alone. Give any chat still on ${earlier.length === 1 ? "it" : "them"} the previous build's connection, or remove ${earlier.length === 1 ? "it" : "them"}.`]);
+  if (earlier.length > 0) more.push([`In Lumiverse, ${connections(earlier)}, RPE's own before the switch took over the previous build's, ${earlier.length === 1 ? "answers" : "answer"} nothing: RPE answered there alone. Give any chat still on ${earlier.length === 1 ? "it" : "them"} the previous build's connection, or remove ${earlier.length === 1 ? "it" : "them"}.`]);
   const replaced = facts.keyReplaced ?? [];
-  if (replaced.length > 0) more.push([`In Lumiverse, put back on ${connections(replaced)} the key ${replaced.length === 1 ? "it" : "each"} held before the swap: the previous build's runtime takes only that key, and the one there now is a key RPE made.`]);
+  if (replaced.length > 0) more.push([`In Lumiverse, put back on ${connections(replaced)} the key ${replaced.length === 1 ? "it" : "each"} held before the switch: the previous build's runtime takes only that key, and the one there now is a key RPE made.`]);
   return [
-    "To go back to the previous build: today's data was never changed, and neither was its connection in Lumiverse.",
+    "To go back to the previous build: its data was never changed, and neither was its connection in Lumiverse.",
     facts.downRun === false ? `  1. Run rpe down: ${down}` : `  1. rpe down: done. ${down}`,
     ...switchBack(facts.identifier, facts.branch ?? PREVIOUS_BRANCH_DEFAULT, 2),
-    `  4. Run the previous build's own install line, the one you use when you update it: bun ${script} up --name ${name} --systemd. It reads its address from its own config, keeps its registration, and takes up its service's unit, which the swap only switched off, with the memory cap it holds: all as the swap left them.`,
+    `  4. Run the previous build's own install line, the one you use when you update it: bun ${script} up --name ${name} --systemd. It reads its address from its own config, keeps its registration, and takes up its service's unit, which the switch only switched off, with the memory cap it holds: all as the switch left them.`,
     ...more.flatMap(([first, ...rest], i) => [`  ${5 + i}. ${first}`, ...rest]),
   ];
 }
@@ -144,7 +144,7 @@ export function goingBack(facts: GoingBackFacts & { downRun?: boolean }): string
 export function stopAfterSwitch(facts: Pick<GoingBackFacts, "identifier" | "branch">, why: string): string[] {
   return [
     why,
-    `What has changed: Lumiverse runs the light extension (${facts.identifier}) now, and the ${RETURNING.length} permissions it does not ask for were withdrawn (${RETURNING.join(", ")}). What has not: today's service runs, and today's data is as it was.`,
+    `What has changed: Lumiverse runs the new build of the extension (${facts.identifier}) now, and the ${RETURNING.length} permissions it does not ask for were withdrawn (${RETURNING.join(", ")}). What has not: the previous build's service runs, and its data is as it was.`,
     "To go back to the previous build now:",
     ...switchBack(facts.identifier, facts.branch ?? PREVIOUS_BRANCH_DEFAULT, 1),
   ];
@@ -160,7 +160,7 @@ export function swapSteps(facts: Pick<GoingBackFacts, "identifier"> & { up?: str
   return [
     `  1. In Lumiverse, switch the installed extension (${facts.identifier}) to the new build's branch, ${NEW_BUILD_BRANCH} until it is main, with Lumiverse's branch switch: switching keeps its storage. ${NEVER_REMOVE}.`,
     `  2. In Lumiverse's extension settings, approve its five permissions: ${LIGHT_PERMISSIONS.join(", ")}.`,
-    "  3. Let any reply being written finish: the swap waits for today's runtime to be idle before it stops it, and stops nothing while a reply is under way.",
+    "  3. Let any reply being written finish: the switch waits for the previous runtime to be idle before it stops it, and stops nothing while a reply is under way.",
     `  4. Run ${facts.up ?? "rpe up"}.`,
   ];
 }

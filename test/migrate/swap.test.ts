@@ -281,7 +281,7 @@ describe("the swap, and going back", () => {
     await writeFile(join(fixture.root, "build", "guidance", "a.md"), "shipped");
     // A real run of his own data has passed here: `rpe migrate` makes it, and the swap's own run comes after it.
     const proven = await rpe(["migrate", "--lumiverse", fixture.sources.lumiverse, "--user", USER, "--data", data]);
-    if (proven.code !== 0) throw new Error(`the real run before the swap stopped: ${proven.out}`);
+    if (proven.code !== 0) throw new Error(`the real run before the switch stopped: ${proven.out}`);
     backupsBefore = (await treeSums(join(data, "backups"))).size;
   });
 
@@ -297,7 +297,7 @@ describe("the swap, and going back", () => {
       const before = await todays();
       const { code, out } = await up();
       expect(code).toBe(1);
-      expect(out).toContain(`Lumiverse still has today's build of the extension (${IDENT}) installed: its manifest asks for the permissions the previous build asks for. Switch the installed extension to the new build's branch in Lumiverse and approve its permissions first, then run rpe up again. Nothing was stopped or changed.`);
+      expect(out).toContain(`Lumiverse still has the previous build of the extension (${IDENT}) installed: its manifest asks for the permissions the previous build asks for. Switch the installed extension to the new build's branch in Lumiverse and approve its permissions first, then run rpe up again. Nothing was stopped or changed.`);
       // Not even today's runtime was asked whether it is busy.
       expect(await asked()).toEqual([]);
       expect((await treeSums(join(data, "backups"))).size).toBe(backupsBefore);
@@ -318,7 +318,7 @@ describe("the swap, and going back", () => {
       expect(code).toBe(1);
       expect(out).toContain(`The extension Lumiverse has installed (${IDENT}) is another build than this rpe (${BUILD}): its backend, ${backend}, does not carry build ${BUILD}. Switch the installed extension to the new build's branch in Lumiverse, or put the new build's files in its folder (${join(fixture.sources.lumiverse, "extensions", IDENT, "repo")}) and switch the extension off and on in Lumiverse so that it runs them, then run rpe up again.`);
       // Lumiverse runs the light extension by now: what has changed and the way back are said.
-      expect(out).toContain(`What has changed: Lumiverse runs the light extension (${IDENT}) now`);
+      expect(out).toContain(`What has changed: Lumiverse runs the new build of the extension (${IDENT}) now`);
       expect(out).toContain(PREVIOUS_PERMISSIONS.join(", "));
       expect(await asked()).toEqual([]);
       expect((await treeSums(join(data, "backups"))).size).toBe(backupsBefore);
@@ -336,7 +336,7 @@ describe("the swap, and going back", () => {
       const { code, out } = await up({}, ["--no-runtime"]);
       expect(code).toBe(1);
       expect(out).toContain(`Something other than RPE answers at http://127.0.0.1:${ownPort}, where RPE's config has it answer: give RPE a free port ("port" in its config, or RPE_PORT), and run rpe up again.`);
-      expect(out).toContain(`What has changed: Lumiverse runs the light extension (${IDENT}) now`);
+      expect(out).toContain(`What has changed: Lumiverse runs the new build of the extension (${IDENT}) now`);
       expect(await asked()).toEqual([]);
       expect((await treeSums(join(data, "backups"))).size).toBe(backupsBefore);
       expect(await todays()).toEqual(before);
@@ -351,8 +351,8 @@ describe("the swap, and going back", () => {
     const before = await todays();
     const { code, out } = await up();
     expect(code).toBe(1);
-    expect(out).toContain(`Today's runtime ${RUNTIME} still has 1 turn(s) and 1 request(s) under way after 2 seconds, and the swap stops nothing while it is busy. Run rpe up again once it is idle.`);
-    expect(out).toContain(`What has changed: Lumiverse runs the light extension (${IDENT}) now`);
+    expect(out).toContain(`The previous runtime ${RUNTIME} still has 1 turn(s) and 1 request(s) under way after 2 seconds, and the switch stops nothing while it is busy. Run rpe up again once it is idle.`);
+    expect(out).toContain(`What has changed: Lumiverse runs the new build of the extension (${IDENT}) now`);
     expect((await asked()).filter((line) => line.startsWith("systemctl"))).toEqual([]);
     expect(existsSync(join(unitFolder, "lumiah-home.service"))).toBe(true);
     expect((await treeSums(join(data, "backups"))).size).toBe(backupsBefore);
@@ -371,9 +371,9 @@ describe("the swap, and going back", () => {
     expect(code).toBe(1);
     expect(await asked()).toEqual(["health idle", "systemctl --user is-active --quiet lumiah-home.service", "systemctl --user stop lumiah-home.service", "systemctl --user start lumiah-home.service"]);
     expect(out).toContain(`found, not classified: user storage: ${STRAY}`);
-    expect(out).toContain("The swap did not go through: the run was refused, as the report says.");
+    expect(out).toContain("The switch did not go through: the run was refused, as the report says.");
     expect(out).toContain("Put back as it was: lumiah-home.service runs again.");
-    expect(out).toContain("Nothing of today's was changed.");
+    expect(out).toContain("Nothing of the previous build's was changed.");
     expect(existsSync(join(unitFolder, "lumiah-home.service"))).toBe(true);
     expect(existsSync(flags.today)).toBe(true);
     // Past the file today's build wrote as it stopped, today's storage is as it was.
@@ -388,8 +388,8 @@ describe("the swap, and going back", () => {
     const { code, out } = await up({ RPE_SWAP_RPE_FAILS: "1" });
     expect(code).toBe(1);
     expect(await asked()).toEqual(["health idle", "systemctl --user is-active --quiet lumiah-home.service", "systemctl --user stop lumiah-home.service", "systemctl --user daemon-reload", `systemctl --user enable ${UNIT}`, `systemctl --user restart ${UNIT}`, `systemctl --user disable --now ${UNIT}`, "systemctl --user daemon-reload", "systemctl --user start lumiah-home.service"]);
-    expect(out).toContain(`The swap did not go through: RPE did not answer at http://127.0.0.1:${place.port} within 1 seconds of its service starting`);
-    expect(out).toContain(`Put back as it was: ${UNIT} is removed; ${MARK_OFF}; RPE's config is as it was; the swap's record is taken out; lumiah-home.service runs again.`);
+    expect(out).toContain(`The switch did not go through: RPE did not answer at http://127.0.0.1:${place.port} within 1 seconds of its service starting`);
+    expect(out).toContain(`Put back as it was: ${UNIT} is removed; ${MARK_OFF}; RPE's config is as it was; the switch's record is taken out; lumiah-home.service runs again.`);
     // Today's build answers again; RPE's service is gone; nothing of today's changed.
     expect(existsSync(flags.today)).toBe(true);
     expect(existsSync(join(unitFolder, UNIT))).toBe(false);
@@ -408,9 +408,9 @@ describe("the swap, and going back", () => {
     const [configBefore, before] = [await readFile(join(data, "config.json"), "utf8"), await todays()];
     const { code, out } = await up({ RPE_SWAP_HANGUP: "stop lumiah-home.service" });
     expect(code).toBe(1);
-    expect(out).toContain(`Today's runtime ${RUNTIME} stops now, and RPE answers in its place once the migration has run again: do not interrupt the swap. Interrupted all the same, it puts back what it did before it ends.`);
-    expect(out).toContain("Told to stop (SIGHUP): the swap ends once the step under way is done, and puts back what it did.");
-    expect(out).toContain("The swap did not go through: it was told to stop (SIGHUP).");
+    expect(out).toContain(`The previous runtime ${RUNTIME} stops now, and RPE answers in its place once the migration has run again: do not interrupt the switch. Interrupted all the same, it puts back what it did before it ends.`);
+    expect(out).toContain("Told to stop (SIGHUP): the switch ends once the step under way is done, and puts back what it did.");
+    expect(out).toContain("The switch did not go through: it was told to stop (SIGHUP).");
     expect(out).toContain("Put back as it was: lumiah-home.service runs again.");
     expect(await asked()).toEqual(["health idle", "systemctl --user is-active --quiet lumiah-home.service", "systemctl --user stop lumiah-home.service", "systemctl --user start lumiah-home.service"]);
     expect(existsSync(flags.today)).toBe(true);
@@ -426,8 +426,8 @@ describe("the swap, and going back", () => {
     const [configBefore, before] = [await readFile(join(data, "config.json"), "utf8"), await todays()];
     const { code, out } = await up({ RPE_SWAP_HANGUP: `restart ${UNIT}` });
     expect(code).toBe(1);
-    expect(out).toContain("The swap did not go through: it was told to stop (SIGHUP).");
-    expect(out).toContain(`Put back as it was: ${UNIT} is removed; ${MARK_OFF}; RPE's config is as it was; the swap's record is taken out; lumiah-home.service runs again.`);
+    expect(out).toContain("The switch did not go through: it was told to stop (SIGHUP).");
+    expect(out).toContain(`Put back as it was: ${UNIT} is removed; ${MARK_OFF}; RPE's config is as it was; the switch's record is taken out; lumiah-home.service runs again.`);
     expect(await asked()).toEqual(["health idle", "systemctl --user is-active --quiet lumiah-home.service", "systemctl --user stop lumiah-home.service", "systemctl --user daemon-reload", `systemctl --user enable ${UNIT}`, `systemctl --user restart ${UNIT}`, `systemctl --user disable --now ${UNIT}`, "systemctl --user daemon-reload", "systemctl --user start lumiah-home.service"]);
     // Never both on: today's unit runs, and is still started at boot; RPE's is gone.
     expect(existsSync(flags.today)).toBe(true);
@@ -449,7 +449,7 @@ describe("the swap, and going back", () => {
     // Stopped only after it said it was idle; switched off only after RPE answered in its place.
     expect(await asked()).toEqual(["health busy", "health busy", "health idle", "systemctl --user is-active --quiet lumiah-home.service", "systemctl --user stop lumiah-home.service", "systemctl --user daemon-reload", `systemctl --user enable ${UNIT}`, `systemctl --user restart ${UNIT}`, "systemctl --user disable lumiah-home.service"]);
     expect(out).toContain("Migration real run");
-    expect(out).toContain("Today's runtime: took home, registered with this Lumiverse for this user");
+    expect(out).toContain("The previous runtime: took home, registered with this Lumiverse for this user");
     // Today's unit, which the config doesn't name, is backed up whole, and left where today's install line finds it.
     const backup = /Backup taken: (\S+) \(/.exec(out)?.[1] ?? "";
     expect(backup).toContain(join(data, "backups"));
@@ -458,9 +458,9 @@ describe("the swap, and going back", () => {
     expect(kept.length).toBe(1);
     expect(await kept[0]?.[1].text()).toBe(TODAYS_UNIT);
     expect(await readFile(join(unitFolder, "lumiah-home.service"), "utf8")).toBe(TODAYS_UNIT);
-    expect(out).toContain(`RPE answers on "LumiRPEngine" (${TODAYS_CONNECTION}), a connection in Lumiverse that reached today's runtime, under its model name (${TODAYS_MODEL}): it is left as it is`);
-    expect(out).toContain(`Started ${UNIT}, RPE's service: RPE answers at http://127.0.0.1:${place.port}, where today's runtime home did, under its model name (${TODAYS_MODEL}) and with its key.`);
-    expect(out).toContain("Stopped and switched off lumiah-home.service, today's service.");
+    expect(out).toContain(`RPE answers on "LumiRPEngine" (${TODAYS_CONNECTION}), a connection in Lumiverse that reached the previous runtime, under its model name (${TODAYS_MODEL}): it is left as it is`);
+    expect(out).toContain(`Started ${UNIT}, RPE's service: RPE answers at http://127.0.0.1:${place.port}, where the previous runtime home did, under its model name (${TODAYS_MODEL}) and with its key.`);
+    expect(out).toContain("Stopped and switched off lumiah-home.service, the previous build's service.");
     // No new connection to choose chat by chat: the chats on today's connection are RPE's now.
     expect(out).not.toContain("choose the connection");
     const text = await readFile(join(unitFolder, UNIT), "utf8");
@@ -544,8 +544,8 @@ describe("the swap, and going back", () => {
     expect(code).toBe(0);
     expect(performance.now() - started).toBeLessThan(1500);
     expect(await asked()).toEqual([`systemctl --user is-active --quiet ${UNIT}`, "systemctl --user is-active --quiet lumiah-home.service", "systemctl --user is-enabled --quiet lumiah-home.service"]);
-    expect(out).toContain(`The swap stands: RPE's service ${UNIT} runs, and RPE answers at http://127.0.0.1:${place.port}, where today's runtime ${RUNTIME} answered; today's service lumiah-home.service is switched off; the extension Lumiverse has installed is this build (${BUILD}). Nothing was stopped or changed, and the migration was not made again.`);
-    expect(out).toContain("carries what changed on today's side since the last run (read at ");
+    expect(out).toContain(`The switch stands: RPE's service ${UNIT} runs, and RPE answers at http://127.0.0.1:${place.port}, where the previous runtime ${RUNTIME} answered; the previous build's service lumiah-home.service is switched off; the extension Lumiverse has installed is this build (${BUILD}). Nothing was stopped or changed, and the migration was not made again.`);
+    expect(out).toContain("carries what changed on the previous build's side since the last run (read at ");
     expect(out).toContain(`): stop RPE's service (systemctl --user stop ${UNIT}), run rpe migrate --lumiverse ${fixture.sources.lumiverse} --user ${USER} --data ${data}, then start it again (systemctl --user start ${UNIT}).`);
     expect(await held()).toEqual(had);
     expect(existsSync(flags.rpe)).toBe(true);
@@ -560,7 +560,7 @@ describe("the swap, and going back", () => {
     const [before, had] = [await todays(), await held()];
     const { code, out } = await up();
     expect(code).toBe(0);
-    expect(out).not.toContain("The swap stands");
+    expect(out).not.toContain("The switch stands");
     expect(await asked()).toEqual([`systemctl --user is-active --quiet ${UNIT}`, "systemctl --user is-active --quiet lumiah-home.service", "systemctl --user daemon-reload", `systemctl --user enable ${UNIT}`, `systemctl --user restart ${UNIT}`, "systemctl --user disable lumiah-home.service"]);
     expect(await held()).toEqual({ chats: had.chats, runs: had.runs + 1, backups: had.backups + 1 });
     expect(existsSync(flags.rpe)).toBe(true);
@@ -577,10 +577,10 @@ describe("the swap, and going back", () => {
     const [before, had] = [await todays(), await held()];
     const { code, out } = await up();
     expect(code).toBe(0);
-    expect(out).not.toContain("The swap stands");
+    expect(out).not.toContain("The switch stands");
     expect(await asked()).toEqual([`systemctl --user is-active --quiet ${UNIT}`, "systemctl --user is-active --quiet lumiah-home.service", "systemctl --user is-enabled --quiet lumiah-home.service", `systemctl --user is-active --quiet ${UNIT}`, `systemctl --user stop ${UNIT}`, "systemctl --user is-active --quiet lumiah-home.service", "systemctl --user daemon-reload", `systemctl --user enable ${UNIT}`, `systemctl --user restart ${UNIT}`, "systemctl --user disable lumiah-home.service"]);
     expect(existsSync(flags.todayOn)).toBe(false);
-    expect(out).toContain(`The connection connection-own in Lumiverse, RPE's own until now, is played no longer once RPE answers in today's runtime's place: the chats on it belong on "LumiRPEngine".`);
+    expect(out).toContain(`The connection connection-own in Lumiverse, RPE's own until now, is played no longer once RPE answers in the previous runtime's place: the chats on it belong on "LumiRPEngine".`);
     expect(await rpeConfig()).toMatchObject({ lumiverse: { connections: [TODAYS_CONNECTION] } });
     expect(await held()).toEqual({ chats: had.chats, runs: had.runs + 1, backups: had.backups + 1 });
     expect(await todays()).toEqual(before);
@@ -595,7 +595,7 @@ describe("the swap, and going back", () => {
     try {
       const { code, out } = await up();
       expect(code).toBe(0);
-      expect(out).toContain(`Started ${UNIT}, RPE's service: RPE answers at http://127.0.0.1:${place.port}, where today's runtime home did, with its key.`);
+      expect(out).toContain(`Started ${UNIT}, RPE's service: RPE answers at http://127.0.0.1:${place.port}, where the previous runtime home did, with its key.`);
       expect(out).not.toContain("under its model name");
     } finally {
       if (todaysConnection !== undefined) lumiverse.connections.set(TODAYS_CONNECTION, todaysConnection);
@@ -613,10 +613,10 @@ describe("the swap, and going back", () => {
     expect(await keep()).toEqual(dataBefore);
     expect(await todays()).toEqual(before);
     expect(out).toContain(`Stopped and removed ${UNIT}. RPE's data stays where it is, in ${data}.`);
-    expect(out).toContain("To go back to the previous build: today's data was never changed, and neither was its connection in Lumiverse.");
+    expect(out).toContain("To go back to the previous build: its data was never changed, and neither was its connection in Lumiverse.");
     expect(out).toContain(`switch the installed extension (${IDENT}) to the branch the previous build is kept on`);
     expect(out).toContain(`Then switch the extension off and on again, so that it starts with them in hand. The ${PREVIOUS_PERMISSIONS.length} permissions it asks for: ${PREVIOUS_PERMISSIONS.join(", ")}.`);
-    expect(out).toContain(`bun <the extension's folder>/dist/lumiah.js up --name ${RUNTIME} --systemd. It reads its address from its own config, keeps its registration, and takes up its service's unit, which the swap only switched off, with the memory cap it holds: all as the swap left them.`);
+    expect(out).toContain(`bun <the extension's folder>/dist/lumiah.js up --name ${RUNTIME} --systemd. It reads its address from its own config, keeps its registration, and takes up its service's unit, which the switch only switched off, with the memory cap it holds: all as the switch left them.`);
     // Today's unit is where today's install line finds it, switched off, with the memory cap it held.
     expect(await readFile(join(unitFolder, "lumiah-home.service"), "utf8")).toBe(TODAYS_UNIT);
     // RPE answered on today's connection: no chat was moved to one of RPE's own.

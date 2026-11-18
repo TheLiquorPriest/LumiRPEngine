@@ -134,7 +134,7 @@ describe("the rehearsal, extension installed for everyone", () => {
     const paths = [...Object.keys(depthFiles(CHAT.classic)).filter((p) => !p.endsWith(".tmp")), "loopback/registry.json"];
     const items = paths.map((path) => report.items.find((i) => i.where !== "runtime" && i.path === path));
     expect(items.map((i) => ({ path: i?.path, row: i?.row, fate: i?.fate }))).toEqual(paths.map((path) => ({ path, row: "depth-engine", fate: "archived" })));
-    for (const i of items) expect(i?.note).toContain("today's build has no depth engine");
+    for (const i of items) expect(i?.note).toContain("the previous build has no depth engine");
     expect(report.items.find((i) => i.path === `runs/${CHAT.classic}/archive/shard-7.json.tmp`)).toMatchObject({ row: "depth-engine", fate: "archived", note: expect.stringContaining("temporary") });
     expect(report.rows.find((r) => r.row === "depth-engine")?.count).toEqual({ found: paths.length + 1, carried: 0, attached: 0, archived: paths.length + 1, backup: 0 });
   });
@@ -245,8 +245,8 @@ describe("the report, on a file today's readers can't parse", () => {
       await writeFile(join(fixture.userFolder, "worlds", fixture.worldId, "rev", `${fixture.revisions[0]}.json`), `{ "name": Ostrichfeather }`);
       await writeFile(join(fixture.userFolder, "worlds", fixture.worldId, "index.json"), `{ "name": Saltpetrel }`);
       const report = await rehearse(fixture.sources);
-      expect(report.unreadable).toContainEqual({ path: `user storage: worlds/${fixture.worldId}/index.json`, why: "today's world store can't read it" });
-      expect(report.chats.find((c) => c.chatId === CHAT.classic)?.notOpened).toBe(`its world ${fixture.worldId} at revision ${fixture.revisions[0]} can't be read by today's world store`);
+      expect(report.unreadable).toContainEqual({ path: `user storage: worlds/${fixture.worldId}/index.json`, why: "the previous build's world store can't read it" });
+      expect(report.chats.find((c) => c.chatId === CHAT.classic)?.notOpened).toBe(`its world ${fixture.worldId} at revision ${fixture.revisions[0]} can't be read by the previous build's world store`);
       for (const word of ["Ostrichfeather", "Saltpetrel"]) {
         expect(JSON.stringify(report)).not.toContain(word);
         expect(reportText(report)).not.toContain(word);

@@ -163,7 +163,7 @@ export async function carryBuildThings(input: { today: Today; report: MigrationR
     if (item.path === JOBS_FILE) {
       const raw = parsed(text);
       if (!isRecord(raw) || raw.v !== 1 || !Array.isArray(raw.jobs)) {
-        damaged(item, "Build's jobs file does not read as today's jobs; no job is made from it, and it is kept whole in the backup");
+        damaged(item, "Build's jobs file does not read as the previous build's jobs; no job is made from it, and it is kept whole in the backup");
         continue;
       }
       for (const job of raw.jobs.flatMap((j) => jobOf(j) ?? [])) {
@@ -174,7 +174,7 @@ export async function carryBuildThings(input: { today: Today; report: MigrationR
     } else if (item.path === LORE_IDS_FILE) {
       const read = loreIdsOf(parsed(text));
       if (read === null) {
-        damaged(item, "today's lore index ids file does not read as today's id map; no id is carried from it, and it is kept whole in the backup");
+        damaged(item, "the previous build's lore index ids file does not read as its id map; no id is carried from it, and it is kept whole in the backup");
         continue;
       }
       const fresh = db.transaction(() => putCarriedLoreIds(db, user, read.ids))();

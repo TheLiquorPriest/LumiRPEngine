@@ -81,7 +81,7 @@ const AGENTS_KEYS: Readonly<Record<string, true>> = { learned: true, assistant: 
  * `src/backend/chat-knowledge-prefs.ts:41,78,192-193`); today's reader keeps the engine alone
  * (`chat-knowledge-prefs.ts:61-62`), so it steers nothing now.
  */
-const ENGINE_FROM = "which engine the chat plays came from your default for new chats, as a build with the depth engine marked it; today's build reads the engine alone, so nothing reads this now";
+const ENGINE_FROM = "which engine the chat plays came from your default for new chats, as a build with the depth engine marked it; the previous build reads the engine alone, so nothing reads this now";
 
 /**
  * The engine's entries in a chat's metadata, each its own item: the run, the engine chosen, the
@@ -94,7 +94,7 @@ function chatEntries(chat: ChatRow, identifier: string): Item[] {
   const own = chat.metadata[LEDGER_NAMESPACE];
   if (isRecord(own)) {
     const run = Object.fromEntries(Object.entries(own).filter(([k]) => Object.hasOwn(RUN_KEYS, k)));
-    if (Object.keys(run).length > 0) out.push(itemOf("Lumiverse database", at(`${LEDGER_NAMESPACE}/run`), measured(run), { row: "chat-run", fate: "carried" }, readRun(chat.metadata) ? undefined : "a run that doesn't read: today's build plays no world in this chat"));
+    if (Object.keys(run).length > 0) out.push(itemOf("Lumiverse database", at(`${LEDGER_NAMESPACE}/run`), measured(run), { row: "chat-run", fate: "carried" }, readRun(chat.metadata) ? undefined : "a run that doesn't read: the previous build plays no world in this chat"));
     for (const [key, value] of Object.entries(own)) {
       if (Object.hasOwn(RUN_KEYS, key)) continue;
       if (key === "prefs" && isRecord(value)) {
@@ -281,11 +281,11 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
         for (const rec of Object.values(ledger?.swipes ?? {})) {
           const refs = recordBlobs(rec);
           for (const h of refs.agents) {
-            missingBlob(`agents/blobs/${h}`, `a session text a record on chat ${chat.id} names; today's clean-up had removed it`);
+            missingBlob(`agents/blobs/${h}`, `a session text a record on chat ${chat.id} names; the previous build's clean-up had removed it`);
             fromRecords.push(`agents/blobs/${h}`);
           }
           for (const h of refs.harness) {
-            missingBlob(`harness/blobs/${h.slice(0, 2)}/${h}`, `a harness text a record on chat ${chat.id} names; today's clean-up had removed it`);
+            missingBlob(`harness/blobs/${h.slice(0, 2)}/${h}`, `a harness text a record on chat ${chat.id} names; the previous build's clean-up had removed it`);
             fromRecords.push(`harness/blobs/${h.slice(0, 2)}/${h}`);
           }
         }
@@ -293,7 +293,7 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
       const meta = agentMetaOf(chat.metadata);
       tally.add("agents-workspace", Object.keys(meta.learned).length);
       tally.add("assistant-threads", meta.assistant.messages.length + Object.keys(meta.assistant.proposals).length);
-      for (const h of [...Object.values(meta.learned).map((f) => f.hash), ...meta.assistant.messages, ...Object.values(meta.assistant.proposals)]) missingBlob(`agents/blobs/${h}`, `a file chat ${chat.id}'s agents kept; today's clean-up had removed it`);
+      for (const h of [...Object.values(meta.learned).map((f) => f.hash), ...meta.assistant.messages, ...Object.values(meta.assistant.proposals)]) missingBlob(`agents/blobs/${h}`, `a file chat ${chat.id}'s agents kept; the previous build's clean-up had removed it`);
       for (const f of Object.values(meta.learned)) nameBlob(`agents/blobs/${f.hash}`, "agents-workspace", `a file of chat ${chat.id}'s learned area`);
       for (const h of [...meta.assistant.messages, ...Object.values(meta.assistant.proposals)]) nameBlob(`agents/blobs/${h}`, "assistant-threads", `a message or proposal of chat ${chat.id}'s assistant thread`);
       unreadable.push(...read.unreadable);
@@ -307,7 +307,7 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
       tally.add("agents-workspace", Object.keys(global.files).length);
       for (const f of Object.values(global.files)) {
         if (!isRecord(f) || typeof f.hash !== "string") continue;
-        missingBlob(`agents/blobs/${f.hash}`, "a file of the global workspace; today's clean-up had removed it");
+        missingBlob(`agents/blobs/${f.hash}`, "a file of the global workspace; the previous build's clean-up had removed it");
         nameBlob(`agents/blobs/${f.hash}`, "agents-workspace", "a file of the global workspace");
       }
     }
@@ -323,14 +323,14 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
       try {
         const index = await reader.worldStore.index(id as WorldId, userId);
         if (!index) {
-          unreadable.push({ path: `user storage: worlds/${id}/index.json`, why: "a world index today's world store doesn't read" });
+          unreadable.push({ path: `user storage: worlds/${id}/index.json`, why: "a world index the previous build's world store doesn't read" });
           continue;
         }
         const docs = await reader.worldStore.getMany(id as WorldId, userId, index.revisions);
         for (const rev of index.revisions) {
           const doc = docs.get(rev);
           if (!doc) {
-            unreadable.push({ path: `user storage: worlds/${id}/rev/${rev}.json`, why: "a revision the world's index lists, which today's world store can't read" });
+            unreadable.push({ path: `user storage: worlds/${id}/rev/${rev}.json`, why: "a revision the world's index lists, which the previous build's world store can't read" });
             continue;
           }
           countWorldDoc(doc, rev === index.head, tally);
@@ -344,7 +344,7 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
         if (isRecord(draft)) countWorldDoc(draft.doc, false, tally);
       } catch {
         // A fixed reason: the store's own words can quote the file's text, and the report holds no content.
-        unreadable.push({ path: `user storage: worlds/${id}/index.json`, why: "today's world store can't read it" });
+        unreadable.push({ path: `user storage: worlds/${id}/index.json`, why: "the previous build's world store can't read it" });
       }
     }
 
@@ -364,13 +364,13 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
       nameBlob(indexPath, item.row ?? "learned-and-home", `the index of the area ${item.path} names`);
       const files = areaFiles(await userView.read(indexPath));
       if (files === null) {
-        unreadable.push({ path: `user storage: ${indexPath}`, why: `the index ${item.path} names; today's clean-up had removed it, or it doesn't read` });
+        unreadable.push({ path: `user storage: ${indexPath}`, why: `the index ${item.path} names; the previous build's clean-up had removed it, or it doesn't read` });
         continue;
       }
       const chat = area[2] ?? "";
       for (const f of files) {
         const blob = `harness/blobs/${f.hash.slice(0, 2)}/${f.hash}`;
-        missingBlob(blob, `the text of ${f.path} in ${item.path}; today's clean-up had removed it`);
+        missingBlob(blob, `the text of ${f.path} in ${item.path}; the previous build's clean-up had removed it`);
         const key = `${chat}\u0000${f.path}\u0000${f.hash}`;
         if (area[3]?.startsWith("area/")) {
           (MIND_FILE.test(f.path) ? versions.mind : versions.notes).add(key);
@@ -408,11 +408,11 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
     if (isRecord(guarded) && Array.isArray(guarded.connections)) {
       tally.add("second-copies", copy);
       const file = items.find((i) => i.where === "user storage" && i.path === "agent-acceptance.json");
-      if (file !== undefined) file.note = "the authority for the connections acceptance runs guard, which today's guard reads first: settings.json's copy of that list is counted as attached";
+      if (file !== undefined) file.note = "the authority for the connections acceptance runs guard, which the previous build's guard reads first: settings.json's copy of that list is counted as attached";
     }
 
     // A damaged file today's readers set aside, as the stand-in kept it.
-    for (const w of writes) if (w.op === "move" && w.to !== undefined && /\.corrupt-\d+$/.test(w.to)) unreadable.push({ path: `${w.store}: ${w.path}`, why: "damaged: today's reader sets it aside and starts afresh" });
+    for (const w of writes) if (w.op === "move" && w.to !== undefined && /\.corrupt-\d+$/.test(w.to)) unreadable.push({ path: `${w.store}: ${w.path}`, why: "damaged: the previous build's reader sets it aside and starts afresh" });
 
     // The blobs a thing names count where that thing goes (a mind file's text with the mind files, a note's with the notes), and the sessions row holds the session, summary and transcript texts: the row of what names each blob is its row, and a blob nothing names stays with the sessions, where both blob stores are kept whole.
     for (const p of fromRecords) nameBlob(p, "sessions", "a session, summary or transcript text a record names");
@@ -423,7 +423,7 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
         item.row = by.row;
         item.fate = ROW[by.row].fate;
         item.note = by.why;
-      } else if (/^(agents\/blobs\/[0-9a-f]{32}|harness\/blobs\/[0-9a-f]{2}\/[0-9a-f]{64})$/.test(item.path)) item.note = "no record, area or file names it; today's clean-up removes a text nothing names after a week, so it is kept whole here";
+      } else if (/^(agents\/blobs\/[0-9a-f]{32}|harness\/blobs\/[0-9a-f]{2}\/[0-9a-f]{64})$/.test(item.path)) item.note = "no record, area or file names it; the previous build's clean-up removes a text nothing names after a week, so it is kept whole here";
     }
 
     // The rows he gave to what no row names (`migration.rows`): a path as the report names it, or a folder (a path ending in `/`).

@@ -82,7 +82,7 @@ describe("what today's build recorded beside each turn", () => {
     ]);
     const text = reportText(report);
     const what = report.rows.find((r) => r.row === "mind-files")?.what ?? "";
-    expect(text).toContain(`  ${what}: On each character's record in the cast, word for word, per turn, marked imported and not yet filed (the cast's mind part): 5 version(s) of 3 file(s) of 2 character(s), 5 of the 5 found in today's areas\n`);
+    expect(text).toContain(`  ${what}: On each character's record in the cast, word for word, per turn, marked imported and not yet filed (the cast's mind part): 5 version(s) of 3 file(s) of 2 character(s), 5 of the 5 found in the previous build's areas\n`);
     const kept = text.slice(text.indexOf("Kept in the backup only"));
     expect(kept).not.toContain(what);
   });
@@ -126,7 +126,7 @@ describe("what today's build recorded beside each turn", () => {
     expect(report.carried?.story.byChat.find((c) => c.chat === CHAT.harness)).toEqual({ chat: CHAT.harness, beats: 3, struck: 1, futures: 2, castings: 2, perceptions: 1, takenIn: 0, exposureLeft: 0, digestedUnknown: 0 });
     const found = report.rows.find((r) => r.row === "story-record")?.inside?.count;
     expect(found).toBe(3 + 1 + 2 + 2);
-    expect(reportText(report)).toContain("RPE's story record and cast, each on the turn whose record held it; each swipe's record also kept word for word beside its turn in the migration's imported_record, read-only: 3 beat(s), 1 struck, 2 draft(s) as proposed futures, 2 casting(s) in the cast, 1 pinned as the player pinned them, 8 of the 8 entr(ies) found in today's records; 1 perception(s) in the cast for whom each beat reached, as its exposure says, and 0 of them marked taken in, for the principals whose mind had taken the beats in (so only later beats reach them as not yet taken in)\n");
+    expect(reportText(report)).toContain("RPE's story record and cast, each on the turn whose record held it; each swipe's record also kept word for word beside its turn in the migration's imported_record, read-only: 3 beat(s), 1 struck, 2 draft(s) as proposed futures, 2 casting(s) in the cast, 1 pinned as you pinned them, 8 of the 8 entr(ies) found in the previous build's records; 1 perception(s) in the cast for whom each beat reached, as its exposure says, and 0 of them marked taken in, for the principals whose mind had taken the beats in (so only later beats reach them as not yet taken in)\n");
   });
 
   test("the Author's notes are in the chat's own notes folder as they stand at the reply the chat shows, and each change a turn made to them is a version on that turn in RPE's own history of notes", async () => {

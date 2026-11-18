@@ -278,7 +278,7 @@ export function refusalsOf(report: Pick<MigrationReport, "rows" | "notClassified
   if (whose.owner !== null && whose.owner !== whose.user) out.push(`This RPE belongs to the Lumiverse user ${whose.owner}, and this run is for ${whose.user}: one RPE serves one Lumiverse user.`);
   for (const other of whose.earlier) if (other !== whose.user) out.push(`An earlier run carried the data of the Lumiverse user ${other} into this data folder, and this run is for ${whose.user}: one RPE serves one Lumiverse user.`);
   // Without its folders the run would carry no unsent writes and no keys, and the backup would lack what going back needs: it says so rather than run as if there were none.
-  if (runtime.missing !== null) out.push(`The runtime's folders are not where this run looks: neither ${runtime.missing.configDir} nor ${runtime.missing.dataDir} is there. Say where they are, or that the server runs no runtime of today's build (--no-runtime).`);
+  if (runtime.missing !== null) out.push(`The runtime's folders are not where this run looks: neither ${runtime.missing.configDir} nor ${runtime.missing.dataDir} is there. Say where they are, or that the server runs no runtime of the previous build (--no-runtime).`);
   if (runtime.undecided !== null) out.push(runtime.undecided);
   for (const r of report.rows) {
     const { found, carried, attached, archived, backup } = r.count;
@@ -473,11 +473,11 @@ export function reportText(report: MigrationReport): string {
   }
   // The chats he must put on RPE himself (N-14): RPE plays only what reaches it on its own connections, and writes nothing into his chats.
   if ((report.offRpe ?? []).length > 0) {
-    lines.push("", "Chats that were on today and are on none of RPE's connections once swapped (every connection that reaches today's runtime becomes RPE's): in Lumiverse, choose one of RPE's connections for each, and it is on RPE.");
+    lines.push("", "Chats that were on the previous build and are on none of RPE's connections once the switch is made (every connection that reaches the previous runtime becomes RPE's): in Lumiverse, choose one of RPE's connections for each, and it is on RPE.");
     for (const c of report.offRpe ?? []) lines.push(`  ${c.chat}: ${c.pinned === null ? "pinned to no connection, so it follows the one active for you" : `pinned to connection ${c.pinned}`}`);
   }
   if (report.imports !== null) {
-    lines.push("", "Chats into RPE: turns, where each swipe was folded, and the check against today's fold");
+    lines.push("", "Chats into RPE: turns, where each swipe was folded, and the check against the previous build's fold");
     for (const c of report.imports) {
       if (c.outcome !== "imported" && c.outcome !== "replaced") {
         lines.push(`  ${c.chatId}: ${c.outcome}${c.why ? ` (${c.why})` : ""}`);
@@ -486,9 +486,9 @@ export function reportText(report: MigrationReport): string {
       const p = c.placed;
       const where = `${p.own} on their own path, ${p.shown} where they show (no turn path of their own), ${p.lost} where they show (their own path lost to an edit or a deletion)`;
       const check = `matched at the head ${c.matched.head ? "yes" : "no"}, at ${c.matched.swipes} of ${c.matched.of} swipes`;
-      lines.push(`  ${c.chatId}: ${c.outcome}, ${c.turns} turns (${where})${c.shares ? `; shares ${c.shares.messages} message(s) with ${c.shares.chat}` : ""}; ${check}${c.differences.length > 0 ? "; MARKED: today's state is kept as the start where they differ" : ""}`);
+      lines.push(`  ${c.chatId}: ${c.outcome}, ${c.turns} turns (${where})${c.shares ? `; shares ${c.shares.messages} message(s) with ${c.shares.chat}` : ""}; ${check}${c.differences.length > 0 ? "; MARKED: the previous build's state is kept as the start where they differ" : ""}`);
       for (const d of c.differences) lines.push(`    ${d.kept ? "differs" : "differs (not kept: the turn is the chat it was made from's)"} at ${d.at === "head" ? "the head" : `message ${d.at.message}, swipe ${d.at.swipe}`}: ${d.values.join(", ")}`);
-      if ((c.edited ?? 0) > 0) lines.push(`    ${c.edited} swipe(s) edited since today's build read them: each is told to the chat's agents as a reply edited after its turn, at the first turn on RPE that finds it showing`);
+      if ((c.edited ?? 0) > 0) lines.push(`    ${c.edited} swipe(s) edited since the previous build read them: each is told to the chat's agents as a reply edited after its turn, at the first turn on RPE that finds it showing`);
       if (c.own !== undefined) lines.push(`    ${c.own.placed} change(s) of your own and your jobs' made in RPE since an earlier run are kept, tied to the same replies${c.own.lost > 0 ? `; ${c.own.lost} had lost their place (their reply is gone) and are not kept` : ""}`);
     }
   }
@@ -502,7 +502,7 @@ export function reportText(report: MigrationReport): string {
   }
   if (report.runtime !== undefined && (report.runtime.taken !== null || report.runtime.leftAlone.length > 0 || (report.runtime.archived ?? []).length > 0)) {
     const { taken, leftAlone } = report.runtime;
-    lines.push("", taken === null ? "Today's runtime: none of this user's taken." : `Today's runtime: took ${taken.name}, ${taken.why}.`);
+    lines.push("", taken === null ? "The previous runtime: none of this user's taken." : `The previous runtime: took ${taken.name}, ${taken.why}.`);
     for (const r of leftAlone) lines.push(`  Left alone: ${r.name}, ${r.why}.`);
     for (const r of report.runtime.archived ?? []) lines.push(`  Runtime folder ${r.name}: ${r.why}; its files are counted under the working copy and archived in the backup.`);
   }
@@ -510,7 +510,7 @@ export function reportText(report: MigrationReport): string {
     lines.push("", "Rows you gave to what no row names (migration.rows):");
     for (const g of report.given ?? []) lines.push(`  ${g.path}: ${g.fate}, ${g.line} (${g.found} thing(s) found${g.found === 0 ? ": nothing found under that path" : ""})`);
   }
-  lines.push("", `Today's readers tried ${report.standIn.writes.length} write(s), kept in memory and never made:`);
+  lines.push("", `The previous build's readers tried ${report.standIn.writes.length} write(s), kept in memory and never made:`);
   for (const w of report.standIn.writes) lines.push(`  ${w.store}: ${w.op} ${w.path}${w.to ? ` to ${w.to}` : ""}`);
   const m = report.lumiverse;
   lines.push("", `In Lumiverse, left as they are: ${m.engineBooks} engine book(s) with ${m.engineEntries} entries, attached to ${m.chatsWithEngineBook} chat(s); ${m.markedEntries} entries of your own books with engine fields; ${m.regexScripts} regex script(s); ${m.presetBlocks} preset block(s) and ${m.outletReferences} outlet reference(s); ${m.panelMessages} message(s) the panels put in your chats; ${m.chatsPinned} chat(s) pinned to the engine's connection, ${m.chatsPinnedToModel} of them to a model too; ${m.schedulerExclusions === null ? "no scheduler exclusions set" : `${m.schedulerExclusions.listed} origin(s) on the scheduler's exclusions, ${m.schedulerExclusions.engine} of them the engine's address`}.`);
@@ -532,7 +532,7 @@ export function reportText(report: MigrationReport): string {
   // The swap's steps, and going back's with the previous build's permissions by name (R-80), as the swap and going back say them.
   if (report.identifier !== undefined) {
     const taken = report.runtime?.taken ?? null;
-    lines.push("", "The swap, once you choose to make it:", ...swapSteps({ identifier: report.identifier }));
+    lines.push("", "The switch, once you choose to make it:", ...swapSteps({ identifier: report.identifier }));
     lines.push("", ...goingBack({ identifier: report.identifier, runtime: taken === null ? null : { name: taken.name, source: taken.source }, downRun: false }));
   }
   if (report.landed) {
@@ -548,8 +548,8 @@ export function reportText(report: MigrationReport): string {
     const w = report.worldsInStore;
     lines.push("", `World revisions RPE's store keeps for Build and play: ${w.added} added, ${w.held} kept already, ${w.unreadable} left out as not a world document${w.unreadable > 0 ? " (listed under what could not be read)" : ""}.`);
     if ((w.copied ?? []).length > 0) lines.push(`Worlds new to RPE, put whole: ${(w.copied ?? []).join(", ")}.`);
-    if ((w.followed ?? []).length > 0) lines.push(`Changed on today's side since a run put them, and followed in RPE (RPE's copy was still the run's): ${(w.followed ?? []).join(", ")}.`);
-    for (const k of w.kept ?? []) lines.push(`The world ${k.world}: its ${k.file} was changed in RPE since a run put it, and is kept as RPE has it${k.newer ? "; today's side changed it too, and today's newer file is in RPE's copy of today's worlds and in the backup" : ""}.`);
+    if ((w.followed ?? []).length > 0) lines.push(`Changed on the previous build's side since a run put them, and followed in RPE (RPE's copy was still the run's): ${(w.followed ?? []).join(", ")}.`);
+    for (const k of w.kept ?? []) lines.push(`The world ${k.world}: its ${k.file} was changed in RPE since a run put it, and is kept as RPE has it${k.newer ? "; the previous build's side changed it too, and its newer file is in RPE's copy of the previous build's worlds and in the backup" : ""}.`);
     for (const id of w.removed ?? []) lines.push(`The world ${id} was removed in RPE since a run put it, and stays removed; its revisions are kept for the chats that play them.`);
   }
   if (report.carried) {
@@ -558,19 +558,19 @@ export function reportText(report: MigrationReport): string {
     if (ownFiles !== null && ownFiles.guidance > 0) lines.push("", "Waiting on you: your GUIDANCE.md is in the file tree under imported/, switched off, since it was written for agents that are gone or changed. Switch it on as an AGENTS.md at the same level, or copy from it.");
     if (ownFiles === null) lines.push("", "Your own agents, skills, texts, GUIDANCE.md, notes and learned files were not carried: this run was not given the file tree's places. They are in the backup.");
     else if (ownFiles.leftOut > 0) lines.push("", `${ownFiles.leftOut} of your own file(s) have names that would leave the folder they go in: not written, in the backup.`);
-    if (ownFiles !== null && ownFiles.removed + ownFiles.changed > 0) lines.push("", `Files an earlier run wrote into the file tree that today's side no longer has: ${ownFiles.removed} removed${ownFiles.changed > 0 ? `; ${ownFiles.changed} changed in RPE since, left as they are` : ""}.`);
-    for (const g of report.carried.worlds.gone ?? []) lines.push("", g.kept ? `The world ${g.world} was deleted on today's side since an earlier run: RPE keeps its copy, since a chat carried from today's side plays it.` : `The world ${g.world} was deleted on today's side since an earlier run, and no chat carried from today's side plays it: RPE's copy of it is gone too.`);
+    if (ownFiles !== null && ownFiles.removed + ownFiles.changed > 0) lines.push("", `Files an earlier run wrote into the file tree that the previous build's side no longer has: ${ownFiles.removed} removed${ownFiles.changed > 0 ? `; ${ownFiles.changed} changed in RPE since, left as they are` : ""}.`);
+    for (const g of report.carried.worlds.gone ?? []) lines.push("", g.kept ? `The world ${g.world} was deleted on the previous build's side since an earlier run: RPE keeps its copy, since a chat carried from the previous build plays it.` : `The world ${g.world} was deleted on the previous build's side since an earlier run, and no chat carried from the previous build plays it: RPE's copy of it is gone too.`);
     // Every place that names a connection (R-80, row 128): carried to one of RPE's connections, or with no match, by name, for him to pick.
     const choices = report.carried.modelChoices ?? [];
     if (choices.length > 0) {
-      lines.push("", "Model choices, each where today's build kept it:");
+      lines.push("", "Model choices, each where the previous build kept it:");
       for (const c of choices) lines.push(`  ${c.where} (connection ${c.connection}${c.model === null ? "" : `, model ${c.model}`}): ${c.carried !== null ? `RPE's connection ${c.carried.id} (${c.carried.how})` : `no match in RPE${c.to === null ? "; RPE has no place for that work, which its default connection does" : `; pick one of RPE's for your agent ${c.to.agent} on the Migration page, until then its default connection does that work`}`}`);
     }
     // His texts and his agents' tools with no counterpart, by name.
     if (ownFiles !== null) {
       const apart = ownFiles.textsSetApart ?? [];
       if (apart.length > 0) {
-        lines.push("", "Your texts that today's build would not send, or whose id no build had, attached as set apart:");
+        lines.push("", "Your texts that the previous build would not send, or whose id no build had, attached as set apart:");
         for (const t of apart) lines.push(`  ${t.id}: ${t.reason.replaceAll("_", " ")}${t.missing.length > 0 ? ` (${t.missing.join(", ")})` : ""}`);
       }
       if ((ownFiles.textsNotText ?? []).length > 0) lines.push("", `Texts that are no text, kept in the backup: ${(ownFiles.textsNotText ?? []).join(", ")}.`);
@@ -584,20 +584,20 @@ export function reportText(report: MigrationReport): string {
     const pinned = report.carried.pins ?? null;
     if (pinned !== null && pinned.forAuthor.length > 0) {
       lines.push("", "Pins for a role RPE has no agent for, pinned for the Author so they are still used in play:");
-      for (const p of pinned.forAuthor) lines.push(`  ${p.file}: pinned for ${p.role} in today's build`);
+      for (const p of pinned.forAuthor) lines.push(`  ${p.file}: pinned for ${p.role} in the previous build`);
     }
     if (pinned !== null && pinned.forOwn.length > 0) {
       lines.push("", "Pins for one of your own agents, which is carried switched off, so the file is handed to it once you switch it on:");
       for (const p of pinned.forOwn) lines.push(`  ${p.file}: ${p.agent}`);
     }
-    if (pinned !== null && pinned.carried + pinned.removed + pinned.takenOut > 0) lines.push("", "Today's pin budgets (how much of a pin the old engines gave) are not carried: RPE hands a pinned file whole, and the budgets are archived with the old engines' settings.");
-    if (connections !== null) lines.push("", "why" in connections ? `Connections: none carried, as ${connections.why}.` : `Connections carried from runtime ${connections.runtime}: ${connections.connections.join(", ") || "none"}; ${connections.keys} key(s), ${connections.signins} sign-in(s), ${connections.headerValues} header value(s); the default ${connections.default ?? "not set"}${connections.defaultKept === true ? " (chosen in RPE: kept over today's)" : ""}${connections.kept > 0 ? `; ${connections.kept} key(s), sign-in(s) and header value(s) RPE already held, which differ from today's, kept as RPE's` : ""}${connections.leftOut > 0 ? `; ${connections.leftOut} entry(s) left out, as today's runtime leaves them out` : ""}.`);
-    if (connections !== null && !("why" in connections) && (connections.changedInRpe ?? []).length > 0) lines.push(`Connections changed or removed in RPE since a run carried them, left as RPE has them (today's copy not taken): ${(connections.changedInRpe ?? []).join(", ")}.`);
+    if (pinned !== null && pinned.carried + pinned.removed + pinned.takenOut > 0) lines.push("", "The previous build's pin budgets (how much of a pin the old engines gave) are not carried: RPE hands a pinned file whole, and the budgets are archived with the old engines' settings.");
+    if (connections !== null) lines.push("", "why" in connections ? `Connections: none carried, as ${connections.why}.` : `Connections carried from runtime ${connections.runtime}: ${connections.connections.join(", ") || "none"}; ${connections.keys} key(s), ${connections.signins} sign-in(s), ${connections.headerValues} header value(s); the default ${connections.default ?? "not set"}${connections.defaultKept === true ? " (chosen in RPE: kept over the previous build's)" : ""}${connections.kept > 0 ? `; ${connections.kept} key(s), sign-in(s) and header value(s) RPE already held, which differ from the previous build's, kept as RPE's` : ""}${connections.leftOut > 0 ? `; ${connections.leftOut} entry(s) left out, as the previous runtime leaves them out` : ""}.`);
+    if (connections !== null && !("why" in connections) && (connections.changedInRpe ?? []).length > 0) lines.push(`Connections changed or removed in RPE since a run carried them, left as RPE has them (the previous build's copy not taken): ${(connections.changedInRpe ?? []).join(", ")}.`);
     // What today's side reset, removed or rotated since an earlier run: followed in RPE where RPE's copy was still what a run put there; else left as RPE has it.
     const own = report.carried.chatSettings;
     const followed = [...(connections !== null && !("why" in connections) ? (connections.followed ?? []) : []), ...(settings.followed ?? []), ...(own?.followed ?? [])];
     if (followed.length > 0) {
-      lines.push("", "Changed on today's side since an earlier run, and what this run did about each:");
+      lines.push("", "Changed on the previous build's side since an earlier run, and what this run did about each:");
       for (const f of followed) lines.push(`  ${f.what}: ${f.change}; ${f.followed ? "followed in RPE" : "RPE's copy is not what a run put there, left as RPE has it"}`);
     }
     // Each chat's own choices, in its own RPE.yml: carried, left as RPE has them, or not carried with why.
@@ -610,8 +610,8 @@ export function reportText(report: MigrationReport): string {
     for (const s of settings.carried) lines.push(`  ${s.from} → ${s.to}`);
     if (settings.carried.length === 0) lines.push("  none");
     if ((settings.keptInRpe ?? []).length > 0) {
-      lines.push("", "Settings a run carried before and changed in RPE since, left as RPE has them (today's value not taken):");
-      for (const s of settings.keptInRpe ?? []) lines.push(`  ${s.to} (today's ${s.from})`);
+      lines.push("", "Settings a run carried before and changed in RPE since, left as RPE has them (the previous build's value not taken):");
+      for (const s of settings.keptInRpe ?? []) lines.push(`  ${s.to} (the previous build's ${s.from})`);
     }
     if ((settings.notCarried ?? []).length > 0) {
       lines.push("", "Settings RPE has a like setting for that means something else or takes no such value, not carried (kept in the backup):");

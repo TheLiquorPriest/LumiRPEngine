@@ -86,7 +86,7 @@ export async function chatsToImport(today: Today): Promise<{ chats: ChatToImport
     if (!run) continue;
     const read = await today.reader.today(row.id as ChatId, user);
     if (!read) {
-      notOpened.push({ chatId: row.id, why: "today's reader can't open it: its world can't be read" });
+      notOpened.push({ chatId: row.id, why: "the previous build's reader can't open it: its world can't be read" });
       continue;
     }
     const from = row.metadata.branched_from;
@@ -353,8 +353,8 @@ function importOne(s: UserStore, db: Database, registry: Registry, chat: ChatToI
 
 /** Fixed words for why a chat couldn't be imported: an error's own words can quote the chat. */
 function whyNot(error: unknown): string {
-  if (error instanceof StoreInputError) return "the store refused what today's fold gave for it";
-  return "today's fold could not fold it";
+  if (error instanceof StoreInputError) return "the store refused what the previous build's fold gave for it";
+  return "the previous build's fold could not fold it";
 }
 
 /**
@@ -433,7 +433,7 @@ export function importChats(input: { store: Store; s: UserStore; db: Database; r
   for (const gone of input.earlier) {
     if (byId.has(gone.chat) || unread.has(gone.chat) || !s.chat(gone.chat)) continue;
     if (input.present.has(gone.chat)) {
-      reports.push({ chatId: gone.chat, outcome: "not imported", why: stands(gone.chat, "today's build plays no world in it now"), ...blank });
+      reports.push({ chatId: gone.chat, outcome: "not imported", why: stands(gone.chat, "the previous build plays no world in it now"), ...blank });
       continue;
     }
     if (s.isPlayed(gone.chat)) {

@@ -72,9 +72,9 @@ test("a reply edited after its turn, before the run, is found edited at the carr
     expect(firstComparison(data, fixture, CHAT.agents)).toEqual([]);
 
     const text = reportText(run.report);
-    expect(text).toContain("    1 swipe(s) edited since today's build read them: each is told to the chat's agents as a reply edited after its turn, at the first turn on RPE that finds it showing");
+    expect(text).toContain("    1 swipe(s) edited since the previous build read them: each is told to the chat's agents as a reply edited after its turn, at the first turn on RPE that finds it showing");
     // The branch shares the harness chat's turn for the edited reply and carries none of its own for it.
-    expect(text.match(/edited since today's build read them/g)?.length).toBe(2);
+    expect(text.match(/edited since the previous build read them/g)?.length).toBe(2);
   } finally {
     await fixture.remove();
   }

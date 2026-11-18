@@ -200,7 +200,7 @@ export function migrateRoutes(deps: MigrateRoutesDeps) {
         const store = needs(p.store, "RPE's store")();
         const last = lastReport(deps.db, user);
         const lumiverse = last?.sources?.lumiverse ?? migrationPage(page(user)).sources.lumiverse;
-        if (lumiverse === null) throw new RouteError(409, "No run has read today's data here, and RPE's config names no Lumiverse database: run the migration first.");
+        if (lumiverse === null) throw new RouteError(409, "No run has read the previous build's data here, and RPE's config names no Lumiverse database: run the migration first.");
         try {
           const done = await answerPaused({
             db: deps.db,

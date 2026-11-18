@@ -164,7 +164,7 @@ export async function carryChatSettings(input: { today: Today; chats: readonly s
         for (const part of path) ours = isRecord(ours) ? ours[part] : undefined;
         drop.add(what);
         if (ours === undefined) continue;
-        const change = "its own choice was taken away on today's side since an earlier run";
+        const change = "its own choice was taken away on the previous build's side since an earlier run";
         if (hashJson(ours) !== was) {
           out.followed.push({ what: `${key} in ${chat}'s RPE.yml`, change, followed: false });
           continue;

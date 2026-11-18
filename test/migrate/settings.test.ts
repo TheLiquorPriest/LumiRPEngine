@@ -126,9 +126,9 @@ describe("today's settings into RPE's config", () => {
       ]);
       // Not carried: today's counts the answers that called tools where RPE's jobs count every model call, and a time of 90.5 seconds is no whole number.
       expect([...(settings.notCarried ?? [])].sort((a, b) => a.from.localeCompare(b.from))).toEqual([
-        { from: lumiah("core.jobs.budget.toolTurns"), to: "jobs.run.calls", why: "today's counted the answers that called tools; RPE's counts every model call" },
+        { from: lumiah("core.jobs.budget.toolTurns"), to: "jobs.run.calls", why: "the previous build's counted the answers that called tools; RPE's counts every model call" },
         { from: lumiah("core.jobs.budget.wallMs"), to: "jobs.run.seconds", why: "jobs.run.seconds takes a whole number, at least 1, or ~ for no limit, not 90.5." },
-        { from: lumiah("core.reply.progress"), to: "progress.show", why: "today's, off, showed no progress line; RPE's least still shows the one that keeps a silent turn alive" },
+        { from: lumiah("core.reply.progress"), to: "progress.show", why: "the previous build's, off, showed no progress line; RPE's least still shows the one that keeps a silent turn alive" },
       ]);
       // Archived: what steered only an old engine, named with why; the runtime's stop wait is named as having no counterpart.
       expect([...(settings.archived ?? [])].map((s) => s.from).sort()).toEqual([lumiah("core.session.summarizeAtTokens"), lumiah("transport.mcp.callMs"), "runtime home: tuning.stallMs", "settings.json: agents", "settings.json: defaults", "settings.json: helper"].sort());
@@ -152,7 +152,7 @@ describe("today's settings into RPE's config", () => {
       const text = reportText(report);
       expect(text).toContain("  harness/settings.json: core.turn.wallMs → RPE-global.yml: limits.turn.seconds");
       expect(text).toContain("\nSettings RPE has a like setting for that means something else or takes no such value, not carried (kept in the backup):\n");
-      expect(text).toContain(`\n  harness/settings.json: core.jobs.budget.toolTurns (RPE's jobs.run.calls: today's counted the answers that called tools; RPE's counts every model call)\n`);
+      expect(text).toContain(`\n  harness/settings.json: core.jobs.budget.toolTurns (RPE's jobs.run.calls: the previous build's counted the answers that called tools; RPE's counts every model call)\n`);
       expect(text).toContain("Your settings: RPE-global.yml: 29 setting(s) carried; 3 not carried, as RPE's like setting means something else or takes no such value; 6 archived in the backup, as they steered only an old engine, each named with why; ");
     } finally {
       await fixture.remove();
@@ -183,7 +183,7 @@ describe("today's settings into RPE's config", () => {
       const settings = second.carried?.settings;
       expect(settings?.keptInRpe).toEqual([{ from: lumiah("core.loop.clipChars"), to: global("results.clipChars") }]);
       expect(settings?.carried).toEqual(expect.arrayContaining([{ from: lumiah("core.session.keepTurns"), to: global("compaction.keepTurns") }, { from: lumiah("core.turn.wallMs"), to: global("limits.turn.seconds") }]));
-      expect(reportText(second)).toContain("  RPE-global.yml: results.clipChars (today's harness/settings.json: core.loop.clipChars)");
+      expect(reportText(second)).toContain("  RPE-global.yml: results.clipChars (the previous build's harness/settings.json: core.loop.clipChars)");
     } finally {
       await fixture.remove();
     }

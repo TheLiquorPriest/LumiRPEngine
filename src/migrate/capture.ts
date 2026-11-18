@@ -104,7 +104,7 @@ export class CapturingFold {
     const landed = this.noted.filter((n) => n.state === out.state).map((n) => n.event);
     this.noted = [];
     const result = out.messages.at(-1);
-    if (result === undefined) throw new Error("Today's fold gave no step for the chain's last message.");
+    if (result === undefined) throw new Error("The previous build's fold gave no step for the chain's last message.");
     const dropped = out.notes.filter((n) => n.kind === "dropped" && n.messageId === m.id).length;
     const violations = out.violations.filter((v) => v.startsWith(`${m.id}:`)).length;
     const changes = result.fold === "user" || result.fold === "paused" ? [] : appliedAt(m, input, result.parentPath, landed, out.resolved);

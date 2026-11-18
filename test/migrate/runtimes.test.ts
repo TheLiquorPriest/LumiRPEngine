@@ -65,11 +65,11 @@ describe("several runtimes under one account", () => {
       const data = join(fixture.root, "told");
       const line = ["--lumiverse", fixture.sources.lumiverse, "--user", USER, "--runtime-config", fixture.sources.runtime?.configDir ?? "", "--runtime-data", fixture.sources.runtime?.dataDir ?? "", "--data", data];
       expect(await migrateCli(line, io, TREE)).toBe(1);
-      expect(out.join("")).toContain(`Several runtimes of today's build are registered with this Lumiverse for this user (away, ${RUNTIME}): say which one this run takes with --runtime <name>.`);
+      expect(out.join("")).toContain(`Several runtimes of the previous build are registered with this Lumiverse for this user (away, ${RUNTIME}): say which one this run takes with --runtime <name>.`);
       expect(existsSync(data)).toBe(false);
       out.length = 0;
       expect(await migrateCli([...line, "--rehearse", "--runtime", RUNTIME], io, TREE)).toBe(0);
-      expect(out.join("")).toContain(`Today's runtime: took ${RUNTIME}, named with --runtime, and registered with this Lumiverse for this user.`);
+      expect(out.join("")).toContain(`The previous runtime: took ${RUNTIME}, named with --runtime, and registered with this Lumiverse for this user.`);
       expect(await migrateCli([...line, "--runtime", RUNTIME, "--no-runtime"], io, TREE)).toBe(2);
     } finally {
       await writeFile(registry, original);

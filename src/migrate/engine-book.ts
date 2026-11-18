@@ -146,11 +146,11 @@ export function goingBackRoutes(deps: GoingBackDeps) {
       reply: removedReply,
       long: true,
       handle: async ({ user, params }) => {
-        if (noGoingBack(deps.db, user) === null) throw new RouteError(409, "Nothing that today's build put in Lumiverse is removed until you have said, on this page, that you will not go back.");
+        if (noGoingBack(deps.db, user) === null) throw new RouteError(409, "Nothing that the previous build put in Lumiverse is removed until you have said, on this page, that you will not go back.");
         const d = deps.door();
         if (d === null) throw new RouteError(409, "RPE is not set up for a Lumiverse, so it reaches no book of yours.");
         const book = (await d.books()).find((b) => b.id === params.book);
-        if (book === undefined || !isEngineBook(book)) throw new RouteError(404, `${params.book} is no engine book of today's build in Lumiverse: only those are removed here.`);
+        if (book === undefined || !isEngineBook(book)) throw new RouteError(404, `${params.book} is no engine book of the previous build in Lumiverse: only those are removed here.`);
         try {
           return { ...(await d.removeBook(user, book.id)), failed: null };
         } catch (error) {

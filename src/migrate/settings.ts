@@ -179,7 +179,7 @@ export async function carrySettings(today: Today, items: readonly Item[], global
     // Today's "messages you hid": whether agents may read them.
     if (path === "core.story.hidden") {
       if (value === "include" || value === "leave_out") puts.push({ from: [from], to: "history.hiddenReadable", value: value === "include" });
-      else notCarried.push({ from, to: "history.hiddenReadable", why: "today's is neither include nor leave_out" });
+      else notCarried.push({ from, to: "history.hiddenReadable", why: "the previous build's is neither include nor leave_out" });
     }
     // Today's history cutoff becomes the history window, with the number it keeps now (§15.2); every message kept is `~`.
     else if (path === "transport.history.keep" || path === "transport.history.count") {
@@ -198,7 +198,7 @@ export async function carrySettings(today: Today, items: readonly Item[], global
   if (history.from.length > 0) {
     const kept = history.keep === "all" ? null : history.count;
     if (kept === null || (typeof kept === "number" && Number.isInteger(kept) && kept >= 1)) puts.push({ from: history.from, to: "history.window", value: kept });
-    else for (const from of history.from) notCarried.push({ from, to: "history.window", why: "today's cutoff keeps no whole number of messages, at least 1" });
+    else for (const from of history.from) notCarried.push({ from, to: "history.window", why: "the previous build's cutoff keeps no whole number of messages, at least 1" });
   }
 
   // Each chat's own choices are carried with the chat (`chat-settings.ts`), the engine's on its record: what is left here has no counterpart.
@@ -224,7 +224,7 @@ export async function carrySettings(today: Today, items: readonly Item[], global
     else if (runtime.memory !== undefined) out.noHome.push(`runtime ${name}: memory`);
     // The runtime writes its whole tuning back whenever any field changes (`keepTuning`), so a field at today's own default is no choice of his: RPE's own default stands for it, and it is named, not carried.
     for (const [field, value] of Object.entries(isRecord(runtime.tuning) ? runtime.tuning : {})) {
-      if (Object.hasOwn(RUNTIME_DEFAULTS, field) && value === (RUNTIME_DEFAULTS as Record<string, unknown>)[field]) archived.push({ from: `runtime ${name}: tuning.${field}`, why: "it is at today's own default, which is no choice of yours: RPE's own default for the setting of that meaning stands" });
+      if (Object.hasOwn(RUNTIME_DEFAULTS, field) && value === (RUNTIME_DEFAULTS as Record<string, unknown>)[field]) archived.push({ from: `runtime ${name}: tuning.${field}`, why: "it is at the previous build's own default, which is no choice of yours: RPE's own default for the setting of that meaning stands" });
       else settle(`runtime ${name}: tuning.${field}`, tuningFate(field), value as JsonValue);
     }
     if (runtime.autoUpdate !== undefined) puts.push({ from: [`runtime ${name}: autoUpdate`], to: "update.restart", value: runtime.autoUpdate as JsonValue });
@@ -288,7 +288,7 @@ export async function carrySettings(today: Today, items: readonly Item[], global
         drop.add(what);
         if (ours === undefined) continue;
         const to = `RPE-global.yml: ${key}`;
-        const change = "reset or removed on today's side since an earlier run";
+        const change = "reset or removed on the previous build's side since an earlier run";
         if (hashJson(ours) !== was) {
           followed.push({ what: to, change, followed: false });
           continue;

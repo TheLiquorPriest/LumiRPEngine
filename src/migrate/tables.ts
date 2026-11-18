@@ -85,7 +85,7 @@ CREATE TABLE world_file (
   },
   {
     version: 5,
-    name: "which character each of today's people became",
+    name: "which character each of the previous build's people became",
     // A later run finds a person's character here before any name, so a rename or a name two people share never makes a second one.
     sql: `
 CREATE TABLE migration_person (
@@ -128,7 +128,7 @@ CREATE TABLE migration_put (
   },
   {
     version: 8,
-    name: "the swap's record and your word on going back",
+    name: "the switch's record and your word on going back",
     // The swap's record of what it did (`going-back.ts` keepSwap/lastSwap), and his word that he will not go back (noGoingBack/sayNoGoingBack).
     sql: `
 CREATE TABLE migration_swap (user TEXT NOT NULL, at TEXT NOT NULL, record TEXT NOT NULL, PRIMARY KEY (user, at));
@@ -137,7 +137,7 @@ CREATE TABLE migration_no_going_back (user TEXT PRIMARY KEY, at TEXT NOT NULL);
   },
   {
     version: 9,
-    name: "your answers to the questions today's build left",
+    name: "your answers to the questions the previous build left",
     // A chat today's build held paused on a keep-or-discard question, answered from RPE: every later run writes it as today's pause chip does.
     sql: `
 CREATE TABLE migration_answer (

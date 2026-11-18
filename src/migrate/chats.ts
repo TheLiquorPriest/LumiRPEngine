@@ -117,7 +117,7 @@ export class ChatReader {
       world = (await this.worlds.get(run.worldId, userId, run.revision)).world;
     } catch {
       // A fixed reason: the reader's own words can quote the file's text, and the report holds no content.
-      this.why.set(chatId, new NotOpened(`its world ${run.worldId} at revision ${run.revision} can't be read by today's world store`));
+      this.why.set(chatId, new NotOpened(`its world ${run.worldId} at revision ${run.revision} can't be read by the previous build's world store`));
       return null;
     }
     const pinned = new Map<RevisionId, WorldDoc>([[run.revision, world]]);
@@ -191,7 +191,7 @@ export class ChatReader {
     const run = readRun(meta);
     const messages = await this.host.chats.messages(chatId, userId);
     const unreadable: Unreadable[] = [];
-    const observed = toChain(messages, (messageId, swipe) => unreadable.push({ path: `chats/${chatId}/messages/${messageId}`, why: `the engine record of swipe ${swipe} is damaged; today's build ignores it` }));
+    const observed = toChain(messages, (messageId, swipe) => unreadable.push({ path: `chats/${chatId}/messages/${messageId}`, why: `the engine record of swipe ${swipe} is damaged; the previous build ignores it` }));
     let journal: Journal | null = null;
     let chain: ChainMessage[] = observed;
     let state: JournalRead = "none";
@@ -213,10 +213,10 @@ export class ChatReader {
         chain = core.chain(seen);
       });
       // The service logs what fails on a chat's queue rather than throwing it: each failure is one this read met. Its words are left out: they can quote the chat.
-      for (let i = failed; i < this.ledger.errors.length; i++) unreadable.push({ path: `chats/${chatId}`, why: "today's ledger reader failed on this chat" });
+      for (let i = failed; i < this.ledger.errors.length; i++) unreadable.push({ path: `chats/${chatId}`, why: "the previous build's ledger reader failed on this chat" });
       if (journal === null) {
         state = "not opened";
-        notOpened = this.why.get(chatId)?.why ?? "today's reader didn't open it";
+        notOpened = this.why.get(chatId)?.why ?? "the previous build's reader didn't open it";
         unreadable.push({ path: `chats/${chatId}`, why: notOpened });
         journal = decoded.journal;
       }

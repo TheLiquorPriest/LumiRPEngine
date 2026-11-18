@@ -181,7 +181,7 @@ describe("what the gate refuses before anything is written", () => {
     expect(ran).toBe(false);
     const connections = report.rows.find((r) => r.row === "connections");
     expect(connections?.count).toMatchObject({ found: 2, carried: 0, backup: 0 });
-    expect(report.refusals).toContain(`Row "${connections?.what}": 2 found, but 0 carried, 0 attached, 0 archived and 0 kept in the backup only; 2 have no place in this run: the runtime ${RUNTIME}: its connections file isn't a list of connections today's runtime reads.`);
+    expect(report.refusals).toContain(`Row "${connections?.what}": 2 found, but 0 carried, 0 attached, 0 archived and 0 kept in the backup only; 2 have no place in this run: the runtime ${RUNTIME}: its connections file isn't a list of connections the previous runtime reads.`);
     expect(existsSync(data)).toBe(false);
   });
 
@@ -190,7 +190,7 @@ describe("what the gate refuses before anything is written", () => {
     const elsewhere = { configDir: join(fixture.root, "another-account", "config"), dataDir: join(fixture.root, "another-account", "data") };
     const { report, ran } = await migrate({ ...fixture.sources, runtime: elsewhere }, { data, tree: TREE });
     expect(ran).toBe(false);
-    expect(report.refusals).toContain(`The runtime's folders are not where this run looks: neither ${elsewhere.configDir} nor ${elsewhere.dataDir} is there. Say where they are, or that the server runs no runtime of today's build (--no-runtime).`);
+    expect(report.refusals).toContain(`The runtime's folders are not where this run looks: neither ${elsewhere.configDir} nor ${elsewhere.dataDir} is there. Say where they are, or that the server runs no runtime of the previous build (--no-runtime).`);
     expect(existsSync(data)).toBe(false);
     const none = await migrate({ ...fixture.sources, runtime: null }, { data, tree: TREE, rehearse: true });
     expect(none.report.refusals).toEqual([]);

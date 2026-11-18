@@ -70,13 +70,13 @@ export async function answerPaused(input: { db: Database; s: UserStore; registry
     const reader = today.reader;
     const paused = await reader.pausedOn(id, user);
     const message = input.message ?? paused[0];
-    if (message === undefined || !paused.includes(message)) throw new NotPaused(`Chat ${chat} is not paused on ${input.message === undefined ? "any question" : `message ${input.message}`} in today's data.`);
+    if (message === undefined || !paused.includes(message)) throw new NotPaused(`Chat ${chat} is not paused on ${input.message === undefined ? "any question" : `message ${input.message}`} in the previous build's data.`);
     const answer: PauseAnswer = { chat, message, choice: input.choice, at: input.now };
     const before = await reader.today(id, user);
-    if (before === null) throw new NotPaused(`Today's reader can't open chat ${chat}.`);
+    if (before === null) throw new NotPaused(`The previous build's reader can't open chat ${chat}.`);
     const came = await reader.answer(id, user, answer);
     const after = await reader.today(id, user);
-    if (after === null) throw new NotPaused(`Today's reader can't open chat ${chat}.`);
+    if (after === null) throw new NotPaused(`The previous build's reader can't open chat ${chat}.`);
     // What today's fold applies at each swipe now, against what it applied while the chat was paused: the held turns' changes.
     const was = new CapturingFold(input.registry);
     const now = new CapturingFold(input.registry);

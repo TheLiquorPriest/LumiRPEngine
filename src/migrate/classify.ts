@@ -44,7 +44,7 @@ const rule = (pattern: string, row: RowId, fate?: Fate, note?: string): Rule => 
  * history afresh (STANDALONE-PLAN §12). The references below are to the depth build before that,
  * a54b3987, under `src/backend/`.
  */
-const DEPTH_GONE = "today's build has no depth engine, so nothing reads it now";
+const DEPTH_GONE = "the previous build has no depth engine, so nothing reads it now";
 
 const depth = (pattern: string, what: string): Rule => rule(pattern, "depth-engine", undefined, `${what}; ${DEPTH_GONE}`);
 
@@ -128,7 +128,7 @@ const STORAGE_RULES: readonly Rule[] = [
   depth(`runs/${SAFE}/archive/shard-\\d+\\.json`, "the depth engine's search index of the chat's messages, made from them"), // archive-index.ts:29,144,210
   depth("loopback/registry\\.json", "the depth engine's loopback registry: its keys' and relays' hashes"), // loopback/store.ts:47
   // RPE's own: the new light extension's registration with RPE (`src/adapter/lumiverse/pipe-wire.ts:24`, written by `src/ext/registration.ts:39`).
-  rule("rpe/registration\\.json", "rpe-own", undefined, "RPE's own: the light extension's registration with RPE, which the migration leaves as it is"),
+  rule("rpe/registration\\.json", "rpe-own", undefined, "RPE's own: the registration the new build of the extension makes with RPE, which the migration leaves as it is"),
 ];
 
 /** The chat a per-chat path is kept for, and whose store keeps it: `runs/<chat>/` names it as it is, LumiAH's `chats/<key>/` as its document key (`docKey`, `H/core/paths.ts:12`). */
@@ -165,7 +165,7 @@ export function classifyStorage(path: string, context: ClassifyContext): Classif
   const aside = /^(.+)\.corrupt-\d+$/.exec(path); // stored-json.ts:10,42
   if (aside) {
     const base = classifyStorage(aside[1] ?? "", context);
-    return base && { row: base.row, fate: "archived", note: "a damaged file today's build had already set aside", unreadable: true };
+    return base && { row: base.row, fate: "archived", note: "a damaged file the previous build had already set aside", unreadable: true };
   }
   const bad = /^(harness\/[a-z-]+\.json)\.bad$/.exec(path); // H/extension/backend/docs.ts:93
   if (bad) {

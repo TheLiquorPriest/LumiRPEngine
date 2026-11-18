@@ -177,12 +177,12 @@ async function idle(identifier: string, name: string, config: SavedRuntime, io: 
   const { drainMs, drainPollMs } = config.tuning;
   let now = await underWay(config, io);
   if (!busy(now)) return true;
-  io.out(`Today's runtime ${name} ${said(now)}: waiting up to ${Math.round(drainMs / 1000)} seconds (its own "Wait before restart" setting) for it to be idle.`);
+  io.out(`The previous runtime ${name} ${said(now)}: waiting up to ${Math.round(drainMs / 1000)} seconds (its own "Wait before restart" setting) for it to be idle.`);
   for (let waited = 0; waited < drainMs && busy(now); waited += drainPollMs) {
     await io.sleep(drainPollMs);
     now = await underWay(config, io);
   }
-  if (busy(now)) for (const line of stopAfterSwitch({ identifier }, `Today's runtime ${name} still ${said(now)} after ${Math.round(drainMs / 1000)} seconds, and the swap stops nothing while it is busy. Run rpe up again once it is idle.`)) io.out(line);
+  if (busy(now)) for (const line of stopAfterSwitch({ identifier }, `The previous runtime ${name} still ${said(now)} after ${Math.round(drainMs / 1000)} seconds, and the switch stops nothing while it is busy. Run rpe up again once it is idle.`)) io.out(line);
   return !busy(now);
 }
 
@@ -252,17 +252,17 @@ const FROM_SOURCES = "dev";
 export async function otherBuildInstalled(input: { lumiverse: string; identifier: string; version: string; installed: { permissions: readonly string[] | null } | null; granted?: readonly string[] | null }): Promise<string | null> {
   const { identifier, version, installed, granted } = input;
   const stop = (why: string): string => stopAfterSwitch({ identifier }, why).join("\n");
-  if (installed === null) return `Lumiverse has no extension (${identifier}) installed: it was removed, not switched to the new build. Removing an extension deletes its own folder and the storage in it (each user's folder for it stays), so what the migration reads there is gone, and the swap does not run the migration again over storage that is gone. The real run's backup holds a copy of it. The swap stopped nothing: today's service runs, and today's data is as it was. Install the new build's extension in Lumiverse from its branch (${NEW_BUILD_BRANCH}, until it is main), approve its five permissions (${LIGHT_PERMISSIONS.join(", ")}), then run rpe up again.`;
-  if (todaysBuildInstalled(installed.permissions)) return `Lumiverse still has today's build of the extension (${identifier}) installed: its manifest asks for the permissions the previous build asks for. Switch the installed extension to the new build's branch in Lumiverse and approve its permissions first, then run rpe up again. Nothing was stopped or changed.`;
-  if (granted === null) return stop(`Lumiverse does not say which permissions it has granted the extension (${identifier}), so the swap cannot tell whether the light extension can play. In Lumiverse's extension settings, check that ${LIGHT_PERMISSIONS.join(", ")} are granted, then run rpe up again.`);
+  if (installed === null) return `Lumiverse has no extension (${identifier}) installed: it was removed, not switched to the new build. Removing an extension deletes its own folder and the storage in it (each user's folder for it stays), so what the migration reads there is gone, and the switch does not run the migration again over storage that is gone. The real run's backup holds a copy of it. The switch stopped nothing: the previous build's service runs, and its data is as it was. Install the new build's extension in Lumiverse from its branch (${NEW_BUILD_BRANCH}, until it is main), approve its five permissions (${LIGHT_PERMISSIONS.join(", ")}), then run rpe up again.`;
+  if (todaysBuildInstalled(installed.permissions)) return `Lumiverse still has the previous build of the extension (${identifier}) installed: its manifest asks for the permissions the previous build asks for. Switch the installed extension to the new build's branch in Lumiverse and approve its permissions first, then run rpe up again. Nothing was stopped or changed.`;
+  if (granted === null) return stop(`Lumiverse does not say which permissions it has granted the extension (${identifier}), so the switch cannot tell whether the new build of the extension can play. In Lumiverse's extension settings, check that ${LIGHT_PERMISSIONS.join(", ")} are granted, then run rpe up again.`);
   const missing = granted === undefined ? [] : LIGHT_PERMISSIONS.filter((p) => !granted.includes(p));
-  if (missing.length > 0) return stop(`Lumiverse has not granted the extension (${identifier}) ${missing.join(", ")}, and the light extension cannot play without ${missing.length === 1 ? "it" : "them"}: the swap stops here, before stopping today's service. In Lumiverse's extension settings, grant ${missing.length === 1 ? "it" : "each of them"}, then run rpe up again.`);
+  if (missing.length > 0) return stop(`Lumiverse has not granted the extension (${identifier}) ${missing.join(", ")}, and the new build of the extension cannot play without ${missing.length === 1 ? "it" : "them"}: the switch stops here, before stopping the previous build's service. In Lumiverse's extension settings, grant ${missing.length === 1 ? "it" : "each of them"}, then run rpe up again.`);
   // Where Lumiverse keeps an extension's files (its `repoDir`).
   const repo = join(input.lumiverse, "extensions", identifier, "repo");
   const backend = join(repo, "dist", "backend.js");
   // Lumiverse loads the backend when the extension starts and does not watch its files, so files put in by hand run once it is started again.
   const what = `Switch the installed extension to the new build's branch in Lumiverse, or put the new build's files in its folder (${repo}) and switch the extension off and on in Lumiverse so that it runs them, then run rpe up again.`;
-  if (version === FROM_SOURCES) return stop(`This rpe runs from its sources and has no build of its own, so whether the extension Lumiverse has installed (${identifier}) is this build can't be told: run the swap with a built copy, such as ${join(repo, "dist", "rpe.js")} once the extension holds the new build.`);
+  if (version === FROM_SOURCES) return stop(`This rpe runs from its sources and has no build of its own, so whether the extension Lumiverse has installed (${identifier}) is this build can't be told: run the switch with a built copy, such as ${join(repo, "dist", "rpe.js")} once the extension holds the new build.`);
   const text = await readText(backend);
   if (text === null) return stop(`Lumiverse has the extension (${identifier}) installed, and its backend is not at ${backend}, where Lumiverse loads it from. ${what}`);
   if (!text.includes(JSON.stringify(version))) return stop(`The extension Lumiverse has installed (${identifier}) is another build than this rpe (${version}): its backend, ${backend}, does not carry build ${version}. ${what}`);
@@ -323,13 +323,13 @@ export async function swapCheck(input: { sources: Sources; options: MigrateOptio
     return null;
   };
   const { previous } = earlierRuns(dataPaths(options.data).database, sources.userId);
-  if (previous === null) return stop(`No real run of your own data has been made in this data folder (${options.data}), and the swap goes ahead only once the migration has been proven on it: it stops before it stops anything. Run rpe migrate (rpe migrate --rehearse shows first what it would do), read its report, then run rpe up again.`);
-  if (!passed(previous)) return stop(`The last real run in this data folder (read at ${previous.at}) did not pass its report: some row's things are not all carried, attached, archived or kept in the backup, or something found is not classified. The swap goes ahead only once the migration has been proven on your data: run rpe migrate again and read its report, then run rpe up again.`);
+  if (previous === null) return stop(`No real run of your own data has been made in this data folder (${options.data}), and the switch goes ahead only once the migration has been proven on it: it stops before it stops anything. Run rpe migrate (rpe migrate --rehearse shows first what it would do), read its report, then run rpe up again.`);
+  if (!passed(previous)) return stop(`The last real run in this data folder (read at ${previous.at}) did not pass its report: some row's things are not all carried, attached, archived or kept in the backup, or something found is not classified. The switch goes ahead only once the migration has been proven on your data: run rpe migrate again and read its report, then run rpe up again.`);
   // Read first: a run the gate would refuse stops nothing, and today's build goes on answering.
   const gate = await migrate(sources, { ...options, rehearse: true });
   if (gate.report.refusals.length > 0) {
     io.out(reportText(gate.report).replace(/\n$/, ""));
-    return stop("The swap stopped before it stopped anything: the run would be refused, as the report says.");
+    return stop("The switch stopped before it stopped anything: the run would be refused, as the report says.");
   }
   const today = await openToday(sources);
   let registry: unknown = null;
@@ -373,11 +373,11 @@ export async function swapRun(plan: SwapPlan, rpe: RpeStart, io: SwapIo): Promis
   const { took } = plan;
   const { identifier } = plan.sources;
   const mark = rpe.mark;
-  if (plan.connections.length > 0 && mark === undefined) throw new Error("the swap was given connections to take and no way to mark them as RPE's");
+  if (plan.connections.length > 0 && mark === undefined) throw new Error("the switch was given connections to take and no way to mark them as RPE's");
   if (took !== null) {
     if (!(await idle(identifier, took.name, took.config, io))) return false;
     if (took.unit === null && (await underWay(took.config, io)) !== null) {
-      for (const line of stopAfterSwitch({ identifier, branch: plan.branch }, `Today's runtime ${took.name} answers at ${took.config.listen}:${took.config.port}, but runs under no unit rpe up can stop: stop it where it runs, then run rpe up again.`)) io.out(line);
+      for (const line of stopAfterSwitch({ identifier, branch: plan.branch }, `The previous runtime ${took.name} answers at ${took.config.listen}:${took.config.port}, but runs under no unit rpe up can stop: stop it where it runs, then run rpe up again.`)) io.out(line);
       return false;
     }
   }
@@ -388,14 +388,14 @@ export async function swapRun(plan: SwapPlan, rpe: RpeStart, io: SwapIo): Promis
   const letGo = io.onStop((signal) => {
     if (told !== null) return;
     told = signal;
-    io.out(`Told to stop (${signal}): the swap ends once the step under way is done, and puts back what it did.`);
+    io.out(`Told to stop (${signal}): the switch ends once the step under way is done, and puts back what it did.`);
   });
   const going = (): void => {
     if (told !== null) throw new Error(`it was told to stop (${told})`);
   };
   // The swap's run's report, for the closing lines on the chats that were on today and are on none of RPE's connections.
   let ran: MigrationReport | null = null;
-  io.out(`${took === null ? "The swap starts now, and RPE answers" : `Today's runtime ${took.name} stops now, and RPE answers in its place`} once the migration has run again: do not interrupt the swap. Interrupted all the same, it puts back what it did before it ends.`);
+  io.out(`${took === null ? "The switch starts now, and RPE answers" : `The previous runtime ${took.name} stops now, and RPE answers in its place`} once the migration has run again: do not interrupt the switch. Interrupted all the same, it puts back what it did before it ends.`);
   try {
     // Only a unit that runs is stopped, and started again on a failure: one stopped already (today's, after an earlier swap) stays so. systemctl says 3 for a unit that doesn't run.
     for (const unit of [rpe.installed ? rpe.service.unit : null, took?.unit ?? null]) {
@@ -423,9 +423,9 @@ export async function swapRun(plan: SwapPlan, rpe: RpeStart, io: SwapIo): Promis
     const database = dataPaths(plan.options.data).database;
     try {
       onRpe(database, (db) => keepSwap(db, plan.sources.userId, record));
-      undo.push({ what: "the swap's record is taken out", run: async () => onRpe(database, (db) => dropSwap(db, plan.sources.userId, record.at)) });
+      undo.push({ what: "the switch's record is taken out", run: async () => onRpe(database, (db) => dropSwap(db, plan.sources.userId, record.at)) });
     } catch (error) {
-      io.out(`The swap's record could not be kept (${error instanceof Error ? error.message : String(error)}): going back will not name the chats moved onto RPE's connections since, nor RPE's own earlier connection.`);
+      io.out(`The switch's record could not be kept (${error instanceof Error ? error.message : String(error)}): going back will not name the chats moved onto RPE's connections since, nor RPE's own earlier connection.`);
     }
     const putBack = await rpe.takeOver();
     undo.push({ what: "RPE's config is as it was", run: putBack });
@@ -447,13 +447,13 @@ export async function swapRun(plan: SwapPlan, rpe: RpeStart, io: SwapIo): Promis
     if (rpe.extension !== undefined) {
       const runs = await registeredBuild(rpe.extension, rpe, io, until, () => told !== null);
       going();
-      if (runs === null) throw new Error(`the light extension did not register with RPE within ${Math.round(rpe.startMs / 1000)} seconds of RPE's service starting, so RPE could not play`);
+      if (runs === null) throw new Error(`the new build of the extension did not register with RPE within ${Math.round(rpe.startMs / 1000)} seconds of RPE's service starting, so RPE could not play`);
       if (runs !== rpe.extension.build) throw new Error(`the extension Lumiverse runs is build ${runs}, not this build (${rpe.extension.build}): Lumiverse loads the backend when the extension starts, and it started another`);
     }
     if (took?.unit) await mustRun(io.systemctl, ["disable", took.unit]);
   } catch (error) {
     // Told to stop, the step under way may fail of the same signal, its systemctl being in the terminal's process group: the signal is why the swap ended.
-    io.out(`The swap did not go through: ${told !== null ? `it was told to stop (${told})` : error instanceof Error ? error.message : String(error)}.`);
+    io.out(`The switch did not go through: ${told !== null ? `it was told to stop (${told})` : error instanceof Error ? error.message : String(error)}.`);
     const putBack: string[] = [];
     const failed: string[] = [];
     for (const step of undo.reverse()) {
@@ -467,13 +467,13 @@ export async function swapRun(plan: SwapPlan, rpe: RpeStart, io: SwapIo): Promis
     io.out(putBack.length > 0 ? `Put back as it was: ${putBack.join("; ")}.` : "Nothing was stopped.");
     for (const line of failed) io.out(`Could not be put back, do it by hand: ${line}.`);
     // Today's service runs again, and what the swap did to Lumiverse stays what the switch did: said, with the way back.
-    if (failed.length === 0) for (const line of stopAfterSwitch({ identifier, branch: plan.branch }, "Nothing of today's was changed.")) io.out(line);
+    if (failed.length === 0) for (const line of stopAfterSwitch({ identifier, branch: plan.branch }, "Nothing of the previous build's was changed.")) io.out(line);
     return false;
   } finally {
     letGo();
   }
-  io.out(`Started ${rpe.service.unit}, RPE's service: RPE answers at ${base}${took === null ? "" : `, where today's runtime ${took.name} did${rpe.todays ? `, under its model name (${took.loopback.model})` : ""}${took.loopback.keyHash === null ? "" : `${rpe.todays ? " and" : ","} with its key`}`}.`);
-  if (took?.unit) io.out(`Stopped and switched off ${took.unit}, today's service. Its unit, and today's runtime's config and folders, stay as they were, for going back.`);
+  io.out(`Started ${rpe.service.unit}, RPE's service: RPE answers at ${base}${took === null ? "" : `, where the previous runtime ${took.name} did${rpe.todays ? `, under its model name (${took.loopback.model})` : ""}${took.loopback.keyHash === null ? "" : `${rpe.todays ? " and" : ","} with its key`}`}.`);
+  if (took?.unit) io.out(`Stopped and switched off ${took.unit}, the previous build's service. Its unit, and the previous runtime's config and folders, stay as they were, for going back.`);
   if (ran !== null) for (const line of offRpeLines(plan, ran)) io.out(line);
   return true;
 }
@@ -489,7 +489,7 @@ function onRpe(file: string, use: (db: Database) => void): void {
 }
 
 /** An old engine in words, as he knows it. */
-const ENGINE_WORDS: Readonly<Record<NonNullable<ChatReport["engine"]>, string>> = { classic: "the classic pipeline", agents: "the agents engine", harness: "today's harness engine" };
+const ENGINE_WORDS: Readonly<Record<NonNullable<ChatReport["engine"]>, string>> = { classic: "the classic pipeline", agents: "the agents engine", harness: "the harness engine" };
 
 /**
  * The swap's closing lines on the chats that were on today and are on none of RPE's connections (N-14's
@@ -515,10 +515,10 @@ function offRpeLines(plan: SwapPlan, report: MigrationReport): string[] {
   const engines = new Map((report.chats ?? []).map((c) => [c.chatId, c.engine]));
   const rpe = plan.connections.length === 0 ? "the connection RPE answers on" : `one of RPE's connections (${plan.connections.map((c) => `"${c.name}"`).join(", ")})`;
   return [
-    `${chats.length === 1 ? "One chat was" : `${chats.length} chats were`} on today's build and ${chats.length === 1 ? "is" : "are"} on none of RPE's connections: RPE plays only what reaches it on its own connections, and writes nothing into your chats. In Lumiverse, choose ${rpe} as each one's connection, and it is on RPE.`,
+    `${chats.length === 1 ? "One chat was" : `${chats.length} chats were`} on the previous build and ${chats.length === 1 ? "is" : "are"} on none of RPE's connections: RPE plays only what reaches it on its own connections, and writes nothing into your chats. In Lumiverse, choose ${rpe} as each one's connection, and it is on RPE.`,
     ...chats.map((c) => {
       const engine = engines.get(c.chat) ?? null;
-      return `  ${names.get(c.chat) ?? c.chat}, played by ${engine === null ? "today's build" : ENGINE_WORDS[engine]}: ${c.pinned === null ? "on no connection of its own, so it follows the one active for you" : `on ${names.get(`connection ${c.pinned}`) ?? `the connection ${c.pinned}`}`}`;
+      return `  ${names.get(c.chat) ?? c.chat}, played by ${engine === null ? "the previous build" : ENGINE_WORDS[engine]}: ${c.pinned === null ? "on no connection of its own, so it follows the one active for you" : `on ${names.get(`connection ${c.pinned}`) ?? `the connection ${c.pinned}`}`}`;
     }),
   ];
 }

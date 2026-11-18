@@ -103,7 +103,7 @@ export class MigrationStopped extends Error {
     readonly step: string,
     cause: unknown,
   ) {
-    super(`while ${step}: ${cause instanceof Error ? cause.message : String(cause)}. Today's data is as it was and the backup it took is kept; run again, and the run finishes what this one left, with nothing duplicated`, { cause });
+    super(`while ${step}: ${cause instanceof Error ? cause.message : String(cause)}. The previous build's data is as it was and the backup it took is kept; run again, and the run finishes what this one left, with nothing duplicated`, { cause });
     this.name = "MigrationStopped";
   }
 }
@@ -171,7 +171,7 @@ export async function migrate(sources: Sources, options: MigrateOptions): Promis
       // Each carried turn's run record goes in the turn lane's table, which the server reads as well.
       if (options.runs) migrations.add(options.runs.tables.area, options.runs.tables.migrations);
       migrateTables(db, migrations, { user: owner, version: options.version ?? "dev", backups: paths.backups, now: () => now().getTime() });
-      step = "reading the chats as today's build does";
+      step = "reading the chats as the previous build does";
       const registry = createRegistry(ALL_PACKS);
       const { chats, notOpened } = await chatsToImport(today);
       const worlds = new Map<string, WorldDoc>();

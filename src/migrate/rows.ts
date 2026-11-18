@@ -48,9 +48,9 @@ export const ROWS = [
   { id: "chips-staged", what: "Review cards and stored chips; staged changes", fate: "carried", found: "own" },
   { id: "old-engine-notes", what: "The classic pipeline's re-narrate lines and the agents engine's kept scene", fate: "archived", found: "own" },
   // Not in the plan's table, which predates it: the depth engine's files, found by the rehearsal on the test instance. Archived for the plan's own reason (it steered only an engine that is gone); see `DEPTH_GONE` in classify.ts.
-  { id: "depth-engine", what: "The depth engine's files, left by a build before today's: each chat's switch to it, its bootstrap of the chat, the layer of what it landed, its search index of the chat, its loopback registry and its day's spend", fate: "archived", found: "own" },
+  { id: "depth-engine", what: "The depth engine's files, left by a build before the previous one: each chat's switch to it, its bootstrap of the chat, the layer of what it landed, its search index of the chat, its loopback registry and its day's spend", fate: "archived", found: "own" },
   // Not in the plan's table either: RPE's own files, which its light extension writes once it has run, so a run after the swap finds them. Never carried, and no reason to refuse.
-  { id: "rpe-own", what: "RPE's own files, written by its light extension: its registration with RPE", fate: "archived", found: "own" },
+  { id: "rpe-own", what: "RPE's own files, written by the new build of the extension: its registration with RPE", fate: "archived", found: "own" },
   { id: "pins", what: "Pins", fate: "carried", found: "inside" },
   { id: "settings", what: "Your settings", fate: "carried", found: "own" },
   { id: "model-choices", what: "Which model each kind of work uses, where a setting names a connection that lives in Lumiverse", fate: "carried", found: "inside" },
@@ -69,10 +69,10 @@ export const ROWS = [
   { id: "browser-prefs", what: "Browser preferences", fate: "carried", found: "not read", why: "They sit in the browser's own storage, which the new pages read under the same keys." },
   { id: "derived", what: "Search vectors, caches and snapshots", fate: "archived", found: "own" },
   { id: "logs", what: "Logs, diagnostics and small working files", fate: "archived", found: "own" },
-  { id: "working-copy", what: "The runtime's working copy and its temporary folder; the installed copy of today's runtime", fate: "archived", found: "own" },
+  { id: "working-copy", what: "The runtime's working copy and its temporary folder; the installed copy of the previous runtime", fate: "archived", found: "own" },
   { id: "deleted-chats", what: "Run data of chats since deleted in Lumiverse", fate: "archived", found: "own" },
   // Not in the plan's table either: where today's build keeps two copies of one thing (§15.2 l.1641), the copy that is not the authority, counted from inside the file it rides in, which is carried whole.
-  { id: "second-copies", what: "Where today's build keeps two copies of one thing: the copy that is not the authority, left in the file it is in", fate: "attached", found: "inside" },
+  { id: "second-copies", what: "Where the previous build keeps two copies of one thing: the copy that is not the authority, left in the file it is in", fate: "attached", found: "inside" },
   // Not in the plan's table either: what he gives a row to (the setting `migration.rows`, §22 l.2117): a file nothing names, kept in the backup as he says, with his own line.
   { id: "owner-rows", what: "Files you gave a row to: each kept as you said, with your line saying what it is", fate: "archived", found: "own" },
 ] as const satisfies readonly { id: string; what: string; fate: Fate; found: Found; why?: string }[];

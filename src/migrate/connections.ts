@@ -119,7 +119,7 @@ const printOf = (id: string, value: string): string => hashJson([id, value]);
 /** A file of today's runtime that is not as the run counted it. */
 class ConnectionsChanged extends Error {
   constructor(path: string) {
-    super(`today's file ${path} was changed after the run counted it, so its counts would not describe what is carried; nothing is carried until it is run again`);
+    super(`the previous build's file ${path} was changed after the run counted it, so its counts would not describe what is carried; nothing is carried until it is run again`);
     this.name = "ConnectionsChanged";
   }
 }
@@ -139,8 +139,8 @@ async function counted(file: RuntimeFile): Promise<string | null> {
 async function readBook(connectionsFile: RuntimeFile, secretsFile: RuntimeFile | undefined, serial: ReadonlySet<string>): Promise<Book> {
   const raw = parsed(await counted(connectionsFile));
   const secret = secretsFile === undefined ? null : parsed(await counted(secretsFile));
-  if (raw === undefined || (raw !== null && !(isRecord(raw) && raw.lumiah === FORMAT && Array.isArray(raw.connections)))) return { why: "its connections file isn't a list of connections today's runtime reads" };
-  if (secret === undefined || (secret !== null && !(isRecord(secret) && secret.lumiah === FORMAT && isRecord(secret.keys) && isRecord(secret.signins)))) return { why: "its secrets file isn't a set of secrets today's runtime reads" };
+  if (raw === undefined || (raw !== null && !(isRecord(raw) && raw.lumiah === FORMAT && Array.isArray(raw.connections)))) return { why: "its connections file isn't a list of connections the previous runtime reads" };
+  if (secret === undefined || (secret !== null && !(isRecord(secret) && secret.lumiah === FORMAT && isRecord(secret.keys) && isRecord(secret.signins)))) return { why: "its secrets file isn't a set of secrets the previous runtime reads" };
   const connections: StoredConnection[] = [];
   const present = new Set<string>();
   const values: Record<string, Record<string, string>> = {};
@@ -180,7 +180,7 @@ async function bookOf(runtime: string, files: readonly RuntimeFile[], serial: Re
   const at = (name: string): RuntimeFile | undefined => files.find((f) => f.path === `runtimes/${runtime}/${name}` && !f.link);
   const connectionsFile = at("connections.json");
   const secretsFile = at("secrets.json");
-  if (connectionsFile === undefined) return secretsFile === undefined ? null : { why: "it has a secrets file and no connections file, and today's runtime reads its keys only with one" };
+  if (connectionsFile === undefined) return secretsFile === undefined ? null : { why: "it has a secrets file and no connections file, and the previous runtime reads its keys only with one" };
   return readBook(connectionsFile, secretsFile, serial);
 }
 
@@ -229,7 +229,7 @@ export async function carryConnections(port: ModelsPort, user: string, runtime: 
     if (was === undefined) return true;
     drop.add(`connection ${c.id}`);
     const follows = hashJson(c) === was;
-    followed.push({ what: `connection ${c.id}`, change: "removed on today's side since an earlier run", followed: follows });
+    followed.push({ what: `connection ${c.id}`, change: "removed on the previous build's side since an earlier run", followed: follows });
     if (follows) removed.add(c.id);
     return !follows;
   });
@@ -287,7 +287,7 @@ export async function carryConnections(port: ModelsPort, user: string, runtime: 
       const rotated = ourKey !== undefined && ourKey !== key && earlier.get(what) === printOf(c.id, ourKey);
       if (ourKey !== undefined && ourKey !== key && !rotated) carried.kept++;
       else if (joins) {
-        if (rotated) followed.push({ what: `the key of connection ${c.id}`, change: "rotated on today's side since an earlier run, and still given for the address it was", followed: true });
+        if (rotated) followed.push({ what: `the key of connection ${c.id}`, change: "rotated on the previous build's side since an earlier run, and still given for the address it was", followed: true });
         keys[c.id] = key;
         carried.keys++;
         put.set(what, printOf(c.id, key));
@@ -301,7 +301,7 @@ export async function carryConnections(port: ModelsPort, user: string, runtime: 
         const rotated = ours[name] !== undefined && ours[name] !== value && earlier.get(what) === printOf(c.id, ours[name] ?? "");
         if (ours[name] !== undefined && ours[name] !== value && !rotated) carried.kept++;
         else if (joins) {
-          if (rotated) followed.push({ what: `the value of header ${name} of connection ${c.id}`, change: "rotated on today's side since an earlier run", followed: true });
+          if (rotated) followed.push({ what: `the value of header ${name} of connection ${c.id}`, change: "rotated on the previous build's side since an earlier run", followed: true });
           ours[name] = value;
           carried.headerValues++;
           put.set(what, printOf(c.id, value));

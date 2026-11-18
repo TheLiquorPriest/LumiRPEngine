@@ -24,11 +24,11 @@ const WRITER = gone("LumiAH's writer agent");
 const LOOP = gone("LumiAH's agent loop");
 const RECALL = gone("LumiAH's recall tools");
 const JOBS = gone("how LumiAH's jobs were run");
-const MODEL = { none: "the model and effort an agent of today's runs on are carried as model choices, and its limits and tools into the header of an agent definition of your own; RPE's own agents are set up in their files" } as const;
+const MODEL = { none: "the model and effort an agent of the previous build runs on are carried as model choices, and its limits and tools into the header of an agent definition of your own; RPE's own agents are set up in their files" } as const;
 
 /** LumiAH's settings by path (`core.*` is its harness section); the paths of a group not named here are looked up by prefix (`LUMIAH_GROUPS`). */
 const LUMIAH: Readonly<Record<string, Fate>> = {
-  "core.reply.progress": { unlike: "today's, off, showed no progress line; RPE's least still shows the one that keeps a silent turn alive", to: "progress.show" },
+  "core.reply.progress": { unlike: "the previous build's, off, showed no progress line; RPE's least still shows the one that keeps a silent turn alive", to: "progress.show" },
   "core.reply.progressChars": { none: "RPE's progress line is not cut at a length of its own" },
   "core.story.hidden": { to: "history.hiddenReadable" },
   "core.story.from": { to: "story.from" },
@@ -58,7 +58,7 @@ const LUMIAH: Readonly<Record<string, Fate>> = {
   "core.jobs.perRun": { to: "jobs.perRun" },
   "core.jobs.budget.tokensIn": { to: "jobs.run.tokensIn" },
   "core.jobs.budget.tokensOut": { to: "jobs.run.tokensOut" },
-  "core.jobs.budget.toolTurns": { unlike: "today's counted the answers that called tools; RPE's counts every model call", to: "jobs.run.calls" },
+  "core.jobs.budget.toolTurns": { unlike: "the previous build's counted the answers that called tools; RPE's counts every model call", to: "jobs.run.calls" },
   "core.jobs.budget.wallMs": { to: "jobs.run.seconds", seconds: true },
   "core.jobs.tokensPerDay": { to: "jobs.tokensPerDay" },
   "core.spend.tokensPerDay": { to: "limits.day.tokens" },
@@ -182,7 +182,7 @@ const TUNING: Readonly<Record<string, Fate>> = {
   providerMs: { to: "calls.providerWaitSeconds", seconds: true },
   answerSilentMs: { to: "calls.silentAfterSeconds", seconds: true },
   signInMs: { to: "calls.signInOpenSeconds", seconds: true },
-  connectionsRead: { none: "it capped today's read of your connections at one page of 200; RPE reads every page" },
+  connectionsRead: { none: "it capped the previous build's read of your connections at one page of 200; RPE reads every page" },
   traceMs: { none: "RPE's trace is written to the turn's folder, not sent in batches" },
   traceBatch: { none: "RPE's trace is written to the turn's folder, not sent in batches" },
   traceHeld: { none: "RPE's trace is written to the turn's folder, not sent in batches" },

@@ -75,11 +75,11 @@ describe("the report's counts of the mind files and the story record", () => {
       const report = await migrated(fixture, data, 9);
       expect(report.imports?.find((c) => c.chatId === CHAT.harness)?.outcome).toBe("not imported");
       accounted(report);
-      const why = "not imported: today's reader can't open it: its world can't be read";
+      const why = "not imported: the previous build's reader can't open it: its world can't be read";
       const text = reportText(report);
       expect(text).toContain(landed(report, "mind-files"));
-      expect(report.landed?.["mind-files"]).toEndWith(`0 version(s) of 0 file(s) of 0 character(s), 0 of the 5 found in today's areas; 5 version(s) of 1 chat(s) this run did not import (${why}): in the backup only`);
-      expect(report.landed?.["story-record"]).toEndWith(`0 of the 8 entr(ies) found in today's records; 8 entr(ies) of 1 chat(s) this run did not import (${why}): in the backup only`);
+      expect(report.landed?.["mind-files"]).toEndWith(`0 version(s) of 0 file(s) of 0 character(s), 0 of the 5 found in the previous build's areas; 5 version(s) of 1 chat(s) this run did not import (${why}): in the backup only`);
+      expect(report.landed?.["story-record"]).toEndWith(`0 of the 8 entr(ies) found in the previous build's records; 8 entr(ies) of 1 chat(s) this run did not import (${why}): in the backup only`);
       // Counted after the run (R-320, R-321): of a chat it did not carry, they end nowhere, are named with why, and the report does not pass.
       for (const [row, n] of [["mind-files", 5], ["story-record", 8]] as const) {
         const inside = report.rows.find((r) => r.row === row)?.inside;
@@ -102,8 +102,8 @@ describe("the report's counts of the mind files and the story record", () => {
       const report = await migrated(fixture, data, 10);
       expect(report.imports?.find((c) => c.chatId === CHAT.harness)?.outcome).toBe("played on RPE: left alone");
       accounted(report);
-      expect(report.landed?.["mind-files"]).toEndWith("0 of the 5 found in today's areas; 5 version(s) of 1 chat(s) this run did not import (played on RPE: left alone): kept from an earlier run");
-      expect(report.landed?.["story-record"]).toEndWith("0 of the 8 entr(ies) found in today's records; 8 entr(ies) of 1 chat(s) this run did not import (played on RPE: left alone): kept from an earlier run");
+      expect(report.landed?.["mind-files"]).toEndWith("0 of the 5 found in the previous build's areas; 5 version(s) of 1 chat(s) this run did not import (played on RPE: left alone): kept from an earlier run");
+      expect(report.landed?.["story-record"]).toEndWith("0 of the 8 entr(ies) found in the previous build's records; 8 entr(ies) of 1 chat(s) this run did not import (played on RPE: left alone): kept from an earlier run");
       const text = reportText(report);
       expect(text.slice(text.indexOf("Kept in the backup only"))).not.toContain("this run did not import");
     });

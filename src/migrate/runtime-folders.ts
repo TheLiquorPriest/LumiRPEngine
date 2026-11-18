@@ -279,10 +279,10 @@ export async function readRuntimeFolders(folders: RuntimeFolders, identifier: st
   if (owner.named !== null) {
     const named = owner.named;
     const found = ours.find((c) => c.name === named);
-    if (found === undefined) out.undecided = unreadable.includes(named) ? `The config of the runtime ${named} can't be read, so this run can't take it: set it up again with today's install line, or run with --no-runtime.` : `There is no runtime ${named} of this extension in ${folders.configDir}${ours.length > 0 ? `: there are ${ours.map((c) => c.name).join(", ")}` : ""}.`;
+    if (found === undefined) out.undecided = unreadable.includes(named) ? `The config of the runtime ${named} can't be read, so this run can't take it: set it up again with the previous build's install line, or run with --no-runtime.` : `There is no runtime ${named} of this extension in ${folders.configDir}${ours.length > 0 ? `: there are ${ours.map((c) => c.name).join(", ")}` : ""}.`;
     else if (!sameUser(found)) out.undecided = `The runtime ${named} signs in to Lumiverse as another user, so its connections and keys are not this user's: this run doesn't take it.`;
     // A name the user shares on another Lumiverse is no proof: where their storage keeps registrations, a runtime named is taken only as one of them, as one found by itself is.
-    else if (regs !== null && !registered(found)) out.undecided = `The runtime ${named} signs in as this user's name, but is not registered with this Lumiverse for this user (another Lumiverse's runtime, or one whose registration was replaced), so its connections and keys may be another's: this run doesn't take it. Register it with this Lumiverse with today's install line, or run with --no-runtime.`;
+    else if (regs !== null && !registered(found)) out.undecided = `The runtime ${named} signs in as this user's name, but is not registered with this Lumiverse for this user (another Lumiverse's runtime, or one whose registration was replaced), so its connections and keys may be another's: this run doesn't take it. Register it with this Lumiverse with the previous build's install line, or run with --no-runtime.`;
     // Where it keeps none, the runtime's Lumiverse is compared with this one's, by what the data shows of it: a runtime of another Lumiverse is left alone.
     else if (regs === null && known.size > 0 && !known.has(addressKey(found.config.base))) out.undecided = `The runtime ${named} signs in as this user's name, and this user's storage holds no registration of a runtime, but its config's Lumiverse address (${found.config.base}) is not this Lumiverse's (${[...known.values()].join(", ")}, as the working copy this user's storage names reaches it): another Lumiverse's runtime, so its connections and keys may be another's and this run doesn't take it.`;
     else [taken, why] = [found, regs === null ? `named with --runtime; ${known.size > 0 ? "its config's Lumiverse address is this Lumiverse's" : "nothing in this user's storage shows this Lumiverse's address to compare it with"}; this user's storage holds no registration of a runtime to tell it by` : "named with --runtime, and registered with this Lumiverse for this user"];
@@ -290,9 +290,9 @@ export async function readRuntimeFolders(folders: RuntimeFolders, identifier: st
     const registeredHere = ours.filter(registered);
     const [only] = registeredHere;
     if (registeredHere.length === 1 && only !== undefined) [taken, why] = [only, "registered with this Lumiverse for this user: the registration in their storage holds its secret"];
-    else if (registeredHere.length > 1) out.undecided = `Several runtimes of today's build are registered with this Lumiverse for this user (${registeredHere.map((c) => c.name).join(", ")}): say which one this run takes with --runtime <name>.`;
-    else if (regs === null && ours.some(sameUser)) out.undecided = `This user's storage holds no registration of a runtime (harness/registry.json is missing or isn't one today's build reads), so which runtime here is theirs can't be told by it (${ours.filter(sameUser).map((c) => c.name).join(", ")} sign(s) in as their name): say which with --runtime <name>, or that none is with --no-runtime.`;
-    else if (unreadable.length > 0) out.undecided = `No runtime of today's build is registered with this Lumiverse for this user, and the config of ${unreadable.join(", ")} can't be read, so whether it is theirs can't be told: set it up again with today's install line, or say that no runtime here is theirs with --no-runtime.`;
+    else if (registeredHere.length > 1) out.undecided = `Several runtimes of the previous build are registered with this Lumiverse for this user (${registeredHere.map((c) => c.name).join(", ")}): say which one this run takes with --runtime <name>.`;
+    else if (regs === null && ours.some(sameUser)) out.undecided = `This user's storage holds no registration of a runtime (harness/registry.json is missing or isn't one the previous build reads), so which runtime here is theirs can't be told by it (${ours.filter(sameUser).map((c) => c.name).join(", ")} sign(s) in as their name): say which with --runtime <name>, or that none is with --no-runtime.`;
+    else if (unreadable.length > 0) out.undecided = `No runtime of the previous build is registered with this Lumiverse for this user, and the config of ${unreadable.join(", ")} can't be read, so whether it is theirs can't be told: set it up again with the previous build's install line, or say that no runtime here is theirs with --no-runtime.`;
   }
   for (const c of ours) {
     if (c === taken) continue;
@@ -313,13 +313,13 @@ export async function readRuntimeFolders(folders: RuntimeFolders, identifier: st
     const verdict = answer === "mine" ? "his" : answer === "theirs" ? "told not his" : verdicts.every((v) => v === "his") ? "his" : elsewhere !== undefined && verdicts.every((v) => v !== "his" && v !== "unknown") ? "not his" : "unknown";
     if (verdict === "his") {
       const root = join(folders.dataDir, "runtimes", name);
-      const note = `a file of the runtime folder ${name}, which no config names, so today's build never runs it; its working copy is this user's${answer === "mine" ? " (as you said)" : ""}`;
+      const note = `a file of the runtime folder ${name}, which no config names, so the previous build never runs it; its working copy is this user's${answer === "mine" ? " (as you said)" : ""}`;
       // Only this user's working copies of this extension are taken: another one's is left where it is, unread.
       const apart = here.filter((c) => !ofThis.includes(c) || (c.user !== null && c.user !== owner.username)).map((c) => `store/${c.folder}/`);
       out.files.push(...(await walk(root)).filter((f) => !apart.some((p) => f.path.startsWith(p))).map((f) => ({ ...f, path: `runtimes/${name}/${f.path}`, disk: join(root, f.path), working: note })));
       for (const c of ofThis) {
         const files = await unsentOf(c.dir);
-        if (files.size > 0) out.unsent.push({ runtime: name, files, kept: false, why: "no config names this runtime, so today's runtime never runs it and never sends what its working copy hadn't sent" });
+        if (files.size > 0) out.unsent.push({ runtime: name, files, kept: false, why: "no config names this runtime, so the previous runtime never runs it and never sends what its working copy hadn't sent" });
       }
       out.archived.push({ name, why: answer === "mine" ? "no config names it; you said its working copy is this user's" : "no config names it; its working copy's identity says it is this user's" });
     } else if (verdict === "told not his" || verdict === "not his") {
@@ -364,12 +364,12 @@ export async function readRuntimeFolders(folders: RuntimeFolders, identifier: st
       // behind its own, the copy goes with what it hadn't sent.
       const outcome =
         mark === null
-          ? { kept: false, why: "the extension's storage names no runtime as keeping it, so today's runtime would throw its copy away, with what it hadn't sent" }
+          ? { kept: false, why: "the extension's storage names no runtime as keeping it, so the previous runtime would throw its copy away, with what it hadn't sent" }
           : mark.copy !== copy
-            ? { kept: true, why: "another copy keeps the extension's storage, and today's runtime sends what it hadn't sent as its own writes" }
+            ? { kept: true, why: "another copy keeps the extension's storage, and the previous runtime sends what it hadn't sent as its own writes" }
             : count < mark.count
-              ? { kept: false, why: "the copy is behind what the extension's storage took from it (a copy restored or moved), so today's runtime would throw it away, with what it hadn't sent" }
-              : { kept: true, why: "the copy is the one the extension's storage keeps, and today's runtime sends what it hadn't sent" };
+              ? { kept: false, why: "the copy is behind what the extension's storage took from it (a copy restored or moved), so the previous runtime would throw it away, with what it hadn't sent" }
+              : { kept: true, why: "the copy is the one the extension's storage keeps, and the previous runtime sends what it hadn't sent" };
       out.unsent.push({ runtime: name, files, ...outcome });
     }
   }

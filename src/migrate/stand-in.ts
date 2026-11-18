@@ -199,7 +199,7 @@ export class StandIn {
 
   private refuse(call: string): never {
     this.writes.push({ store: "Lumiverse", op: "refused call", path: call });
-    throw new Error(`The migration reads today's data and nothing else: ${call} isn't something it does.`);
+    throw new Error(`The migration reads the previous build's data and nothing else: ${call} isn't something it does.`);
   }
 
   private makeHost(): HostPort {

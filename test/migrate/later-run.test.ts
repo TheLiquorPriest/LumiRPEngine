@@ -129,9 +129,9 @@ describe("a later run over today's data changed since", () => {
       expect(third.carried?.connections).toMatchObject({ connections: [], changedInRpe: ["conn-1"], default: "conn-own", defaultKept: true });
       expect(third.carried?.settings.keptInRpe).toEqual([{ from: "harness/settings.json: core.story.hidden", to: "RPE-global.yml: history.hiddenReadable" }]);
       const text = reportText(third);
-      expect(text).toContain("the default conn-own (chosen in RPE: kept over today's)");
-      expect(text).toContain("Connections changed or removed in RPE since a run carried them, left as RPE has them (today's copy not taken): conn-1.");
-      expect(text).toContain("  RPE-global.yml: history.hiddenReadable (today's harness/settings.json: core.story.hidden)");
+      expect(text).toContain("the default conn-own (chosen in RPE: kept over the previous build's)");
+      expect(text).toContain("Connections changed or removed in RPE since a run carried them, left as RPE has them (the previous build's copy not taken): conn-1.");
+      expect(text).toContain("  RPE-global.yml: history.hiddenReadable (the previous build's harness/settings.json: core.story.hidden)");
       // Its key, which RPE held as today's had it, stays.
       expect(await port.loadSecrets({ user: USER })).toMatchObject({ keys: { "conn-1": SECRETS.key } });
     });
@@ -157,7 +157,7 @@ describe("a later run over today's data changed since", () => {
       const second = await migrated(fixture, data, 10);
       expect(await hidden()).toBeUndefined();
       expect(await port.loadSecrets({ user: USER })).toMatchObject({ keys: { "conn-1": "sk-invented-rotated-0123456789" } });
-      expect(second.carried?.settings.followed).toEqual([{ what: "RPE-global.yml: history.hiddenReadable", change: "reset or removed on today's side since an earlier run", followed: true }]);
+      expect(second.carried?.settings.followed).toEqual([{ what: "RPE-global.yml: history.hiddenReadable", change: "reset or removed on the previous build's side since an earlier run", followed: true }]);
       expect(second.carried?.connections).toMatchObject({ followed: [{ what: "the key of connection conn-1", followed: true }] });
 
       // The connection removed on today's side since: RPE's copy, still the run's, goes with its key.
@@ -169,7 +169,7 @@ describe("a later run over today's data changed since", () => {
       expect(((await port.loadConnections({ user: USER })) as ConnectionsDoc).connections.map((c) => c.id)).toEqual([]);
       expect(await port.loadSecrets({ user: USER })).toMatchObject({ keys: {} });
       expect(third.carried?.connections).toMatchObject({ followed: [{ what: "connection conn-1", followed: true }] });
-      expect(reportText(third)).toContain("  connection conn-1: removed on today's side since an earlier run; followed in RPE");
+      expect(reportText(third)).toContain("  connection conn-1: removed on the previous build's side since an earlier run; followed in RPE");
     });
   });
 });
