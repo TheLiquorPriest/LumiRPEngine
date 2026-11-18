@@ -35,7 +35,7 @@ A vehicle is bought like anything costly: one `pay` operation that names it as t
 
 ## Harm
 
-Damage, wear, repair and fuel are the vehicle's condition. Change it with the condition tools (find them with `tool_search`), and say what did it.
+Damage, wear, repair and fuel are the vehicle's condition. Change it with the condition tools (find them with `tool_search`), and say what did it. Refuelling, a repair and a service are also actions of the engine's (`refuel`, `repair_vehicle`, `service_vehicle`), carried out with the `world_apply` operation `act`; each gives its own minutes, which you pass with `pass_time`.
 
 ## What a tool tells you
 

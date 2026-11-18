@@ -41,7 +41,7 @@ If nothing is recorded of what they carry and the story has not said, `fill_in_d
 
 ## The rest
 
-A thing's condition (broken, worn, mended), its names and description, standing permission to use another's things, two records of one thing merged, a thing lost: each has a tool of its own, found with `tool_search`.
+A thing's condition (broken, worn, mended), its names and description, standing permission to use another's things, two records of one thing merged, a thing lost: each has a tool of its own, found with `tool_search`. Searching a place or a container, fetching something of yours from close by and taking a piece out of a kit are actions of the engine's (`search`, `fetch`, `take_piece`), carried out with the `world_apply` operation `act`; `checks_odds` lists the ids, with what each takes, when it is given an id the world does not have.
 
 ## What a tool tells you
 

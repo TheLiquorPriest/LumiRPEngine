@@ -28,7 +28,7 @@ A value set on a group reaches its members unless a member has their own: the wa
     ```
 
   - Also: `org_leave` (the call's `who` leaves; `org`), `org_remove` (`org`, `who`), `org_title` (`org`, `who`, `title`, none to take it away), `org_appoint` (`org`, `who`, `position`, none to take them out of one), `org_position` (a position of the group itself: `org`, `title`, `powers`, `seats`). Every action of the engine has an id, and `checks_odds` (found with `tool_search`) lists them, with what each takes, when it is given an id the world does not have.
-- **How people stand with a group or with each other:** `world_apply` with `relate`: standing, trust, a debt of honour, a grudge.
+- **How people stand with a group or with each other:** `world_apply` with `relate`: standing, trust, a debt of honour, a grudge. A talk or a present between two people is an action of its own (`chat_with`, `give_gift`), carried out with `act` as above; the skill `time` says what a talk meets.
 - **Pay, dues, shares:** money moves with `pay`, like any payment. What each member pays in, how often an organization pays its staff and sharing out its money are actions of their own (`org_dues`, `org_pay_schedule`, `org_share_out`), and taking someone on for pay is `job_hire`, carried out the same way. A wage that falls due shows in what time brings due (the skill `time`).
 - **A place that only members may enter:** the entry rule belongs to the place and names the group. Who holds a key is a fact of the key.
 

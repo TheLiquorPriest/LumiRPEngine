@@ -15,10 +15,10 @@ The world has a ruleset of its own: how checks are made, how people advance, how
 `SIMULATION.md` says when the dice are rolled. When they are:
 
 1. Say what is attempted, by whom, and by what approach.
-2. Find what the ruleset makes of it: which stat or skill, against what difficulty, with what helping or hindering. If the ruleset has an action for it, use that action.
+2. Find what the ruleset makes of it: which stat or skill, against what difficulty, with what helping or hindering. If the ruleset has an action for it, use that action; it is carried out with the `world_apply` operation `act` (step 5).
 3. Say what each outcome will do before you roll, in a line each. Success, failure, and anything between that the ruleset has.
 4. Roll with `roll`. It rolls once and records the roll with what it was for.
-5. Apply the outcome with `world_apply`.
+5. Apply the outcome with `world_apply`. For an action of the ruleset's, that is an `act` giving the `outcome` your roll decided.
 
 ## One roll
 

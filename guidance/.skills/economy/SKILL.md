@@ -38,7 +38,7 @@ When time passes, the answer lists what the time brought due: wages, rent, a loa
 
 ## The rest
 
-Accounts opened and closed, loans, credit, taxes, a job taken or lost, a business and its takings, property: each has a tool of its own. Find it with `tool_search` and call it with `tool_use`.
+Accounts opened and closed, loans, credit, taxes, a job taken or lost, a business and its takings, property: each is an action of the engine's (`apply_credit`, `lend_money`, `job_hire`, `job_end`, `job_raise`, `invoice_issue`, `owner_draw`, `property_buy`, `property_sell`, `trade` and the rest) or has a tool of its own. An action is carried out with the `world_apply` operation `act`: `{"op": "act", "action": "<id>", "who": "<who does it>", "params": {…}}`; `checks_odds` lists the ids, with what each takes, when it is given an id the world does not have. A tool is found with `tool_search` and called with `tool_use`.
 
 ## What a tool tells you
 
