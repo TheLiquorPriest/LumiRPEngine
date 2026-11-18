@@ -40,8 +40,8 @@ const isPerson = (ctx: Pick<ReadContext, "registry" | "world" | "state">, id: En
 /**
  * A thing's size (§4.1), the first that answers: its own `size`; Built-in when `fixed`; `part` when
  * marked so or its containers row is built into a vehicle; a vehicle; its type row's `size`; a
- * containers row that stands as furniture; its volume against the size bounds; its name, by the
- * world's sizes by name; its category's size; otherwise unknown.
+ * containers row that stands as furniture; its volume against the size bounds; its category's size;
+ * otherwise unknown. Its name gives none (nothing is read from a name).
  */
 export function sizeOf(ctx: ThingContext, id: EntityId): { size: SizeClass; from: SizeFrom } {
   const e = own(ctx.state.entities, id);
