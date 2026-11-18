@@ -54,7 +54,6 @@ import { appArea } from "./area";
 import type { TurnTimes } from "./service-timings";
 import type { App, Area } from "./app";
 import type { SettingsReader } from "./config-read";
-import { RouteError } from "./routes";
 import { writeSetting } from "./settings-routes";
 
 export interface ComposeOptions {
@@ -147,8 +146,16 @@ export function compose(options: ComposeOptions = {}): Composition {
     },
   };
   // His worlds, kept by the worlds area: Build edits them through its service, and a proposal for a world's entry is approved through its store, once mounted.
-  // The chats that play his worlds are listed with Lumiverse's name for each, where RPE is set up for a Lumiverse.
-  const worlds = worldsArea(() => ({ store: made().store, turning, chatName: async (chat) => (await door.lumiverse()?.reads.chat(chat))?.name ?? null }));
+  // The chats that play his worlds are listed with Lumiverse's name for each, where RPE is set up for a Lumiverse; a world is attached only to a chat Lumiverse has among his (the same read, `place` below too).
+  const worlds = worldsArea(() => ({
+    store: made().store,
+    turning,
+    chatName: async (chat) => (await door.lumiverse()?.reads.chat(chat))?.name ?? null,
+    hasChat: async (chat) => {
+      const reads = door.lumiverse()?.reads;
+      return reads === undefined ? null : (await reads.chat(chat)) !== null;
+    },
+  }));
   const build = buildArea(() => ({
     store: made().store,
     worlds: worlds.service(),
@@ -203,17 +210,8 @@ export function compose(options: ComposeOptions = {}): Composition {
     chats: (user) => made().chats.placed(user).filter((c) => c.deleted === null).map((c) => c.chat),
     log: () => app().log,
   });
-  // A chat RPE has not played yet, placed as its first turn places it: under its character, by Lumiverse's own names for both.
-  const place = async (owner: string, chat: string) => {
-    const known = made().chats.folders(owner, chat);
-    if (known !== null) return known;
-    const reads = door.lumiverse()?.reads;
-    if (reads === undefined) throw new RouteError(503, "RPE is not connected to Lumiverse, so it cannot make that chat's folder yet: try again once it is.");
-    const lv = await reads.chat(chat);
-    if (lv === null) throw new RouteError(404, `Lumiverse has no chat ${chat} of yours.`);
-    const character = lv.character === null ? null : await reads.character(lv.character);
-    return await made().chats.place(owner, chat, { character: character === null ? null : { id: character.id, name: character.name }, chat: { name: lv.name } });
-  };
+  // A chat RPE has not played yet is placed by the one placer its first turn and its jobs use: under its character, by Lumiverse's own names for both.
+  const place = (owner: string, chat: string) => made().place(owner, chat);
   // The levels of the agents' tree that have a config file, where they are on disk: a chat's own once it has its folder, or placed for a write.
   const settingLevels = async (chat: string | null, make = false) => {
     const owner = app().config.lumiverse.user ?? "";
@@ -230,8 +228,9 @@ export function compose(options: ComposeOptions = {}): Composition {
       after = page.next;
     }
   };
-  // "Apply now" (R-119): the chat's open session starts its opening block afresh; none open, nothing to renew.
+  // "Apply now" (R-119): the chat's open session starts its opening block afresh; none open, nothing to renew. A chat not placed yet is placed, as any write at its level places it.
   const apply = async (user: string, chat: string): Promise<{ session: string | null }> => {
+    await place(user, chat);
     const open = (await sessionsOf(user, chat)).find((s) => s.state === "open");
     if (open === undefined) return { session: null };
     await made().harness.definitions.apply({ user, chat, session: open.id });

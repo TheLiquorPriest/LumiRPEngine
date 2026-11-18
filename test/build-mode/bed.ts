@@ -73,7 +73,7 @@ export const GUIDANCE = resolve(import.meta.dir, "../../guidance");
 
 /** The world service over a bed's store, with the chats it plays told to no page. */
 export function worldsOn(bed: Bed): WorldService {
-  const chats = { live: new LiveHub({ queueEvents: 16, now: () => 0 }), turning: () => false, name: async () => null };
+  const chats = { live: new LiveHub({ queueEvents: 16, now: () => 0 }), turning: () => false, name: async () => null, has: async () => true };
   return new WorldService({ store: bed.store, writes: bed.writes, log: bed.log, chats });
 }
 

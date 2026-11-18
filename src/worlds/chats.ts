@@ -32,6 +32,8 @@ export interface WorldChatsDeps {
   turning(user: UserId, chat: string): boolean;
   /** A chat's name in Lumiverse, through the door; null for one it does not know. */
   name(chat: string): Promise<string | null>;
+  /** Whether Lumiverse has the chat among the user's, by the door's read of its chats; null where RPE reaches no Lumiverse to look. */
+  has(chat: string): Promise<boolean | null>;
 }
 
 /** A chat that plays one of his worlds. */
@@ -216,10 +218,18 @@ export class WorldChats {
     return { undone: true, words: "" };
   }
 
+  /** Refuses a chat Lumiverse does not have among the user's: a world is attached to chats the user has, and nothing is written for one that is not. */
+  private async known(chat: string): Promise<void> {
+    const there = await this.deps.has(chat);
+    if (there === null) throw new WorldError("bad_request", "RPE is not connected to your Lumiverse just now, so it cannot tell whether that chat is one of yours: try again once it is.");
+    if (!there) throw new WorldError("not_found", "That chat is not one of your chats in Lumiverse, so no world was attached to it.");
+  }
+
   /**
    * Attaches the world to the chat. A chat that plays no world takes its head revision from its next turn (a marker of his own that takes
    * in everything the world has, as an Upgrade from nothing does), and a chat the store has not met starts on it. One that plays an older
    * revision of this world is offered the Upgrade instead of a refusal, and one that plays another world is told so; neither is written.
+   * A chat that is not one of the user's in Lumiverse is refused, whatever the store holds of it.
    */
   async attach(user: UserId, world: WorldId, chat: string): Promise<Attached> {
     const index = await this.deps.worlds.index(world, user);
@@ -227,6 +237,7 @@ export class WorldChats {
     const s = this.deps.store.user(user);
     const waiting = this.deps.turning(user, chat);
     const row = s.chat(chat);
+    if (row === null || row.world === null) await this.known(chat);
     if (row === null) {
       await this.deps.writes.run(() => s.attachWorld({ id: chat, world, revision: index.head }), "attaching a world to a chat");
       return { attached: true, revision: index.head, waiting };

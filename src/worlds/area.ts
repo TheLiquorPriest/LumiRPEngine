@@ -31,12 +31,14 @@ export const WORLD_KIND = liveKind("world", {
 
 /**
  * What the area takes from the composition: the store his worlds are kept in, once the turn lane has made it; whether a turn of a chat runs
- * now; and a chat's name in Lumiverse, through the door (null for one it does not know, or where RPE reaches no Lumiverse).
+ * now; a chat's name in Lumiverse, through the door (null for one it does not know, or where RPE reaches no Lumiverse); and whether Lumiverse
+ * has a chat among the user's, by the same read (null where RPE reaches no Lumiverse to look).
  */
 export interface WorldsTakes {
   store: Store;
   turning(user: string, chat: string): boolean;
   chatName(chat: string): Promise<string | null>;
+  hasChat(chat: string): Promise<boolean | null>;
 }
 
 export interface WorldsArea extends Area {
@@ -58,8 +60,8 @@ export function worldsArea(takes: () => WorldsTakes): WorldsArea {
     settings: WORLD_SETTINGS,
     liveKinds: [WORLD_KIND],
     mounted: (at) => {
-      const { store, turning, chatName } = takes();
-      made = new WorldService({ store, writes: at.writes, log: at.log, limits: () => worldLimitsOf(at), chats: { live: at.live, turning, name: chatName } });
+      const { store, turning, chatName, hasChat } = takes();
+      made = new WorldService({ store, writes: at.writes, log: at.log, limits: () => worldLimitsOf(at), chats: { live: at.live, turning, name: chatName, has: hasChat } });
       store.onWorld((change) => {
         const { user, ...told } = change;
         // The store's change notice names the user whose world changed; this RPE belongs to one, whose pages these are.

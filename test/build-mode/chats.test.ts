@@ -11,7 +11,8 @@ const tick = (minutes: number): ChangeInput => ({ lane: "engine", op: "clock", v
 function rig() {
   const bed = makeBed();
   const running = new Set<string>();
-  const service = new WorldService({ store: bed.store, writes: bed.writes, log: bed.log, chats: { live: new LiveHub({ queueEvents: 16, now: () => 0 }), turning: (_user, chat) => running.has(chat), name: async (chat) => `Chat ${chat}` } });
+  // Lumiverse has every chat but "ghost".
+  const service = new WorldService({ store: bed.store, writes: bed.writes, log: bed.log, chats: { live: new LiveHub({ queueEvents: 16, now: () => 0 }), turning: (_user, chat) => running.has(chat), name: async (chat) => `Chat ${chat}`, has: async (chat) => chat !== "ghost" } });
   return { bed, service, running };
 }
 
@@ -51,5 +52,13 @@ describe("a world's chats", () => {
     expect(await service.chats.undoUpgrade(USER, "c", moved.edit ?? "")).toEqual({ undone: true, words: "" });
     expect(s.headState("c").state.world.revision).toBe(made.revision);
     expect((await service.chats.undoUpgrade(USER, "c", moved.edit ?? "")).undone).toBe(false);
+  });
+
+  test("a world is not attached to a chat Lumiverse does not have among the user's: it is refused in words and nothing is kept", async () => {
+    const { bed, service } = rig();
+    const made = await service.create(USER, "Fernwick", "fantasy_town");
+    await expect(service.chats.attach(USER, made.world.id, "ghost")).rejects.toThrow("not one of your chats in Lumiverse");
+    expect(bed.store.user(USER).chat("ghost")).toBeNull();
+    expect(await service.chats.chatsOf(USER, { chat: "ghost" })).toEqual([]);
   });
 });
