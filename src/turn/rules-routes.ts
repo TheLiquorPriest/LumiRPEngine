@@ -162,8 +162,11 @@ export function rulesRoutes(turns: Turns) {
         const row = turns.store.user(user).turn(body.turn);
         if (row === null || row.chat !== params.chat) throw new RouteError(404, `Chat ${params.chat} has no turn ${body.turn}.`);
         if (row.joined !== null) throw new JoinedTurnError(body.turn, row.joined);
+        // The turn is read in the session it played in: its session file and its folder are there.
+        const run = turns.runs.record(user, body.turn);
+        if (run === null) throw new RouteError(404, `Chat ${params.chat} has no turn ${body.turn}.`);
         try {
-          return await turns.harness.rules.test({ user, chat: params.chat, session: NO_SESSION, turn: body.turn }, params.name, body.turn);
+          return await turns.harness.rules.test({ user, chat: params.chat, session: run.session, turn: body.turn }, params.name, body.turn);
         } catch (error) {
           throw new RouteError(404, error instanceof Error ? error.message : String(error));
         }
