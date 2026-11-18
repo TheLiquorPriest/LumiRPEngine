@@ -5,8 +5,9 @@
 
 import { describe, expect, test } from "bun:test";
 import { h } from "preact";
-import type { SettingsReply } from "../../../src/shared/api";
+import type { SettingsReply, SettingView } from "../../../src/shared/api";
 import { NO_SETTINGS, settingsCalls, settingsControl, type SettingsShown, SettingsView, type SettingsViewProps } from "../../../src/ui/pages/settings";
+import { sectionsOf } from "../../../src/ui/pages/settings/model";
 import { UI_CSS } from "../../../src/ui/styles";
 import { hashOf, routeOfHash } from "../../../src/ui/web";
 import { askingClient, settle } from "../asking";
@@ -244,5 +245,12 @@ describe("finding a setting, the books choice and what waits for the server", ()
     expect(text).toContain("rpe allow tide-tools");
     expect(text).toContain("rpe deny notes-hook");
     expect(buttonsOf(tree).some((b) => /allow|switch/i.test(b))).toBe(false);
+  });
+
+  test("a setting whose section the route does not list is shown under Other, which says no section names it yet, so none is left off the page", () => {
+    const stray = { key: "stray.key", section: "A section nobody listed", group: "Strays", from: null, set: [], levels: ["global"] } as unknown as SettingView;
+    const listed = [{ title: "Agents", about: "What each agent thinks at." }, { title: "Other", about: "Settings no section names yet." }];
+    expect(sectionsOf(listed, [stray]).map((s) => [s.title, s.about, s.count])).toEqual([["Other", "Settings no section names yet.", 1]]);
+    expect(sectionsOf(listed.slice(0, 1), [stray]).map((s) => [s.title, s.about, s.count])).toEqual([["Other", "Settings no section names yet.", 1]]);
   });
 });

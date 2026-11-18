@@ -132,10 +132,18 @@ export interface SectionShown {
   count: number;
 }
 
-/** The settings in sections, in the route's order of sections, each with its groups in the order RPE lists them; empty sections left out. */
+/** The section a setting that no section of the route names is shown in, and what it says of it. */
+const OTHER = { title: "Other", about: "Settings no section names yet." };
+
+/**
+ * The settings in sections, in the route's order of sections, each with its groups in the order RPE lists them; empty sections left out. A setting
+ * whose section is none of the route's is shown under "Other" (added at the end where the route lists none), so a setting is never left off the page.
+ */
 export function sectionsOf(sections: readonly { title: string; about: string }[], settings: readonly SettingView[]): SectionShown[] {
-  return sections.flatMap((section) => {
-    const inside = settings.filter((s) => s.section === section.title);
+  const known = new Set(sections.map((s) => s.title));
+  const listed = known.has(OTHER.title) ? sections : [...sections, OTHER];
+  return listed.flatMap((section) => {
+    const inside = settings.filter((s) => (known.has(s.section) ? s.section : OTHER.title) === section.title);
     if (inside.length === 0) return [];
     const groups = new Map<string, GroupShown>();
     for (const s of inside) {
