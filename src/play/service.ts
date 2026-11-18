@@ -83,7 +83,7 @@ export async function playAnswers(guidance: string): Promise<Part> {
 }
 
 /** A line of this area's words, filled with `fields` and with `codes` in the file's words for them (`keys`), each once; none when the user deleted the line. */
-function answerWords(part: Part, line: string, fields: Record<string, unknown> = {}, codes: Readonly<Record<string, readonly string[]>> = {}): string {
+export function answerWords(part: Part, line: string, fields: Record<string, unknown> = {}, codes: Readonly<Record<string, readonly string[]>> = {}): string {
   const said = Object.fromEntries(Object.entries(codes).map(([name, list]) => [name, [...new Set(list.map((code) => own(part.keys, code) ?? code))]]));
   return part.lines.get(line)?.render(part.header, { ...fields, ...said }) ?? "";
 }
@@ -95,9 +95,9 @@ function answerWords(part: Part, line: string, fields: Record<string, unknown> =
 export function leftLines(part: Part, left: readonly Report[]): string[] {
   const lines: string[] = [];
   for (const l of left) {
-    // A kind that cannot be taken back by its nature says why, in the words of its own line; one that only lacks an undo, or whose thing changed since, says that.
+    // A kind that cannot be taken back by its nature says why, in the words of its own line; a part with a line of its own code (a turn not yet finished) says that; one that only lacks an undo, or whose thing changed since, says that.
     const nature = typeof l.values?.why === "string" ? answerWords(part, `nature_${l.values.why}`) : "";
-    const line = nature !== "" ? "undone_left_nature" : l.code === "changed_since" ? "undone_left_changed" : "undone_left_kept";
+    const line = nature !== "" ? "undone_left_nature" : l.code === "changed_since" ? "undone_left_changed" : part.lines.has(`undone_left_${l.code}`) ? `undone_left_${l.code}` : "undone_left_kept";
     const said = answerWords(part, line, { ...(typeof l.values?.on === "string" ? { on: l.values.on } : {}), ...(nature !== "" ? { why: nature } : {}) }, { parts: [String(l.values?.op ?? "")] });
     lines.push(said.charAt(0).toUpperCase() + said.slice(1));
   }

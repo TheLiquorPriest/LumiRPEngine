@@ -10,7 +10,9 @@ import { own } from "../engine/pack-kit";
 import { authorLines } from "../engine/player-events";
 import { chatSchedulesIn } from "../engine/schedules";
 import { placeOfEntity } from "../engine/scope";
-import { isRecord } from "../shared/json";
+import type { Registry } from "../engine/registry-impl";
+import type { WorldState } from "../engine/state";
+import { isRecord, type JsonValue } from "../shared/json";
 import type { WorldDoc } from "../shared/world";
 import { type ChangeRow, clockRecorded, type Store, type StoreState, timeDue } from "../store";
 import { eventOf } from "../store/fold";
@@ -81,15 +83,24 @@ function dueWords(entry: DueEntry, world: WorldDoc, state: StoreState, schedules
   }
 }
 
+/**
+ * A change in the GM view's words (`authorLines`): its event worded with the names the world has, whoever it is about and whatever the
+ * player knows. None for a store operation, an area's, or an event that is bookkeeping only.
+ */
+export function changeLine(registry: Registry, world: WorldDoc, state: WorldState, op: string, value: JsonValue): string | undefined {
+  const event = eventOf(op, value);
+  const line = event === null ? undefined : authorLines(registry, world, state, [event], 1)[0];
+  return line === undefined || line === "" ? undefined : line;
+}
+
 /** The turn's applied changes of the world that name what an item concerns (whose it is, or its place where it is no one's), in the order recorded, each as its own line in the GM view's words; a change worded twice reads once. */
 function changesFor(store: Store, world: WorldDoc, state: StoreState, changes: readonly ChangeRow[], names: readonly string[]): string[] {
   if (names.length === 0) return [];
   const lines = new Set<string>();
   for (const c of changes) {
     if (!c.applied || !names.some((name) => JSON.stringify(c.value).includes(JSON.stringify(name)))) continue;
-    const event = eventOf(c.op, c.value);
-    const line = event === null ? undefined : authorLines(store.env.registry, world, state.world, [event], 1)[0];
-    if (line !== undefined && line !== "") lines.add(line);
+    const line = changeLine(store.env.registry, world, state.world, c.op, c.value);
+    if (line !== undefined) lines.add(line);
   }
   return [...lines];
 }

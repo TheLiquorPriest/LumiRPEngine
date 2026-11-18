@@ -10,6 +10,7 @@ import { JoinedTurnError, type Report, type UserStore } from "../store";
 import { RPE_GUIDANCE } from "../tree";
 import { answerOf, type ApprovalRow } from "./approvals";
 import type { Turns } from "./lane";
+import { changeWords, engineAnswers, reportWords, undoWords } from "./card-words";
 
 const T = shape.text();
 const N = shape.number();
@@ -24,17 +25,19 @@ export const report = shape.named(
 
 const changeShown = shape.named(
   "CardChange",
-  "One change of a turn on its card: its id, its operation, whether it applied, who decided it, where it came from, how sure it is, its reports, its undo (the operations undoing it would record, and what would be left, as report codes and, each part one sentence, in the play answers' words: its kind, what it was done to and why it stays) and the changes that already undid it.",
+  "One change of a turn on its card: its id, its operation, the change in words (as the GM view words it), whether it applied, who decided it, where it came from, how sure it is, its value as written, its reports as codes and each in the engine's answers' words, its undo (the operations undoing it would record, what would be left as report codes and, each part one sentence, in the play answers' words: its kind, what it was done to and why it stays; and one sentence of what the undo does) and the changes that already undid it.",
   shape.object({
     id: T,
     op: T,
+    words: T,
     applied: shape.yesNo(),
     by: nullable(T),
     source: nullable(T),
     standing: nullable(T),
     value: shape.json(),
     reports: shape.list(report),
-    undo: shape.object({ ops: shape.list(T), left: shape.list(report), leftWords: shape.list(T) }),
+    reportWords: shape.list(T),
+    undo: shape.object({ ops: shape.list(T), left: shape.list(report), leftWords: shape.list(T), words: T }),
     undoneBy: shape.list(T),
   }),
 );
@@ -119,20 +122,25 @@ export function reviewRoutes(turns: Turns) {
         const s = held(user, params.chat, params.turn);
         // A turn dropped with nothing saved took its staged changes with it (plan §6.3): the card says that none stands, and offers no undo.
         const dropped = s.turn(params.turn)?.status === "dropped";
-        // What an undo would leave is said in the play answers' words, as the play page says it.
+        // What an undo would leave is said in the play answers' words, as the play page says it; each change in the GM view's words, with the names the world has where the turn stands, and each report in the engine's answers' words.
         const words = await playAnswers(RPE_GUIDANCE);
+        const engine = await engineAnswers(RPE_GUIDANCE);
+        const at = s.stateAt(params.turn).state.world;
+        const doc = turns.store.env.worlds(at.revision);
         const lanes = s.reviewCard(params.turn).map((l) => ({
           lane: l.lane,
           changes: l.changes.map(({ change, undo, undoneBy }) => ({
             id: String(change.id),
             op: change.op,
+            words: changeWords(words, turns.store.env.registry, doc, at, change),
             applied: change.applied && !dropped,
             by: change.by,
             source: change.source,
             standing: change.standing,
             value: change.value,
             reports: change.reports,
-            undo: dropped ? { ops: [], left: [], leftWords: [] } : { ...undo, leftWords: leftLines(words, undo.left) },
+            reportWords: change.reports.map((r) => reportWords(engine, words, change.applied && !dropped, r)),
+            undo: dropped ? { ops: [], left: [], leftWords: [], words: "" } : { ...undo, leftWords: leftLines(words, undo.left), words: undoWords(words, undo.ops) },
             undoneBy: undoneBy.map(String),
           })),
         }));

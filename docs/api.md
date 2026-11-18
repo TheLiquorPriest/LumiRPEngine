@@ -4336,19 +4336,21 @@ export type CallRefusal = { by: "limit"; hit: LimitHit } | { by: "answer"; max: 
 
 ### `CardChange`
 
-One change of a turn on its card: its id, its operation, whether it applied, who decided it, where it came from, how sure it is, its reports, its undo (the operations undoing it would record, and what would be left, as report codes and, each part one sentence, in the play answers' words: its kind, what it was done to and why it stays) and the changes that already undid it.
+One change of a turn on its card: its id, its operation, the change in words (as the GM view words it), whether it applied, who decided it, where it came from, how sure it is, its value as written, its reports as codes and each in the engine's answers' words, its undo (the operations undoing it would record, what would be left as report codes and, each part one sentence, in the play answers' words: its kind, what it was done to and why it stays; and one sentence of what the undo does) and the changes that already undid it.
 
 ```ts
 export interface CardChange {
   id: string;
   op: string;
+  words: string;
   applied: boolean;
   by: string | null;
   source: string | null;
   standing: string | null;
   value: JsonValue;
   reports: ReportShown[];
-  undo: { ops: string[]; left: ReportShown[]; leftWords: string[] };
+  reportWords: string[];
+  undo: { ops: string[]; left: ReportShown[]; leftWords: string[]; words: string };
   undoneBy: string[];
 }
 ```
