@@ -1,5 +1,6 @@
 ---
 description: gm_link as the model is told it - what the tool does, and what each of its arguments is.
+doing: linking two people or things
 arguments:
   relation: "The relation, as the world names its relation types: employed_by, lives_at, knows and the like."
   from: "Whose relation."
