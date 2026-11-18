@@ -64,6 +64,43 @@ describe("stage.unperceived and path.unperceived", () => {
     expect(values["path.unperceived"]).toMatchObject({ count: 2, names: ["Tam", "Wren"], namesBy: { supporting: [] } });
   });
 
+  test("turns a migration carried owe no perception and their stage is not asked: the count names only the turn RPE played", async () => {
+    const b = await openBench();
+    const stage = new Map<string, string[]>();
+    const asked: string[] = [];
+    const facts = castFacts({
+      store: b.t.store,
+      sources: b.t.shelf.reader,
+      playerMind: async () => false,
+      onStage: async (_scope, turns) => {
+        asked.push(...turns);
+        return new Map(turns.flatMap((t) => (stage.has(t) ? [[t, { who: stage.get(t) ?? [], how: "scene" as const }] as const] : [])));
+      },
+    });
+    // Two turns the previous build played, carried with the castings it held: Bram and Odile on stage in both, no perception of RPE's.
+    const carried: string[] = [];
+    for (let i = 0; i < 2; i++) {
+      const turn = await b.t.begin();
+      if (i === 0) await b.call("cast_update", { operations: [{ op: "cast", who: "Bram", as: "principal" }, { op: "cast", who: "Odile", as: "supporting" }] }, turn.id);
+      await b.t.tie(turn);
+      await b.t.writes.run((db) => db.run("UPDATE turn SET imported = 1 WHERE user = ? AND id = ?", [USER, turn.id]));
+      stage.set(turn.id, ["Bram", "Odile"]);
+      carried.push(turn.id);
+    }
+    // The first turn RPE plays: Odile is on stage and no perception of it is written.
+    const own = await b.t.begin();
+    stage.set(own.id, ["Odile"]);
+    await b.t.tie(own);
+
+    const next = await b.t.begin();
+    const values = await facts.read({ user: USER, chat: CHAT, session: "s-1", turn: next.id }, ["stage.unperceived", "path.unperceived"]);
+    expect(factProblems(CAST_FACT_DEFS, values)).toEqual([]);
+    expect(values["path.unperceived"]).toMatchObject({ count: 1, names: ["Odile"], namesBy: { principal: [], supporting: ["Odile"] }, fields: { messages: [5], read: { scene: 1, owner: 0, none: 0 } } });
+    expect(asked.some((t) => carried.includes(t))).toBe(false);
+    // Read at a carried turn, no one is owed a perception of it.
+    expect((await facts.read({ user: USER, chat: CHAT, session: "s-1", turn: carried[1] }, ["stage.unperceived"]))["stage.unperceived"]?.count).toBe(0);
+  });
+
   test("a chat with no record yet counts no one", async () => {
     const b = await openBench();
     const facts = castFacts({ store: b.t.store, sources: b.t.shelf.reader, onStage: async () => new Map(), playerMind: async () => false });

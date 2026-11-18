@@ -1,7 +1,8 @@
 // The neutral count (plan §7.3, §5.4 "Facts"): for a turn, who was on stage and has no perception of
 // it recorded, each with their casting. Two facts, given to the turn lane's facts registry the way
 // its own are (`src/turn/facts.ts`, `FactSource`): `stage.unperceived`, this turn; and
-// `path.unperceived`, the earlier turns on the path. Each counts everyone, grouped by casting, with
+// `path.unperceived`, the earlier turns on the path. Both count only turns RPE played: a turn a
+// migration carried owes no perception (§15.2). Each counts everyone, grouped by casting, with
 // the names it counts (`names`, and per casting `namesBy`), so a rule's header picks the castings it
 // cares about. Who was on stage is the caller's to say. Code decides nothing about whose perceptions
 // matter, and holds nothing back for a missing one: it counts.
@@ -36,13 +37,13 @@ export type OnStage = (scope: { user: string; chat: string }, turns: readonly st
 export const CAST_FACT_DEFS: readonly FactDef[] = [
   {
     name: "stage.unperceived",
-    counts: "Characters on stage this turn with no perception of it recorded, by casting; read: how the stage was read (scene: the open scene and who the state places in its place; owner: no scene recorded, who the state places where the owner's character is; none: not recorded).",
+    counts: "Characters on stage this turn with no perception of it recorded, by casting; read: how the stage was read (scene: the open scene and who the state places in its place; owner: no scene recorded, who the state places where the owner's character is; none: not recorded). A turn a migration carried counts no one: the previous build played it, and what its characters took from it was carried with their minds.",
     by: [...UNPERCEIVED_GROUPS],
     fields: ["read"],
   },
   {
     name: "path.unperceived",
-    counts: "Characters on stage in earlier turns on the chat's path with no perception of that turn recorded, each counted once, by casting; messages: those turns' replies; read: how many of those turns' stages were read each way (scene, owner, none).",
+    counts: "Characters on stage in earlier turns RPE played on the chat's path with no perception of that turn recorded, each counted once, by casting; messages: those turns' replies; read: how many of those turns' stages were read each way (scene, owner, none). The turns a migration carried are not counted: the previous build played them, and what their characters took from them was carried with their minds.",
     by: [...UNPERCEIVED_GROUPS],
     fields: ["messages", "read"],
   },
@@ -127,10 +128,13 @@ export function castFacts(deps: { store: Store; onStage: OnStage; sources: Sourc
           ...mind,
         };
       }
-      const turn = scope.turn ?? null;
-      const at = castAt(user, scope.chat, turn);
+      const at = castAt(user, scope.chat, scope.turn ?? null);
       const record = CastRecord.read(deps.store, scope.user, at);
-      const earlier = at.turns.filter((t) => t !== turn);
+      // Only the turns RPE played are counted (`playedOf`, plan §7.3): a turn a migration carried was the previous build's to play, owes
+      // no perception of RPE's, and its stage is not asked; what its characters took from it is in the mind files carried with them (§15.2).
+      const played = user.playedOf([...at.turns, ...(scope.turn === undefined ? [] : [scope.turn])]);
+      const turn = scope.turn !== undefined && played.has(scope.turn) ? scope.turn : null;
+      const earlier = at.turns.filter((t) => t !== scope.turn && played.has(t));
       const asked = [...(wanted.stage && turn !== null ? [turn] : []), ...(wanted.path ? earlier : [])];
       const stage = asked.length === 0 ? new Map<string, StageRead>() : await deps.onStage({ user: scope.user, chat: scope.chat }, asked);
 
