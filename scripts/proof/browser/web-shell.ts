@@ -71,7 +71,7 @@ export async function openWebPage(page: string, tab: PageTab, options: WebPagesO
   };
   await until("a heading", async () => (await heading()) !== "");
   if ((await heading()) === SIGN_IN) {
-    await tab.browser.type({ label: "Token" }, options.token);
+    await tab.browser.type({ role: "textbox", label: "Token" }, options.token);
     await tab.browser.press({ role: "button", label: "Sign in" });
     await until("the pages after sign-in", async () => (await heading()) !== SIGN_IN && (await heading()) !== "");
   }
