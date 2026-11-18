@@ -81,6 +81,8 @@ export interface TurnBedOptions {
   messages?: ChatMessage[];
   /** Areas a test adds after the composition's own, made from the composition (its door, its turn lane). */
   areas?: (composition: Composition) => readonly Area[];
+  /** The scripted model's context window in tokens: 64,000 when not given. */
+  contextWindow?: number;
 }
 
 /** The Author's answer in one call: its intent record, then its reply. */
@@ -141,7 +143,7 @@ export async function openTurnBed(options: TurnBedOptions): Promise<TurnBed> {
     const off = options.off ?? [];
     await writeFile(paths.globalConfig, `stack: { off: [${off.join(", ")}] }\n${options.global ?? ""}`, "utf8");
 
-    const model = scriptedModel(options.answers, { contextWindow: 64_000, maxTokens: 4_000 });
+    const model = scriptedModel(options.answers, { contextWindow: options.contextWindow ?? 64_000, maxTokens: 4_000 });
     const logged: Logged[] = [];
     const config = configOf({ port: 0, lumiverse: { url: server.base, user: USER, database: db.path, connection: CONNECTION } }, {}, "the test's config");
     // What the harness is told of turns that left the path, and what it is asked to answer, recorded on the way to it.

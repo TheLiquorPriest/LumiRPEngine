@@ -93,6 +93,10 @@ Its words come from `guidance/.prompts/play-answers.md` and `request-answers.md`
 
 **"Not connected to RPE".** The page cannot reach RPE (**Try again** reads it afresh). From another device, RPE must be published at an address that device reaches, and that address listed in `server.origins` and `server.hosts` in `files/RPE-global.yml` (see [Install](install.md#the-web-app-and-its-key)).
 
+## RPE holds more memory than you expect
+
+To see what RPE's memory is made of as a chat is played, run `bun scripts/perf/memory.ts` from RPE's source folder. It starts RPE's own application on a scratch data folder, with a stand-in Lumiverse and a scripted model, plays turns of tens of thousands of tokens with tool calls, a delegate and jobs, and prints RPE's resident size, its heap and what its allocator holds every few turns, so you see what grows with the number of turns and what levels off. `--turns`, `--chats` (chats played at once), `--prompt` (tokens a prompt holds) and `--rest` (seconds to wait after the last turn before measuring again) change what it plays; the file's first lines list the rest.
+
 ## After an update
 
 `rpe status`'s `Builds:` line says what RPE does about a new build: it is waiting for a turn or job to end, it is restarting, `update.restart` is off, it was started by hand, or the new file does not start. The same line is on the **Runtime** page.
