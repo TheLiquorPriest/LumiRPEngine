@@ -68,6 +68,8 @@ interface Read {
   what: "preset" | "persona" | "entry" | "entries" | "book";
   named: string;
   requests: number;
+  /** The code that asked for it. */
+  stack: string;
 }
 
 /** Every read of these kinds RPE makes of Lumiverse from now on, in order. */
@@ -75,7 +77,7 @@ function recordReads(b: TurnBed): Read[] {
   const reads: LumiverseReads = b.composition.door.lumiverse()!.reads;
   const seen: Read[] = [];
   const note = (what: Read["what"], named: string): void => {
-    seen.push({ what, named, requests: b.model.requests.length });
+    seen.push({ what, named, requests: b.model.requests.length, stack: new Error().stack ?? "" });
   };
   const { preset, persona, entry, entries, book } = reads;
   reads.preset = (id) => (note("preset", id), preset(id));
@@ -147,25 +149,22 @@ describe("the Author starts at once; the turn's folder follows it", () => {
     expect(JSON.parse(await folderText(b, turn, TURN_FILES.turn)).files.some((f: string) => f.endsWith(TURN_FILES.worldState))).toBe(false);
   });
 
-  test("nothing read for the folder before the first call", async () => {
+  test("the folder reads nothing of Lumiverse", async () => {
     const b = await bed({ answers: [replying("The lamp turns."), replying("Wren points at the stairs.")] });
     presetWithCard(b);
     b.db.run("INSERT INTO personas (id, name, description, user_id) VALUES (?, ?, ?, ?)", PERSONA, "Marlow Venn", PERSONA_TEXT, USER);
     // A first turn, so that Lumiverse holds the breakdown it stores with a saved reply, which names the preset's blocks.
     await settledTurn(b, await play(b, "normal", "I climb the stairs.", PERSONA));
     const reads = recordReads(b);
-    const before = b.model.requests.length;
     const turn = await settledTurn(b, await play(b, "normal", "I ask where the oil is kept.", PERSONA));
 
-    // The folder reads nothing of Lumiverse: the persona's and the character's files are the harness's views of the prompt. Nothing
-    // reads the preset or the persona once this turn's first request to the Author has gone out (the door may read the preset before,
-    // on receipt, for itself).
+    // The folder reads nothing of Lumiverse: the persona's and the character's files are the harness's views of the prompt. (The door
+    // reads the preset and the persona for itself, on receipt and for the next reply's hint.)
     expect(b.turns.runs.record(USER, turn.id)?.folder).toMatchObject({ error: null });
-    expect(reads.filter((r) => r.requests > before && (r.what === "preset" || r.what === "persona"))).toEqual([]);
-    expect(reads.filter((r) => r.requests === before && r.what === "persona")).toEqual([]);
+    expect(reads.filter((r) => r.stack.includes("/src/turn/folder.ts"))).toEqual([]);
   });
 
-  test("the lore file is written from what intake read: no entry's text is read a second time", async () => {
+  test("the lore file is written from what intake read: the folder reads no entry", async () => {
     const b = await bed({ answers: [replying("Wren points down the stairs.")] });
     const content = "Whale oil is kept in the cellar under the lamp room, six barrels, the oldest nearest the door.";
     b.db.run("INSERT INTO world_books (id, name, user_id) VALUES (?, ?, ?)", "wb-keep", "Keeper's Book", USER);
@@ -180,9 +179,8 @@ describe("the Author starts at once; the turn's folder follows it", () => {
     const id = /^- \[(e-\d+)\] The oil store/m.exec(lore)?.[1];
     expect(id).toBeDefined();
     expect(lore).toContain(`## [${id}] The oil store, from Keeper's Book, activated by keyword\n\n${content}\n`);
-    // Its text was read of Lumiverse once in the turn, with its book's entries for intake's lore map, and never on its own after.
-    expect(reads.filter((r) => r.what === "entries" && r.named === "wb-keep")).toHaveLength(1);
-    expect(reads.filter((r) => r.what === "entry")).toEqual([]);
+    // The folder reads no entry of its own: its text is what the lore map and the check of the lore on receipt read.
+    expect(reads.filter((r) => r.stack.includes("/src/turn/folder.ts"))).toEqual([]);
   });
 });
 

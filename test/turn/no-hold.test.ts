@@ -1,7 +1,7 @@
 // Nothing in RPE's turn waits for, holds or orders a step (plan §10.3, §10.7, §17.2 "Nothing in code holds the process"). A release
 // is known the moment the reply's first text reaches RPE: marked on the run, told live while the run goes on, and read at once by
 // `turn.owes.reply`. Whether a reply went out before its intent record is counted from the order the two reached RPE. A tool the
-// Author calls before its record runs at once; with `reply-missing` off, a clean closing call before any reply ends the run in one
+// Author calls before its record runs at once; with `reply-missing` off, a message with no call before any reply ends the run in one
 // call. And the record's own time and the thinking before each call's first output are kept on the run as they arrive (R-185). Played
 // through the stand-in Lumiverse on the scripted model, and, for the times, RPH's trace as it would come. Every name is invented.
 
@@ -102,8 +102,8 @@ describe("a turn played through", () => {
     expect(await read(second.id, run2!.session)).toEqual({ count: 0 });
   });
 
-  test("with reply-missing switched off, a clean closing call made before any reply ends the run in one call, with the error line", async () => {
-    const b = await bed({ off: ["rules/reply-missing"], answers: [{ pieces: [{ text: "<intent>Nothing to say.</intent>" }, { call: "world_query", args: { at: "world", closing: true } }] }] });
+  test("with reply-missing switched off, a message that makes no call before any reply ends the run in one call, with the error line", async () => {
+    const b = await bed({ off: ["rules/reply-missing"], answers: [{ pieces: [{ text: "<intent>Nothing to say.</intent>" }] }] });
     b.host.send(CHAT, "I climb the stairs.");
     const out = await b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET });
     expect(out.error).not.toBeNull();
