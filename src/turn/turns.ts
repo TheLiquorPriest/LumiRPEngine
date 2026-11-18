@@ -2265,6 +2265,10 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       this.#d.log.warn("The empty reply a turn left in the chat when it ended before a word of it went out could not be taken away; it stays until it is deleted in the chat.", { turn: run.turn, chat: run.chat, message: saved.id, error: words(error) });
       return false;
     });
+    // What RPE holds of the chat follows what the drop left in it at once, as the next intake would find it: the empty reply where it
+    // stands, with its line, or the reply its swipe was taken from as it shows again. Its pages then ask their lines again.
+    await this.#atRest(user, run.chat, run.turn);
+    this.#stateChanged(run.chat);
     if (removed !== true) EMPTY_REPLY_KIND.publish(this.#d.live, run.chat, { turn: run.turn, message: saved.id, off: removed === null });
   }
 
@@ -2407,23 +2411,24 @@ export class TurnLane implements TurnPlayer, ChatChanges {
   }
 
   /**
-   * A message deleted, or an earlier reply's swipe flipped, heard by its event with no turn of the chat going on: the path compared as
-   * a turn's intake compares it (keeping its report with the chat, so the next turn's start still tells the Author, once), and the
-   * chat's notes put as they stand at its head (plan §5.1, R-130); a note he changed in between stays as he left it. With a turn going
-   * on its own start puts the notes; a missed event is caught up at the next start. `#catchUp` is not called here: it waits for
-   * `settled()`, which waits on this very work.
+   * A message deleted, an earlier reply's swipe flipped, or the empty reply a dropped turn left (or took away), with no turn of the chat
+   * going on but the dropped one (`ending`), whose run may still be finishing: the path compared as a turn's intake compares it (keeping
+   * its report with the chat, so the next turn's start still tells the Author, once), and the chat's notes put as they stand at its head
+   * (plan §5.1, R-130); a note he changed in between stays as he left it. With a turn going on its own start puts the notes; a missed
+   * event is caught up at the next start. `#catchUp` is not called here: it waits for `settled()`, which waits on this very work.
    */
-  async #atRest(user: string, chat: string): Promise<void> {
+  async #atRest(user: string, chat: string, ending: string | null = null): Promise<void> {
     const reads = this.#d.reads();
     const store = this.#d.store.user(user);
-    if (reads === null || store.chat(chat) === null || this.#generatingIn(user, chat).size > 0 || this.#d.runs.ofChat(user, chat).length > 0) return;
+    const going = (): boolean => this.#generatingIn(user, chat).size > 0 || this.#d.runs.ofChat(user, chat).some((r) => r.turn !== ending);
+    if (reads === null || store.chat(chat) === null || going()) return;
     const intake = this.#queue(user, chat);
     try {
       if (intake.waiting) return;
       const steps = await reads.path(chat);
       if (steps === null) return;
       // A generation told begun while the path was read is the one to compare it, at its intake, with what it writes left out.
-      if (this.#generatingIn(user, chat).size > 0 || this.#d.runs.ofChat(user, chat).length > 0) return;
+      if (going()) return;
       await this.#compare(user, chat, steps, null, null, store.heardCount(chat));
       await this.#d.notes.follow(user, chat, { turns: store.line(chat).map((l) => l.turn), branchOf: store.chat(chat)?.sourceChat ?? null });
     } finally {

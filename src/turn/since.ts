@@ -62,15 +62,17 @@ export interface KeptItem {
  * messages a delete took, the player's own messages (the store compares replies) and the replies no turn is tied to: the store's
  * comparison finds every one of those again, so only those `was` did not hold as they read now, new since or changed since, are found,
  * in stretches broken by a played reply or by one found before. A message with nothing written in it (what Lumiverse keeps of a
- * generation stopped or failed before its first word) is no reply anyone wrote, and is not found. `stoppedBefore`: the changes the
- * chat's last flip had stopped, which this one does not list again.
+ * generation stopped or failed before its first word) is no reply anyone wrote, and is not found; nor is the newest reply as showing
+ * such a swipe, which is no other swipe the player turned to. `stoppedBefore`: the changes the chat's last flip had stopped, which this
+ * one does not list again.
  */
 export function foundItems(report: PathReport, was: readonly PathEntry[], steps: readonly LvStep[], stoppedBefore: ReadonlySet<number> = new Set()): FoundItem[] {
   const items: FoundItem[] = [];
   const number = new Map(was.map((e, i) => [e.message, i]));
   const gone = report.gone.flatMap((g) => (g.turn === null ? [] : [{ turn: g.turn, message: g.message, n: number.get(g.message) ?? null }]));
   if (gone.length > 0) items.push({ kind: "deleted", turns: gone.map((g) => g.turn), gone });
-  if (report.swiped !== null) items.push({ kind: "swiped", message: report.swiped.message, to: report.swiped.to });
+  const swiped = report.swiped;
+  if (swiped !== null && !(swiped.to === null && steps.some((s) => s.id === swiped.message && s.shown.hash === NOTHING_WRITTEN))) items.push({ kind: "swiped", message: swiped.message, to: swiped.to });
   const stopped = report.notApplied.filter((n) => !stoppedBefore.has(n.change)).map((n) => ({ change: n.change, turn: n.turn, op: n.op, codes: n.reports.map((r) => r.code) }));
   const stretch = report.rebased === null ? null : { from: report.rebased.from, to: report.rebased.to };
   for (const f of report.flipped) items.push({ kind: "flipped", message: f.message, to: f.to, stretch, stopped });
