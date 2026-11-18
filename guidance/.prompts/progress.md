@@ -1,17 +1,17 @@
 ---
-description: The lines shown in the chat's thinking block while a turn is being worked on. One kind of line per row, a name, a colon, then its text. Change the words freely. Delete a row and that kind of line is no longer shown, except the row named still, which keeps a long turn alive in Lumiverse. The row named retrying is shown when a call to a model failed and is made again; `is.<kind>` says what broke it (connection, timeout, overloaded, server, other), `seconds` is the wait before the next try, `next` that try's number and `most` the most tries there will be. The row named thinking heads each stretch of an agent's thinking, which goes into the thinking block as it is written where the setting Thinking in the chat lets it; `is.<kind>` says whose it is (author, gm, narrator, character, other) and `name` is the character's name, or the agent's definition for another.
+description: The lines shown in the chat's thinking block while a turn is being worked on. One kind of line per row, a name, a colon, then its text. Change the words freely. Delete a row and that kind of line is no longer shown, except the row named still, which keeps a long turn alive in Lumiverse. The rows named tool, delegate, question and thinking name an agent as a person calls it; `is.<kind>` says whose it is (author, gm, narrator, character, other), `name` is the character's name, or the agent's definition for another, and `nth` is set where the turn has another agent of that kind before it. The row named tool is shown as a tool begins; `doing` says what the tool does in a few words, from the `doing` line of its file in `.tools/`, and `tool` is its own name, for a tool whose file gives none. The row named retrying is shown when a call to a model failed and is made again; `is.<kind>` says what broke it (connection, timeout, overloaded, server, other), `wait` is the wait before the next try in words (none where it is made at once), `next` that try's number and `most` the most tries there will be. The row named thinking heads each stretch of an agent's thinking, which goes into the thinking block as it is written where the setting Thinking in the chat lets it.
 format: lines
 ---
 intake: Reading the chat for the briefing.
 started: Reading the turn.
 waiting_previous: Finishing the last turn's work first.
-tool: {{tool}}
-delegate: Asking {{agent}}.
+tool: {{#is.author}}The Author{{/is.author}}{{#is.gm}}{{#nth}}Another{{/nth}}{{^nth}}The{{/nth}} GM{{/is.gm}}{{#is.narrator}}{{#nth}}Another{{/nth}}{{^nth}}The{{/nth}} narrator{{/is.narrator}}{{#is.character}}{{name}}{{/is.character}}{{#is.other}}{{#nth}}Another{{/nth}}{{^nth}}The{{/nth}} {{name}}{{/is.other}} is {{#doing}}{{doing}}{{/doing}}{{^doing}}using {{tool}}{{/doing}}.
+delegate: Asking {{#is.author}}the Author{{/is.author}}{{#is.gm}}{{#nth}}another{{/nth}}{{^nth}}the{{/nth}} GM{{/is.gm}}{{#is.narrator}}{{#nth}}another{{/nth}}{{^nth}}the{{/nth}} narrator{{/is.narrator}}{{#is.character}}{{name}}{{/is.character}}{{#is.other}}{{#nth}}another{{/nth}}{{^nth}}the{{/nth}} {{name}}{{/is.other}}.
 agents: {{count}} agents at work.
-question: {{agent}} has a question.
+question: {{#is.author}}The Author{{/is.author}}{{#is.gm}}{{#nth}}Another{{/nth}}{{^nth}}The{{/nth}} GM{{/is.gm}}{{#is.narrator}}{{#nth}}Another{{/nth}}{{^nth}}The{{/nth}} narrator{{/is.narrator}}{{#is.character}}{{name}}{{/is.character}}{{#is.other}}{{#nth}}Another{{/nth}}{{^nth}}The{{/nth}} {{name}}{{/is.other}} has a question.
 rule: A rule of yours fired: {{rule}}.
 writing: Writing.
 hook_waits: Waiting for a hook of yours to see the reply.
-retrying: A call to the model failed ({{#is.connection}}the connection broke{{/is.connection}}{{#is.timeout}}it timed out{{/is.timeout}}{{#is.overloaded}}the provider is busy{{/is.overloaded}}{{#is.server}}the provider's server failed{{/is.server}}{{#is.other}}it failed{{/is.other}}). Trying again in {{seconds}}s, try {{next}} of {{most}}.
+retrying: A call to the model failed ({{#is.connection}}the connection broke{{/is.connection}}{{#is.timeout}}it timed out{{/is.timeout}}{{#is.overloaded}}the provider is busy{{/is.overloaded}}{{#is.server}}the provider's server failed{{/is.server}}{{#is.other}}it failed{{/is.other}}). Trying again{{#wait}} in {{wait}}{{/wait}}{{^wait}} at once{{/wait}}, try {{next}} of {{most}}.
 still: Still working ({{elapsed}}).
 thinking: {{#is.author}}The Author{{/is.author}}{{#is.gm}}The GM{{/is.gm}}{{#is.narrator}}The narrator{{/is.narrator}}{{#is.character}}{{name}}{{/is.character}}{{#is.other}}The {{name}}{{/is.other}} thinks:

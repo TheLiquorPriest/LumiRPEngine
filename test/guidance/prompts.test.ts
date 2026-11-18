@@ -294,8 +294,15 @@ describe("a row each of E.6: present, laid out as its row says, asking for nothi
     expect(part.line("still", { elapsed: "1:30" })).toBe("Still working (1:30).");
     expect(part.names).toEqual(expect.arrayContaining(["intake", "started", "tool", "delegate", "writing", "still"]));
     expect(written(part)).not.toMatch(ASKS);
-    // A call made again: what broke it, the wait and the try, as RPH fills the row (its turn's `call_failed`).
-    expect(part.line("retrying", { failure: "connection", is: { connection: true }, seconds: 1, next: 2, most: 3 })).toBe("A call to the model failed (the connection broke). Trying again in 1s, try 2 of 3.");
+    // A call made again: what broke it, the wait in words and the try, as RPH fills the row (its turn's `call_failed`); at once where it does not wait.
+    expect(part.line("retrying", { failure: "connection", is: { connection: true }, wait: "a second", next: 2, most: 3 })).toBe("A call to the model failed (the connection broke). Trying again in a second, try 2 of 3.");
+    expect(part.line("retrying", { failure: "timeout", is: { timeout: true }, next: 3, most: 3 })).toBe("A call to the model failed (it timed out). Trying again at once, try 3 of 3.");
+    // An agent at work, asked or asking, as a person calls it, as the harness fills the rows through RPE's names; a tool by what it is doing.
+    expect(part.line("delegate", { is: { gm: true }, name: "gm" })).toBe("Asking the GM.");
+    expect(part.line("delegate", { is: { gm: true }, name: "gm", nth: 2 })).toBe("Asking another GM.");
+    expect(part.line("question", { is: { character: true }, name: "Wren Hale" })).toBe("Wren Hale has a question.");
+    expect(part.line("tool", { is: { author: true }, name: "author", tool: "file_read", doing: "reading a file" })).toBe("The Author is reading a file.");
+    expect(part.line("tool", { is: { other: true }, name: "keeper", tool: "weather" })).toBe("The keeper is using weather.");
     // Each stretch of an agent's thinking under its name, as the door fills the row: by its definition, a character by its name.
     expect(part.line("thinking", { is: { gm: true }, name: "gm" })).toBe("The GM thinks:");
     expect(part.line("thinking", { is: { character: true }, name: "Wren Hale" })).toBe("Wren Hale thinks:");

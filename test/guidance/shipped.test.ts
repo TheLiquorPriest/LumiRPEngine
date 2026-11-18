@@ -69,11 +69,11 @@ const EFFORTS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 /**
  * The header fields of a prompt part or a tool file that something reads besides a template of the file's
- * own: its description and format; a tool's `arguments`; a lines part's `lines` and `keys` (RPE's words for a state line); and the fields code reads
+ * own: its description and format; a tool's `arguments` and `doing` (what a person is told it is doing, in RPH's progress line); a lines part's `lines` and `keys` (RPE's words for a state line); and the fields code reads
  * of one part by name (RPH's judge reads `yes`, its briefing `record`, its prompt map `views`, its turn the
  * reply contract's `tags` and `intent_file`; RPE's briefing `on_stage_views`).
  */
-const READ_BY_CODE: Record<string, true> = { description: true, format: true, arguments: true, lines: true, keys: true, yes: true, record: true, views: true, tags: true, intent_file: true, on_stage_views: true };
+const READ_BY_CODE: Record<string, true> = { description: true, format: true, arguments: true, doing: true, lines: true, keys: true, yes: true, record: true, views: true, tags: true, intent_file: true, on_stage_views: true };
 
 /** The definitions' names, in the order E.4 lists them. */
 const AGENTS = ["author", "gm", "character", "narrator", "keeper", "historian", "indexer", "mapper", "assistant"];
