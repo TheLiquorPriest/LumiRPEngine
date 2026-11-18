@@ -58,6 +58,8 @@ export interface ApprovalsDeps {
   now: () => number;
   /** Told when a question is asked, answered or taken down, so a page that follows the turn reads its card again. */
   changed?: (chat: string, turn: string | null) => void;
+  /** Whether a call of `tool` would only answer that it does nothing (a web search where no provider is set): no question is put to him for it, and the tool says so itself. */
+  idle?: (scope: RunScope, tool: string) => Promise<boolean>;
 }
 
 /** What an answer to a question came to. */
@@ -87,6 +89,8 @@ export class Approvals implements ApprovalsPort {
   async ask(scope: RunScope, ask: ApprovalAsk, signal: AbortSignal): Promise<ApprovalAnswer> {
     if (signal.aborted) throw signal.reason;
     if (scope.chat === undefined) return { go: true };
+    // A call that would only answer that it does nothing here puts no question to him.
+    if (await this.deps.idle?.(scope, ask.tool)) return { go: true };
     const { chat } = scope;
     const turn = scope.turn ?? null;
     const id = `ap-${this.deps.now().toString(36)}-${(this.next++).toString(36)}`;

@@ -396,7 +396,9 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   const requests = new Requests(app.db, app.writes, (chat, waiting) => REQUESTS_KIND.publish(app.live, chat, { waiting }));
   const marks = new TurnMarks(app.db, app.writes);
   const since = new SinceKept(app.db);
-  const approvals = new Approvals({ db: app.db, writes: app.writes, files, log: app.log, now: () => clock.now() });
+  // `web_search` over the provider he sets on the Connections page; off until he sets one. Where none is set the tool only answers so, and nothing leaves the machine, so no question is put to him for it.
+  const web = webSearcher({ secrets: app.secrets, config: () => globalConfig(app.paths.files, app.log) });
+  const approvals = new Approvals({ db: app.db, writes: app.writes, files, log: app.log, now: () => clock.now(), idle: async (scope, tool) => tool === "web_search" && !(await web.enabled(scope)) });
   // Search by meaning (plan §9.4, §10.5): one vector per lore entry, chat message, state thing and story item in the index file, made on
   // his embedding connection through the model layer; with none set, nothing is embedded and every search is by words alone.
   const meaning = new MeaningIndex({ index: app.index, embed: (user, texts) => harness.models.embed(user, texts) });
@@ -594,7 +596,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
       read: async (scope, ref) => (await storesNow(scope)).read(scope, ref),
     },
     // `web_search` over the provider he sets on the Connections page; off until he sets one.
-    web: webSearcher({ secrets: app.secrets, config: () => globalConfig(app.paths.files, app.log) }),
+    web,
     // RPE's tools are a chat's: a job of no chat is given none of them.
     tools: { all: async (scope) => (scope.chat === undefined ? ((await options.jobTools?.(scope)) ?? []) : (await hostTools(joined(scope))).map((tool) => ({ ...tool, run: (args, ctx) => tool.run(args, { ...ctx, scope: joined(ctx.scope) }) }))) },
     // `gap_check`'s places beside the chat and the lore: the folded state and the story record, at the check's turn as it is joined.
