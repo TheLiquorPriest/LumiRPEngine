@@ -2118,12 +2118,8 @@ export interface OwnAnswer {
 /** One change to what a chat plays by on its own: a realism level for everyone, one band's cap for a part of life, what something you add that the world doesn't have becomes, or when checks roll and when a failed try may be tried again (each as far as it is given); or the claims or the check rules given back to what the chat's world says. */
 export type OwnAsk = { kind: "level"; domain: "money" | "gear" | "vehicles" | "castlife" | "relationships" | "space" | "calendar" | "weather" | "sheets"; to: number } | { kind: "cap"; band: "principal" | "supporting" | "background"; domain: "money" | "gear" | "vehicles" | "castlife" | "relationships" | "space" | "calendar" | "weather" | "sheets"; to: number } | { kind: "claims"; mode?: "real" | "ask" | "hold"; capped?: boolean } | { kind: "claims-world" } | { kind: "checks"; when?: "every" | "risky" | "marked" | "never"; riskyAt?: number; trivialAt?: number | null; impossibleAt?: number | null; retry?: "free" | "changed" | "once"; retryAfter?: number } | { kind: "checks-world" };
 
-/** What a chat plays by on its own now: its realism (the preset its levels match, each part of life's level, each band's cap, the floors the world's ruleset sets, and the world's tiers in each band), what something you add that the world doesn't have becomes (and whether the chat set it), and when checks roll and when a failed try may be tried again (and whether the chat set it). */
-export interface OwnValues {
-  realism: { preset: "story" | "grounded" | "simulation" | "custom"; levels: { [key: string]: number }; caps: { [key: string]: { [key: string]: number } }; floors: { [key: string]: number }; tiers: { [key: string]: string[] } };
-  claims: { mode: "real" | "ask" | "hold"; capped: boolean; own: boolean };
-  checks: { when: "every" | "risky" | "marked" | "never"; riskyAt: number; trivialAt: number | null; impossibleAt: number | null; retry: "free" | "changed" | "once"; retryAfter: number; own: boolean };
-}
+/** What a chat plays by on its own now: its realism (the preset its levels match, each part of life's level, each band's cap, the floors the world's ruleset sets, and the world's tiers in each band), what something you add that the world doesn't have becomes (and whether the chat set it), and when checks roll and when a failed try may be tried again (and whether the chat set it). A chat that plays no world answers `world: false` and nothing else: it has no values of its own and no world to follow. */
+export type OwnValues = { world: true; realism: { preset: "story" | "grounded" | "simulation" | "custom"; levels: { [key: string]: number }; caps: { [key: string]: { [key: string]: number } }; floors: { [key: string]: number }; tiers: { [key: string]: string[] } }; claims: { mode: "real" | "ask" | "hold"; capped: boolean; own: boolean }; checks: { when: "every" | "risky" | "marked" | "never"; riskyAt: number; trivialAt: number | null; impossibleAt: number | null; retry: "free" | "changed" | "once"; retryAfter: number; own: boolean } } | { world: false };
 
 /** The proof of a page's nonce, keyed by the hash of its page token. */
 export interface PageProof {
@@ -4874,7 +4870,7 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
-  /** What a chat plays by on its own now: how closely each part of life is worked out, what something you add that the world doesn't have becomes, and when checks roll. */
+  /** What a chat plays by on its own now: how closely each part of life is worked out, what something you add that the world doesn't have becomes, and when checks roll; a chat that plays no world answers that it has none. */
   "GET /api/v1/chats/:chat/own-values": {
     params: { chat: string };
     query: Record<string, never>;
@@ -4884,7 +4880,7 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
-  /** One change to what a chat plays by on its own, recorded at once as his own edit from now on, over nothing already recorded, and taken back by the Undo its answer names; a refusal is answered in words with nothing changed. */
+  /** One change to what a chat plays by on its own, recorded at once as his own edit from now on, over nothing already recorded, and taken back by the Undo its answer names; a change refused (a chat that plays no world, a level under its world's floor, one that cannot be read) is answered as not applied, in words, with nothing changed. */
   "POST /api/v1/chats/:chat/own-values": {
     params: { chat: string };
     query: Record<string, never>;

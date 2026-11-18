@@ -545,7 +545,7 @@ Keep in the world: the draft patch that copies the picked places, then things, i
 
 ### `GET /api/v1/chats/:chat/own-values`
 
-What a chat plays by on its own now: how closely each part of life is worked out, what something you add that the world doesn't have becomes, and when checks roll.
+What a chat plays by on its own now: how closely each part of life is worked out, what something you add that the world doesn't have becomes, and when checks roll; a chat that plays no world answers that it has none.
 
 | | |
 |---|---|
@@ -559,7 +559,7 @@ What a chat plays by on its own now: how closely each part of life is worked out
 
 ### `POST /api/v1/chats/:chat/own-values`
 
-One change to what a chat plays by on its own, recorded at once as his own edit from now on, over nothing already recorded, and taken back by the Undo its answer names; a refusal is answered in words with nothing changed.
+One change to what a chat plays by on its own, recorded at once as his own edit from now on, over nothing already recorded, and taken back by the Undo its answer names; a change refused (a chat that plays no world, a level under its world's floor, one that cannot be read) is answered as not applied, in words, with nothing changed.
 
 | | |
 |---|---|
@@ -7125,14 +7125,10 @@ export type OwnAsk = { kind: "level"; domain: "money" | "gear" | "vehicles" | "c
 
 ### `OwnValues`
 
-What a chat plays by on its own now: its realism (the preset its levels match, each part of life's level, each band's cap, the floors the world's ruleset sets, and the world's tiers in each band), what something you add that the world doesn't have becomes (and whether the chat set it), and when checks roll and when a failed try may be tried again (and whether the chat set it).
+What a chat plays by on its own now: its realism (the preset its levels match, each part of life's level, each band's cap, the floors the world's ruleset sets, and the world's tiers in each band), what something you add that the world doesn't have becomes (and whether the chat set it), and when checks roll and when a failed try may be tried again (and whether the chat set it). A chat that plays no world answers `world: false` and nothing else: it has no values of its own and no world to follow.
 
 ```ts
-export interface OwnValues {
-  realism: { preset: "story" | "grounded" | "simulation" | "custom"; levels: { [key: string]: number }; caps: { [key: string]: { [key: string]: number } }; floors: { [key: string]: number }; tiers: { [key: string]: string[] } };
-  claims: { mode: "real" | "ask" | "hold"; capped: boolean; own: boolean };
-  checks: { when: "every" | "risky" | "marked" | "never"; riskyAt: number; trivialAt: number | null; impossibleAt: number | null; retry: "free" | "changed" | "once"; retryAfter: number; own: boolean };
-}
+export type OwnValues = { world: true; realism: { preset: "story" | "grounded" | "simulation" | "custom"; levels: { [key: string]: number }; caps: { [key: string]: { [key: string]: number } }; floors: { [key: string]: number }; tiers: { [key: string]: string[] } }; claims: { mode: "real" | "ask" | "hold"; capped: boolean; own: boolean }; checks: { when: "every" | "risky" | "marked" | "never"; riskyAt: number; trivialAt: number | null; impossibleAt: number | null; retry: "free" | "changed" | "once"; retryAfter: number; own: boolean } } | { world: false };
 ```
 
 ### `PageProof`

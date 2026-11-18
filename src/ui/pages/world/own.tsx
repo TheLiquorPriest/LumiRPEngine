@@ -17,7 +17,10 @@ import { readOwn, sendOwn, sendUndo } from "./read";
 
 const LEVELS: readonly Level[] = [0, 1, 2, 3, 4];
 
-const PRESET_WORDS: Readonly<Record<OwnValues["realism"]["preset"], string>> = { story: "the Story preset", grounded: "the Grounded preset", simulation: "the Simulation preset", custom: "a mix of your own" };
+/** What a chat that plays a world reads as. */
+type Played = Extract<OwnValues, { world: true }>;
+
+const PRESET_WORDS: Readonly<Record<Played["realism"]["preset"], string>> = { story: "the Story preset", grounded: "the Grounded preset", simulation: "the Simulation preset", custom: "a mix of your own" };
 
 /** The ask a change of the check rules' controls comes to. */
 function checksAsk(patch: Partial<CheckRules>): OwnAsk {
@@ -32,7 +35,7 @@ function checksAsk(patch: Partial<CheckRules>): OwnAsk {
   };
 }
 
-function Levels(props: { values: OwnValues["realism"]; disabled: boolean; onAsk(ask: OwnAsk): void }) {
+function Levels(props: { values: Played["realism"]; disabled: boolean; onAsk(ask: OwnAsk): void }) {
   const { values } = props;
   return (
     <div class="lre-stack" data-own="levels">
@@ -102,7 +105,7 @@ function Levels(props: { values: OwnValues["realism"]; disabled: boolean; onAsk(
   );
 }
 
-function Claims(props: { values: OwnValues["claims"]; disabled: boolean; onAsk(ask: OwnAsk): void }) {
+function Claims(props: { values: Played["claims"]; disabled: boolean; onAsk(ask: OwnAsk): void }) {
   const { mode, capped, own } = props.values;
   return (
     <div class="lre-stack" data-own="claims">
@@ -121,7 +124,7 @@ function Claims(props: { values: OwnValues["claims"]; disabled: boolean; onAsk(a
   );
 }
 
-function Checks(props: { values: OwnValues["checks"]; disabled: boolean; onAsk(ask: OwnAsk): void }) {
+function Checks(props: { values: Played["checks"]; disabled: boolean; onAsk(ask: OwnAsk): void }) {
   const { own, ...rules } = props.values;
   return (
     <div class="lre-stack" data-own="checks">
@@ -175,7 +178,7 @@ export function OwnValuesSection(props: { chat: string }) {
         <h3 class="lre-section-title">For this chat</h3>
       </div>
       <div class="lre-section-body lre-stack">
-        <p class="rpe-meta">What this chat plays by from now on. Each change is your own edit, and Undo takes it back.</p>
+        {values !== null && !values.world ? null : <p class="rpe-meta">What this chat plays by from now on. Each change is your own edit, and Undo takes it back.</p>}
         {read.problem === null ? null : (
           <Banner tone="neg" icon="alert" title="This could not be read">
             <span>{read.problem}</span>
@@ -193,6 +196,8 @@ export function OwnValuesSection(props: { chat: string }) {
         )}
         {values === null ? (
           read.loading ? <p class="lre-muted rpe-line">Reading what this chat plays by…</p> : null
+        ) : !values.world ? (
+          <p class="rpe-meta" data-own="no-world">This chat plays no world, so there is nothing to set here.</p>
         ) : (
           <>
             <Levels values={values.realism} disabled={busy} onAsk={send} />

@@ -55,26 +55,30 @@ const ownAsk = shape.named(
 
 const ownValues = shape.named(
   "OwnValues",
-  "What a chat plays by on its own now: its realism (the preset its levels match, each part of life's level, each band's cap, the floors the world's ruleset sets, and the world's tiers in each band), what something you add that the world doesn't have becomes (and whether the chat set it), and when checks roll and when a failed try may be tried again (and whether the chat set it).",
-  shape.object({
-    realism: shape.object({
-      preset: shape.oneOf("story", "grounded", "simulation", "custom"),
-      levels: shape.record(level),
-      caps: shape.record(shape.record(level)),
-      floors: shape.record(level),
-      tiers: shape.record(shape.list(T)),
+  "What a chat plays by on its own now: its realism (the preset its levels match, each part of life's level, each band's cap, the floors the world's ruleset sets, and the world's tiers in each band), what something you add that the world doesn't have becomes (and whether the chat set it), and when checks roll and when a failed try may be tried again (and whether the chat set it). A chat that plays no world answers `world: false` and nothing else: it has no values of its own and no world to follow.",
+  shape.union(
+    shape.object({
+      world: shape.literal(true),
+      realism: shape.object({
+        preset: shape.oneOf("story", "grounded", "simulation", "custom"),
+        levels: shape.record(level),
+        caps: shape.record(shape.record(level)),
+        floors: shape.record(level),
+        tiers: shape.record(shape.list(T)),
+      }),
+      claims: shape.object({ mode: shape.oneOf(...CLAIM_MODES), capped: shape.yesNo(), own: shape.yesNo() }),
+      checks: shape.object({
+        when: shape.oneOf(...CHECK_TIMINGS),
+        riskyAt: share,
+        trivialAt: shape.nullable(share),
+        impossibleAt: shape.nullable(share),
+        retry: shape.oneOf(...RETRY_RULES),
+        retryAfter: minutes,
+        own: shape.yesNo(),
+      }),
     }),
-    claims: shape.object({ mode: shape.oneOf(...CLAIM_MODES), capped: shape.yesNo(), own: shape.yesNo() }),
-    checks: shape.object({
-      when: shape.oneOf(...CHECK_TIMINGS),
-      riskyAt: share,
-      trivialAt: shape.nullable(share),
-      impossibleAt: shape.nullable(share),
-      retry: shape.oneOf(...RETRY_RULES),
-      retryAfter: minutes,
-      own: shape.yesNo(),
-    }),
-  }),
+    shape.object({ world: shape.literal(false) }),
+  ),
 );
 
 const ownAnswer = shape.named(
@@ -106,6 +110,7 @@ function shown(world: WorldDoc, state: Readonly<WorldState>): OwnShown {
   const floors = levelFloors(world);
   const policy = policyOf(world, state);
   return {
+    world: true,
     realism: {
       preset: presetOf(state.realism),
       levels: { ...state.realism.levels },
@@ -147,13 +152,17 @@ function markerOf(ask: OwnChange, world: WorldDoc, state: Readonly<WorldState>):
 export class OwnService {
   constructor(private readonly deps: OwnDeps) {}
 
-  /** What the chat plays by now; a chat that plays no world is refused in its words. */
+  /**
+   * What the chat plays by now. A chat that plays no world reads as one with no values of its own and no world to follow (`world:
+   * false`), as an untouched chat reads; a chat whose world's revision is not held is refused in its words.
+   */
   async values(user: string, chat: string): Promise<OwnShown> {
     try {
       const head = headOf(this.deps.store, user, chat);
       return shown(head.world, head.state);
     } catch (error) {
       if (!(error instanceof Refused)) throw error;
+      if (error.code === "not_world_chat") return { world: false };
       throw new RouteError(STATUS[error.code], await this.words(error));
     }
   }
@@ -193,7 +202,7 @@ export function ownRoutes(own: OwnService) {
       path: OWN_PATH,
       access: "page",
       group: "state",
-      does: "What a chat plays by on its own now: how closely each part of life is worked out, what something you add that the world doesn't have becomes, and when checks roll.",
+      does: "What a chat plays by on its own now: how closely each part of life is worked out, what something you add that the world doesn't have becomes, and when checks roll; a chat that plays no world answers that it has none.",
       reply: ownValues,
       handle: ({ user, params }) => own.values(user, params.chat),
     }),
@@ -202,7 +211,7 @@ export function ownRoutes(own: OwnService) {
       path: OWN_PATH,
       access: "page",
       group: "state",
-      does: "One change to what a chat plays by on its own, recorded at once as his own edit from now on, over nothing already recorded, and taken back by the Undo its answer names; a refusal is answered in words with nothing changed.",
+      does: "One change to what a chat plays by on its own, recorded at once as his own edit from now on, over nothing already recorded, and taken back by the Undo its answer names; a change refused (a chat that plays no world, a level under its world's floor, one that cannot be read) is answered as not applied, in words, with nothing changed.",
       body: ownAsk,
       reply: ownAnswer,
       handle: ({ user, params, body }) => own.change(user, params.chat, body),
