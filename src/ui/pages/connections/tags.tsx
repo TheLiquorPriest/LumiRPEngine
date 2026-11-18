@@ -23,7 +23,7 @@ export const FORM_WORDS: Readonly<Record<ReplyForm, string>> = { tags: "tags", "
 
 /** The settings key that holds one connection's reply form. */
 export function formKey(connection: string): string {
-  return `reply.forms.${connection}`;
+  return `connections.${connection}.reply.form`;
 }
 
 /** What a check found, in a line; none was made when `check` is null. */

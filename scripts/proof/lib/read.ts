@@ -97,7 +97,7 @@ export class RpeReader {
     return this.get("/api/v1/connections") as Promise<ConnectionsShown>;
   }
 
-  /** The shipped level as RPE serves it to a chat, by path below the level; each layer of the user's own: their files the user can write; and each shipped file an `off:` list switches off, with the levels whose list does. */
+  /** The shipped level as RPE serves it to a chat, by path below the level; each layer of the user's own: their files the user can write; and each shipped file a `stack.off` list switches off, with the levels whose list does. */
   async trees(chat: string): Promise<{ shipped: TreeFile[]; layers: Layer[]; off: OffFile[] }> {
     const files = await this.view(chat);
     const shipped: TreeFile[] = [];

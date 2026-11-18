@@ -1,6 +1,6 @@
 // The Rules page's hooks (plan §5.4 "Hooks", §16, R-46): each hook of each level's hooks file, the moment it runs at, its command and timeout, whether RPH
-// runs it and why not (switched off in an `off:` list, replaced by a nearer file's hook of its name, waiting for the server's `rpe allow`), its file's text
-// edited and saved as his at a level, and the hook switched off and on in its `off:` list. Only the server's command line switches a command on; no page can.
+// runs it and why not (switched off in a `stack.off` list, replaced by a nearer file's hook of its name, waiting for the server's `rpe allow`), its file's text
+// edited and saved as his at a level, and the hook switched off and on in its `stack.off` list. Only the server's command line switches a command on; no page can.
 
 import { useState } from "preact/hooks";
 import type { HookEvent, LayerLevel, TreeFileRow, TreeHook } from "../../../shared/api";
@@ -224,7 +224,7 @@ export function HookOpen(props: { chat: string | null; row: HookRow; onChanged()
         <span class="rpe-caption">Its command</span>
         <Pre text={hook.runs} mono />
         <p class="rpe-meta" data-hook-timeout>
-          {timeout === null ? "No timeout of its own: the hooks.timeout setting's seconds hold." : `Stopped after ${timeout} seconds.`}
+          {timeout === null ? "No timeout of its own: the hooks.timeoutSeconds setting's seconds hold." : `Stopped after ${timeout} seconds.`}
         </p>
       </div>
       {hook.state === "waiting" || hook.state === "off" ? (

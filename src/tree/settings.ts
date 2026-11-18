@@ -1,7 +1,7 @@
 // The file tree's settings (plan §5.2, §5.5, Appendix D.1): each of its limits, and which files are in
 // force, as a config file writes them. The tree reads its limits at each use, through the one reader of
 // the config levels (`src/app/config-read.ts`), so a change holds from the next use on. The files'
-// keys (`off:`, `layered:`, `added:`, `instructions:`, `pins:`) are the files layer's: RPH reads them as
+// keys (`stack.off`, `stack.layered`, `stack.added`, `stack.instructions`, `stack.pins`) are the files layer's: RPH reads them as
 // it loads guidance for a turn, and they are declared here so the Settings page shows and writes them
 // at each level, in their own shapes.
 //

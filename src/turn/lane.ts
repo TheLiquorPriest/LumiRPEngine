@@ -20,6 +20,7 @@
 
 import { join } from "node:path";
 import { createHarness, type CreateHarnessOptions } from "rp-harness";
+import { SETTINGS as RPH_SETTINGS } from "rp-harness/helpers";
 import { type LinesPart, loadGuidance } from "../app/guidance";
 import type { AgentRef, AttachMoment, Clock, Environment, GapQuery, Harness, HostTool, JsonValue, RunScope, Scope, StoresPort, UserScope, UserSessionScope } from "rp-harness/contract";
 import type { ChatReads } from "../adapter/lumiverse/chat";
@@ -534,6 +535,9 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
       job: async (scope, job) => events.job?.(joined(scope), job),
     },
     clock,
+    // RPE's own setting keys, as its list declares them: they share sections with RPH's (`turn.*`, `limits.*`, `tools.*`), and RPH
+    // passes them over where it logs a key in its sections that none of its settings names.
+    settingKeys: app.settings.filter((s) => !RPH_SETTINGS.some((rph) => rph.key === s.key)).map((s) => s.key),
     log: app.log,
   };
   const harness = createHarness(env, { appName: "RPE", ...options.harness });

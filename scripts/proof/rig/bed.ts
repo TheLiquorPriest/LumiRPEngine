@@ -48,7 +48,7 @@ export interface RigBedOptions {
   ui: string;
   /** The user's own `RPE-global.yml`, over the shipped one (a play that lays user-layer guidance says so by it). */
   global?: string;
-  /** What the user switched off in their own `RPE-global.yml` (`off:`): nothing, unless a play names it. */
+  /** What the user switched off in their own `RPE-global.yml` (`stack.off`): nothing, unless a play names it. */
   off?: readonly string[];
   /** The starting chat's messages: the character's greeting when not given; null makes no chat. */
   messages?: ChatMessage[] | null;
@@ -105,7 +105,7 @@ export async function openRigBed(options: RigBedOptions): Promise<RigBed> {
     await prepareDataFolder(paths);
     const signIn = await new LumiverseSession({ base: server.base, fetch: server.fetch, signIn: null, save: async () => undefined, owner: () => RIG_USER, clock: REAL_CLOCK, log: () => undefined }).signIn("marlow", RIG_PASSWORD);
     await new SecretsFile(paths.secrets).write("lumiverse", { ...signIn });
-    await writeFile(paths.globalConfig, `off: [${(options.off ?? []).join(", ")}]\n${options.global ?? ""}`, "utf8");
+    await writeFile(paths.globalConfig, `stack: { off: [${(options.off ?? []).join(", ")}] }\n${options.global ?? ""}`, "utf8");
 
     const config = configOf({ port: 0, lumiverse: { url: server.base, user: RIG_USER, database: db.path, connection: RIG_RPE_CONNECTION } }, {}, "the rig's config");
     const limitMs = options.limitMs ?? (Number(process.env.RPE_TEST_LIMIT_MS) || 15_000);

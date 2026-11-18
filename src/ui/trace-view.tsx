@@ -258,7 +258,6 @@ function ToolView(props: { step: ToolStep; run: RunNode; now: number; depth: num
       <div class="rpe-step-head">
         <Icon name="wrench" size={16} />
         <span class="rpe-step-title">{step.started.tool}</span>
-        {step.started.closing ? <Badge>closing</Badge> : null}
         {step.started.via === undefined ? null : <Badge>through {step.started.via}</Badge>}
         {ended === null ? <Badge tone="accent">running</Badge> : result?.error === true ? <Badge tone="neg">failed</Badge> : ended.clean ? <Badge tone="pos">clean</Badge> : <Badge tone="warn">with reports</Badge>}
         {ended?.endedRun === true ? <Badge>ended the run</Badge> : null}
@@ -358,6 +357,8 @@ function NoteView(props: { step: NoteStep; notices: NoticeLines }) {
           {event.given.length === 0 ? null : <p class="rpe-meta">Given: {event.given.join(", ")}</p>}
         </div>
       );
+    case "effort_lowered":
+      return <NoteHead icon="alert" title={`The provider refused effort ${event.asked} on ${event.connection} · ${event.model}: sent ${event.sent}`} />;
     case "intent":
       return (
         <div class="lre-stack">

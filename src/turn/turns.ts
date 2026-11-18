@@ -659,7 +659,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       let request: TurnRequest;
       let ask: FolderAsk;
       try {
-        // Who leads is the config's line alone (`lead:`): where no level names one, no agent is chosen here, and the turn ends with the
+        // Who leads is the config's line alone (`turn.lead`): where no level names one, no agent is chosen here, and the turn ends with the
         // turn-errors line that says so.
         if (settings.lead === null) throw new Error(await turnErrorWords(this.#d.files, { user, chat }, "no_lead"));
         // The briefing's blocks, and what has happened since the last turn.

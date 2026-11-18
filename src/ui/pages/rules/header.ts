@@ -52,7 +52,7 @@ function scopeWords(value: string | undefined): string {
     .join(", ");
 }
 
-const MOMENT_WORDS: Readonly<Record<string, string>> = { "turn-start": "a turn's start", "run-end": "a run's end", "before-compaction": "before a compaction" };
+const MOMENT_WORDS: Readonly<Record<string, string>> = { "turn-start": "a turn's start", "after-message": "the end of each message that made a call", "run-end": "a run's end", "before-compaction": "before a compaction" };
 
 /** What triggers the rule, in a sentence or two, from its header. */
 export function triggerWords(fields: ReadonlyMap<string, string>): string {

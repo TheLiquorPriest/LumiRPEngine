@@ -65,15 +65,15 @@ function DiffShown(props: { diff: NonNullable<OpenFile["diff"]> }) {
   );
 }
 
-/** Whose `off:` list a level's is, as a sentence names it. */
+/** Whose `stack.off` list a level's is, as a sentence names it. */
 const OFF_LIST_WORDS: Readonly<Record<LayerLevel, string>> = { shipped: "the shipped config", global: "your own config", character: "this character's config", chat: "this chat's config" };
 
-/** The levels whose `off:` list this page writes: the user's own, and the chat's with one open. */
+/** The levels whose `stack.off` list this page writes: the user's own, and the chat's with one open. */
 export const switchLevels = (chat: string | null): ("global" | "chat")[] => (chat === null ? ["global"] : ["global", "chat"]);
 
 /**
- * Switching a name off, in the user's own config with no chat open and in theirs or the chat's with one; and on again where an
- * `off:` list names it, and only there: at a level whose list does not name it, the route writes nothing and the name stays off.
+ * Switching a name off, in the user's own config with no chat open and in theirs or the chat's with one; and on again where a
+ * `stack.off` list names it, and only there: at a level whose list does not name it, the route writes nothing and the name stays off.
  */
 function SwitchButtons(props: { entry: TreeFileRow; chat: string | null; busy: boolean; onSwitch(path: string, level: "global" | "chat", off: boolean): void }) {
   const { entry } = props;

@@ -5,8 +5,9 @@
 // else. A value a setting does not take is logged with its file and passed over, and the default
 // holds; it never stops a turn.
 //
-//   lead: null                   the agent definition that leads a turn; the shipped RPE-global.yml names it (author),
-//                                and nothing in code does: with no level naming one, no turn is played
+//   turn:
+//     lead: null                 the agent definition that leads a turn, RPH's setting; the shipped RPE-global.yml names it
+//                                (author), and nothing in code does: with no level naming one, no turn is played
 //   carry: continuing            what a session carries between turns: continuing, records or nothing
 //   limits:
 //     previousRun: ~             seconds a turn waits for the run of the turn before it, then stops it; none: until it ends
@@ -52,11 +53,18 @@ import { WINDOW_DEFAULTS, type WindowSettings } from "../story/window";
 import { sharedLevels } from "../tree";
 import { SETTINGS as RPH_SETTINGS } from "rp-harness/helpers";
 
-/** RPH's room kept for the answer (`compaction.reserve`), declared by RPH alone: the room the door's trim leaves a reply whose request names none. */
+/** RPH's room kept for the answer (`compaction.reserveTokens`), declared by RPH alone: the room the door's trim leaves a reply whose request names none. */
 const RESERVE =
-  RPH_SETTINGS.find((s) => s.key === "compaction.reserve") ??
+  RPH_SETTINGS.find((s) => s.key === "compaction.reserveTokens") ??
   (() => {
-    throw new Error("rp-harness declares no compaction.reserve setting.");
+    throw new Error("rp-harness declares no compaction.reserveTokens setting.");
+  })();
+
+/** The agent definition that leads a turn (`turn.lead`), declared by RPH alone (its jobs read it too): RPE reads it for each turn. */
+const LEAD =
+  RPH_SETTINGS.find((s) => s.key === "turn.lead") ??
+  (() => {
+    throw new Error("rp-harness declares no turn.lead setting.");
   })();
 
 /** RPH's ratio of characters to a token (`tokens.charsPerToken`), at which its model layer counts a prompt (`ModelsApi.count`): every budget a turn fills is counted at it. */
@@ -103,7 +111,7 @@ export interface TurnSettings {
   engine: IfaceSettings;
   /** The map's settings, for the chat. */
   map: MapConfig;
-  /** RPH's room kept for the answer, in tokens (`compaction.reserve`). */
+  /** RPH's room kept for the answer, in tokens (`compaction.reserveTokens`). */
   reserve: number;
   /** RPH's characters to a token for the chat (`tokens.charsPerToken`), the model layer's count: every budget the turn fills is counted at it. */
   charsPerToken: number;
@@ -133,7 +141,7 @@ export const LANE_PERMISSIONS: readonly LanePermission[] = ["auto", "confirm", "
 
 /** The defaults, where no level sets a value. */
 export const TURN_DEFAULTS: Readonly<TurnSettings> = Object.freeze({
-  // Plan §13.1, §17.2: who leads is the shipped config's line (`RPE-global.yml` `lead: author`), never code's choice.
+  // Plan §13.1, §17.2: who leads is the shipped config's line (`RPE-global.yml` `turn.lead: author`), never code's choice.
   lead: null,
   // Appendix D.1: continuing, until the session measurement says otherwise.
   carry: "continuing",
@@ -182,17 +190,6 @@ const CARRIES: readonly Carry[] = ["continuing", "records", "nothing"];
 
 /** Each setting as the files write it, by the name this file reads it under. Each is in force from the next turn, but the connection for requests with no tag, read at each. */
 const DEFS = {
-  lead: {
-    key: "lead",
-    default: TURN_DEFAULTS.lead,
-    takes: { type: "text" },
-    orNone: true,
-    none: "no lead: no turn is played",
-    perConnection: false,
-    name: "Lead agent",
-    about: "The agent definition that leads a turn; the shipped config names the Author.",
-    effect: "turn",
-  },
   carry: {
     key: "carry",
     default: TURN_DEFAULTS.carry,
@@ -426,19 +423,16 @@ const DEFS = {
   },
 } as const satisfies Record<string, Setting>;
 
-/**
- * Every setting the turn lane lists, as a config file writes it: its own, the map's and the taps'. `lead` is RPH's (its jobs list it,
- * which `harnessSettings` carries), so it is read here and listed once, by RPH.
- */
-export const TURN_SETTINGS: readonly Setting[] = [...Object.values(DEFS).filter((def) => def !== DEFS.lead), ...MAP_SETTINGS, ...TAP_SETTINGS];
+/** Every setting the turn lane lists, as a config file writes it: its own, the map's and the taps'. `turn.lead` is RPH's, read here and listed once, by RPH. */
+export const TURN_SETTINGS: readonly Setting[] = [...Object.values(DEFS), ...MAP_SETTINGS, ...TAP_SETTINGS];
 
 /** The turn's settings for a scope, as its levels' config files set them over the defaults. */
 export async function turnSettings(files: FilesPort, scope: Scope, log: Log): Promise<TurnSettings> {
-  const read = readConfig(await portTexts(files, scope), log, [...TURN_SETTINGS, DEFS.lead]);
+  const read = readConfig(await portTexts(files, scope), log, [...TURN_SETTINGS, LEAD]);
   const previousRun = read.value(DEFS.previousRun) as number | null;
   // Each value is one its setting takes, so it is of the type the setting's `takes` says.
   return {
-    lead: read.value(DEFS.lead) as string | null,
+    lead: read.value(LEAD) as string | null,
     carry: read.value(DEFS.carry) as Carry,
     previousRunMs: previousRun === null ? null : previousRun * 1000,
     hiddenReadable: read.value(DEFS.hiddenReadable) as boolean,

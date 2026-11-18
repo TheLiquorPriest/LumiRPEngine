@@ -111,7 +111,7 @@ export function useSettings(chat: string | null, written: () => void = () => und
 // ---------------------------------------------------------------- the view
 
 /** The settings that name a connection or a definition, by key: each is chosen among them rather than typed. */
-const NAMES: Readonly<Record<string, "connections" | "definitions">> = { passConnection: "connections", "embedding.connection": "connections", "rules.judge": "connections", lead: "definitions" };
+const NAMES: Readonly<Record<string, "connections" | "definitions">> = { passConnection: "connections", "embedding.connection": "connections", "rules.judge": "connections", "turn.lead": "definitions" };
 
 /** The section the facts of the install and what waits for the server are shown under. */
 const SERVER_SECTION = "Server and service";

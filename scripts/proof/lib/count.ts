@@ -21,7 +21,7 @@ import type { CountedForm, FormKept } from "../g0/forms";
 /** What a count plays: the form, the value its connection is set to, and the gate's parts it judges each turn on. */
 export interface CountSpec {
   form: CountedForm;
-  /** The value of `reply.forms.<connection>` for the run. */
+  /** The value of `connections.<connection>.reply.form` for the run. */
   setting: "tags" | "two-step";
   /** The part each turn is judged on as kept or not. */
   part: string;
@@ -58,7 +58,7 @@ export async function playCount(play: Play, acts: FloorActs, reader: LoopReader,
     return { kept: null, trials: opened.trials, stopped: null, unplayed: why };
   };
   if (connection === null) return unplayed("run.json names no Author among its agents, so the connection whose form is counted is not known");
-  const held = await setSetting(reader, opened.chat, `reply.forms.${connection}`, spec.setting);
+  const held = await setSetting(reader, opened.chat, `connections.${connection}.reply.form`, spec.setting);
   if (held !== null) return unplayed(`the connection was not set to the ${spec.form} form for the run: ${held}`);
   let tags: ReplyTags | { none: string };
   try {

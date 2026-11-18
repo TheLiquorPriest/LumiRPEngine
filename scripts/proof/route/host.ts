@@ -142,18 +142,18 @@ export interface RunFacts {
 }
 
 /**
- * What the levels' config files say of the names in force (RPH's `off:`, `layered:` and `added:`,
+ * What the levels' config files say of the names in force (RPH's `stack.off`, `stack.layered` and `stack.added`,
  * RPE's `namesInForce` and the files route's `off` and `offIn`): a file's name appears here whatever
  * the file holds, and a config is a setting, never guidance, so the tree's hashes cannot show these.
  * Any name in any list means the agents did not run under the shipped guidance as shipped: the run
  * is a trial, with that as its why.
  */
 export interface NamesFacts {
-  /** Each name a level's `off:` switches off, with the levels whose list names it. */
+  /** Each name a level's `stack.off` switches off, with the levels whose list names it. */
   off: { name: string; levels: string[] }[];
-  /** The instruction files read at every level that has one, named by a level's `layered:`. */
+  /** The instruction files read at every level that has one, named by a level's `stack.layered`. */
   layered: string[];
-  /** The files a level's `added:` adds to stacks. */
+  /** The files a level's `stack.added` adds to stacks. */
   added: string[];
 }
 

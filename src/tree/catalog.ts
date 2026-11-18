@@ -1,6 +1,6 @@
 // What the Files page shows of the tree (plan §5.2, §5.4, §14): every file at every level of a chat's
 // view, with the name RPH loads it by, whether it is the one taken, the nearer file taken in its place,
-// and whether a config's `off:` list switches its name off. The names follow RPH's own (`itemKey` and
+// and whether a config's `stack.off` list switches its name off. The names follow RPH's own (`itemKey` and
 // `writtenKey` in RPH's `files/tree.ts`, which its package does not export): an instruction file by its
 // own name, anything else by its kind and name. RPH stays the one that loads guidance; this shows the
 // files as it will find them.
@@ -24,15 +24,15 @@ export interface TreeFileEntry {
   level: LayerLevel;
   kind: FileKind;
   bytes: number;
-  /** The name RPH loads it by, and an `off:` list names it by (`WORLD`, `rules/consent`); null for a file RPH does not load by its name. */
+  /** The name RPH loads it by, and a `stack.off` list names it by (`WORLD`, `rules/consent`); null for a file RPH does not load by its name. */
   item: string | null;
-  /** Whether RPH takes it: a named file when it is the nearest of its name (each level's, for a name in a `layered:` list), not switched off and not an example; any other file as it is. */
+  /** Whether RPH takes it: a named file when it is the nearest of its name (each level's, for a name in a `stack.layered` list), not switched off and not an example; any other file as it is. */
   applies: boolean;
   /** The nearer file of the same name taken in its place; null when none is. */
   replacedBy: string | null;
-  /** Its name is in a config's `off:` list, which switches it off at every level. */
+  /** Its name is in a config's `stack.off` list, which switches it off at every level. */
   off: boolean;
-  /** The levels whose config's `off:` list names it, farthest first: switching it on at one of these takes the name out there; at any other level it changes nothing. Empty when it is not off. */
+  /** The levels whose config's `stack.off` list names it, farthest first: switching it on at one of these takes the name out there; at any other level it changes nothing. Empty when it is not off. */
   offIn: LayerLevel[];
   /** Whether the user may write it where it is: never a shipped file or a generated one. */
   editable: boolean;
@@ -54,14 +54,14 @@ export interface TreeFileEntry {
   held?: "needs" | "broken" | null;
   /** What RPH found wrong with it, in its own words, line by line. Absent where RPH was not asked. */
   problems?: string[];
-  /** The agents whose stacks it joins (a file `instructions:` names, or one they read), by definition name. Absent where RPH was not asked. */
+  /** The agents whose stacks it joins (a file `stack.instructions` names, or one they read), by definition name. Absent where RPH was not asked. */
   joins?: string[];
   /** For a level's hooks file (`hooks.yml` in its hooks folder): each hook it names, as RPH's hook reader takes it. Absent for any other file. */
   hooks?: TreeHook[];
 }
 
 /**
- * A hook as a hooks file names it (plan §5.4 "Hooks"): its name, which an `off:` list names as `hooks/<name>`; the moment it runs at and
+ * A hook as a hooks file names it (plan §5.4 "Hooks"): its name, which a `stack.off` list names as `hooks/<name>`; the moment it runs at and
  * the command line, as written; switched off, and by which levels; the nearer level's hooks file that names it in its place; whether RPH
  * runs it; and, where RPH lists it, whether its command is switched on.
  */
@@ -97,11 +97,11 @@ export function hooksNamed(text: string): { name: string; on: HookEvent; runs: s
   });
 }
 
-/** What the levels' config files say of the names in force (RPH's `off:` and `layered:`, `CONFIG_KEYS`): each name switched off, with the levels whose list names it. */
+/** What the levels' config files say of the names in force (RPH's `stack.off` and `stack.layered`, `CONFIG_KEYS`): each name switched off, with the levels whose list names it. */
 export interface NamesInForce {
   off: Map<string, LayerLevel[]>;
   layered: Set<string>;
-  /** The files pinned for agents (RPH's `pins:`), each at the level whose config says so; every level's list applies. */
+  /** The files pinned for agents (RPH's `stack.pins`), each at the level whose config says so; every level's list applies. */
   pins: PinOf[];
 }
 
@@ -120,10 +120,20 @@ export interface PinnedFor {
   level: LayerLevel;
 }
 
-/** The config keys read here, as RPH reads them. */
+/** The config keys read here, as RPH reads them, dotted as a config writes them. */
 export const OFF_KEY = FILE_KEYS.off;
 const LAYERED_KEY = FILE_KEYS.layered;
 export const PINS_KEY = FILE_KEYS.pins;
+
+/** What a config holds at a dotted key (`stack.off`); undefined where it holds nothing there, or a part on the way is no mapping. */
+export function atKey(doc: Record<string, unknown>, key: string): unknown {
+  let at: unknown = doc;
+  for (const part of key.split(".")) {
+    if (!isRecord(at)) return undefined;
+    at = at[part];
+  }
+  return at;
+}
 
 const KINDS: readonly GuidanceKind[] = ["agents", "skills", "rules", "hooks", "prompts", "tools"];
 
@@ -138,7 +148,7 @@ export function nameList(value: unknown): string[] | undefined {
   return undefined;
 }
 
-/** The records of a `pins:` list, each with a file and an agent; nothing for none; undefined for anything else. */
+/** The records of a `stack.pins` list, each with a file and an agent; nothing for none; undefined for anything else. */
 export function pinRecords(value: unknown): Pin[] | undefined {
   if (value === undefined || value === null) return [];
   if (!Array.isArray(value)) return undefined;
@@ -163,7 +173,7 @@ function kindOfFolder(name: string, layers: readonly Layer[]): GuidanceKind | un
   return undefined;
 }
 
-/** A name as RPH reads it from an `off:` entry, however it is written: with a mount, a level's own folder name, `.md` or `/SKILL.md`. */
+/** A name as RPH reads it from a `stack.off` entry, however it is written: with a mount, a level's own folder name, `.md` or `/SKILL.md`. */
 export function writtenItem(entry: string, layers: readonly Layer[]): string {
   let s = entry.trim().replace(/^(?:\.\/|\/)+/, "");
   const mounted = layers.find((l) => l.mount !== "" && s.startsWith(l.mount));
@@ -229,13 +239,13 @@ export async function namesInForce(loc: ChatLocation, layers: readonly Layer[] =
     } catch {
       continue;
     }
-    for (const name of nameList(doc[OFF_KEY]) ?? []) {
+    for (const name of nameList(atKey(doc, OFF_KEY)) ?? []) {
       const item = writtenItem(name, layers);
       const levels = names.off.get(item) ?? [];
       if (!levels.includes(layer.level)) names.off.set(item, [...levels, layer.level]);
     }
-    for (const name of nameList(doc[LAYERED_KEY]) ?? []) names.layered.add(writtenItem(name, layers));
-    for (const pin of pinRecords(doc[PINS_KEY]) ?? []) names.pins.push({ file: pinPath(pin.file), agent: pin.agent.trim(), level: layer.level });
+    for (const name of nameList(atKey(doc, LAYERED_KEY)) ?? []) names.layered.add(writtenItem(name, layers));
+    for (const pin of pinRecords(atKey(doc, PINS_KEY)) ?? []) names.pins.push({ file: pinPath(pin.file), agent: pin.agent.trim(), level: layer.level });
   }
   return names;
 }
@@ -364,7 +374,7 @@ async function filesOfName(ctx: ListingContext, level: LayerLevel, rest: readonl
 
 /**
  * The file a chat's agents are given by the name of the file at `level` and `rest`, whether or not that file is there: the nearest
- * level's file of that name (of a name in a `layered:` list, whose every level's is given, the nearest too). Null where the path is
+ * level's file of that name (of a name in a `stack.layered` list, whose every level's is given, the nearest too). Null where the path is
  * no place of a file RPH loads by its name, the name is switched off or an example's, or no level has a file of it.
  */
 export async function inForceOf(ctx: ListingContext, level: LayerLevel, rest: readonly string[]): Promise<string | null> {
@@ -376,7 +386,7 @@ export async function inForceOf(ctx: ListingContext, level: LayerLevel, rest: re
   return taken === undefined ? null : (same.get(taken) ?? null);
 }
 
-/** The hooks a level's hooks file names, each as RPH takes it: off where a config's `off:` list names `hooks/<name>`, replaced where a nearer level's hooks file names it too. */
+/** The hooks a level's hooks file names, each as RPH takes it: off where a config's `stack.off` list names `hooks/<name>`, replaced where a nearer level's hooks file names it too. */
 async function hooksAt(ctx: ListingContext, level: LayerLevel, disk: string, place: (to: LayerLevel) => string[] | null): Promise<TreeHook[]> {
   const nearer: { path: string; names: Set<string> }[] = [];
   for (const other of FARTHEST_FIRST.slice(FARTHEST_FIRST.indexOf(level) + 1)) {

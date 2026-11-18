@@ -30,8 +30,8 @@ export const CHATS_FOLDER = "chats";
 export const GLOBAL_CONFIG = GLOBAL_CONFIG_FILE;
 /** A chat's config file. */
 export const CHAT_CONFIG = "RPE.yml";
-/** The keys of a level's config file the files layer reads (RPH's `CONFIG_KEYS`): the files switched off, read at every level, added for a kind of turn, added to stacks, and pinned. */
-export const FILE_KEYS = { off: "off", layered: "layered", added: "added", instructions: "instructions", pins: "pins" } as const;
+/** The keys of a level's config file the files layer reads, as a config writes them (RPH's `CONFIG_KEYS`, under `stack`): the files switched off, read at every level, added for a kind of turn, added to stacks, and pinned. */
+export const FILE_KEYS = { off: "stack.off", layered: "stack.layered", added: "stack.added", instructions: "stack.instructions", pins: "stack.pins" } as const;
 /** The name a scope gives for "no chat" where the harness asks for a chat's stack but a page names none: no chat has an id that begins with `~`, so it is never placed, and its view is the shipped and global levels alone. */
 export const NO_CHAT = "~no-chat";
 /** The chat's notes (plan §5 `persistent-workspace/`): agents read and write them. */

@@ -1,8 +1,8 @@
 // Connections (plan §14): the models RPE's agents call, as RPH's model layer keeps them: the list, which
 // one is the default, adding one, changing one, removing one, and testing one. A key is typed once and
 // sent to RPE; RPE never sends one back, and this page shows only whether one is set. Each connection's
-// model shows its limits as RPH uses them and where each comes from, and the form sets the user's own in
-// their place. What the layer or the provider refuses is shown in its own words.
+// model shows its limits as RPH uses them and where each comes from, and whether it takes audio and video;
+// the form sets the user's own in their place. What the layer or the provider refuses is shown in its own words.
 
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
@@ -18,11 +18,19 @@ import { WebSearchSection } from "./web";
 
 const FROM_WORDS: Readonly<Record<ModelLimit["from"], string>> = { user: "yours", pi: "as pi lists it", connection: "as its server reported" };
 
-/** A model's limits as RPH uses them, and where each comes from; or, where they could not be read, why, apart from a limit nobody knows. */
+/** What a model takes of a part a request may carry: audio, or video. */
+const MEDIA = ["audio", "video"] as const;
+const MEDIA_WORDS: Readonly<Record<(typeof MEDIA)[number], string>> = { audio: "Audio", video: "Video" };
+
+/** A model's limits as RPH uses them, and where each comes from, and whether it takes audio and video; or, where they could not be read, why, apart from a limit nobody knows. */
 export function limitsWords(limits: ModelLimits | null, problem: string | null = null): string {
   if (problem !== null) return `Its limits could not be read: ${problem.replace(/\.$/, "")}`;
   const one = (label: string, limit: ModelLimit | null | undefined): string => (limit === null || limit === undefined ? `${label}: not known` : `${label}: ${num(limit.tokens)} tokens, ${FROM_WORDS[limit.from]}`);
-  return `${one("Context window", limits?.contextWindow)} · ${one("Longest reply", limits?.maxTokens)}`;
+  const media = MEDIA.map((part) => {
+    const said = limits?.[part];
+    return said === null || said === undefined ? `${MEDIA_WORDS[part]}: not said, so it is sent` : `${MEDIA_WORDS[part]}: ${said.takes ? "taken" : "not taken"}, ${FROM_WORDS[said.from]}`;
+  });
+  return [one("Context window", limits?.contextWindow), one("Longest reply", limits?.maxTokens), ...media].join(" · ");
 }
 
 /** Every effort a connection may think at, as RPH's contract names them. */
@@ -84,17 +92,24 @@ function limitsOf(field: ReadonlyMap<string, string>, model: string | null, was:
     };
     const contextWindow = typed("contextWindow");
     const maxTokens = typed("maxTokens");
-    const entry: ModelLimitsEntry = { ...(contextWindow === undefined ? {} : { contextWindow }), ...(maxTokens === undefined ? {} : { maxTokens }) };
-    if (entry.contextWindow === undefined && entry.maxTokens === undefined) delete own[model];
+    // Whether it takes pictures is no field of the form: an entry's own stays as it was.
+    const pictures = own[model]?.pictures;
+    const entry: ModelLimitsEntry = { ...(pictures === undefined ? {} : { pictures }), ...(contextWindow === undefined ? {} : { contextWindow }), ...(maxTokens === undefined ? {} : { maxTokens }) };
+    for (const part of MEDIA) {
+      const said = field.get(part);
+      if (said === "yes" || said === "no") entry[part] = said === "yes";
+    }
+    if (Object.keys(entry).length === 0) delete own[model];
     else own[model] = entry;
   }
   return Object.keys(own).length === 0 ? null : own;
 }
 
-/** The limit fields' text for `model`: the user's own entry for it on the connection, else empty. */
-export function limitFieldsFor(was: ConnectionShown | null, model: string): { contextWindow: string; maxTokens: string } {
+/** The model fields' values for `model`: the user's own entry for it on the connection, else empty (for audio and video, not said). */
+export function limitFieldsFor(was: ConnectionShown | null, model: string): { contextWindow: string; maxTokens: string; audio: string; video: string } {
   const entry = model === "" ? undefined : was?.limits?.[model];
-  return { contextWindow: String(entry?.contextWindow ?? ""), maxTokens: String(entry?.maxTokens ?? "") };
+  const said = (takes: boolean | undefined): string => (takes === undefined ? "" : takes ? "yes" : "no");
+  return { contextWindow: String(entry?.contextWindow ?? ""), maxTokens: String(entry?.maxTokens ?? ""), audio: said(entry?.audio), video: said(entry?.video) };
 }
 
 /** The form that adds a connection (`was` null) or changes one. Its key field starts empty: RPE never sends a key back. `fill` starts the limit fields with figures a test found, for the player to save or not. */
@@ -155,8 +170,8 @@ function ConnectionForm(props: { was: ConnectionShown | null; fill?: ModelLimits
               // The limit fields are for the model named here: another model's figures are not carried over to it.
               const input = event.currentTarget;
               const fields = limitFieldsFor(was, input.value.trim());
-              for (const name of ["contextWindow", "maxTokens"] as const) {
-                const field = input.form?.elements.namedItem(name) as HTMLInputElement | null | undefined;
+              for (const name of ["contextWindow", "maxTokens", ...MEDIA] as const) {
+                const field = input.form?.elements.namedItem(name) as HTMLInputElement | HTMLSelectElement | null | undefined;
                 if (field != null) field.value = fields[name];
               }
             }}
@@ -211,6 +226,23 @@ function ConnectionForm(props: { was: ConnectionShown | null; fill?: ModelLimits
           <input name="maxTokens" class="lre-input" type="number" inputMode="numeric" defaultValue={fill?.maxTokens === undefined ? start.maxTokens : String(fill.maxTokens)} autoComplete="off" />
           <span class="lre-field-help">In tokens, for its model, in place of the figure RPH would use. Leave it empty to use that figure.</span>
         </label>
+        {MEDIA.map((part) => (
+          <label key={part} class="lre-field">
+            <span class="label">{`Takes ${part}`}</span>
+            <select name={part} class="lre-input">
+              <option value="" selected={start[part] === ""}>
+                As its server reports
+              </option>
+              <option value="yes" selected={start[part] === "yes"}>
+                Yes
+              </option>
+              <option value="no" selected={start[part] === "no"}>
+                No
+              </option>
+            </select>
+            <span class="lre-field-help">{`Whether its model takes ${part} in a request passed through to it: one that carries ${part === "audio" ? "audio" : "a video"} it takes none of is refused before anything is sent. Not said by you or its server, it is sent.`}</span>
+          </label>
+        ))}
         {fill === undefined ? null : <p class="rpe-meta" data-filled="true">The two limits are filled in from the test. Save to take them as this connection's own; nothing is written until you do.</p>}
         <label class="lre-field">
           <span class="label">Key</span>

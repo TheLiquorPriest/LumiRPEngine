@@ -1,7 +1,7 @@
 // The guidance files RPE lays its own texts out by (plan §5.4, §14): a prompt part (`.prompts/`), a tool's description (`.tools/`) or
 // a skill, in force for a scope. RPH's reader of the levels is its own and not a host's to import (`rp-harness/helpers`), so this one
 // reads them as RPH does, through the file port: the nearest level that holds a file of the name, passing over one its levels' config
-// switches off (`off:`). A part's header and body are laid out by RPH's one template renderer (`renderTemplate`, R-44), the header's
+// switches off (`stack.off`). A part's header and body are laid out by RPH's one template renderer (`renderTemplate`, R-44), the header's
 // fields the outermost, as every shipped part is; a part whose header says `format: lines` holds one `name: text` template per line.
 // A file that cannot be read whole is no part, as RPH reads it: what it holds is not used. It is the application's, so every area
 // that lays out its texts by the chat's guidance (the turn, the lore, the cast, the story, the operations, the tree) reads through it.
@@ -123,7 +123,7 @@ function partOf(text: string, name: string, kind: "prompts" | "tools", source: P
   return { ...base, format: "template", render: (fields) => filled(split.body, header, fields, source.path) ?? { text: "", missing: [] } };
 }
 
-/** An `off:` entry as RPH keys it (`prompts/notices`), however it was written: with a mount, a level's own folder name, `.md` or `/SKILL.md`. */
+/** A `stack.off` entry as RPH keys it (`prompts/notices`), however it was written: with a mount, a level's own folder name, `.md` or `/SKILL.md`. */
 function offKey(entry: string, layers: readonly Layer[]): string {
   let s = entry.trim().replace(/^(?:\.\/|\/)+/, "");
   const mounted = layers.find((l) => l.mount !== "" && s.startsWith(l.mount));
@@ -164,7 +164,8 @@ export function loadGuidance(files: Pick<FilesPort, "layers" | "read">, scope: S
         } catch {
           continue;
         }
-        const listed = typeof config === "object" && config !== null && !Array.isArray(config) ? (config as Record<string, unknown>).off : undefined;
+        const stack = typeof config === "object" && config !== null && !Array.isArray(config) ? (config as Record<string, unknown>).stack : undefined;
+        const listed = typeof stack === "object" && stack !== null && !Array.isArray(stack) ? (stack as Record<string, unknown>).off : undefined;
         if (Array.isArray(listed)) for (const name of listed) if (typeof name === "string") names.add(offKey(name, all));
       }
       return names;

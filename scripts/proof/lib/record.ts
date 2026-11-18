@@ -192,7 +192,7 @@ function customBodyOf(body: unknown, from: "reasoning" | "preset"): PlainReasoni
   return { from, reasoningKeys: Object.keys(parsed).filter((k) => REASONING_KEYS.includes(k)) };
 }
 
-/** A shipped file switched off by an `off:` list, and the levels whose list switches it off (RPE's files route: `TreeFileEntry.off`, `offIn`). */
+/** A shipped file switched off by a `stack.off` list, and the levels whose list switches it off (RPE's files route: `TreeFileEntry.off`, `offIn`). */
 export interface OffFile {
   path: string;
   offIn: string[];
@@ -200,9 +200,9 @@ export interface OffFile {
 
 /**
  * Who leads the floor's turns, as RPE's own settings say (PlanGates-4-fix2 item 2): `expected` is the
- * shipped default of the `lead` setting as RPE serves it, written nowhere in the script; `inForce` is
+ * shipped default of the `turn.lead` setting as RPE serves it, written nowhere in the script; `inForce` is
  * the value RPE holds for the floor's chat and `from` the level whose file decides it (null: the
- * default holds); `levels` is what each level's own settings file sets `lead` to, read from the file.
+ * default holds); `levels` is what each level's own settings file sets `turn.lead` to, read from the file.
  */
 export interface Leads {
   expected: string | null;
@@ -211,7 +211,7 @@ export interface Leads {
   levels: { level: string; file: string; lead: string | null; problem: string | null }[];
 }
 
-/** What a settings file's text sets `lead` to: the name, null where it sets none, and why a file that does not parse is passed over. */
+/** What a settings file's text sets `turn.lead` to: the name, null where it sets none, and why a file that does not parse is passed over. */
 export function leadInFile(text: string): { lead: string | null; problem: string | null } {
   let parsed: unknown;
   try {
@@ -219,13 +219,13 @@ export function leadInFile(text: string): { lead: string | null; problem: string
   } catch (error) {
     return { lead: null, problem: `its text does not parse: ${error instanceof Error ? error.message : String(error)}` };
   }
-  const lead = isRecord(parsed) ? parsed.lead : undefined;
+  const lead = isRecord(parsed) && isRecord(parsed.turn) ? parsed.turn.lead : undefined;
   return { lead: typeof lead === "string" && lead.trim() !== "" ? lead.trim() : null, problem: null };
 }
 
 /** The leads from RPE's settings reply and each level's own settings file as read (`text` null where it was not). */
 export function leadsOf(settings: Pick<SettingsReply, "settings">, read: readonly { level: string; file: string; text: string | null; problem: string | null }[]): Leads {
-  const view = settings.settings.find((s) => s.key === "lead");
+  const view = settings.settings.find((s) => s.key === "turn.lead");
   const name = (value: unknown): string | null => (typeof value === "string" && value.trim() !== "" ? value.trim() : null);
   return {
     expected: name(view?.default),
@@ -238,12 +238,12 @@ export function leadsOf(settings: Pick<SettingsReply, "settings">, read: readonl
   };
 }
 
-/** The floor's own trial where the turn's lead is not the Author: the lead RPE holds for the chat is not the shipped default of its `lead` setting, or either is not known. */
+/** The floor's own trial where the turn's lead is not the Author: the lead RPE holds for the chat is not the shipped default of its `turn.lead` setting, or either is not known. */
 export function leadTrials(leads: Leads): string[] {
-  if (leads.expected === null) return ["RPE's settings give no `lead` setting with a default, so who leads the turn is not known"];
-  if (leads.inForce === null) return ["RPE's settings give no value in force for `lead`, so who leads the turn is not known"];
+  if (leads.expected === null) return ["RPE's settings give no `turn.lead` setting with a default, so who leads the turn is not known"];
+  if (leads.inForce === null) return ["RPE's settings give no value in force for `turn.lead`, so who leads the turn is not known"];
   if (leads.inForce === leads.expected) return [];
-  return [`the turn's lead is ${leads.inForce}, not the Author (the shipped default of the lead setting is ${leads.expected}; ${leads.from === null ? "no file sets it" : `the ${leads.from} level's file sets it`})`];
+  return [`the turn's lead is ${leads.inForce}, not the Author (the shipped default of the turn.lead setting is ${leads.expected}; ${leads.from === null ? "no file sets it" : `the ${leads.from} level's file sets it`})`];
 }
 
 /**
@@ -294,7 +294,7 @@ export function additionOf(gate: string, run: RunRecord, observed: Observed, bui
 
 /**
  * The floor's own reasons for a trial, found before its first pair (PlanGates-4-fix1 item 4): guidance
- * in a layer of the user's own; a shipped file switched off at any level by an `off:` list; a lead that
+ * in a layer of the user's own; a shipped file switched off at any level by a `stack.off` list; a lead that
  * is not the Author (PlanGates-4-fix2 item 2); a shipped tree served to the floor's chat that is not
  * the build's (held to the build's hash in `run.json`, or, where `run.json` lacks it, to the build
  * `build` lays). Empty when there is none.

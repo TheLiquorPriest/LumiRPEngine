@@ -103,7 +103,7 @@ export type ConnectionOf = (id: string) => string | null;
 
 /** A throttle of today's on one connection (`core.connections.throttles.<connection>.<field>`), by its field, and RPE's setting of the same meaning for one connection. */
 const THROTTLE = /^core\.connections\.throttles\.([^.]+)\.(requestsPerMinute|tokensPerMinute|atOnce)$/;
-const throttleKey = (connection: string, field: string): string => `throttles.connections.${connection}.${field}`;
+const throttleKey = (connection: string, field: string): string => `connections.${connection}.throttles.${field}`;
 
 /** The setting RPE declares for `key`: the one of that key, or the one whose key has a `<name>` where `key` has a name (a setting for one connection, or one definition, at a time). */
 function declaredFor<T extends { key: string }>(known: readonly T[], key: string): T | undefined {

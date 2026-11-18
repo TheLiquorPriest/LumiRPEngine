@@ -1,6 +1,6 @@
 // The Rules page's routes (plan §14 the Rules row, §5.4 l.524-558, C-10): every rule of a chat's stack (or, with no chat, of the
 // shipped and global levels a new chat takes) with whether it is in force and why not; one switched at the chat's or the global level
-// (RPH writes the level's `off:` list, his own press); the facts a trigger can name, RPH's and RPE's, each with its value in the open
+// (RPH writes the level's `stack.off` list, his own press); the facts a trigger can name, RPH's and RPE's, each with its value in the open
 // chat where RPE counts it and the rules whose text names it; the rules that fired in a chat, newest first, a job's among them, with
 // what the agent did next; and a rule run against a past turn, which writes nothing. Each mirrors RPH's own type. RPH's hooks are
 // listed by the switches route until RPH gives a reader of them.

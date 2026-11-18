@@ -32,7 +32,7 @@ export default gate({
   bed: [
     "the floor fixture made by `bun scripts/testbed/floor.ts setup`: its invented card, persona, preset and book",
     "two connections in Lumiverse on the same model: plain generation (read, not sent to) and RPE's",
-    "RPE's connection the Author runs on, in the tag form: set for the run by the play in the chat's settings (`reply.forms.<connection>`)",
+    "RPE's connection the Author runs on, in the tag form: set for the run by the play in the chat's settings (`connections.<connection>.reply.form`)",
     "the lead driving one run at a time",
   ],
   live: playTags,

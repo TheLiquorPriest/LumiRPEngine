@@ -19,9 +19,9 @@ There are four levels, from far to near:
 
 The shipped files come from this repository's `guidance/` folder. The instruction files in `guidance/chat-defaults/` are laid at the root of `files/defaults/`, beside `ALL-AGENTS.md`.
 
-**A file at a nearer level replaces the file of the same name at a farther one.** Your `files/.rules/consent.md` replaces the shipped one, and a chat's `rules/consent.md` replaces yours for that chat. The one exception is `AGENTS.md`: a character's and a chat's both apply (the `layered` list in `guidance/RPE-global.yml`).
+**A file at a nearer level replaces the file of the same name at a farther one.** Your `files/.rules/consent.md` replaces the shipped one, and a chat's `rules/consent.md` replaces yours for that chat. The one exception is `AGENTS.md`: a character's and a chat's both apply (the `stack.layered` list in `guidance/RPE-global.yml`).
 
-**A shipped file can be switched off** without replacing it: name it in the `off:` list of your `files/RPE-global.yml`, or of a chat's `RPE.yml`. An instruction file is named by its own name (`WORLD`); anything else by its folder and name (`rules/perceptions-owed`). "Delete" on a shipped file in the Files page writes that entry for you.
+**A shipped file can be switched off** without replacing it: name it in the `stack.off` list of your `files/RPE-global.yml`, or of a chat's `RPE.yml`. An instruction file is named by its own name (`WORLD`); anything else by its folder and name (`rules/perceptions-owed`). "Delete" on a shipped file in the Files page writes that entry for you.
 
 When an update changes a shipped file you have replaced, your file is kept. The Files page says the default changed and shows the difference.
 
@@ -37,7 +37,7 @@ Plain markdown, with no header. Each agent reads the ones its definition names, 
 4. `WORLD.md`, `SIMULATION.md` and `WRITING.md`: this story's world, how its game side is run, and how its reply is written.
 5. The agent's own definition.
 6. `TURN.md` and `PRESET.md`: how a turn is run, and how the preset's prompt is used. As shipped, the Author reads both every turn.
-7. For the turn at hand: `SWIPE.md` on a swipe or a regenerate, `DELETE.md` when turns were deleted since the last one. They are read with `TURN.md`, not in place of it. Which kind of turn adds which file is the `added` list in `guidance/RPE-global.yml`.
+7. For the turn at hand: `SWIPE.md` on a swipe or a regenerate, `DELETE.md` when turns were deleted since the last one. They are read with `TURN.md`, not in place of it. Which kind of turn adds which file is the `stack.added` list in `guidance/RPE-global.yml`.
 
 The turn's process is written in `TURN.md` ([shipped](../guidance/chat-defaults/TURN.md)). Change it and the turn runs differently.
 
@@ -79,9 +79,9 @@ Each agent is a file in `.agents/` (yours and the shipped ones) or `agents/` (a 
 - `tools`: the tools it holds; with `tool_search` and `tool_use` it can reach the rest;
 - `reads`: which instruction files it reads;
 - `given`: what it is handed at the start of a run (the prompt or parts of it, the briefing, ranges of the chat, views of the world and of its character). The lead's names are found the same way a sub-agent's are, and laid out after its briefing by `files/defaults/.prompts/given.md`; a name nothing could be found for gets one line saying so;
-- `limits`: what it may spend, as `limits: { toolRounds: 12, calls: 12 }`, with any of `calls`, `toolRounds` (answers that call tools), `toolsPerAnswer`, `toolsAtOnce`, `messages` (a sub-agent's, after its first answer), `tokensIn`, `tokensOut`, `time`, `callTokensIn`, `callTokensOut` and `callTime` (times in seconds). No shipped agent sets one but the narrator, which makes one call, because that is what a narrator is: no agent's work is cut short unless you set a limit.
+- `limits`: what it may spend, as `limits: { toolRounds: 12, calls: 12 }`, with any of `calls`, `toolRounds` (answers that call tools), `toolsPerAnswer`, `toolsAtOnce`, `messages` (a sub-agent's, after its first answer), `tokensIn`, `tokensOut`, `time`, `callTokensIn`, `callTokensOut` and `callTime` (times in seconds). No shipped agent sets one but the narrator, which makes one call, because that is what a narrator is: no agent's work is cut short unless you set a limit. Each limit, and the effort, is a setting of the agent's too, set on the Agents page for every chat or for one: `agents.<definition>.effort` and `agents.<definition>.limits.<limit>`, with `seconds` and `callSeconds` for `time` and `callTime`. A value set there stands over the header's, and `~` lifts the header's limit.
 
-Its text is its instructions. The shipped agents are the Author, who leads (`guidance/.agents/author.md`); the game master (`guidance/.agents/gm.md`); a character, one run per principal character (`guidance/.agents/character.md`); the narrator (`guidance/.agents/narrator.md`); the keeper, for bookkeeping after the reply (`guidance/.agents/keeper.md`); the historian, the indexer and the mapper, which the Author starts as jobs; and the assistant (`guidance/.agents/assistant.md`), for talking with outside the story, which comes with a later build: nothing starts it yet. The indexing job is meant for a small model: the indexer's `model:` is `default`, and naming your smaller connection there runs it on that. The agent that leads a turn is the setting `lead`.
+Its text is its instructions. The shipped agents are the Author, who leads (`guidance/.agents/author.md`); the game master (`guidance/.agents/gm.md`); a character, one run per principal character (`guidance/.agents/character.md`); the narrator (`guidance/.agents/narrator.md`); the keeper, for bookkeeping after the reply (`guidance/.agents/keeper.md`); the historian, the indexer and the mapper, which the Author starts as jobs; and the assistant (`guidance/.agents/assistant.md`), for talking with outside the story, which comes with a later build: nothing starts it yet. The indexing job is meant for a small model: the indexer's `model:` is `default`, and naming your smaller connection there runs it on that. The agent that leads a turn is the setting `turn.lead`.
 
 Build's five model jobs run as agents of their own: Import from lore (`guidance/.agents/build-import-lore.md`), Index this text (`build-index-text.md`), Refine with AI (`build-refine.md`), Describe a map (`build-describe-map.md`) and Propose routines (`build-propose-routines.md`). Each holds the world's reads and `world_propose` and no tool that writes: it proposes, and you apply what you want in Build. The brief each is started with is a line of `guidance/.prompts/build-jobs.md`.
 
@@ -146,10 +146,11 @@ The same goes for `perceptions-missing.md`, which reminds at the next turn's sta
 
 ### Switch off a shipped rule
 
-The rule `engine-silent` notices when nothing has been recorded in the engine lane for a while. To switch it off for every chat, add it to the `off:` list of your `files/RPE-global.yml`:
+The rule `engine-silent` notices when nothing has been recorded in the engine lane for a while. To switch it off for every chat, add it to the `stack.off` list of your `files/RPE-global.yml`:
 
 ```yaml
-off: [rules/engine-silent]
+stack:
+  off: [rules/engine-silent]
 ```
 
 For one chat only, put the same line in that chat's `RPE.yml`. Take the name out of the list to switch it on again. A rule tied to a file with `needs:` goes off with that file: switch off `rules/perceptions` and `perceptions-owed` and `perceptions-missing` go off with it.

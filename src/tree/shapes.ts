@@ -35,27 +35,27 @@ const treeFileRow = shape.named(
     level: layerLevel,
     kind: fileKind,
     bytes: N,
-    item: field(nullable(T), "The name RPH loads it by, and an `off:` list names it by; null for a file RPH does not load by its name."),
+    item: field(nullable(T), "The name RPH loads it by, and a `stack.off` list names it by; null for a file RPH does not load by its name."),
     applies: field(shape.yesNo(), "Whether RPH takes it: a named file when it is the nearest of its name, not switched off and not an example; any other file as it is."),
     replacedBy: field(nullable(T), "The nearer file of the same name taken in its place; null when none is."),
-    off: field(shape.yesNo(), "Its name is in a config's `off:` list, which switches it off at every level."),
-    offIn: field(shape.list(layerLevel), "The levels whose config's `off:` list names it, farthest first: switching it on at one of these takes the name out there; at any other level it changes nothing."),
+    off: field(shape.yesNo(), "Its name is in a config's `stack.off` list, which switches it off at every level."),
+    offIn: field(shape.list(layerLevel), "The levels whose config's `stack.off` list names it, farthest first: switching it on at one of these takes the name out there; at any other level it changes nothing."),
     editable: field(shape.yesNo(), "Whether the user may write it where it is: never a shipped file or a generated one."),
     shipped: field(nullable(T), "The shipped file of the same name, for a file of another level that has one; null otherwise."),
     defaultChanged: field(nullable(N), "For a file of the user's in place of a shipped one: when the latest update that changed that shipped file did so, if it did since this file was last written; null otherwise."),
     defaultRemoved: opt(nullable(N), "For a file of the user's in place of a default an update has since taken away: when the update that removed it ran, if it did since this file was last written."),
-    pinnedFor: opt(shape.list(shape.object({ agent: field(T, "The agent it is pinned for, by its definition's name."), level: field(layerLevel, "The level whose config's `pins:` list says so.") })), "The agents it is pinned for: each is handed the file whole at the start of its runs. Empty for a file pinned for none."),
+    pinnedFor: opt(shape.list(shape.object({ agent: field(T, "The agent it is pinned for, by its definition's name."), level: field(layerLevel, "The level whose config's `stack.pins` list says so.") })), "The agents it is pinned for: each is handed the file whole at the start of its runs. Empty for a file pinned for none."),
     isConfig: opt(shape.yesNo(), "Whether it is a level's config file, which the Settings page edits too."),
     placeable: opt(shape.list(layerLevel), "The levels where a file of its kind and name has a place that the user may write: \"save as\" offers only those."),
     editedOn: opt(nullable(T), "For a generated file, the page where what it shows is edited, if one is; null otherwise."),
     held: opt(nullable(shape.oneOf("needs", "broken")), "Why RPH leaves it out though it is the nearest of its name and not switched off: what its `needs:` names is not in force, or its header does not parse; null when nothing does."),
     problems: opt(shape.list(T), "What RPH found wrong with it, in its own words, line by line."),
-    joins: opt(shape.list(T), "The agents whose stacks it joins: a file `instructions:` names or an agent reads."),
+    joins: opt(shape.list(T), "The agents whose stacks it joins: a file `stack.instructions` names or an agent reads."),
     hooks: opt(
       shape.list(
         shape.named(
           "TreeHook",
-          "A hook as a hooks file names it: its name (an `off:` list names it `hooks/<name>`), the moment it runs at and its command line as written; switched off, and by which levels; the nearer level's hooks file that names it in its place; whether RPH runs it; and, where RPH lists it, whether its command is switched on.",
+          "A hook as a hooks file names it: its name (a `stack.off` list names it `hooks/<name>`), the moment it runs at and its command line as written; switched off, and by which levels; the nearer level's hooks file that names it in its place; whether RPH runs it; and, where RPH lists it, whether its command is switched on.",
           shape.object({ name: T, on: hookEvent, runs: T, off: shape.yesNo(), offIn: shape.list(layerLevel), replacedBy: nullable(T), applies: shape.yesNo(), state: opt(shape.oneOf("on", "waiting", "off")) }),
         ),
       ),
@@ -130,12 +130,12 @@ export const fileWriteBody = shape.named(
 );
 export const fileSwitchBody = shape.named(
   "FileSwitchAsk",
-  "A file's name switched off or on again in the `off:` list of a level's config: the global level's, or a chat's, which names the chat.",
+  "A file's name switched off or on again in the `stack.off` list of a level's config: the global level's, or a chat's, which names the chat.",
   shape.object({ level: shape.oneOf("global", "chat"), chat: opt(nullable(T)), off: shape.yesNo(), hook: opt(shape.text({ blank: false }), "For a hooks file: the hook of it switched, by its name.") }),
 );
 export const filePinBody = shape.named(
   "FilePinAsk",
-  "A file pinned for an agent, or the pin taken away, in the `pins:` list of a level's config: the global level's, or a chat's, which names the chat.",
+  "A file pinned for an agent, or the pin taken away, in the `stack.pins` list of a level's config: the global level's, or a chat's, which names the chat.",
   shape.object({ level: shape.oneOf("global", "chat"), chat: opt(nullable(T)), agent: field(T, "The agent, by its definition's name."), pinned: shape.yesNo() }),
 );
 export const pinsReply = shape.named(
@@ -156,7 +156,7 @@ export const pinsReply = shape.named(
 export const fileWrittenReply = shape.named("FileWrittenReply", "What writing a file or switching its name answers: the file as the listing now shows it.", shape.object({ file: nullable(treeFileRow) }));
 export const fileRemovedReply = shape.object({
   removed: field(T, "The path of the file removed; for a shipped file, the path of the one switched off."),
-  switchedOff: opt(layerLevel, "For a shipped file: the level whose `off:` list now names it. The file itself stays."),
+  switchedOff: opt(layerLevel, "For a shipped file: the level whose `stack.off` list now names it. The file itself stays."),
 });
 
 const guidanceKind = shape.named("GuidanceKind", "A kind of guidance a folder of the tree holds: the agents' definitions, skills, rules, hooks, prompt parts or tools.", shape.oneOf("agents", "skills", "rules", "hooks", "prompts", "tools"));
@@ -176,7 +176,7 @@ export const fileMovedReply = shape.named(
 export const applyBody = shape.named("ApplyNowAsk", "The chat whose open session starts its opening block afresh.", shape.object({ chat: shape.text({ blank: false }) }));
 export const applyReply = shape.named(
   "ApplyNowReply",
-  "What \"Apply now\" did: the session whose opening block starts afresh with the next run of each agent, or none when no session is open, and what that means in words.",
+  "What \"Apply now\" did: the session whose opening block was made afresh at the press, which the next run of each agent takes, or none when no session is open, and what that means in words.",
   shape.object({ session: nullable(T), note: T }),
 );
 
@@ -306,7 +306,7 @@ const stackPartRow = shape.named(
   "One part of an agent's stack: its kind, which part, the file it came from, its level, whether it sits in the opening block or comes with the briefing, its text, and the situations that hand it to the briefing; a part left out is listed with why.",
   shape.object({
     kind: field(shape.oneOf("definition", "instruction", "rule", "contract", "guide", "description", "skills", "given"), "What the part is."),
-    part: field(T, "Its name as `off:` lists name it; for `given`, the item as `opening:` writes it."),
+    part: field(T, "Its name as `stack.off` lists name it; for `given`, the item as `opening:` writes it."),
     path: field(T, "The file it came from; for a part left out as `missing`, where it would be; for `given`, the definition that names it."),
     level: layerLevel,
     hash: opt(T, "SHA-256 of the file (for `given`, of its text), lower-case hex; absent for a part left out as `missing`."),

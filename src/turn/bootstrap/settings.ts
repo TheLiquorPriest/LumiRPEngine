@@ -51,7 +51,7 @@ export const BOOTSTRAP_SETTING_DEFS = {
     takes: { type: "whole", least: 1 },
     perConnection: false,
     name: "Time for a bootstrap job's run",
-    about: "Seconds one bootstrap job's run may take, in place of every job's jobs.run.time; none set, that one holds. The clock waits while the job waits for your word.",
+    about: "Seconds one bootstrap job's run may take, in place of every job's jobs.run.seconds; none set, that one holds. The clock waits while the job waits for your word.",
     effect: "use",
   },
 } as const satisfies Record<keyof BootstrapSettings, Setting>;

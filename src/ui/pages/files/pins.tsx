@@ -1,5 +1,5 @@
 // Pins (R-174): a file says which agents it is pinned for, and a pin is made or taken away here: a pinned file is
-// handed to that agent whole at the start of each of its runs. A pin is written in the `pins:` list of his own
+// handed to that agent whole at the start of each of its runs. A pin is written in the `stack.pins` list of his own
 // config, or of the chat's with one open; RPE refuses a path its view does not hold in its words.
 
 import type { LayerLevel, TreeFileRow } from "../../../shared/api";

@@ -108,7 +108,7 @@ export async function agentFacts(rpe: RpeReader): Promise<AgentFacts[]> {
   const view = (key: string): unknown => settings.settings.find((s) => s.key === key)?.value;
   const form = view("reply.form");
   const streamAnyway = Array.isArray(view("reply.streamAnyway")) ? (view("reply.streamAnyway") as unknown[]).filter((v): v is string => typeof v === "string") : [];
-  const byConnection = (prefix: string, c: ConnectionShown): unknown => settings.settings.find((s) => s.key.startsWith(prefix) && (s.connection?.id === c.id || s.connection?.name === c.name) && s.value !== null)?.value;
+  const byConnection = (pattern: string, c: ConnectionShown): unknown => settings.settings.find((s) => s.pattern === pattern && (s.setFor?.key === c.id || s.setFor?.key === c.name) && s.value !== null)?.value;
   const agents: AgentFacts[] = [];
   const named = files.filter((f) => f.level === "shipped" && /^@shipped\/\.agents\/[^/]+\.md$/.test(f.path)).map((f) => f.path);
   for (const path of named) {
@@ -120,9 +120,10 @@ export async function agentFacts(rpe: RpeReader): Promise<AgentFacts[]> {
     const connection = wanted === "default" ? shown.connections.find((c) => c.id === shown.default) : shown.connections.find((c) => c.name === wanted || c.id === wanted);
     if (connection === undefined) throw new Error(`the ${name} agent runs on "${wanted}", and RPE's connections hold no such connection${wanted === "default" ? " (RPE has no default one)" : ""}`);
     if (connection.model === undefined || connection.model === "") throw new Error(`RPE's connection ${connection.name} names no model, so the ${name} agent's model is not known`);
-    const forms = byConnection("reply.forms.", connection);
+    const forms = byConnection("connections.<connection>.reply.form", connection);
     const replyForm = typeof forms === "string" ? forms : typeof form === "string" ? form : "tags";
-    const effort = byConnection("effort.connections.", connection) ?? header.effort ?? connection.effort ?? "inherit";
+    const agentEffort = settings.settings.find((s) => s.pattern === "agents.<definition>.effort" && s.setFor?.key === name && s.value !== null)?.value;
+    const effort = agentEffort ?? byConnection("connections.<connection>.effort", connection) ?? header.effort ?? connection.effort ?? "inherit";
     agents.push({ agent: name, connection: connection.name, model: connection.model, replyForm, effort: String(effort), streams: replyForm === "tags" || streamAnyway.includes(connection.id) || streamAnyway.includes(connection.name) });
   }
   if (agents.length === 0) throw new Error("RPE's shipped tree holds no agent definition, so the run's agents are not known");
@@ -131,9 +132,9 @@ export async function agentFacts(rpe: RpeReader): Promise<AgentFacts[]> {
 
 /**
  * The guidance a chat stands on: the shipped tree RPE serves it, each layer of the user's own it sees, the build's own
- * shipped folders at `commit`, and the names the levels' configs switch. A shipped file an `off:` list switches off is
- * shown by the files route (`off`, `offIn`); a name `layered:` takes at every level is one the shipped tree holds that
- * a nearer level also holds and the route does not mark as replaced. RPE's routes show no `added:` list, so an added
+ * shipped folders at `commit`, and the names the levels' configs switch. A shipped file a `stack.off` list switches off is
+ * shown by the files route (`off`, `offIn`); a name `stack.layered` takes at every level is one the shipped tree holds that
+ * a nearer level also holds and the route does not mark as replaced. RPE's routes show no `stack.added` list, so an added
  * file is seen only as a file of its level in the layers.
  */
 export async function guidanceOf(rpe: RpeReader, chat: string, repo: string, commit: string): Promise<GuidanceFacts> {

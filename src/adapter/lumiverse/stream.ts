@@ -8,7 +8,7 @@
 //
 // A long turn is kept alive by the turn's own progress lines. Lumiverse ends a generation that has given it no reply or thinking
 // text for ten minutes, checked every minute (`services/generation/active-generation-registry.ts:140-158`); only a chunk with text
-// resets that clock (`services/generate.service.ts:3866-3873`). RPH writes a progress line after `progress.silence` seconds of
+// resets that clock (`services/generate.service.ts:3866-3873`). RPH writes a progress line after `progress.silenceSeconds` seconds of
 // nothing shown, at most 540 (its own settings), so one reaches Lumiverse inside every ten minutes; the stream adds none of its own.
 // Comment lines go out more often, which Lumiverse skips: they keep the connection itself busy.
 

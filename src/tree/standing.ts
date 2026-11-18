@@ -1,7 +1,7 @@
 // What RPH itself makes of the files of a chat's view (plan §5.2, §14 Files): which rule it holds out
 // because what its `needs:` names is not in force, or because its header does not parse, what it found
 // wrong with a file in its own words, and which agents' stacks each instruction file and rule joins
-// (a file `instructions:` names joins every stack it reaches). RPH is the one that lists them (its rules,
+// (a file `stack.instructions` names joins every stack it reaches). RPH is the one that lists them (its rules,
 // its definitions and their stacks, what it found wrong with a file that runs or calls out); this asks
 // it and hands the answer to the listing, so the page shows a file as RPH will find it.
 

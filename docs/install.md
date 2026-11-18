@@ -174,13 +174,15 @@ rpe connection remove deepseek
 By default the reply is written in one call, with tags around its parts (`reply.form`: `tags`). Some models do not keep to the tags. For such a model, set the reply's form for its connection to `two-step`, in the global settings file `files/RPE-global.yml` in RPE's data folder:
 
 ```yaml
+connections:
+  deepseek:
+    reply:
+      form: two-step
 reply:
-  forms:
-    deepseek: two-step
   streamAnyway: [deepseek]
 ```
 
-`reply.forms.<connection>` is set per connection, by its name or its id. See [Settings](settings.md).
+`connections.<connection>.reply.form` is set per connection, by its name or its id. See [Settings](settings.md).
 
 ## The pages
 

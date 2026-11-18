@@ -31,7 +31,7 @@ export { mergedConfig } from "rp-harness/helpers";
 /** Where a per-connection setting's key names the connection, by its name or its id. */
 export const CONNECTION_PART = "<connection>";
 
-/** Where a setting set per agent definition names the definition, by its name (`sampling.<definition>.temperature`). */
+/** Where a setting set per agent definition names the definition, by its name (`agents.<definition>.sampling.temperature`). */
 export const DEFINITION_PART = "<definition>";
 
 /** Whether a part of a key is where a connection or a definition is named. */
@@ -65,8 +65,8 @@ export interface RecordField {
 /**
  * The shapes RPE's registry declares beyond RPH's `SettingTakes`. `table`: a mapping of names (a
  * situation, an agent) to values that each take `of`; with `whole`, a value that takes `of` alone is
- * taken too, for every name at once (`instructions: [STYLE]`). `records`: a list of records, each a
- * mapping holding every field, shown as a table and written whole (`pins:`).
+ * taken too, for every name at once (`stack.instructions: [STYLE]`). `records`: a list of records, each a
+ * mapping holding every field, shown as a table and written whole (`stack.pins`).
  */
 export type RpeTakes = { readonly type: "table"; readonly of: SettingTakes; readonly whole?: true } | { readonly type: "records"; readonly fields: readonly RecordField[] };
 
@@ -93,7 +93,7 @@ export interface Setting extends Omit<Declared, "name" | "about"> {
   readonly row?: string;
   /**
    * Every level's value applies, not the nearest alone: the value in force is each level's list, the
-   * farther first (`off:`, `layered:`, `instructions:`, `pins:`, as the files layer reads them).
+   * farther first (`stack.off`, `stack.layered`, `stack.instructions`, `stack.pins`, as the files layer reads them).
    */
   readonly joined?: true;
 }
@@ -108,13 +108,13 @@ const HARNESS_ROWS: Readonly<Record<string, string>> = Object.freeze({
   "reply.heldSentences": "Reply held back when a rule that interrupts covers it",
   "reply.tailSentences": "Sentences shown again to an agent that goes on after a rule stopped it",
   "reply.leadSampling": "The Author's sampling",
-  "progress.silence": "Thinking block in the chat",
+  "progress.silenceSeconds": "Thinking block in the chat",
   "rules.judge": "The model that answers a `question:` rule",
-  "compaction.reserve": "Compaction starts",
+  "compaction.reserveTokens": "Compaction starts",
   "compaction.keepTurns": "Compaction starts",
-  "compaction.records": "Carried records before folding (records mode)",
+  "compaction.recordsTokens": "Carried records before folding (records mode)",
   "calls.retries": "A model call that failed before any answer arrived",
-  "calls.silentAfter": "A model's answer that goes silent",
+  "calls.silentAfterSeconds": "A model's answer that goes silent",
 });
 
 /** The keys of RPH's own list that a row above names. */
@@ -152,10 +152,11 @@ export const SECTIONS: readonly { readonly title: string; readonly about: string
   { title: "Other", about: "Settings no section names yet." },
 ];
 
-/** Each key's first part: the group the page shows it in, and that group's section. */
+/** Each key's first part: the group the page shows it in, and that group's section; for a key set per agent, `agents.` and its part after the definition. */
 const GROUPS: Readonly<Record<string, readonly [group: string, section: string]>> = {
-  agents: ["Effort and limits, for each agent", "Agents"],
-  sampling: ["Sampling, for each agent", "Agents"],
+  "agents.effort": ["Effort and limits, for each agent", "Agents"],
+  "agents.limits": ["Effort and limits, for each agent", "Agents"],
+  "agents.sampling": ["Sampling, for each agent", "Agents"],
   limits: ["Limits on a turn's work", "Agents"],
   compaction: ["Compaction", "Agents"],
   sessions: ["Sessions", "Agents"],
@@ -167,7 +168,7 @@ const GROUPS: Readonly<Record<string, readonly [group: string, section: string]>
   hooks: ["Hooks", "Agents"],
   rules: ["Rules", "Agents"],
   usage: ["Usage", "Agents"],
-  lead: ["The turn", "Turns and replies"],
+  turn: ["The turn", "Turns and replies"],
   passConnection: ["The turn", "Turns and replies"],
   requests: ["The turn", "Turns and replies"],
   chat: ["The chat's history", "Turns and replies"],
@@ -205,11 +206,7 @@ const GROUPS: Readonly<Record<string, readonly [group: string, section: string]>
   retention: ["Turn folders", "Files and storage"],
   files: ["The agents' files", "Files and storage"],
   notes: ["Notes", "Files and storage"],
-  off: ["The files in force", "Files and storage"],
-  layered: ["The files in force", "Files and storage"],
-  added: ["The files in force", "Files and storage"],
-  instructions: ["The files in force", "Files and storage"],
-  pins: ["The files in force", "Files and storage"],
+  stack: ["The files in force", "Files and storage"],
   suggestions: ["Suggestions", "Files and storage"],
   storage: ["Storage", "Files and storage"],
   pages: ["The pages", "Pages"],
@@ -235,11 +232,13 @@ export const EACH_CONNECTION = "For each connection";
 const GROUP_ORDER: readonly string[] = [...new Set([EACH_CONNECTION, ...Object.values(GROUPS).map(([group]) => group)])];
 
 /**
- * The section and group a setting is shown in: one set per connection with every other, as one table; else by its key's first part.
- * `order` puts the settings in the order of the page's sections and of the groups within each, the registry's order kept within a group.
+ * The section and group a setting is shown in: one set per connection with every other, as one table; one set per agent by its part after
+ * the definition; else by its key's first part. `order` puts the settings in the order of the page's sections and of the groups within
+ * each, the registry's order kept within a group.
  */
 export function groupOf(def: Pick<SettingDef, "key" | "perConnection">): { section: string; group: string; order: number } {
-  const first = def.key.split(".")[0] ?? def.key;
+  const parts = def.key.split(".");
+  const first = parts[1] === DEFINITION_PART ? `${parts[0]}.${parts[2]}` : (parts[0] ?? def.key);
   const found = GROUPS[first];
   const [group, section] = def.perConnection ? [EACH_CONNECTION, "Connections and model calls"] : found === undefined ? [first, "Other"] : found;
   const groupAt = GROUP_ORDER.indexOf(group);

@@ -202,7 +202,7 @@ export class BootstrapJobs {
       skill: skill !== undefined,
       relive: Array.isArray(words) ? words.filter((w): w is string => typeof w === "string" && w.trim() !== "") : [],
       tokenLimit: settings.tokenLimit,
-      cachedWeight: number("jobs.cachedWeight") ?? 0,
+      cachedWeight: number("limits.cachedWeight") ?? 0,
       caps: [
         { key: "bootstrap.run.calls", value: settings.runCalls },
         { key: "bootstrap.run.time", value: settings.runTime },

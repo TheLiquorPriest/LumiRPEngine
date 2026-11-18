@@ -41,7 +41,7 @@ RPE played the turn, and it ended with no reply. The chat shows one plain line, 
 
 | The line starts | What it means | What to do |
 |---|---|---|
-| "The Author ended this turn without writing a reply." | The lead agent ended its run with no reply. | Look at the turn's page. Swipe or send again. If it keeps happening, the model may not keep to the reply's form: set `reply.forms.<connection>` to `two-step` (see [Install](install.md#a-model-that-does-not-keep-to-the-replys-tags)). |
+| "The Author ended this turn without writing a reply." | The lead agent ended its run with no reply. | Look at the turn's page. Swipe or send again. If it keeps happening, the model may not keep to the reply's form: set `connections.<connection>.reply.form` to `two-step` (see [Install](install.md#a-model-that-does-not-keep-to-the-replys-tags)). |
 | "The turn reached its limit of …" | A limit you set stopped the turn first, such as `limits.turn.calls`. | Raise the limit in [Settings](settings.md#limits), or swipe. |
 | "The model's provider failed before a reply was written: …" | The provider refused or broke off. The rest of the line is its own words. | Check the connection's key and model (`rpe connection list`), the provider's status, and your account's credit. |
 | "The turn was stopped before a reply was written." | You, or Lumiverse, stopped the generation. | Send again. |

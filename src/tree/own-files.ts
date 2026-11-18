@@ -2,7 +2,7 @@
 // level, which for a file of another level is his own file of that name there, taken in place of the
 // farther one, and kept as written by him (`recordWritten`) so the Files page can say which updates came
 // after; a file of his removed, which for one in place of a default is resetting to the default; a name
-// switched off or on again in a level's config (`off:`), which is what "Delete" on a shipped file does;
+// switched off or on again in a level's config (`stack.off`), which is what "Delete" on a shipped file does;
 // and a folder made, a file or folder of his renamed, moved or copied, never a shipped one or one RPE
 // makes again. The Files routes call these, and so does the migration's switch-on, which writes his
 // files too. Every path is a path of the chat's view, found by the view (`locate`): none leaves the tree,
@@ -15,8 +15,8 @@ import { dirname, join, sep } from "node:path";
 import type { GuidanceKind, LayerLevel } from "rp-harness/contract";
 import { RouteError } from "../app";
 import { oneFileAtATime, readText, writeWhole } from "../app/disk";
-import { LayoutRefused, withTopLevelKey, yamlMapping } from "../app/yaml";
-import { kindAt, nameList, OFF_KEY, PINS_KEY, pinPath, pinRecords, placeAt, userMayWrite, writtenItem, writtenKey } from "./catalog";
+import { LayoutRefused, withKeyAt, yamlMapping } from "../app/yaml";
+import { atKey, kindAt, nameList, OFF_KEY, PINS_KEY, pinPath, pinRecords, placeAt, userMayWrite, writtenItem, writtenKey } from "./catalog";
 import type { ChatFolders, TreeChats, TreeWrites } from "./chats";
 import { recordWritten } from "./defaults";
 import { type ChatLocation, type Located, locate, treeLayers, viewPath } from "./view";
@@ -34,7 +34,7 @@ export interface OwnFilesDeps {
 /** A path of the view, found: where it is, and where on disk. */
 export type FoundFile = Located & { disk: string };
 
-/** The levels a config's `off:` list is written at (plan §5.2: `RPE-global.yml` or the chat's `RPE.yml`). */
+/** The levels a config's `stack.off` list is written at (plan §5.2: `RPE-global.yml` or the chat's `RPE.yml`). */
 export const OFF_LEVELS: readonly LayerLevel[] = ["global", "chat"];
 
 export class OwnFiles {
@@ -91,7 +91,7 @@ export class OwnFiles {
   }
 
   /**
-   * Switches the name `item` off, or on again, in the `off:` list of the config of `level` (the global level's, or the chat's, the
+   * Switches the name `item` off, or on again, in the `stack.off` list of the config of `level` (the global level's, or the chat's, the
    * chat being the one `loc` is the view of), keeping what else the config holds and says. A name already as asked changes nothing.
    */
   async switchOff(loc: ChatLocation, level: LayerLevel, item: string, off: boolean): Promise<void> {
@@ -103,7 +103,7 @@ export class OwnFiles {
   }
 
   /**
-   * Pins the file at `path` for `agent`, or takes the pin away, in the `pins:` list of the config of `level`, keeping what else the config
+   * Pins the file at `path` for `agent`, or takes the pin away, in the `stack.pins` list of the config of `level`, keeping what else the config
    * holds and says. Pinning names a file the view holds; a pin already as asked changes nothing, and one whose file is gone is taken away
    * all the same.
    */
@@ -122,30 +122,30 @@ export class OwnFiles {
   }
 
   /**
-   * Changes the list under `key` in the config of `level`: `next` is given the list as it stands and answers the one to write; the rest of
+   * Changes the list at the dotted `key` in the config of `level`: `next` is given the list as it stands and answers the one to write; the rest of
    * the config, its comments and its layout, is kept. An unchanged list writes nothing; a key that is not such a list, or a config in a
    * layout the splice does not follow, is refused in words.
    */
   async #changeList<T>(loc: ChatLocation, level: LayerLevel, key: string, parse: (value: unknown) => T[] | undefined, shown: string, next: (list: readonly T[]) => T[]): Promise<void> {
     const layers = treeLayers();
     const layer = layers.find((l) => l.level === level);
-    if (layer?.config === undefined) throw new RouteError(400, `The ${level} level has no config to write \`${key}:\` in.`);
+    if (layer?.config === undefined) throw new RouteError(400, `The ${level} level has no config to write \`${key}\` in.`);
     const config = await this.found(loc, viewPath(level, [layer.config]));
     if (config.is === "folder") throw new RouteError(409, `${config.path} is a folder.`);
     await oneFileAtATime(config.disk, async () => {
       const text = (await readText(config.disk)) ?? "";
       let read: T[] | undefined;
       try {
-        read = parse(yamlMapping(text, config.path)[key]);
+        read = parse(atKey(yamlMapping(text, config.path), key));
       } catch (error) {
         throw new RouteError(409, error instanceof Error ? error.message : String(error));
       }
-      if (read === undefined) throw new RouteError(409, `\`${key}:\` in ${config.path} is not ${shown}: make it one, then try again.`);
+      if (read === undefined) throw new RouteError(409, `\`${key}\` in ${config.path} is not ${shown}: make it one, then try again.`);
       const now = next(read);
       if (JSON.stringify(now) === JSON.stringify(read)) return;
       let spliced: string;
       try {
-        spliced = withTopLevelKey(text, key, now, config.path);
+        spliced = withKeyAt(text, key.split("."), now, config.path);
       } catch (error) {
         // His file in a layout the splice does not follow: nothing is written, and the answer names the line.
         if (error instanceof LayoutRefused) throw new RouteError(409, error.message);

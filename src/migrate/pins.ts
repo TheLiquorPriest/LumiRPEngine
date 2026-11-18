@@ -1,6 +1,6 @@
 // His pins (STANDALONE-PLAN §15.2 "Pins", R-174): a file pinned in today's build for a definition
 // (LumiAH's `FileEntry.pins` on a chat's notes and on his `~/` files; the agents engine's pin on a
-// workspace file) is a pin in RPE: an entry of `pins:` in the chat's `RPE.yml`, or in `RPE-global.yml`
+// workspace file) is a pin in RPE: an entry of `stack.pins` in the chat's `RPE.yml`, or in `RPE-global.yml`
 // for a global note, naming the carried file as that level's view names it and the agent it is pinned
 // for, so that agent is handed the file whole at the start of each run. A pin for today's lead agent
 // (`main`) is the Author's; a pin for a definition RPE has an agent of that name for is that agent's;
@@ -21,7 +21,7 @@ const LEAD = "author";
 
 /** What a run did with the pins of today's build. */
 export interface PinsCarried {
-  /** Pins written, each in its level's `pins:`. */
+  /** Pins written, each in its level's `stack.pins`. */
   carried: number;
   /** Pins for a role RPE has no agent for, pinned for the Author: the file and the role it was pinned for in today's build. */
   forAuthor: { file: string; role: string }[];
@@ -76,7 +76,8 @@ export async function carryPins(input: { wanted: readonly PinWanted[]; globalCon
   for (const [config, wanted] of byConfig) {
     const text = (await readText(config)) ?? "";
     const where = config;
-    const held = yamlMapping(text, where).pins;
+    const stack = yamlMapping(text, where).stack;
+    const held = isRecord(stack) ? stack.pins : undefined;
     const now = (Array.isArray(held) ? held : []).flatMap((p) => (isRecord(p) && typeof p.file === "string" && typeof p.agent === "string" ? [{ ...p, file: p.file, agent: p.agent }] : []));
     const wantedKeys = new Set(wanted.map((w) => keyOf(config, w.file, w.agent)));
     // What an earlier run put here and today's side no longer pins goes, where it still stands.
@@ -100,7 +101,7 @@ export async function carryPins(input: { wanted: readonly PinWanted[]; globalCon
     if (added.length === 0 && kept.length === now.length) continue;
     const list = [...kept.map((p) => ({ file: p.file, agent: p.agent })), ...added];
     await mkdir(dirname(config), { recursive: true });
-    await writeWhole(config, withKeyAt(text, ["pins"], list.length > 0 ? list : undefined, where));
+    await writeWhole(config, withKeyAt(text, ["stack", "pins"], list.length > 0 ? list : undefined, where));
   }
   return { carried: out, put };
 }

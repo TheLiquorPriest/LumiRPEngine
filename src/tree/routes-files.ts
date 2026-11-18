@@ -6,7 +6,7 @@
 // since the user wrote theirs; a file written as the user at a level, which for a file of another level is
 // the user's own file of that name there, taken in place of the farther one; a file of the user's removed,
 // which for one in place of a default is resetting to the default, and for a shipped file is switching its
-// name off in the `off:` list of the level it is deleted at (§5.2: "Delete" on a shipped file does exactly
+// name off in the `stack.off` list of the level it is deleted at (§5.2: "Delete" on a shipped file does exactly
 // that); a name switched off or on again in a level's config; and any agent's stack with where each part
 // comes from. Every route is a page's: an agent has no way to them, and reaches the tree only through the
 // file port, held to where it may write.
@@ -218,8 +218,8 @@ export function fileRoutes(kit: RouteKit) {
       path: FILE_PATH,
       access: "page",
       group: "files",
-      does: "Removes a file of the user's; for one in place of a default, that is resetting to the default. \"Delete\" on a shipped file writes its name in the `off:` list of the level named (the chat's when a chat is named, else the global level's), so the shipped file stays and is not in force.",
-      query: { chat: chatQuery, level: shape.optional(shape.oneOf("global", "chat"), "For a shipped file, the level whose `off:` list takes its name; the chat's when a chat is named, else the global level's.") },
+      does: "Removes a file of the user's; for one in place of a default, that is resetting to the default. \"Delete\" on a shipped file writes its name in the `stack.off` list of the level named (the chat's when a chat is named, else the global level's), so the shipped file stays and is not in force.",
+      query: { chat: chatQuery, level: shape.optional(shape.oneOf("global", "chat"), "For a shipped file, the level whose `stack.off` list takes its name; the chat's when a chat is named, else the global level's.") },
       reply: fileRemovedReply,
       handle: async ({ user, params, query }) => {
         const chat = chatOf(query.chat);
@@ -233,7 +233,7 @@ export function fileRoutes(kit: RouteKit) {
         }
         const level = levelOf(query.level ?? (chat === null ? "global" : "chat"), OFF_LEVELS, chat);
         const listed = await kit.entryOf(user, loc, at.path);
-        if (listed?.item === null || listed === null) throw new RouteError(400, `${at.path} is not a file RPH takes by its name, so no \`off:\` list can name it.`);
+        if (listed?.item === null || listed === null) throw new RouteError(400, `${at.path} is not a file RPH takes by its name, so no \`stack.off\` list can name it.`);
         await own.switchOff(loc, level, listed.item, true);
         await kit.written(user, chat, at.path, level);
         return { removed: at.path, switchedOff: level };
@@ -244,7 +244,7 @@ export function fileRoutes(kit: RouteKit) {
       path: OFF_PATH,
       access: "page",
       group: "files",
-      does: "Switches a file's name off or on again in the `off:` list of a level's config, which is what \"Delete\" on a shipped file does; for a hooks file, one hook of it by its name; says the file as the listing now shows it.",
+      does: "Switches a file's name off or on again in the `stack.off` list of a level's config, which is what \"Delete\" on a shipped file does; for a hooks file, one hook of it by its name; says the file as the listing now shows it.",
       body: fileSwitchBody,
       reply: fileWrittenReply,
       handle: async ({ user, params, body }) => {
@@ -258,7 +258,7 @@ export function fileRoutes(kit: RouteKit) {
         const hook = body.hook === undefined ? undefined : listed.hooks?.find((h) => h.name === body.hook);
         if (body.hook !== undefined && hook === undefined) throw new RouteError(400, `${listed.path} names no hook ${body.hook}.`);
         const name = hook === undefined ? listed.item : `hooks/${hook.name}`;
-        if (name === null) throw new RouteError(400, `${listed.path} is not a file RPH takes by its name, so no \`off:\` list can name it${listed.hooks === undefined ? "" : ": name one of its hooks"}.`);
+        if (name === null) throw new RouteError(400, `${listed.path} is not a file RPH takes by its name, so no \`stack.off\` list can name it${listed.hooks === undefined ? "" : ": name one of its hooks"}.`);
         await own.switchOff(loc, level, name, body.off);
         await kit.written(user, chat, listed.path, level);
         return { file: await kit.entryOf(user, loc, listed.path) };
@@ -269,7 +269,7 @@ export function fileRoutes(kit: RouteKit) {
       path: PIN_PATH,
       access: "page",
       group: "files",
-      does: "Pins a file for an agent, or takes the pin away, in the `pins:` list of a level's config (the global level's, or a chat's): the agent is handed the file whole at the start of each of its runs. A path the view does not hold is refused; says the file as the listing now shows it.",
+      does: "Pins a file for an agent, or takes the pin away, in the `stack.pins` list of a level's config (the global level's, or a chat's): the agent is handed the file whole at the start of each of its runs. A path the view does not hold is refused; says the file as the listing now shows it.",
       body: filePinBody,
       reply: fileWrittenReply,
       handle: async ({ user, params, body }) => {
@@ -309,12 +309,12 @@ export function fileRoutes(kit: RouteKit) {
       path: "/api/v1/files-apply",
       access: "page",
       group: "files",
-      does: "\"Apply now\": starts the opening block of the chat's open session afresh from the files as they stand, there and then (the next run of each agent makes it); says which session, or that none is open and the next one opens with the files as they stand. Nothing else carries it.",
+      does: "\"Apply now\": makes each lead's opening block of the chat's open session afresh from the files as they stand, there and then, and the next run of each takes it; says which session, or that none is open and the next one opens with the files as they stand. Nothing else carries it.",
       body: applyBody,
       reply: applyReply,
       handle: async ({ user, body }) => {
         const { session } = await deps.apply(user, body.chat);
-        return { session, note: session === null ? "No session of this chat is open, so the next one opens with the files as they stand." : `The opening block of session ${session} starts afresh with the next run of each agent, from the files as they stand.` };
+        return { session, note: session === null ? "No session of this chat is open, so the next one opens with the files as they stand." : `The opening block of session ${session} was made afresh from the files as they stand; the next run of each agent takes it.` };
       },
     }),
     route({

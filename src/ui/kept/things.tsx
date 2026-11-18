@@ -39,7 +39,7 @@ async function limitsOf(client: Pick<RpeClient, "call">, chat: string): Promise<
     return value;
   };
   const takes = of("things.tidyRunMost")?.takes;
-  const least = takes !== undefined && "least" in takes ? takes.least : 1;
+  const least = (takes !== undefined && "least" in takes ? takes.least : undefined) ?? 1;
   return { editOps: whole("engine.editOps"), thingsMost: whole("taps.thingsMost"), tidyRunLeast: least };
 }
 
