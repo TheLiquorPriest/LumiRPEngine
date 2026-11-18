@@ -9,13 +9,14 @@ import { currentStage, isTerminal } from "../engine/tracks";
 import { hintsEarned, hintsOpened } from "../engine/visibility";
 import { objectiveLabel, objectiveWhen, type TrackDef, trackOwner } from "../shared/world";
 import type { Call, Reply, StateHit } from "../iface/kit";
-import { isFound, type Reading } from "../iface/reading";
+import { isFound, type Reading, type ReadingCall } from "../iface/reading";
 import { textOf } from "../iface/texts";
 import { storySliceOf } from "../story/fold";
 import { storyAt } from "../story/path";
 import { StoryRecord } from "../story/record";
 import { findQuestView, questLine, questRead, questRef, searchQuests } from "./read";
 import { openQuests, questSliceOf, questViews } from "./record";
+import { trailsOf, withTrails } from "./trail";
 import { QUESTS_DEFAULTS } from "./settings";
 
 /** The point of the tree the quests' level is asked at. */
@@ -46,12 +47,12 @@ function engineOf(reading: Reading, id: string, def: TrackDef): JsonObject {
   return out;
 }
 
-/** The quests as a reading sees them: the world's tracks and those opened in play, and which are open. */
-function questsOf(reading: Reading) {
+/** The quests as a reading sees them, as the pages see them: the world's tracks and those opened in play, each with the stages it was moved past and why, and which are open. */
+function questsOf(call: ReadingCall, reading: Reading) {
   const slice = questSliceOf(reading.state);
   const tracks = reading.doc.tracks;
   const standing = Object.fromEntries(Object.entries(reading.state.world.tracks).map(([id, t]) => [id, t.stage]));
-  const views = questViews(tracks, slice);
+  const views = withTrails(questViews(tracks, slice), tracks, trailsOf(call.deps.store, call.deps.env, call.scope.chat, reading.turn?.id ?? null, tracks, reading.state.world.tracks));
   const open = new Set(openQuests(tracks, slice, standing).map((q) => q.id));
   return { slice, tracks, standing, views, open };
 }
@@ -63,7 +64,7 @@ function questsOf(reading: Reading) {
 export function queryQuests(call: Call, reading: Reading, reply: Reply, said: unknown): Reply | null {
   if (typeof said !== "string" || said.trim() === "") return null;
   const asked = said.trim();
-  const { slice, tracks, standing, views, open } = questsOf(reading);
+  const { slice, tracks, standing, views, open } = questsOf(call, reading);
   if (asked.toLowerCase() === QUESTS_POINT) return reply.data({ quests: views.map((q) => questLine(q, open.has(q.id), standing, Object.hasOwn(tracks, q.id) && q.world ? { status: engineOf(reading, q.id, tracks[q.id] as TrackDef).status } : {})) });
   const prefixed = /^(?:quest|track):/.test(asked);
   // A name that is a place, person or thing is theirs; a quest goes by its own.
@@ -96,6 +97,6 @@ export function queryQuests(call: Call, reading: Reading, reply: Reply, said: un
 }
 
 /** The quests `world_search` finds for the words, as the search gives its hits. */
-export function searchedQuests(reading: Reading, words: string): StateHit[] {
-  return searchQuests(questsOf(reading).views, words).map((h) => ({ ref: h.ref, name: h.name, what: h.what, matched: h.matched }));
+export function searchedQuests(call: ReadingCall, reading: Reading, words: string): StateHit[] {
+  return searchQuests(questsOf(call, reading).views, words).map((h) => ({ ref: h.ref, name: h.name, what: h.what, matched: h.matched }));
 }

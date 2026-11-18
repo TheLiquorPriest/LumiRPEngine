@@ -4,6 +4,8 @@ import { questSliceOf } from "../../src/quests";
 import { holdersOf } from "../../src/quests/holders";
 import { STORY_OPS } from "../../src/story/fold";
 import { dataOf, rig, texts, world } from "../iface/rig";
+import { engine } from "../store/fixtures";
+import type { LedgerEvent } from "../../src/shared/ledger";
 
 const src = { from: "prose", message: "m-1" };
 
@@ -106,5 +108,20 @@ describe("the engine's reading of a quest and its stages", () => {
     expect(reading.stage(quest, "Search the reeds")).toMatchObject({ ref: `${quest.ref}/search`, name: "Search the reeds" });
     expect(reading.stage(quest, `${quest.ref}/ask`)).toMatchObject({ id: "ask" });
     expect(reading.stage(quest, "the third")).toEqual({ stages: [expect.objectContaining({ id: "ask" }), expect.objectContaining({ id: "search" })] });
+  });
+});
+
+describe("a quest the world defines, read by the Author", () => {
+  test("shows a stage it was moved past with how it ended and why, as the pages do, and the quest closed as its end stage ended it", async () => {
+    const t = await rig();
+    await t.writes.run(() => t.s.addChanges(t.turn.id, engine({ type: "stage", track: "errand", from: "asked", to: "done", why: "The letter reached the warden's hand." } as LedgerEvent)));
+    const letter = dataOf(await t.call("world_query", { at: "quest:errand" }));
+    expect((letter.stages as { stage: string; state: string | null; why: string | null }[]).map((s) => [s.stage, s.state, s.why])).toEqual([
+      ["asked", "met", "The letter reached the warden's hand."],
+      ["done", null, null],
+    ]);
+    expect(letter).toMatchObject({ status: "done" });
+    const level = dataOf(await t.call("world_query", { at: "quests" }));
+    expect((level.quests as { name: string; open: boolean }[]).find((q) => q.name === "The sealed letter")).toMatchObject({ open: false });
   });
 });

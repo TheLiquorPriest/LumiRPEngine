@@ -135,7 +135,7 @@ export const WORLD_SEARCH: ToolSpec = {
     // (S17Story, quests) A quest is found by the words of its name, objective and stages, beside what the state's search finds; the state's own kinds are asked of it alone.
     const stateKind = args.kind === undefined || args.kind === "quest" ? undefined : (args.kind as StateKind);
     const fromState = args.kind === "quest" ? [] : await call.deps.search.search(reading.state, call.deps.env, words, { ...(stateKind !== undefined ? { kind: stateKind } : {}), limit: Number.MAX_SAFE_INTEGER });
-    const found = [...fromState, ...(args.kind === undefined || args.kind === "quest" ? searchedQuests(reading, words) : [])];
+    const found = [...fromState, ...(args.kind === undefined || args.kind === "quest" ? searchedQuests(call, reading, words) : [])];
     if (found.length === 0) return reply.line("none_found", { words });
     const shown = Math.min(asked, call.settings.searchHits);
     if (found.length > shown) reply.line("more_found", { words, shown, more: found.length - shown });
