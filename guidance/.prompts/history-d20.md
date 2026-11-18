@@ -19,9 +19,9 @@ d20_part_limit: {{value}} at most ({{name}})
 d20_part_formula: {{value}} ({{formula}})
 d20_part_mod: {{value}}{{#type}} {{type}}{{/type}} {{from}}{{#note}} ({{note}}){{/note}}
 d20_part_mod_lost: {{value}}{{#type}} {{type}}{{/type}} {{from}}, not counted: a better {{type}} bonus counts
-d20_given: named by the GM
-ev_d20_check: {{who}} rolled {{what}}{{#take}} taking {{take}}{{/take}}: {{#natural}}{{natural}} on the die, {{/natural}}total {{total}}{{#parts}} ({{parts}}){{/parts}}{{#dc}} against {{dc}}{{/dc}}{{#vs}} against {{vs}}'s {{against}}{{/vs}}{{#aided}}; helped: {{aided}}{{/aided}}{{#outcome}}: {{outcome}}{{/outcome}}{{#notes}} ({{notes}}){{/notes}}.
-ev_d20_save: {{who}} made a {{save}} save: {{#natural}}{{natural}} on the die, {{/natural}}total {{total}}{{#parts}} ({{parts}}){{/parts}} against {{dc}}: {{outcome}}.
+d20_given: named in the call
+ev_d20_check: {{who}} {{#ruled}}used {{what}}: ruled {{outcome}}, nothing rolled{{/ruled}}{{^ruled}}rolled {{what}}{{#take}} taking {{take}}{{/take}}: {{#natural}}{{natural}} on the die, {{/natural}}total {{total}}{{#parts}} ({{parts}}){{/parts}}{{#dc}} against {{dc}}{{/dc}}{{#vs}} against {{vs}}'s {{against}}{{/vs}}{{#aided}}; helped: {{aided}}{{/aided}}{{#outcome}}: {{outcome}}{{/outcome}}{{/ruled}}{{#notes}} ({{notes}}){{/notes}}.
+ev_d20_save: {{who}} made a {{save}} save: {{#ruled}}ruled {{outcome}}, nothing rolled{{/ruled}}{{^ruled}}{{#natural}}{{natural}} on the die, {{/natural}}total {{total}}{{#parts}} ({{parts}}){{/parts}} against {{dc}}: {{outcome}}{{/ruled}}.
 ev_d20_attack: {{who}} attacked {{target}}{{#with}} with {{with}}{{/with}}: {{told}}{{#notes}} ({{notes}}){{/notes}}
 ev_d20_harm: {{who}} took {{amount}}{{#type}} {{type}}{{/type}}{{#nonlethal}} nonlethal{{/nonlethal}} harm{{#dice}} ({{dice}} rolled {{rolled}}){{/dice}}{{#by}} from {{by}}{{/by}}{{#why}}, {{why}}{{/why}}: {{told}}.
 ev_d20_heal: {{who}} was healed{{#dice}} ({{dice}} rolled {{rolled}}){{/dice}}{{#why}}, {{why}}{{/why}}: {{told}}.
@@ -49,7 +49,7 @@ d20_part_enhancement: {{value}} enhancement of {{from}}
 d20_part_unskilled: {{value}} not proficient with {{weapon}}
 d20_part_nonlethal: {{value}} to deal nonlethal harm
 d20_part_secondary: {{value}} as a lesser attack
-d20_part_range: {{value}} range ({{distance}} away, {{increments}} increments past the first)
+d20_part_range: {{value}} range ({{distance}} away, {{increments}} increment(s) past the first)
 d20_part_shot: {{value}} {{shot}} shot
 d20_untrained: {{skill}} is used only with ranks in it, and was rolled all the same
 d20_aid: {{who}} helped with {{total}} against {{dc}}, {{outcome}}
@@ -59,17 +59,17 @@ d20_attack_roll: {{natural}} on the die {{bonus}}{{#offset}} (a further attack, 
 d20_attack_ruled: ruled {{outcome}}
 d20_confirm: confirming {{natural}} on the die makes {{total}}: {{outcome}}
 d20_concealed: concealment's {{chance}} in a hundred came up {{rolled}}: a miss
-d20_damage: damage {{dice}} rolled {{rolled}}{{#times}} times {{times}}{{/times}}{{#strength}}, {{strength}} Strength{{/strength}}{{#bonus}}, {{bonus}} more{{/bonus}}: {{total}}
+d20_damage: damage {{dice}} rolled {{rolled}}{{#times}} (the dice {{times}} times){{/times}}{{#strength}}, {{strength}} Strength{{/strength}}{{#bonus}}, {{bonus}} more{{/bonus}}: {{total}}
 d20_reduction: {{amount}} stopped by {{from}}
 d20_resistance: {{amount}} resisted by {{from}}
-d20_rounds_spent: {{spent}} rounds spent, {{left}} left in the magazine
-d20_magazine_short: {{weapon}} held {{loaded}} of the {{spend}} rounds the shot spends
-d20_out_of_range: beyond the most a range of {{most}} reaches ({{distance}} away), rolled all the same
+d20_rounds_spent: {{spent}} round(s) spent, {{left}} left in the magazine
+d20_magazine_short: {{weapon}} held {{loaded}} of the {{spend}} round(s) the shot spends
+d20_out_of_range: {{distance}} away is beyond the most the range reaches ({{most}}), rolled all the same
 d20_no_shot: no shot {{said}} (the ruleset's are {{shots}}), so a single attack was made
 d20_shot_not_fired: {{weapon}} has no fire mode for a {{shot}} shot, fired all the same
-d20_shot_needs_trait: a {{shot}} shot takes {{trait}}, fired all the same
-d20_area_saved: {{who}} {{save}}, and took nothing
-d20_area_hit: {{who}} {{save}}; {{damage}}{{#stopped}}; {{stopped}}{{/stopped}}; {{harm}}
+d20_shot_needs_trait: a {{shot}} shot needs {{trait}}, which the shooter does not have, fired all the same
+d20_area_saved: {{who}} saved ({{save}}) and took nothing
+d20_area_hit: {{who}} did not save ({{save}}); {{damage}}{{#stopped}}; {{stopped}}{{/stopped}}; {{harm}}
 d20_harm_hp: hit points {{from}} to {{to}}
 d20_harm_nonlethal: nonlethal harm {{from}} to {{to}}
 d20_harm_temporary: {{absorbed}} off temporary hit points, {{left}} left
@@ -81,27 +81,27 @@ d20_heal_temporary: temporary hit points {{from}} to {{to}}
 d20_stabilized: made stable
 d20_nothing_changed: nothing changed
 d20_gauge_full: {{gauge}} {{from}} to {{to}}
-d20_length: {{#rounds}}for {{rounds}} rounds{{/rounds}}{{#minutes}}{{#rounds}}, {{/rounds}}for {{minutes}} minutes{{/minutes}}{{#save}}, until a {{save}} save against {{dc}}{{/save}}{{^rounds}}{{^minutes}}{{^save}}until it is taken off{{/save}}{{/minutes}}{{/rounds}}
+d20_length: {{#rounds}}for {{rounds}} round(s){{/rounds}}{{#minutes}}{{#rounds}}, {{/rounds}}for {{minutes}} minute(s){{/minutes}}{{#save}}, until a {{save}} save against {{dc}}{{/save}}{{^rounds}}{{^minutes}}{{^save}}until it is taken off{{/save}}{{/minutes}}{{/rounds}}
 d20_condition_on: is now {{condition}}{{#mods}} ({{mods}}){{/mods}} {{length}}{{#text}}: {{text}}{{/text}}
 d20_condition_off: is no longer {{condition}}
 d20_effect_on: is under {{label}} ({{mods}}) {{length}}
 d20_effect_off: is no longer under {{label}}
 d20_reloaded: rounds in the magazine {{from}} to {{to}} of {{magazine}}{{#short}}, {{short}} short: no more were carried{{/short}}
-d20_awarded: experience {{from}} to {{to}}{{#open}}; it reaches level {{level}}, so {{open}} level is open to take{{/open}}
-d20_advanced: level {{level}} of it, level {{total}} in all; {{kept}} hit points on a d{{die}} ({{way}}); {{points}} skill points to spend{{#feat}}; a feat to choose{{/feat}}{{#ability}}; an ability point to place{{/ability}}{{#features}}; it gives {{features}}{{/features}}
+d20_awarded: experience {{from}} to {{to}}{{#open}}; it reaches level {{level}}, so {{open}} more level(s) can be taken{{/open}}
+d20_advanced: level {{level}} of it, level {{total}} in all; {{kept}} hit points on a d{{die}} ({{way}}); {{points}} skill point(s) to spend{{#feat}}; a feat to choose{{/feat}}{{#ability}}; an ability point to place{{/ability}}{{#features}}; it gives {{features}}{{/features}}
 d20_trait_on: has {{trait}} now{{#text}}: {{text}}{{/text}}{{#unmet}} (it requires {{unmet}}, which does not hold: taken all the same){{/unmet}}
 d20_trait_off: no longer has {{trait}}
-d20_ranks: has {{to}} ranks in {{skill}} (from {{from}}); at most {{most}}{{#over}}, so this is over the most{{/over}}{{#class_skill}}, a class skill{{/class_skill}}; {{left}} skill points left
-d20_stat_as: {{fields}} values of the sheet and {{attacks}} attacks
+d20_ranks: has {{to}} rank(s) in {{skill}} (from {{from}}); at most {{most}}{{#over}}, so this is over the most{{/over}}{{#class_skill}}, a class skill{{/class_skill}}; {{left}} skill point(s) left
+d20_stat_as: {{fields}} value(s) of the sheet and {{attacks}} attack(s)
 d20_upkeep_stable: dying, rolled {{total}} and is stable
-d20_upkeep_lost: dying, rolled {{total}} and lost {{lost}} hit points, {{from}} to {{to}}
+d20_upkeep_lost: dying, rolled {{total}} and lost {{lost}} hit point(s), {{from}} to {{to}}
 d20_upkeep_saved: {{name}} ended on a save: {{save}}
 d20_upkeep_ended: {{name}} ran out
 d20_mod_to: {{value}}{{#type}} {{type}}{{/type}} to {{to}}
 d20_sheet_rounds: {{loaded}} of {{magazine}} rounds loaded
 d20_ruleset_skill: {{skill}} [{{id}}] ({{ability}}{{#trained}}, only with ranks in it{{/trained}}{{#armor}}, armour's check penalty applies{{/armor}})
-d20_ruleset_use: Every number of these rules comes from a sheet: read one with the tool sheet. A check, a save, an attack, harm, healing, a condition or an effect, a night's rest, a reload, experience, a level, a trait, ranks or a sheet from the bestiary is the action of that id, carried out with the world_apply operation act; it works the numbers out and answers with each one's parts. A difficulty is a number or one of the difficulties above.
-why_d20_no_rules: This world has no tabletop rules (its ruleset has no d20 part), so there is nothing to work this out by.
+d20_ruleset_use: Every number of these rules comes from a sheet: read one with the tool sheet. What the rules work out is done by their actions, each carried out with the world_apply operation act, which work the numbers out and answer with each one's parts: check, save, attack, harm, heal, condition, effect, d20_rest (a night's rest), reload, award (experience), advance (a level), trait, ranks and stat_as (a sheet from the bestiary). A difficulty is a number or one of the difficulties above.
+why_d20_no_rules: This world has no tabletop rules, so there is nothing to work this out by.
 why_d20_off: The tabletop rules are switched off in this chat; switch them on to use them.
 why_d20_no_skill: {{said}} is no skill or ability of this ruleset. Skills: {{skills}}.{{#abilities}} Abilities: {{abilities}}.{{/abilities}}
 why_d20_no_save: {{said}} is no save of this ruleset. Saves: {{saves}}.
