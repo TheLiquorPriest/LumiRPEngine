@@ -77,19 +77,25 @@ export interface StoreArea {
   reads?: Readonly<Record<string, (slice: Readonly<JsonObject>, args: JsonObject) => JsonValue>>;
 }
 
-/** The areas a store opened with, by name, and the operations they answer for. */
+/**
+ * The areas a store opened with, by name, and the operations they answer for. An operation is an area's when the area registered it
+ * by that name, never by its prefix alone: an area and a pack may share a name (the story area and the story pack), and the pack's
+ * events (`story.flag`) are the engine's. So that no name is ever both, an area's operation that is also an engine event's type is
+ * refused when the store opens (`isEvent`), as is an area named like the store's own operations.
+ */
 export class Areas {
   private readonly byId = new Map<string, StoreArea>();
 
-  constructor(areas: readonly StoreArea[]) {
+  constructor(areas: readonly StoreArea[], isEvent: (type: string) => boolean = () => false) {
     for (const a of areas) {
       if (this.byId.has(a.id)) throw new Error(`the area ${a.id} is registered twice`);
       if (a.id === "store" || a.id.includes(".")) throw new Error(`"${a.id}" cannot name an area`);
+      for (const name of Object.keys(a.ops)) if (isEvent(`${a.id}.${name}`)) throw new Error(`the area ${a.id}'s operation ${name} is named as an engine event, ${a.id}.${name}`);
       this.byId.set(a.id, a);
     }
   }
 
-  /** The area and operation an op names, or null for one no area answers for (an engine event or a store operation). */
+  /** The area and operation an op names, or null for one no area registered (an engine event or a store operation). */
   of(op: string): { area: StoreArea; name: string; def: AreaOp } | null {
     const dot = op.indexOf(".");
     if (dot <= 0) return null;
@@ -100,10 +106,9 @@ export class Areas {
     return def ? { area, name, def } : null;
   }
 
-  /** Whether an area answers for the op's prefix, whatever the operation. */
+  /** Whether an area registered the op by its name. */
   owns(op: string): boolean {
-    const dot = op.indexOf(".");
-    return dot > 0 && this.byId.has(op.slice(0, dot));
+    return this.of(op) !== null;
   }
 
   get(id: string): StoreArea | undefined {

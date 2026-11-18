@@ -445,7 +445,8 @@ export class Store {
     // A chat that names no world plays on the blank one, which the store answers for itself.
     const blank = blankWorld(options.registry);
     this.handlerFailed = options.handlerFailed ?? ((f: StoreFailure) => console.error(`RPE's store: the handler for ${f.op} failed on turn ${f.turn}:`, f.error));
-    this.env = { registry: options.registry, worlds: (revision) => (revision === BLANK_REVISION ? blank : options.worlds(revision)), areas: new Areas(options.areas ?? []) };
+    // An area's operation is never named as an engine event: the store opens on no such pair (`Areas`).
+    this.env = { registry: options.registry, worlds: (revision) => (revision === BLANK_REVISION ? blank : options.worlds(revision)), areas: new Areas(options.areas ?? [], (type) => options.registry.get(type) !== undefined) };
     this.snapshotEvery = Math.max(1, Math.floor(options.snapshotEvery ?? STORE_DEFAULTS.snapshotEvery));
     const whole = (n: number | undefined, d: number, least: number): number => Math.max(least, Math.floor(n ?? d));
     this.chatsHeld = options.chatsHeld === undefined ? STORE_DEFAULTS.chatsHeld : options.chatsHeld === null ? null : Math.max(1, Math.floor(options.chatsHeld));

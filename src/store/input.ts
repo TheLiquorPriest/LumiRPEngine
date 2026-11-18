@@ -26,9 +26,8 @@ export function checkChange(c: ChangeInput, index: number, areas?: Areas): void 
     throw new StoreInputError(`${at}: reports are [{ code, values? }]`);
   }
   const v = c.value;
-  if (areas?.owns(c.op)) {
-    const found = areas.of(c.op);
-    if (!found) throw new StoreInputError(`${at}: the area has no operation ${c.op}`);
+  const found = areas?.of(c.op);
+  if (found) {
     const why = found.def.check(v);
     if (why !== null) throw new StoreInputError(`${at}: ${why}`);
     return;
