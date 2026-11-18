@@ -55,9 +55,20 @@ export function say(name: string, fields?: LineFields): string {
   return source?.line(name, fields) ?? "";
 }
 
+/** What a process that is built without lines throws, in its own words, where `say` finds none (`withoutLines`); null: the default. */
+let missing: ((name: string) => Error) | null = null;
+
+/**
+ * For a process that ships no lines on purpose (the outside command line, which is not in this build): what `say` throws there is this error, in that
+ * process's own words, instead of the default, which names the line for a developer. It still throws: such a process must not say empty words.
+ */
+export function withoutLines(error: (name: string) => Error): void {
+  missing = error;
+}
+
 function unloaded(name: string): string {
   if (typeof document !== "undefined") return "";
-  throw new Error(`RPE has no words loaded on this thread, so it cannot say the line "${name}": the lines of guidance/.prompts/history-*.md were never given to it.`);
+  throw missing?.(name) ?? new Error(`RPE has no words loaded on this thread, so it cannot say the line "${name}": the lines of guidance/.prompts/history-*.md were never given to it.`);
 }
 
 /** Words joined as a list is read ("a", "a and b", "a, b and c"): the one connecting word is the line `list_and`'s, the commas are the code's. */

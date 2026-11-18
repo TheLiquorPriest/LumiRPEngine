@@ -14,11 +14,17 @@ import type { WorldDoc } from "../shared/world";
 import { ENGINE_VERSION, EXPORT_FORMAT } from "../shared/world";
 import { checkWorldDay, isWorldDoc, lintWorld, migrateWorld, newBlankWorld, playtestStart, playtestTurn, shapeIssues, type DayFindings, type PlaytestStep, type PlaytestTurn } from "../engine/authoring";
 import { buildGmWorld, buildGmWorldPart, gmWorldPartCount, type GmPick, type GmWorldPart } from "../engine/gm-view";
+import { withoutLines } from "../engine/lines";
 import { readPass } from "../engine/read-pass";
 import { createRegistry, type Registry } from "../engine/registry-impl";
 import type { WorldState } from "../engine/state";
 import { planTurn, postTurn, timelapseIntent } from "../engine/turn";
 import { ALL_PACKS } from "../packs/index";
+import { ToolError } from "./args";
+
+// This command line is not in this build (it is the outside command line, set aside until a later build): nothing here loads the engine's lines of words, so
+// what an offline command is asked to word stops and says so, in plain words, and never prints a finding with no sentence.
+withoutLines(() => new ToolError("This command line is not in this build: it returns with a later build of LumiRPEngine, and until then its checks, playtests and migrations cannot word what they find. Use RPE's own pages for now: Build's Check world and Playtest do the same."));
 
 export { checkSchema, ENGINE_VERSION, EXPORT_FORMAT, MAP_SCHEMA, pathText };
 /** Shape checks for an untrusted document, before `migrate` and `lint` read it (the backend's patches are checked the same way). */
