@@ -278,6 +278,34 @@ Where the world uses the grid system, you stand on a square: tap a square of you
 
 In the chat, **World map** and **Map** open the same map over the chat.
 
+## Time, needs and routines
+
+A chat has one clock. With a world, it runs on the world's calendar, and the HUD, the scene card and **Story → Calendar** show it. A chat with no world has a clock with no date until the story sets one: nobody chose its start, so no date is shown, and times are given as how long from now.
+
+**Time passes when an agent passes it.** The Author, or the GM it asks, passes the time the story took: a conversation is minutes, a meal an hour, a night's sleep a night. In a fight on a room grid, time moves in rounds of a few seconds. Nothing moves the clock by itself between turns, and a turn takes no set time of its own.
+
+**What time brings due.** When time passes, the engine lists what fell due in that span near the scene: where people's routines now put them, who arrives, a need that crossed its point, an effect that ended, something the Author scheduled, a payment, a change in the weather or in prices. It applies none of it. Whoever runs the turn decides each item (it happened as scheduled, differently, or not at all) and records what happened. An item nobody decides did not happen: someone listed at school at 8:00 is still at home. For a long skip, the Author asks ahead what will come due, passes the time a stretch at a time, says what the people off stage did meanwhile, and records totals for the routine remainder (meals, wages, rent). All of this is written in the shipped skill `time` (`.skills/time/SKILL.md`), which you can change like any file.
+
+**Your controls.**
+
+- **Pause clock** and **Resume clock** (in the World details, the actions sheet, the composer's action bar and **Story → Calendar**) pause the clock for the scene. The pause is a mark, not a lock: an agent that moves the clock while it is paused is told so, and the move stands.
+- **✎ on the time** sets the clock (see [Fixing a value](#fixing-a-value)). Moving it on decides nothing about what the time in between brought: that is the Author's, at the next turn.
+- **Timelapse**, in the actions sheet in the chat: **For** (lengths, with **Custom**), **Until** (the next morning or another part of the day, your next shift, the end of a trip, a date), **Follow my routine** for your own character, and **Interrupts for this run**. What you pick goes with your next message: the Author is told the length or the target and your choices, and plays the stretch of time.
+
+### Needs
+
+From Cast life 4, people get hungry, tired, lonely and bored: hunger, fatigue, social and fun, each from 0 (met) to 100 (urgent). They rise with the clock. They come down only when the engine records what met them, one of the world's actions: **eat** for hunger, **sleep** for fatigue, **chat_with** for social, **rest** for fun. Passing the minutes of a meal does not meet hunger. As shipped, the `time` skill tells the agents to record a meal, a night's sleep or a rest with its action, so that the need comes down.
+
+**Me → Needs** shows your own. A need that crosses its point is listed among what falls due. A world sets each need in **Build → Needs**: how fast it grows (**Grows by … points an hour, out of 100**), the point it is pressing from (the field reads **Told to the narrator from …**), and its alert point (**An alert from …**), with an **On** or **Off** for each and **Use the defaults**. Anyone can have a **bed** (the person's **Bed** field in Build): **sleep** takes them to it.
+
+### Routines and schedules
+
+A **routine** is what someone can be relied on to do on an ordinary day: opening the shop at seven, a walk by the lake on a fair weekend. A **schedule** is a commitment with set hours, such as a shift or school. A world's routines and schedules are written in Build (see [Routines in Build](#routines-in-build)).
+
+They are defaults, never a script. They show what someone would usually do: on a person's sheet in **People** (**Today**, **Their usual day**), and among what falls due when time passes. Nobody moves by their routine until an agent records the move. What the story established always comes first.
+
+An agent can change one character's routine in a chat (the tool `gm_routine_edit`), as a change of that turn, without touching the world.
+
 ## GM mode
 
 **GM** mode shows everything the engine knows, including secrets, truths you haven't discovered and people who were removed, and lets you change any of it. It wears a gold frame, so you can tell at a glance that you're behind the curtain. Looking never changes your chat; only the edits you save do. In RPE its places are the World, Places, Quests, Cast and Story pages, each behind its own spoiler gate.
@@ -520,78 +548,6 @@ Before the reply starts, the engine works on the turn: it reads your message, pl
 
 A Lumiverse chat branch carries the world with it. Records that belong to the branch you're on apply; changes made on another branch stay stored but do nothing until you go back. When you delete a reply, the settings changes recorded on it (realism, time controls, Upgrade) move to the nearest earlier reply, and its other-branch changes are dropped with it.
 
-## Time controls
-
-Time is deterministic: nothing here needs the AI.
-
-Every turn has an **elapsed time**. It is one of: the length of a Timelapse, the length of the action you took (a drive, a rest), or the **default tick** of the current scene type multiplied by the **time scale**. The **+n min** chip in the reply's receipt shows it, the scene card in **Play → Now** says how long the last turn took, and the narrator is told it in the Scene section: "No time passes this turn." while the clock is paused, "This turn took 20 min." where the world tells only the part of the day (Calendar 1), and from when to when where it tells the clock ("This turn took 30 min, from 6:15 AM to 6:45 AM."), so the Scene's time reads as when your turn's actions are done. These lines are yours to word, in **Settings → Agents → Prompts → Final output → Elapsed time**. The narrator is told to give no time of day or date that contradicts it, and to let any time the reply tells pass on from it.
-
-Every text that tells a model the time of your turn tells the same clock as the Scene: your character's local time where the world shows time zones (Calendar 3), else the world's own. That holds for the narrator's Scene, a Timelapse's "Time passed" line in the Outcome, the facts the helper steps read, a step's `{{clock}}`, and an agent turn's director and read.
-
-The clock holds rules for 28 time zones (the Calendar part's time zone field lists them). A name that is no time zone at all is refused when you save it, and the world's checks list it as an error. A real zone the clock does not hold (Asia/Dubai, say) saves, with a warning on the field and in the checks: times there read as the world's own time until the clock holds it.
-
-### Ticks, scale and pause
-
-- **Tick per scene type.** The time a turn takes when nothing else sets it, before the time scale. The defaults are **conversation 2 minutes**, **action 1 minute**, **exploration 10 minutes** and **downtime 30 minutes**. Worlds can add scene types. A tick is a whole number of minutes: a fractional one, such as a world's half minute, plays as the nearest whole minute, and one under half a minute as no time at all (with **Use my settings** on, a world's own scene type that your settings don't list keeps the world's tick as written). The time scale can still make a turn's time a fraction of a minute ("This turn took 0.5 min."). The scene type is set by actions and by places, or by a ✎ fix.
-- **Time scale.** A multiplier on default ticks only, from 0.25× to 10×, default 1×; a tick after scaling is never longer than a day. Action durations, travel times and Timelapses stay exact. When it isn't 1×, the status line, the pill and the scene card show it.
-- **Clock pause.** While paused for the scene, no time elapses (neither ticks nor action durations) until you resume it or the scene changes. If a scene change started the clock again, **Pause clock** pauses it for the new scene. The status line and the pill show the pause icon, and the scene card says **Clock paused**. A Timelapse asks you to resume first. A time jump the narration describes still applies (see [When the story jumps ahead](#when-the-story-jumps-ahead)). Pause and resume with **Pause clock** / **Resume clock** in the World sheet or the pill's details, in the Actions sheet's header, on the input bar, or in **Play → Story → Calendar**.
-
-Where to change them:
-
-- **Settings → Time** fills in, for **new chats**, what a world's own time defaults leave out (always the time scale); with **Use my settings instead of a world's defaults for new chats** on, it replaces them.
-- **GM → This chat → Time** changes **this chat**. **Play → Story → Calendar** has a button that takes you there.
-
-Both have the same sections: **Default tick per scene type** (with **Time scale**), **Timelapse interrupts**, **Speed through** and **Montage and limits**; **Settings → Time** also has [Skips without asking](#skips-without-asking). A change saves as you make it; there is nothing to apply.
-
-A change in a running chat applies from the next turn forward, is recorded like any other change, and respects swipes and branches. Earlier turns keep their recorded times. Changing Settings later leaves existing chats alone, except for **Skips without asking**.
-
-### Skips without asking
-
-**Settings → Time → Skips without asking** is how long a skip may run inside one turn before the engine asks you first. It covers a length of time you type ("for the next three hours", "OOC: skip ahead two hours") and a jump the reply tells ("three hours later"). It is a day by default; set it in minutes, from 0 (every such skip asks) up to 366 days, and the line under it reads the minutes back as a span ("That's 1 d"). A longer skip doesn't run: it becomes a chip that runs it as a Timelapse when you tap it (**Timelapse** for a skip you typed, **Run timelapse** for one the reply tells). An *until* you type ("until dinner", "until my next shift"), a day and time you name, a Timelapse you start yourself and a ✎ fix of the clock never ask. It is a setting of yours, not a chat's: every chat follows it from its next turn, and turns already played keep the time they took.
-
-### Timelapse
-
-A Timelapse skips ahead while the world keeps living: bills fall due, you commute to work, NPCs go about their days. Open it from the **Timelapse…** button in the input bar (it opens the Actions sheet on its **Timelapse** tab), from **Timelapse** in **Play → Now** and **Timelapse…** in **Play → Story → Calendar**, or from a chip. The sheet has a **For** row of duration buttons (with a **Custom** length in minutes, hours, days or weeks), an **Until** list, and **Interrupts for this run**, folded away until you open it.
-
-**Follow my routine**, below the targets, says what your own character does while the time passes: on, they go about their usual day (work, meals, sleep, as their routine and schedules have it); off, they stay where the story has them while the world goes on. It starts at the world's default, which is off unless the world's **Routines and the story** says otherwise, and holds for that Timelapse only.
-
-**Targets** are either a duration (minutes, hours, days, weeks) or *until* something: next morning or another part of the day, your next shift or commitment, arrival (when the current trip ends), a date and time, a quest reaching a stage, or "until something happens".
-
-**Interrupts.** While the time passes, some things should stop it. Each kind has a policy: **stop**, **note** or **ignore**. The kinds are invitations, bills and declines, incidents, quest and rule triggers, NPC arrivals at your place, overdue loans, needs thresholds and weather alerts. The defaults:
-
-| Policy | Kinds |
-|---|---|
-| **stop** | invitations, declines, incidents, quest triggers, arrivals |
-| **note** | bills and paydays, rule triggers, overdue loans |
-| **ignore** | needs thresholds and weather alerts |
-
-The first *stop* you could see ends the Timelapse at the end of that time slot; something hidden from you never stops it, so a stop never gives a secret away. *Notes* go into the Montage. The same world and the same policy always stop in the same place, and you can override the policy for a single Timelapse in the sheet.
-
-**The safety cap.** One Timelapse segment is limited, by default, to **600 agent-days** (the people who are simulated in detail, plus you, times the days) and **5,000 events**; you can lower either but not raise it. A longer request ends at the last whole time slot inside the cap, and a **Continue timelapse** chip carries on from there. Segments add up exactly as if you had done it in one go, as long as nothing else changes the world between them. One segment reaches at most 366 days ahead.
-
-**NPC choices** during a Timelapse use the numbers only; the AI isn't called. A Timelapse that can't run at all (the clock is paused, its time has passed, or there is no upcoming shift or commitment to run to) simulates nothing, and the turn's changes say why ("Timelapse not run: …"). One whose time lies more than 366 days ahead runs at most 366 days and offers **Continue timelapse** for the rest.
-
-### Montage
-
-A Timelapse turn is narrated from a **Montage**: the key events the point-of-view character would know (about people and places you have met; the weather counts when it is your region's), plus totals (money in and out per account at your Money level, distance travelled, anything you can see that crossed a band, such as how someone feels or a need going from calm to frantic, and net changes to your own and your belongings' other numbers; a field shown in bands is told by its band, never its number). A field that changed several times in one batch, such as an hourly temperature, is listed once at its latest value. The narrator is told to narrate the interval from the Montage and not add events; when a short Timelapse has nothing for the Montage, the Montage is left out and the narrator is told only not to add events. The Outline never points the narrator at a section it doesn't have that turn. The Journal keeps the full list, with spans worded in days, hours or minutes. Under **Montage and limits** you can choose the **Montage granularity**: **Key events** (the default), **Per day** or **Per week**; it is shortened to fit the budget.
-
-### Speed through and Timelapse offers
-
-For long activities (sleep, a work shift, travel, waiting), the engine can skip the dull part. When an activity that has a policy has more time left than its threshold (**When longer than (min)**), one of two things happens, per activity type (**Speed through** in **Settings → Time**, or in **GM → This chat → Time** for this chat):
-
-- **Offer a timelapse** (the default): the turn takes only the action's own time, and a chip offers a Timelapse to the end of the activity: the fast way through it. What your character does decides whether the activity goes on. Doing something else ends it, and nothing it would have met is met after: an action that sets what they're doing ("I get up", "I make breakfast"), or going somewhere. Talking doesn't: after "I go to bed", "Goodnight, Rosa" leaves them falling asleep, so a narrated night, any Timelapse or turns that reach its end still see it out.
-- **Run it**: the turn runs that Timelapse itself, with your interrupt policy and a Montage.
-
-When you say how long ("I sleep for eight hours", "I rest for three hours"), the activity lasts that long, and the same policy decides: a length under the threshold passes within the turn ("sleep for 20 minutes" is a 20-minute turn, "rest for an hour" an hour's), and a longer one takes the action's own few minutes, then offers (or runs) a Timelapse to its end. That Timelapse keeps you doing what you said until it ends: your routine doesn't get you up for dinner.
-
-New settings give every listed activity a policy (offer, past 30 minutes), and a world can set its own for any activity; settings you saved with an earlier version keep the policies they had and aren't filled in. An activity without one (in a chat started before it had one, a world's own activity that the world leaves unset, or one your saved settings don't list) is never sped through, however long it lasts: when you said how long, the turn runs on to its end; otherwise the turn takes only the action's own time, and the rest of the activity passes in the turns that follow. Its row says *never sped through: its time passes in your turns* and shows no mode or threshold, and picking either gives it a policy.
-
-When the narration implies an activity the engine hadn't seen start, you always get the offer chip, because the engine never starts a generation by itself. An activity with no more time left than the threshold gets no offer either: its time passes in your turns, the same way. The offer reads "Timelapse to 07:00 (8 h 55 min)?" (with the weekday when it is another day); the **Timelapse** button on it runs the Timelapse. A threshold can be anything from a minute to a week (1 to 10,080 on the stepper); a threshold outside that, such as a 0 an earlier version let you save, reads as the nearest end.
-
-### When the story jumps ahead
-
-If the reply says "three days later", the engine can read that as a time jump. The reading counts all the time the reply says passed in the turn, and only the part *beyond* what the turn already used is added: after a 15-minute action, "an hour later" adds 45 minutes, and a reply that tells less time than the action took adds none. It adds up to [Skips without asking](#skips-without-asking) at once (a day unless you change it), and runs the whole interval so the world catches up. A longer jump, or one that can't finish, becomes a chip offering to **Run timelapse** instead; one of more than 366 days runs at most 366 days at a time, each step ending with **Continue timelapse**, so no time the story tells is dropped. The time advance has its own mode (see [Extraction modes](#extraction-modes)): on **auto**, its starting mode, it applies by itself; on **confirm** a chip asks first, and **Apply** runs it. A fight doesn't stop one, nor does a paused clock: the fight and the pause hold the turn's own time, not time the reply says passed.
-
 ## Realism
 
 Realism is how much of life the engine keeps track of. It is set **per domain**, from level 0 (off) to level 4 (simulation), and the story never needs it: quests and secrets work at any setting. Use as much or as little as your story enjoys.
@@ -707,72 +663,6 @@ A character at a low level can still deal with one at a high level: each side re
 ### Other people's money
 
 From Money level 3, the people in the world live on their money as you do. They are paid, they pay their bills, and every Monday they pay a week of living costs that follows their wealth band (a world can set its own amounts; the Modern US data prices them from a weekly grocery basket), so their balances go down as well as up. A bill paid to someone in the world, like your rent to your landlord, lands in that person's own account. The first morning their bills run, the engine opens their accounts with the balances the world gives them. You see all of this only in [GM mode](#everyone-elses-money).
-
-## Routines and schedules
-
-People in a world have days of their own. A **routine** is what someone can be relied on to do on an ordinary day: opening the shop at seven, coffee somewhere three mornings a week, a walk by the lake on a fair weekend. Its blocks can be **fixed** (at a set time), **flexible** (somewhere in a window, or a few times a week) or **optional** (only likely, and the first thing a busy day drops), and someone can have no routine at all. A **schedule** is a commitment with set hours, such as a shift or school. A world's routines can rest on its lore or a character's sheet, and say so.
-
-Routines and schedules are defaults the world relies on, never a script the story has to follow. Where someone's day comes from, most binding first:
-
-1. **What the story established:** where the narration, your actions or the GM put them, a trip, a plan under way, and what the GM says they mean to do.
-2. **Their commitments:** schedules, appointments and trips.
-3. **Their plans** from the story.
-4. **Their routine.**
-5. **Their basic needs:** sleep and meals.
-6. **Chores, their agenda's steps and things to get back** that the world grounds.
-
-Nothing else fills a day: no outing, party or invitation that nothing in the world or the story grounds. The story always leads the people in it. What someone's routine and their own schedules are to the engine is their **role**, which the world sets for each level of the [fidelity ladder](#the-fidelity-ladder):
-
-- **Informative**, the default for Live, Near and Far characters: their routine and schedules never move or occupy them. The story and context-aware planning (plans the story made, the GM's intent) decide what they do, and their routine is only context their mind and the narrator may weigh.
-- **Enforced**, the default for Background characters: the planner lives their routine and their schedules run, the story still first. Off screen, this is where routines matter most.
-- **Off**: their routine isn't used at all, not even as context.
-
-**In a time skip** (a Timelapse, a typed span or a skip the reply narrates), someone whose routine is informative spends the time as the world picks for their level, or the GM for them:
-
-- **Stay put**: they stay where the story has them.
-- **Follow their routine**: they go about their usual routine for the skip, as an enforced one would be lived, except while a story plan, a trip, the GM's intent or an appointment covers them.
-- **Planned by the model**, the default for Live, Near and Far: at the skip's start one helper call plans everyone it covers, from their routine, their plans and the story so far: a few blocks each, for what they do other than simply being at home asleep, and each lives what it planned for them, from the skip's first minute for whatever is under way as it starts. Whenever no block covers them, they keep to their basic needs as their day has them: home to sleep at night, and their meals (one their day has at work they have where they are; it never sends them to work). So does someone it planned nothing for, or everyone when the call fails, runs out of time or is cut off. The call is the **Time-skip beats** step's (**Settings → Steps and connections**), off by default: while it's off no call is made and everyone it would plan keeps to their basic needs, and the GM view's skip note says why. A replay or a swipe reads the recorded plan rather than asking again, and a skip continued inside the planned time reuses it. **Follow their routine** is Background's default.
-
-An enforced routine is always lived through a skip, and an off one never. Either way the story comes first: no one is moved into or out of a scene with you, and someone arriving where you are is only noted.
-
-Whatever the role, a routine or a schedule never moves anyone out of a scene with you, and no routine interrupts play or stops a time skip. The world's own schedules (weather, prices, bills, paydays, opening hours) and money run whatever the roles say: a job still pays on its schedule when the worker's routine only informs. Your own character follows its routine through a Timelapse only when you turn on its **Follow my routine** ([Timelapse](#timelapse)); a span you spend doing something ("for the next two hours, I sort the stock"), a skip the reply narrates or a time you fix with ✎ leaves you where the story has you.
-
-**Tuning.** A world sets how routines and the story share the day in **Build → Routines → Routines and the story**:
-
-- **What a routine is, by closeness:** the role of each level, **Live**, **Near**, **Far** and **Background**: **Informative**, **Enforced** or **Off**.
-- **In a time skip:** for each level, how those whose routine is informative spend a skip: **Stay put**, **Follow their routine** or **Planned by the model**.
-- **The narrator:** whether the narrator is told the usual routines of the people in the scene that your character can see and whose routine isn't off (on by default): at the end of **People**, a line or two each ("Maya usually: weekdays, working the counter at Daybreak Café 07:00–15:00"), as background it may use or ignore, never a fact to state. They go in only while the section budget has room, never carry a private block or anything your character can't see, and no helper reads them as fact. For a character whose routine only informs, this and their own mind's **Their usual routine** are the only ways their routine reaches the story.
-- **Timelapse from the Actions sheet:** where **Follow my routine** starts (off by default).
-- **How strictly people keep to routine** against the story, for those whose routine is enforced: **Story first** (someone the story put somewhere stays there until the story or the GM releases them), **Balanced** (the default: until their night, with Background characters keeping their routine) or **Routine first** (their routine's next block takes them back).
-- **Invitations** from routine blocks that ask company along: **Off**, **To the player only** (the default) or **Between everyone**. Plans the story makes, and the GM, invite whatever this says.
-- **Sociability:** **Reserved**, **Usual** or **Outgoing**, how fast people's social and fun needs grow.
-- **How plans bend routine:** which plans the story makes take time from work and school.
-
-In a chat, the GM can change any of this for one character without touching the world: their routine's role, how they spend a time skip, whether and how strictly they keep their routine, one block, or one schedule, each with its Undo.
-
-Where you meet them:
-
-- **Play → People**: someone's usual day, as far as you may know it, and why each block is there ([People](#people)).
-- **GM → Routines**: everyone's routine, schedules and day as this chat has them, with what the story changed and the GM's changes ([Routines in GM mode](#routines-in-gm-mode)).
-- **Build → Routines**: the world's routines and their settings ([Routines in Build](#routines-in-build)), and routines proposed from the world's lore ([Proposing routines from lore](#proposing-routines-from-lore)). A routine Build can't read, or a setting it doesn't take, isn't saved: the message names the field to fix. Outside agents edit them the same way, with the same checks ([MCP.md](MCP.md)).
-
-### Needs
-
-From Cast life 4 your character gets hungry, tired, lonely and bored, each from 0 (met) to 100 (urgent). Once a need is pressing (60 by default) the narrator is told of it ("Alex Rivera (you): hungry") and **Me → Needs** marks it; at its alert point (80) it raises the needs alert in a timelapse, which by default is ignored ([Interrupts](#timelapse)).
-
-What meets a need meets it when it's done, so the need grows again from then:
-
-- **Eating** meets hunger at the end of the meal (half an hour, or as long as you say: "I eat for an hour").
-- **Resting** meets fun at the end of the rest (half an hour, or as long as you say: "I rest for an hour" takes an hour; a longer rest goes to [Speed through](#speed-through-and-timelapse-offers)).
-- **Company**: every turn you spend with someone you know (anyone you've met, there with you as the turn ends) meets your social need, so a day spent with friends keeps you from getting lonely. **Chatting** with someone meets it at the end of the chat (a quarter of an hour, or "I talk to Rosa for two hours"), or at once while the clock is paused.
-- **An activity a turn gives you** (a world's own "Have dinner", a short nap or rest) meets its need when it ends within that turn, and **Not an action?** takes that back with the action. One that runs on goes on through the turns that follow and meets its need when one of them sees it out, unless you've done something else or gone somewhere first.
-- **Sleep** meets fatigue as you sleep through it: **Go to bed** sleeps until 07:00, then the Speed through or Timelapse offer rests you when the night ends; so does any time skip your routine sleeps through. A nap you give a length ("I sleep for 20 minutes") lasts that long and rests you as it ends: a short one within the turn, a long one through its Timelapse. Going to bed and getting straight up again rests no one: **Get up** ("I get out of bed"), anything else that sets what you're doing, or going somewhere ends the night. Saying goodnight doesn't get you up.
-- **Through a time skip**, what you live during the skip meets your needs: your meals and sleep, time out, and time with someone you know. The time you played before it counts only as you played it.
-- **What only the narration describes meets nothing.** A meal, a nap or a night that the reply narrates, without your character eating, resting or going to bed through your own message, doesn't meet a need: say it ("I eat", "I go to bed") or use **Eat**, **Rest** or **Go to bed**. LumiRPEngine doesn't yet read meals or sleep from the reply.
-
-**Beds.** Anyone can have a **bed**: a place, or an item such as a cot, wherever it stands. Their nights at home happen there, and Go to bed takes your character to yours. Set it in Build (the person's **Bed** field) or in GM mode (the person's page, **Where it is → Bed**). A bed in a secret place stays secret.
-
-**Needs settings** (**Build → Needs**): each need under its own name, with what meets it, an **On**/**Off** in its header, and each number said in words with its value: **Grows by 4 points an hour, out of 100**, **Told to the narrator from 60** and **An alert from 80**. Under them, how long the need takes from met to each point at that rate ("told after 15 h and alerts after 20 h"); a need switched off shows no numbers. A world without settings plays as before: hunger 4, fatigue 3, social 1.5 and fun 1 an hour, told from 60 and alerting from 80. **Use the defaults** puts them back. A setting the engine can't read is refused when you save it, and **Check world** warns about an alert set below the point its need is told from.
 
 ## How checks are decided
 
