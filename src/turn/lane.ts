@@ -24,11 +24,12 @@ import { SETTINGS as RPH_SETTINGS } from "rp-harness/helpers";
 import { type LinesPart, loadGuidance } from "../app/guidance";
 import type { AgentRef, AttachMoment, Clock, Environment, GapQuery, Harness, HostTool, JsonValue, RunScope, Scope, StoresPort, UserScope, UserSessionScope } from "rp-harness/contract";
 import type { ChatReads } from "../adapter/lumiverse/chat";
+import { forkOf } from "../adapter/lumiverse/events";
 import type { Hints } from "../adapter/lumiverse/hint";
 import type { IndexFeed } from "../adapter/lumiverse/index-feed";
 import type { LumiverseReads } from "../adapter/lumiverse/reads";
 import type { Stores } from "../adapter/lumiverse/stores";
-import { type App, LIVE_JOBS } from "../app";
+import { type App, LIVE_JOBS, RouteError } from "../app";
 import { portTexts, readConfig } from "../app/config-read";
 import { type BookReader, CAST_PLAYER_MIND, castFacts, CastRecord, castTools, chatLine, findCharacter, MemorySearch, playerMindOf, type SourceReader } from "../cast";
 import { castAt } from "../cast/path";
@@ -44,7 +45,7 @@ import { madeOf } from "../lore/made";
 import { ALL_PACKS } from "../packs/index";
 import { MeaningIndex } from "../search/meaning";
 import { hashJson } from "../shared/hash";
-import { openStore, STATE_SEARCH_SETTING_DEFS, StateIndex, type Store, STORE_SETTING_DEFS, storedWorlds, timeDue, WORLD_DOCS_SETTING_DEFS } from "../store";
+import { type ChatRow, openStore, STATE_SEARCH_SETTING_DEFS, StateIndex, type Store, STORE_SETTING_DEFS, storedWorlds, timeDue, WORLD_DOCS_SETTING_DEFS } from "../store";
 import type { StoreFailure } from "../store/store";
 import type { FoldJob, StoreBrief } from "../store/away";
 import { STORY_FACT_SETTING_DEFS, storyFacts, storyTools } from "../story";
@@ -53,7 +54,7 @@ import { Approvals } from "./approvals";
 import { type EventsDeps, givenViews, turnEvents } from "./events";
 import { FactsRegistry, turnFacts } from "./facts";
 import { JOB_KIND } from "./jobs";
-import { kvStore, servedUser, storeUsers } from "./kv";
+import { kvStore, servedUser, storeUsers, type Writes } from "./kv";
 import { PROMPT_MAP_FILE, PROMPT_MAP_FILENAME, type TurnPrompts, turnPrompts } from "./prompt";
 import { TurnMarks } from "./marks";
 import { FOLDER_KIND } from "./live-routes";
@@ -132,6 +133,50 @@ function placingJobs(harness: Harness, place: (user: string, chat: string) => Pr
       answer: (user, id, answer) => jobs.answer(user, id, answer),
       tagCheck: (user, connection) => jobs.tagCheck(user, connection),
       tagChecks: (user) => jobs.tagChecks(user),
+    },
+  };
+}
+
+/** How RPE takes a chat on: its row in the store, and that and its folders. */
+export interface ChatTaker {
+  /** The chat's row, made the first time anything names the chat. */
+  take(user: string, chat: string): Promise<ChatRow>;
+  /** The chat taken on, and its folders, laid again should one have gone. */
+  place(user: string, chat: string): Promise<ChatFolders>;
+}
+
+/**
+ * The one way RPE takes a chat on (plan §4.2: "A reply in a chat RPE has never seen: the chat is created on the spot. Nothing has to be
+ * prepared first"): whatever names the chat first (a page's route, its first turn, a job started in it, a write at its levels) makes its
+ * row in the store by what Lumiverse says of it, a branch sharing the tree of the chat it was made from where RPE holds that one, and
+ * its folders by Lumiverse's names for it (`chatPlacer`). A chat the store holds is as it is, whether or not Lumiverse still has it. A
+ * chat Lumiverse does not have is refused in words, and so is a chat RPE does not hold while it cannot reach Lumiverse to look it up.
+ */
+export function chatTaker(d: { store: Store; writes: Writes; chats: TreeChats; reads: () => LumiverseReads | null }): ChatTaker {
+  const folders = chatPlacer(d.chats, d.reads);
+  const take = async (user: string, chat: string): Promise<ChatRow> => {
+    const store = d.store.user(user);
+    const held = store.chat(chat);
+    if (held !== null) return held;
+    const reads = d.reads();
+    if (reads === null) throw new RouteError(503, "RPE is not connected to Lumiverse, so it cannot look this chat up yet: try again once it is.");
+    const lv = await reads.chat(chat);
+    if (lv === null) throw new RouteError(404, "Lumiverse has no such chat of yours, so RPE holds nothing of it.");
+    const fork = await forkOf(reads, chat);
+    const at = lv.metadata.branch_at_message;
+    await d.writes.run(() => {
+      if (store.chat(chat) !== null) return;
+      if (fork !== null && store.chat(fork.from) !== null) store.branchChat({ id: chat, from: fork.from, map: fork.ids, at: typeof at === "string" ? at : null });
+      else store.createChat({ id: chat });
+    }, "taking a chat on");
+    await folders(user, chat);
+    return store.chat(chat) as ChatRow;
+  };
+  return {
+    take,
+    place: async (user, chat) => {
+      await take(user, chat);
+      return await folders(user, chat);
     },
   };
 }
@@ -257,9 +302,11 @@ export interface Turns {
   env: Environment;
   facts: FactsRegistry;
   files: TreeFiles;
-  /** The tree's record of where each chat's folders are; `place` is the one way a chat gets them (`chatPlacer`), by whatever writes at its levels first. */
+  /** The tree's record of where each chat's folders are; `place` is the one way a chat gets them (`chatTaker`), by whatever writes at its levels first. */
   chats: TreeChats;
-  place(user: string, chat: string): Promise<ChatFolders>;
+  /** The one way RPE takes a chat on, by whatever names it first (`chatTaker`): its row in the store, and with `place` its folders too. */
+  take: ChatTaker["take"];
+  place: ChatTaker["place"];
   prompts: TurnPrompts;
   runs: Runs;
   /** What he asks for beside his words, waiting or kept with the turn that answered it. */
@@ -303,8 +350,8 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   const clock = options.clock ?? MACHINE_CLOCK;
   const { store } = options;
   const chats = new TreeChats(app.db, app.writes, app.paths.files);
-  // A chat's folders are made by whatever needs them first, by Lumiverse's own names for it: its first turn, a job started in it, a write at its levels.
-  const place = chatPlacer(chats, () => options.lumiverse()?.reads ?? null);
+  // A chat is taken on by whatever names it first, by what Lumiverse says of it: its row in the store and its folders, by Lumiverse's own names.
+  const { take, place } = chatTaker({ store, writes: app.writes, chats, reads: () => options.lumiverse()?.reads ?? null });
   const notes = new TreeNotes({ files: app.paths.files, db: app.db, writes: app.writes, chats });
   const suggestions = new TreeSuggestions({ db: app.db, writes: app.writes, now: () => clock.now(), limits: (user, chat) => chats.suggestionLimits(user, chat) });
   // A file written with a turn named is told on the chat's live socket, so the Live page shows the turn's folder as it is written.
@@ -633,5 +680,5 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   }
   const secretMarks = (at: LoreScope): Promise<LinesPart | undefined> => secretMarkLines(loadGuidance(files, chatLevels(at)));
   const given = (scope: Scope, agent: AgentRef, refs: readonly string[], moment: AttachMoment) => givenViews(eventsDeps, joined(scope), agent, refs, moment);
-  return { lane, store, harness, env, facts, files, chats, place, prompts, runs, requests, approvals, writes: app.writes, marks, trace, lore, secretSettings, secretMarks, loreIndex, notes, suggestions, projection, meaning, stateIndex, given, sources, placeSources, castKnowledge };
+  return { lane, store, harness, env, facts, files, chats, take, place, prompts, runs, requests, approvals, writes: app.writes, marks, trace, lore, secretSettings, secretMarks, loreIndex, notes, suggestions, projection, meaning, stateIndex, given, sources, placeSources, castKnowledge };
 }

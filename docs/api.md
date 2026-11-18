@@ -63,7 +63,7 @@ The models the provider endpoint offers to the request's key: those of the conne
 
 ### `GET /api/v1/chats`
 
-The chats RPE played, the most recently played first, then the chats its store holds that it has not played (a migration's), by name.
+The chats RPE played, the most recently played first, then the chats its store holds that it has not played (one a migration carried, one a world was attached to, one a page or a job named before its first turn), by name.
 
 | | |
 |---|---|

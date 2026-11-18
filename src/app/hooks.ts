@@ -25,6 +25,9 @@ export interface DoorFills {}
 /** Lists what the user's files name that runs a command or calls out, as the files stand now, so that the registry holds each as waiting before anything reads it. */
 export type ListFilesHook = () => Promise<void>;
 
+/** Takes on the chat a route names in its path (`/api/v1/chats/:chat/…`) before the route answers: a chat Lumiverse does not have is refused in words. */
+export type ChatNamedHook = (user: string, chat: string) => Promise<void>;
+
 /** What one area adds to the hooks of the others. */
 export interface Fills {
   /** A view given to an agent by name, which the turn lane's `views` hook asks of every area in turn. */
@@ -33,6 +36,8 @@ export interface Fills {
   readonly jobTools?: JobToolsHook;
   /** Looks at the files for what runs a command or calls out, which the app asks before it reads the list of switches. */
   readonly listFiles?: ListFilesHook;
+  /** Takes on a chat a route names, which the server asks before every such route answers. One area fills it. */
+  readonly chatNamed?: ChatNamedHook;
   /** The door's lanes this area fills. */
   readonly door?: DoorFills;
 }
@@ -45,6 +50,8 @@ export interface Hooks {
   readonly jobTools: JobToolsHook;
   /** Every area's look at the files, once each, as the files stand now. */
   readonly listFiles: ListFilesHook;
+  /** The one area's taking on of a chat a route names; absent where no area fills it, and nothing is done first. */
+  readonly chatNamed?: ChatNamedHook;
   /** The door's lanes, each as the one area that fills it gave it; a lane no area fills is absent. */
   readonly door: Readonly<DoorFills>;
 }
@@ -56,17 +63,22 @@ interface Giving {
   readonly settings?: readonly Setting[];
 }
 
-/** Every area's fills as one set of hooks; a lane of the door that two areas fill is an error that names both. */
+/** Every area's fills as one set of hooks; a lane of the door, or the taking on of a chat, that two areas fill is an error that names both. */
 export function gatherHooks(areas: readonly Giving[]): Hooks {
   const views: ViewHook[] = [];
   const tools: JobToolsHook[] = [];
   const listers: ListFilesHook[] = [];
   const door: Record<string, unknown> = {};
   const filledBy = new Map<string, string>();
+  let chatNamed: { by: string; hook: ChatNamedHook } | null = null;
   for (const area of areas) {
     if (area.fills?.views !== undefined) views.push(area.fills.views);
     if (area.fills?.jobTools !== undefined) tools.push(area.fills.jobTools);
     if (area.fills?.listFiles !== undefined) listers.push(area.fills.listFiles);
+    if (area.fills?.chatNamed !== undefined) {
+      if (chatNamed !== null) throw new Error(`A chat a route names is taken on by two areas, ${chatNamed.by} and ${area.name}: one area takes it on.`);
+      chatNamed = { by: area.name, hook: area.fills.chatNamed };
+    }
     for (const [lane, fill] of Object.entries(area.fills?.door ?? {})) {
       if (fill === undefined) continue;
       const first = filledBy.get(lane);
@@ -87,6 +99,7 @@ export function gatherHooks(areas: readonly Giving[]): Hooks {
     listFiles: async () => {
       await Promise.all(listers.map((look) => look()));
     },
+    ...(chatNamed === null ? {} : { chatNamed: chatNamed.hook }),
     door: door as DoorFills,
   };
 }

@@ -347,11 +347,12 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       path: "/api/v1/chats",
       access: "page",
       group: "chats",
-      does: "The chats RPE played, the most recently played first, then the chats its store holds that it has not played (a migration's), by name.",
+      does: "The chats RPE played, the most recently played first, then the chats its store holds that it has not played (one a migration carried, one a world was attached to, one a page or a job named before its first turn), by name.",
       reply: chatsReply,
       handle: async ({ user }) => {
-        // The chats played on RPE, newest first; then each chat the store holds that RPE has played no turn of (one a migration imported),
-        // by name. Played is the store's one test (`playedIn`): a chat whose only run of RPE's was a Settle now on a carried turn is not.
+        // The chats played on RPE, newest first; then each chat the store holds that RPE has played no turn of (one a migration imported,
+        // one taken on when something named it before its first turn), by name. Played is the store's one test (`playedIn`): a chat
+        // whose only run of RPE's was a Settle now on a carried turn is not.
         // Each says whether it was played, and whether the store has a world for it, so a page offers a world's panels only there.
         const store = turns.store.user(user);
         const played = turns.runs.chats(user).filter((c) => store.playedIn(c.chat));

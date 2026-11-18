@@ -22,7 +22,7 @@
 import type { Database } from "bun:sqlite";
 import { type Fields, type Guidance, type LinesPart, loadGuidance, type TemplatePart } from "../app/guidance";
 import type { Clock, ContextBlock, DefinitionsApi, FilesPort, Harness, JobState, JsonObject, Log, ModelLimits, ReplyError, ReplySink, Scope, SinceItem, TurnRequest, Usage } from "rp-harness/contract";
-import { forkOf, reconcile, type ChatChange, type ChatChanges, type ShownSwipe } from "../adapter/lumiverse/events";
+import { reconcile, type ChatChange, type ChatChanges, type ShownSwipe } from "../adapter/lumiverse/events";
 import type { Feedback } from "../adapter/lumiverse/feedback";
 import type { TaggedTurn, TurnPlayer } from "../adapter/lumiverse/provider";
 import type { LumiverseReads, LvStep } from "../adapter/lumiverse/reads";
@@ -189,7 +189,7 @@ export interface TurnLaneDeps {
   writes: Writes;
   files: TreeFiles;
   chats: TreeChats;
-  /** The one way a chat gets its folders (`chatPlacer`): its first turn places it, unless a job or a write placed it first. */
+  /** The one way a chat is taken on (`chatTaker`): its row in the store and its folders, made by its first turn unless a page, a job or a write named it first. */
   place(user: string, chat: string): Promise<ChatFolders>;
   prompts: TurnPrompts;
   lore: Lore;
@@ -513,8 +513,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       lap("queue");
       if (!(await waited(unlessAborted(intake.turn, signal), intake.waiting))) return;
 
-      // The chat, and its folders.
-      await this.#chat(reads, user, chat);
+      // The chat taken on, and its folders.
+      await this.#d.place(user, chat);
       lap("chat");
       // What Lumiverse saved for generations whose end was not recorded (`#catchUp`), once every change heard so far is recorded: the
       // turn before's end among them, so waiting for those is a wait for the turn before's work, kept apart from the steps.
@@ -1023,7 +1023,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const intake = this.#queue(user, chat);
     try {
       if (intake.waiting || this.#d.runs.ofChat(user, chat).length > 0) return await refused("settle_running");
-      await this.#chat(reads, user, chat);
+      await this.#d.place(user, chat);
       await this.#catchUp(reads, user, chat);
       const heardUpTo = this.#d.store.user(user).heardCount(chat);
       const steps = await reads.path(chat);
@@ -1246,22 +1246,6 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       if (this.#intakes.get(key) === tail) this.#intakes.delete(key);
     });
     return { waiting: before !== undefined, turn: before ?? Promise.resolve(), done: () => mine.resolve() };
-  }
-
-  /** The chat in the store: made on the spot the first time, sharing its source's tree when it is a fork of a chat RPE knows; and its folders, unless something placed it before its first turn. */
-  async #chat(reads: LumiverseReads, user: string, chat: string): Promise<void> {
-    const store = this.#d.store.user(user);
-    if (store.chat(chat) === null) {
-      const lv = await reads.chat(chat);
-      const fork = await forkOf(reads, chat);
-      const at = lv?.metadata.branch_at_message;
-      await this.#d.writes.run(() => {
-        if (store.chat(chat) !== null) return;
-        if (fork !== null && store.chat(fork.from) !== null) store.branchChat({ id: chat, from: fork.from, map: fork.ids, at: typeof at === "string" ? at : null });
-        else store.createChat({ id: chat });
-      }, "making a chat");
-    }
-    await this.#d.place(user, chat);
   }
 
   /**

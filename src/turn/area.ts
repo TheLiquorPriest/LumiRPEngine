@@ -112,6 +112,10 @@ export function turnArea(takes: TurnTakes): TurnArea {
     settings: [...harnessSettings(), ...TURN_SETTINGS, ...Object.values(WEB_SETTING_DEFS)],
     liveKinds: [REQUESTS_KIND, FOLDER_KIND, JOB_KIND],
     fills: {
+      // A chat a route names is taken on before the route answers (`chatTaker`): its row and its folders, by what Lumiverse says of it.
+      chatNamed: async (user, chat) => {
+        await made().take(user, chat);
+      },
       door: {
         turns: { play: (turn, out, signal) => made().lane.play(turn, out, signal) },
         changes: { changed: (change) => made().lane.changed(change), reopened: () => made().lane.reopened() },

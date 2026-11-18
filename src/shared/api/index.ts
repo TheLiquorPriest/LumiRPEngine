@@ -4318,7 +4318,7 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
-  /** The chats RPE played, the most recently played first, then the chats its store holds that it has not played (a migration's), by name. */
+  /** The chats RPE played, the most recently played first, then the chats its store holds that it has not played (one a migration carried, one a world was attached to, one a page or a job named before its first turn), by name. */
   "GET /api/v1/chats": {
     params: Record<string, never>;
     query: Record<string, never>;
