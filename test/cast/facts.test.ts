@@ -1,14 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import type { AgentRef, JsonObject, ToolResult } from "rp-harness/contract";
 import { factProblems } from "rp-harness/testing/kit";
-import { CAST_FACT_DEFS, castFacts } from "../../src/cast/facts";
+import { CAST_FACT_DEFS, castFacts, type JobRead } from "../../src/cast/facts";
+import { castAt } from "../../src/cast/path";
 import { CAST_DEFAULTS } from "../../src/cast/kit";
 import { turnFacts } from "../../src/turn/facts";
 import { charactersOf } from "../../src/cast/record";
 import { CHAT, dataOf, openBench, USER } from "./rig";
 
 /** No scene recorded for any turn, and the cast's settings as shipped. */
-const UNSCENED = { scenes: async () => ({ of: new Map(), closed: new Map() }), settings: async () => CAST_DEFAULTS };
+const UNSCENED = { scenes: async () => ({ of: new Map(), closed: new Map() }), settings: async () => CAST_DEFAULTS, jobs: async () => [] };
 
 describe("stage.unperceived and path.unperceived", () => {
   test("count exactly the characters on stage with no perception of the turn, by casting with their names, this turn and earlier ones", async () => {
@@ -174,6 +175,7 @@ describe("what waits for a character's own agent", () => {
       settings: async () => CAST_DEFAULTS,
       onStage: async (_scope, turns) => new Map(turns.flatMap((t) => (stage.has(t) ? [[t, { who: stage.get(t) ?? [], how: "scene" as const }] as const] : []))),
       scenes: async (_scope, turns) => ({ of: new Map(turns.map((t) => [t, scenes.get(t) ?? null])), closed }),
+      jobs: async () => [],
     });
     const read = async (turn: string) => {
       const values = await facts.read({ user: USER, chat: CHAT, session: "s-1", turn }, ["stage.untaken", "path.untaken", "path.untaken.turns", "scene.untaken"]);
@@ -276,5 +278,52 @@ describe("what waits for a character's own agent", () => {
         ],
       },
     });
+  });
+
+  test("a perception waits from the turn it was written in, not the turn it is of; one a job of its own agent has in hand waits not, unless that job failed", async () => {
+    const b = await openBench();
+    // Every write of the bench is made at the moment 7: a job started at 7 or later has what was written before it in hand.
+    const jobs: JobRead[] = [];
+    const facts = castFacts({ ...UNSCENED, jobs: async () => jobs, store: b.t.store, sources: b.t.shelf.reader, playerMind: async () => false, onStage: async (_scope, turns) => new Map(turns.map((t) => [t, { who: ["Bram"], how: "scene" as const }])) });
+    const read = async (turn: string) => {
+      const values = await facts.read({ user: USER, chat: CHAT, session: "s-1", turn }, ["stage.untaken", "path.untaken", "path.untaken.turns"]);
+      expect(factProblems(CAST_FACT_DEFS, values)).toEqual([]);
+      return values;
+    };
+    const first = await b.t.begin();
+    await b.call("cast_update", { operations: [{ op: "cast", who: "Bram", as: "principal" }] }, first.id);
+    await b.t.tie(first);
+    await b.t.tie(await b.t.begin());
+
+    // Two turns later, a perception of the first turn is written, as one owed for an earlier turn is.
+    const third = await b.t.begin();
+    const message = castAt(b.t.s, CHAT, null).replyOf(first.id);
+    expect((await b.call("perceive", { perceptions: [{ who: "Bram", reach: "whole", content: "What was said at the lamp, told late.", message }] }, third.id)).error).toBeUndefined();
+    let values = await read(third.id);
+    // Written this turn: it waits on stage now, and is none of an earlier turn's.
+    expect(values["stage.untaken"]).toMatchObject({ count: 1, names: ["Bram"], fields: { held: [{ name: "Bram", perceptions: 1, since: null, turns: 0 }] } });
+    expect([values["path.untaken"]?.count, values["path.untaken.turns"]?.count]).toEqual([0, 0]);
+    await b.t.tie(third);
+    const fourth = await b.t.begin();
+    // A turn later it is one turn late, counted from the turn that wrote it, not the three since the turn it is of.
+    values = await read(fourth.id);
+    expect(values["path.untaken"]).toMatchObject({ count: 1, names: ["Bram"], fields: { held: [{ name: "Bram", perceptions: 1, since: castAt(b.t.s, CHAT, null).replyOf(third.id), turns: 1 }] } });
+    expect(values["path.untaken.turns"]?.count).toBe(1);
+
+    // A job of his own agent started after it was written has it in hand while it runs, and once done until the turn after it ended.
+    jobs.push({ plays: "Bram", state: "running", started: 7, ended: null, turn: fourth.id });
+    values = await read(fourth.id);
+    expect([values["stage.untaken"]?.count, values["path.untaken"]?.count, values["path.untaken.turns"]?.count]).toEqual([0, 0, 0]);
+    jobs[0] = { plays: "Bram", state: "done", started: 7, ended: Number.MAX_SAFE_INTEGER, turn: fourth.id };
+    expect((await read(fourth.id))["path.untaken"]?.count).toBe(0);
+    // One started before it was written has it not; one that failed has nothing in hand; another character's job is not his.
+    for (const job of [
+      { plays: "Bram", state: "running" as const, started: 6, ended: null, turn: fourth.id },
+      { plays: "Bram", state: "failed" as const, started: 7, ended: 8, turn: fourth.id },
+      { plays: "Odile", state: "running" as const, started: 7, ended: null, turn: fourth.id },
+    ]) {
+      jobs[0] = job;
+      expect((await read(fourth.id))["path.untaken"]?.count).toBe(1);
+    }
   });
 });

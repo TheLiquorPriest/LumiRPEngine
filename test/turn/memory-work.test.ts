@@ -118,8 +118,8 @@ test("right after the reply, the Author delegates to the character definition fo
 });
 
 test("as a job, the Author starts the character definition for the principal it voiced: what its agent writes is taken in from the first turn that begins after the job ended", async () => {
-  // The run ends with her perception still waiting (the job's writes count from the next turn), so the reminder fires once, and the Author says a job has it.
-  const author: Answer[] = [...VOICED, calling("job_start", { agent: "character", plays: WREN, brief: BRIEF }), { pieces: [{ text: "Started." }] }, { pieces: [{ text: "A job is taking them in." }] }, replying("The lamp turns.")];
+  // The run ends with her perception still waiting for the job (its writes count from the next turn), which has it in hand: nothing reminds the Author of it.
+  const author: Answer[] = [...VOICED, calling("job_start", { agent: "character", plays: WREN, brief: BRIEF }), { pieces: [{ text: "Started." }] }, replying("The lamp turns.")];
   // Who has no perception of the second turn is not this test's: its reminder is off.
   const b = await openTurnBed({ off: ["rules/unsourced", "rules/perceptions-owed"], answers: routed(author, [TAKING_IN, { pieces: [{ text: "Taken in." }] }]) });
   beds.push(b);
@@ -128,7 +128,7 @@ test("as a job, the Author starts the character definition for the principal it 
   // The job ran on its own, tied to the turn, and ended done.
   const job = await b.until("the job to end", async () => (await b.turns.harness.jobs.list({ user: USER, chat: CHAT })).jobs.find((j) => j.ended !== undefined));
   expect(job).toMatchObject({ agent: "character", state: "done", scope: { turn: first } });
-  expect(fired(b, first)).toEqual(["memory-owed"]);
+  expect(fired(b, first)).toEqual([]);
   // The turn it was started in reads none of it; the first turn begun after it ended reads it all, and nothing reminds anyone of it.
   expect(wrenAt(b, first)).toMatchObject({ memories: [], untaken: wrenAt(b, first).given });
   const next = await play(b, "I wait.");

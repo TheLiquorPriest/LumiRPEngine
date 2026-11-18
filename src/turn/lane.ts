@@ -22,7 +22,7 @@ import { join } from "node:path";
 import { createHarness, type CreateHarnessOptions } from "rp-harness";
 import { SETTINGS as RPH_SETTINGS } from "rp-harness/helpers";
 import { type LinesPart, loadGuidance } from "../app/guidance";
-import type { AgentRef, AttachMoment, Clock, Environment, GapQuery, Harness, HostTool, JsonValue, RunScope, Scope, StoresPort, UserScope, UserSessionScope } from "rp-harness/contract";
+import type { AgentRef, AttachMoment, Clock, Environment, GapQuery, Harness, HostTool, JobState, JobView, JsonValue, RunScope, Scope, StoresPort, UserScope, UserSessionScope } from "rp-harness/contract";
 import type { ChatReads } from "../adapter/lumiverse/chat";
 import { forkOf } from "../adapter/lumiverse/events";
 import type { Hints } from "../adapter/lumiverse/hint";
@@ -541,6 +541,20 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
       sources,
       onStage: async ({ user, chat }, turns) => new Map([...stagesAt(store, user, chat, turns)].map(([turn, stage]) => [turn, { who: stage.who, how: stage.how }])),
       scenes: async ({ user, chat }, turns, at) => ({ of: scenesOf(store, user, chat, turns), closed: closedScenesAt(store, user, chat, at) }),
+      // The chat's jobs that may have a character's perceptions in hand: those not ended, every one; and those done, ended since `since`.
+      jobs: async ({ user, chat }, since) => {
+        const out: JobView[] = [];
+        for (const states of [["queued", "held", "running", "asking"], ["done"]] satisfies JobState[][]) {
+          if (states[0] === "done" && since === Number.POSITIVE_INFINITY) continue;
+          let cursor: string | undefined;
+          do {
+            const page = await harness.jobs.list({ user, chat, states, ...(cursor !== undefined ? { cursor } : {}) });
+            out.push(...page.jobs.filter((j) => states[0] !== "done" || (j.ended ?? 0) >= since));
+            cursor = page.next;
+          } while (cursor !== undefined);
+        }
+        return out.map((j) => ({ plays: j.plays ?? null, state: j.state, started: j.started, ended: j.ended ?? null, turn: j.scope.turn ?? null }));
+      },
       playerMind: async (scope) => playerMindOf(readConfig(await portTexts(files, scope), app.log, [CAST_PLAYER_MIND])),
       settings: async (scope) => (await turnSettings(files, scope, app.log)).cast,
     }),
