@@ -2,7 +2,8 @@
 // for the character the calling agent plays (`AgentRef.plays`), on the call's turn, so a swipe takes
 // back what it did. Every word of a memory is the character's agent's; code keeps the rows and does
 // the arithmetic (`memory.ts`): recalling strengthens what it brings back, dreaming settles what is
-// still short term into long term and raises or lowers the weights the character names. When the
+// still short term into long term and raises or lowers the weights the character names, and each dream
+// is kept as a row of the character's own, so when it last dreamt is read from the record. When the
 // memory work runs, and what the character makes of anything, is guidance. The user's setting for
 // the story lane is held by the harness's gate before a call of a tool that writes runs; `recall` is
 // a read, and the strengthening it records is a change of that lane, made unless the setting is Never.
@@ -18,7 +19,7 @@ import type { Provenance } from "../iface/source";
 import { isRecord } from "../shared/json";
 import { type CastCall, type CastClock, type CastSettings, type CastToolSpec, datedAt, readingOr } from "./kit";
 import { dimmedOf, memoriesNow, type MemoryNow, strongestFirst, touches, weightOf } from "./memory";
-import { type CastWrite, writeCast } from "./record";
+import { type CastWrite, dreamItemId, writeCast } from "./record";
 import { CHARACTER_STAMP, PROVENANCE_READS, readSource, sourceLines, stampOn } from "./source";
 import { listOf, nearOwn, notAnItem, ownIds, readFields, type Self, selfOr, strangers, unchecked } from "./self";
 import { CAST_LANE, ignoredOf, type ItemRead, type Kind, leftOut, needed, type Reads, refused } from "./update";
@@ -320,7 +321,9 @@ async function dream(args: JsonObject, call: CastCall): Promise<Reply> {
   }
   const dreamWrites = writes.length;
   for (const c of connections) writes.push({ character: self.character.id, part: "memory", item: null, value: { ...c.fields, kind: "connection" }, ...stampOn(c.it.prov) });
-  const rows = await call.deps.writes.run(() => writeCast(call.deps.store, self.writer, writes), call.tool);
+  // The dream itself is kept as a row of the character's, at the story time of the turn, whatever it moved: when the character last dreamt is read from it.
+  const mark: CastWrite = { character: self.character.id, part: "dream", item: dreamItemId(self.character.id), value: { moved: dreamWrites, connections: connections.length }, stamp: CHARACTER_STAMP };
+  const rows = (await call.deps.writes.run(() => writeCast(call.deps.store, self.writer, [...writes, mark]), call.tool)).slice(0, writes.length);
   for (const x of items) leftOut(reply, x, readsOf(x.op ?? "").reads);
   // The dream names where it comes from only when it wrote something of its own: what it settled, dimmed or raised.
   sourceLines(reply, dreamWrites > 0 ? items : items.filter((x) => x !== it));

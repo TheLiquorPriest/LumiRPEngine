@@ -56,6 +56,8 @@ export const CAST_DEFAULTS = Object.freeze({
   recallItems: 10,
   /** The scale a relationship's dimensions are read and reported against: from minus this to this (`src/packs/relationships/core/index.ts:41-45` keeps today's regard on it). */
   dimensionScale: 100,
+  /** Story hours after a character last dreamt (or first perceived, if it never has) from which the fact `dream.due` counts it, slept or not: "days pass for it" (plan §7.4). */
+  dreamAfterHours: 24,
 });
 
 export type CastSettings = { -readonly [K in keyof typeof CAST_DEFAULTS]: number };
@@ -80,6 +82,7 @@ export const CAST_SETTING_DEFS = {
   comesToMindTokens: { key: "cast.comesToMindTokens", default: CAST_DEFAULTS.comesToMindTokens, takes: { type: "whole", least: 0 }, perConnection: false, name: "What comes to mind", about: "Tokens of a character's memories that come to mind for a scene.", effect: "turn", row: "What comes to mind" },
   recallItems: { key: "cast.recallItems", default: CAST_DEFAULTS.recallItems, takes: { type: "whole", least: 1 }, perConnection: false, name: "Memories one recall brings back", about: "The most memories one recall brings back; the answer says how many more touch the cue.", effect: "turn" },
   dimensionScale: { key: "cast.dimensionScale", default: CAST_DEFAULTS.dimensionScale, takes: { type: "number", least: 1 }, perConnection: false, name: "Scale of a relationship's dimensions", about: "The scale a relationship's trust, warmth, respect and fear are read and reported against: from minus this to this. A value past it is kept as sent, and said to be past.", effect: "turn" },
+  dreamAfterHours: { key: "cast.dreamAfterHours", default: CAST_DEFAULTS.dreamAfterHours, takes: { type: "number", least: 1 }, perConnection: false, name: "Story hours before a dream is due", about: "Story hours after a character last dreamt (or first perceived something, if it never has) from which the fact dream.due counts it, whether or not it slept; a sleep begun since its last dream counts it sooner. Only a rule that names the fact reads it.", effect: "turn" },
 } as const satisfies NumberSettings<keyof CastSettings>;
 
 /**

@@ -3,7 +3,8 @@
 // and the stage says it was not recorded. The first horizon entry's place is never used. The cast's facts count by it, the views an
 // agent is given of the character it plays take its people, its place and its things as what is present, and what comes to mind is
 // cued by them. Nothing is guessed from words but the scene's place, which is found the way the space pack finds a place named in
-// play (`findPlaces`). The same scene names the stretch of the chat an agent can ask for as `scene` (`chat:history[scene]`).
+// play (`findPlaces`). The same scene names the stretch of the chat an agent can ask for as `scene` (`chat:history[scene]`). The cast's
+// facts of what waits for a character's own agent read which scene each turn was played in and which scenes are closed at a reading.
 
 import type { HistoryRange } from "rp-harness/contract";
 import { isGone, kindIs } from "../engine/scope";
@@ -114,6 +115,47 @@ export function stagesAt(store: Store, user: string, chat: string, turns: readon
     left.delete(deepest);
   }
   return out;
+}
+
+/** A scene as the cast's facts name it: its id, and its title as the Author wrote it (null: none). */
+export interface SceneRef {
+  id: string;
+  title: string | null;
+}
+
+function sceneRef(scene: { id: string; fields: Readonly<Record<string, unknown>> }): SceneRef {
+  const title = scene.fields.title;
+  return { id: scene.id, title: typeof title === "string" && title.trim() !== "" ? title : null };
+}
+
+/**
+ * The scene each of `turns` was played in, read from the state the store folded at that turn as `stagesAt` reads it: the scene the record
+ * holds open there, or the one that turn closed; null for a turn played in none. A turn its own reading does not hold is left out.
+ */
+export function scenesOf(store: Store, user: string, chat: string, turns: readonly string[]): Map<string, SceneRef | null> {
+  const out = new Map<string, SceneRef | null>();
+  const u = store.user(user);
+  if (u.chat(chat) === null) return out;
+  const left = new Set(turns);
+  for (const deepest of [...turns].reverse()) {
+    if (!left.has(deepest)) continue;
+    const at = storyAt(u, chat, deepest);
+    for (const turn of at.turns) {
+      if (!left.delete(turn)) continue;
+      const scene = new StoryRecord(at, storySliceOf(u.stateAt(turn).state)).current("scene");
+      out.set(turn, scene === null || (scene.closedBy !== null && scene.closedBy !== turn) ? null : sceneRef(scene));
+    }
+    left.delete(deepest);
+  }
+  return out;
+}
+
+/** The scenes the story record holds closed at a reading of the chat (at `turn`, with what it has recorded; at the head for null), by id. */
+export function closedScenesAt(store: Store, user: string, chat: string, turn: string | null): Map<string, SceneRef> {
+  const u = store.user(user);
+  if (u.chat(chat) === null) return new Map();
+  const record = StoryRecord.read(store, user, storyAt(u, chat, turn));
+  return new Map(record.of("scene").flatMap((scene) => (scene.closedBy === null ? [] : [[scene.id, sceneRef(scene)] as const])));
 }
 
 /** What a stage puts in mind for what comes to a character's mind: its place and the things there, by name. */

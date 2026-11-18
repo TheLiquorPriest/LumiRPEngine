@@ -319,6 +319,7 @@ function kindOf(item: CastItem): CastKind | null {
     case "casting":
     case "away":
     case "edit":
+    case "dream":
       return null;
     case "mind":
       return item.fields.kind === IMPORTED_KIND ? "files" : "mind";

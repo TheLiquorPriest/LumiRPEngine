@@ -5177,7 +5177,7 @@ export interface EntryItems {
 The parts of a character's record kept as rows tied to turns, the casting aside.
 
 ```ts
-export type EntryPart = "growth" | "mind" | "relationship" | "knowledge" | "history" | "perception" | "memory" | "away" | "edit";
+export type EntryPart = "growth" | "mind" | "relationship" | "knowledge" | "history" | "perception" | "memory" | "away" | "edit" | "dream";
 ```
 
 ### `EntryRow`

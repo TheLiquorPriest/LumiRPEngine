@@ -66,7 +66,7 @@ import { STORE_AREAS } from "./store-areas";
 import { RunTimes } from "./spans";
 import { globalConfig, turnSettings } from "./settings";
 import { SinceKept } from "./since";
-import { stagesAt } from "./stage";
+import { closedScenesAt, scenesOf, stagesAt } from "./stage";
 import { guidanceTexts } from "./texts";
 import { type TurnTrace, turnTrace } from "./trace";
 import { type MigratedSource, NO_SESSION, turnErrorWords, TurnLane } from "./turns";
@@ -527,13 +527,15 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     return holdersOf(known.items, (id) => known.nameOf(id), quest);
   };
   // Who was on stage at each turn the cast counts, and how that was read (R-56): the open scene there and who the state places in its place; with none recorded, who the state places where the owner's character stands; with neither, nobody.
-  // Whether his own character has a mind is his setting for the chat (`cast.playerMind`), read at each use.
+  // The scene each turn was played in, and those closed at the reading, from the story record. Whether his own character has a mind is his setting for the chat (`cast.playerMind`), read at each use; the cast's settings are the chat's.
   facts.add(
     castFacts({
       store,
       sources,
       onStage: async ({ user, chat }, turns) => new Map([...stagesAt(store, user, chat, turns)].map(([turn, stage]) => [turn, { who: stage.who, how: stage.how }])),
+      scenes: async ({ user, chat }, turns, at) => ({ of: scenesOf(store, user, chat, turns), closed: closedScenesAt(store, user, chat, at) }),
       playerMind: async (scope) => playerMindOf(readConfig(await portTexts(files, scope), app.log, [CAST_PLAYER_MIND])),
+      settings: async (scope) => (await turnSettings(files, scope, app.log)).cast,
     }),
   );
   // What time brings due over the store's states: listed by the world state's due section and by an answer that lets time pass.

@@ -362,6 +362,9 @@ export const castingItemId = (character: string): string => `casting:${character
 /** The id of the one item that keeps where a character is away and what it means to do there. */
 export const awayItemId = (character: string): string => `away:${character}`;
 
+/** The id of the one item that keeps each dream a character had: a row per dream, at the story time of the dream. */
+export const dreamItemId = (character: string): string => `dream:${character}`;
+
 /** The id of the one relationship item a character has toward a person: by the reference `towardOf` gives (a character's id, a world entity, or a name key). */
 export const relationshipItemId = (character: string, toward: string): string => `rel:${character}:${nameKey(toward)}`;
 

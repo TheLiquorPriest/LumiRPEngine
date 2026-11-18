@@ -853,7 +853,7 @@ export interface EntryItems {
 }
 
 /** The parts of a character's record kept as rows tied to turns, the casting aside. */
-export type EntryPart = "growth" | "mind" | "relationship" | "knowledge" | "history" | "perception" | "memory" | "away" | "edit";
+export type EntryPart = "growth" | "mind" | "relationship" | "knowledge" | "history" | "perception" | "memory" | "away" | "edit" | "dream";
 
 /** An entry of a character's record as it stands on the path read: its fields, story time of its first write, its first write, whether it is struck, and every write of it. */
 export interface EntryRow {
