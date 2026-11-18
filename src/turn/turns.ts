@@ -438,6 +438,8 @@ interface Found {
   notAppliedBudget: number;
   /** What each finished job changed, listed while it fits (`briefing.jobTokens`); the rest counted. */
   jobBudget: number;
+  /** Characters of each finished job's report told (`briefing.jobReportChars`); past them, `job_read` reads the rest. */
+  jobReport: number;
   /** A text's tokens as the model layer counts them (`tokenCount`). */
   tokens: (text: string) => number;
   /** The chat's out-of-play settings, by which an edit of his he made no choice on is told or not. */
@@ -758,7 +760,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         // turn-errors line that says so.
         if (settings.lead === null) throw new Error(await turnErrorWords(this.#d.files, { user, chat }, "no_lead"));
         // The briefing's blocks, and what has happened since the last turn.
-        const found = { steps, notices: lines(notices), guidance, last, again: named !== null, replaced, hiddenReadable: settings.hiddenReadable, editedBudget: settings.editedBudget, deleted: { budget: settings.deletedBudget, words: settings.deletedWords }, notAppliedBudget: settings.notAppliedBudget, jobBudget: settings.jobBudget, tokens: tokenCount(settings.charsPerToken), tell: settings.taps.tell };
+        const found = { steps, notices: lines(notices), guidance, last, again: named !== null, replaced, hiddenReadable: settings.hiddenReadable, editedBudget: settings.editedBudget, deleted: { budget: settings.deletedBudget, words: settings.deletedWords }, notAppliedBudget: settings.notAppliedBudget, jobBudget: settings.jobBudget, jobReport: settings.jobReport, tokens: tokenCount(settings.charsPerToken), tell: settings.taps.tell };
         const writes = tag.target.message !== null && (tag.kind === "new" || tag.kind === "swipe" || tag.kind === "regenerate");
         const at: BriefingFor = { kind: tag.kind, speaker: tag.speaker.name, message: target, writing: writes ? tag.target.message : null, keep: tagged.cut.keep?.id ?? null, limits, notGiven: left, cut: tagged.cut };
         // A continue whose tag names a turn's message is told what is new since that turn's runs were told, as a continue of it.
@@ -1223,7 +1225,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       let request: TurnRequest;
       try {
         if (settings.lead === null) throw new Error(await turnErrorWords(this.#d.files, { user, chat }, "no_lead"));
-        const found = { steps, notices: lines(notices), guidance, last, again: true, replaced: null, hiddenReadable: settings.hiddenReadable, editedBudget: settings.editedBudget, deleted: { budget: settings.deletedBudget, words: settings.deletedWords }, notAppliedBudget: settings.notAppliedBudget, jobBudget: settings.jobBudget, tokens: tokenCount(settings.charsPerToken), tell: settings.taps.tell };
+        const found = { steps, notices: lines(notices), guidance, last, again: true, replaced: null, hiddenReadable: settings.hiddenReadable, editedBudget: settings.editedBudget, deleted: { budget: settings.deletedBudget, words: settings.deletedWords }, notAppliedBudget: settings.notAppliedBudget, jobBudget: settings.jobBudget, jobReport: settings.jobReport, tokens: tokenCount(settings.charsPerToken), tell: settings.taps.tell };
         const limits = (): Promise<ModelLimits | null> => this.#leadLimits(scope, settings.lead);
         const at: BriefingFor = { kind: run.kind, speaker: null, message: null, writing: null, keep: this.#d.prompts.keptFrom(user, turn.id), limits, notGiven: [], cut: { notices: [], clipped: null } };
         const [{ blocks: briefing, notGiven }, { items, told }] = await Promise.all([this.#briefing(reads, guidance, scope, at, steps, settings), this.#since(reads, user, turn, found)]);
@@ -1933,7 +1935,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       if (tied.status === "cut" && last.kind !== "settle") add("cut-short", notices?.line("cut_short", { message: tied.message }), { turn: last.turn });
       if (last.saved !== null) add("saved-differs", notices?.line("saved_differs", { message: tied.message, released: last.base + last.reply, saved: last.saved }), { turn: last.turn });
     }
-    for (const job of this.#jobsEnded(user, turn, ended, { keys, place, tokens: found.tokens, budget: found.jobBudget, say: wordsOf, names: namesOf })) add("job", notices?.line(job.line, job.fields), job.turn === null ? {} : { turn: job.turn });
+    for (const job of this.#jobsEnded(user, turn, ended, { keys, place, tokens: found.tokens, budget: found.jobBudget, report: found.jobReport, say: wordsOf, names: namesOf })) add("job", notices?.line(job.line, job.fields), job.turn === null ? {} : { turn: job.turn });
     // His own edits placed before this turn (plan §6.3 l.632): each once, as his, with what he pressed by its name and what it changed,
     // in words; a swipe of the turn told them is told them again, a continue is not.
     if (!again) {
@@ -1969,16 +1971,17 @@ export class TurnLane implements TurnPlayer, ChatChanges {
    * The jobs whose end a turn is told (plan §10.9, §13.5): each of `ended` (the jobs of the chat whose end the store recorded after the
    * turn before it on its own line began, and before it began itself, so that it is the first turn to begin after the job ended, where
    * what the job recorded takes effect); one a turn started, only on a line that holds that turn. Each with the notice of how it ended and
-   * that notice's data: the job, the definition it ran as, its brief, its report, and what it recorded, change by change: the change in
-   * words (`say`), what it is about by name (`names`), and for one that did not take effect why, each report code in the notices part's
-   * words (its `keys`), with the later turn whose value stands (by its message's number) where one does. Each job's changes are listed
-   * while they fit `briefing.jobTokens`; the rest are counted, and the Jobs page lists them all.
+   * that notice's data: the job, what it was for in a line (the definition it ran as and whom it played; never its brief, which the one
+   * who started it wrote), its report up to `briefing.jobReportChars` (past them, the line names `job_read` for the rest), and what it
+   * recorded, change by change: the change in words (`say`), what it is about by name (`names`), and for one that did not take effect
+   * why, each report code in the notices part's words (its `keys`), with the later turn whose value stands (by its message's number)
+   * where one does. Each job's changes are listed while they fit `briefing.jobTokens`; the rest are counted, and the Jobs page lists them.
    */
   #jobsEnded(
     user: string,
     turn: TurnRow,
     ended: ReturnType<typeof jobsEndedBetween>,
-    told: { keys: Record<string, unknown>; place: ReadonlyMap<string, number>; tokens: (text: string) => number; budget: number; say: (change: { op: string; value: JsonValue }) => string | undefined; names: (refs: readonly string[]) => string },
+    told: { keys: Record<string, unknown>; place: ReadonlyMap<string, number>; tokens: (text: string) => number; budget: number; report: number; say: (change: { op: string; value: JsonValue }) => string | undefined; names: (refs: readonly string[]) => string },
   ): { turn: string | null; line: string; fields: JsonObject }[] {
     if (ended.length === 0) return [];
     const store = this.#d.store.user(user);
@@ -2017,7 +2020,11 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         spent += cost;
         (c.applied ? applied : notApplied).push(entry);
       }
-      const fields = { job: view.id, agent: view.agent, brief: view.brief, ...(view.report !== undefined ? { report: view.report } : {}), applied, not_applied: notApplied, ...(more > 0 ? { more } : {}) };
+      // The report up to the setting, cut at a word; how long it runs, where it was cut.
+      const report = view.report?.trim() ?? "";
+      const cut = report.length > told.report;
+      const kept = cut ? report.slice(0, told.report).replace(/\s+\S*$/, "") : report;
+      const fields = { job: view.id, agent: view.agent, ...(view.plays !== undefined && view.plays !== "" ? { plays: view.plays } : {}), ...(kept !== "" ? { report: kept } : {}), ...(cut ? { cut: true, chars: report.length } : {}), applied, not_applied: notApplied, ...(more > 0 ? { more } : {}) };
       return [{ turn: started, line, fields }];
     });
   }

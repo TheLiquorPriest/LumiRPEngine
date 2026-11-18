@@ -29,6 +29,7 @@
 //     deletedWords: 24           words of each such reply it quotes
 //     notAppliedTokens: 1500     tokens it spends listing what no longer applies after a flip; past it, a count
 //     jobTokens: 1500            tokens it spends listing, thing by thing, what each finished job changed; past it, a count
+//     jobReportChars: 1500       characters of each finished job's report it carries; past them, job_read reads the rest
 //   reply:
 //     lastText: false            a turn that ends with no reply sends the Author's last plain text in place of the error line
 //
@@ -94,6 +95,8 @@ export interface TurnSettings {
   notAppliedBudget: number;
   /** Tokens the briefing spends listing what each finished job changed, change by change. */
   jobBudget: number;
+  /** Characters of each finished job's report the briefing carries; the rest is read with `job_read`. */
+  jobReport: number;
   /** The history window (`src/story/window`). */
   window: WindowSettings;
   /** The cast's tools and views, for the chat. */
@@ -161,6 +164,9 @@ export const TURN_DEFAULTS: Readonly<TurnSettings> = Object.freeze({
   notAppliedBudget: 1500,
   // PlanTurnKinds-5: what each finished job changed, listed while it fits; the rest counted, and all of it on the Jobs page.
   jobBudget: 1500,
+  // A finished job's report is the job's own accounting, of any length: an ordinary one (a paragraph or two) is carried whole, a long one
+  // cut, the line naming job_read for the rest. Its brief is the starter's own words, never told back.
+  jobReport: 1500,
   // Appendix D.1, as the window's own module keeps them.
   window: WINDOW_DEFAULTS,
   // Appendix D.1, as each area keeps its own.
@@ -278,6 +284,15 @@ const DEFS = {
     perConnection: false,
     name: "What a finished job changed, in the briefing",
     about: "The tokens the briefing spends on each finished job's changes, thing by thing, with why one did not take effect; past them the rest are counted, and the Jobs page lists them all.",
+    effect: "turn",
+  },
+  jobReport: {
+    key: "briefing.jobReportChars",
+    default: TURN_DEFAULTS.jobReport,
+    takes: { type: "whole", least: 0 },
+    perConnection: false,
+    name: "A finished job's report, in the briefing",
+    about: "How many characters of each finished job's report the next briefing carries; past them the line names job_read, which reads the report whole. The job's brief is not told again: the one who started it wrote it.",
     effect: "turn",
   },
   window: {
@@ -443,6 +458,7 @@ export async function turnSettings(files: FilesPort, scope: Scope, log: Log): Pr
     deletedWords: read.value(DEFS.deletedWords) as number,
     notAppliedBudget: read.value(DEFS.notAppliedBudget) as number,
     jobBudget: read.value(DEFS.jobBudget) as number,
+    jobReport: read.value(DEFS.jobReport) as number,
     window: {
       size: read.value(DEFS.window) as number | null,
       step: read.value(DEFS.step) as number | null,

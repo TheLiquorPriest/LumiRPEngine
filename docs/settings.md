@@ -175,6 +175,7 @@ What a turn reads and tells the Author, how the reply is written and shown, and 
 | `briefing.deletedWords` | `24` words | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Words quoted of a deleted turn: How many of the first words of each deleted turn's reply the briefing quotes to name it. |
 | `briefing.notAppliedTokens` | `1500` tokens | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | What a flip stopped, in the briefing: The tokens the briefing spends listing, change by change, what no longer applies after an earlier reply was flipped to another swipe; past them the rest are counted, and the world state lists them. |
 | `briefing.jobTokens` | `1500` tokens | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | What a finished job changed, in the briefing: The tokens the briefing spends on each finished job's changes, thing by thing, with why one did not take effect; past them the rest are counted, and the Jobs page lists them all. |
+| `briefing.jobReportChars` | `1500` characters | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | A finished job's report, in the briefing: How many characters of each finished job's report the next briefing carries; past them the line names job_read, which reads the report whole. The job's brief is not told again: the one who started it wrote it. |
 
 ### The reply
 
