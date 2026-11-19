@@ -45,7 +45,8 @@ const TURN_KINDS = ["too_big", "worn_elsewhere"] as const;
 /**
  * The holds that cannot be at the start of `turn`, for its world state: with the chat's tidy-up on (its own switch, else the world's
  * `tidy.auto`), the kept finder's findings of the turn's two kinds, less those he left as they are. Each with the fix the tidy-up would
- * make; none is applied. None where the switch is off, or the chat plays no world.
+ * make; none is applied. None where the switch is off, or the chat plays no world. Which things the two kinds find is the state's alone;
+ * only a thing too big to carry reads the path's events, for who bought it (its fix), so the path is read only where one is found.
  */
 export function tidyHolds(store: Store, user: string, turn: string, tidy: TidySettings): TidyFinding[] {
   const s = store.user(user);
@@ -56,5 +57,7 @@ export function tidyHolds(store: Store, user: string, turn: string, tidy: TidySe
   if (!(tidy.on ?? thingsConfigOf(world).tidy.auto)) return [];
   const left = new Set(tidy.left);
   const ctx = store.env.registry.context(world, state.world);
-  return tidyFindings(ctx, pathEventsBefore(s, turn), { kinds: TURN_KINDS }).filter((f) => !left.has(f.key));
+  const found = tidyFindings(ctx, [], { kinds: TURN_KINDS });
+  const read = found.some((f) => f.kind === "too_big") ? tidyFindings(ctx, pathEventsBefore(s, turn), { kinds: TURN_KINDS }) : found;
+  return read.filter((f) => !left.has(f.key));
 }

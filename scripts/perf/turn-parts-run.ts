@@ -32,7 +32,7 @@ import { playAnswers } from "../../src/play/service";
 import { hashParts } from "../../src/shared/hash";
 import type { JsonObject, JsonValue } from "../../src/shared/json";
 import { own } from "../../src/engine/pack-kit";
-import { type ChangeInput, timeDue, worldState } from "../../src/store";
+import { type ChangeInput, timeDue, WORLD_STATE_SECTIONS, worldState } from "../../src/store";
 import { storyBrief } from "../../src/story";
 import { RPE_GUIDANCE } from "../../src/tree";
 import { maskWorldInfoScanExclusions, SCAN_SETTING, scannedSteps, scanSettingsOf } from "../../src/turn/scan";
@@ -218,11 +218,20 @@ else {
   const maps = mapView(await mapWording(guidanceTexts(turns.files, point, turns.env.log)), settings.map);
   if (layout?.status === "read") {
     const text = layout.text;
-    await timed(
-      "a briefing's world state",
-      () => worldState(s, { chat, turn: newestTurn, layout: text, map: maps, drawnGiven: {}, placeLines: placeLinesAt(s, turns.store.env, chat, newestTurn, settings.places, settings.map), holds: tidyHolds(turns.store, owner, newestTurn, settings.taps.tidy), due: timeDue(turns.store), settings: settings.worldState, charsPerToken: settings.charsPerToken }),
-      (o) => o.text.length,
-    );
+    const inputAt = (turn: string, layoutText: string) => ({ chat, turn, layout: layoutText, map: maps, drawnGiven: {}, placeLines: placeLinesAt(s, turns.store.env, chat, turn, settings.places, settings.map), holds: tidyHolds(turns.store, owner, turn, settings.taps.tidy), due: timeDue(turns.store), settings: settings.worldState, charsPerToken: settings.charsPerToken });
+    await timed("a briefing's world state", () => worldState(s, inputAt(newestTurn, text)), (o) => o.text.length);
+    // Its parts, read at the start of the turn before the newest (another state, as cold): the tree over the state, then each section of
+    // the layout alone (the layout's own lines, a body of that section only), each on the tree the ones before it read.
+    const earlier = s.turn(newestTurn)?.parent ?? null;
+    const closing = text.startsWith("---\n") ? text.indexOf("\n---", 4) : -1;
+    if (earlier !== null && s.turn(earlier)?.chat === chat && closing >= 0) {
+      const head = text.slice(0, text.indexOf("\n", closing + 1) + 1);
+      await timed("a world state's tree over the state (the turn before)", () => s.viewAt(earlier));
+      await timed("a world state's holds that cannot be (the turn before)", () => tidyHolds(turns.store, owner, earlier, settings.taps.tidy), size);
+      await timed("a world state's place lines, made (the turn before)", () => placeLinesAt(s, turns.store.env, chat, earlier, settings.places, settings.map));
+      for (const section of WORLD_STATE_SECTIONS) await timed(`a world state's section ${section} alone (the turn before)`, () => worldState(s, inputAt(earlier, `${head}{{${section}}}\n`)), (o) => o.text.length);
+      await timed("a world state whole, after its sections (the turn before)", () => worldState(s, inputAt(earlier, text)), (o) => o.text.length);
+    } else notMade.push("a world state's parts (no turn before the newest, or a layout with no header)");
   } else notMade.push("a briefing's world state (its layout part is not in force for the chat)");
   const said = (await guidance.part(PARTS.briefing))?.header[ON_STAGE_VIEWS];
   const named = Array.isArray(said) ? said.flatMap((n) => (typeof n === "string" && n.trim() !== "" ? [n.trim()] : [])) : [];
