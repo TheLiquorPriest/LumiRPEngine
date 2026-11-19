@@ -30,6 +30,7 @@ import type { OrgMember, OrgPower } from "../../../shared/org";
 import { calendarOf, clockAt, dateAt, dayIndexOf, dayIndexOfText, formatClock, MINUTES_PER_DAY, type Calendar } from "../../../engine/calendar";
 import { labelOf, numOf, objOf, optionalQuery, optionalService, own, rowOf, sliceOf, sliceRecord, strOf } from "../../../engine/pack-kit";
 import type { EffectContext, EventTypeDef, ReadContext, Rejection, SlotInfo } from "../../../engine/registry";
+import { passMemo } from "../../../engine/read-pass";
 import { isGone, kindIs, placeOfEntity, placeWithin } from "../../../engine/scope";
 import { businessAt, isRuled, jobsAt, mayAct, orgPlaces, orgTypeOf, placesOf, positionsBelow, positionsOf } from "../../../engine/org";
 import { COMPANY_KIND, GROUP_KIND, type MembershipContext } from "../../../engine/selector";
@@ -1229,7 +1230,10 @@ export function registerEmployment(r: FinanceRegistry): void {
   core.effect({ type: "economy.job_position", args: ["job", "position?", "by?"], resolve: (args, ctx) => setPosition(args, ctx) });
   core.effect({ type: "economy.job_title", args: ["job", "title?", "by?"], resolve: (args, ctx) => setTitle(args, ctx) });
   core.effect({ type: "economy.pay_schedule", args: ["org", "every", "weekday?", "anchor?", "days?", "by?"], resolve: (args, ctx) => paySchedule(args, ctx) });
-  core.formula("employs", (ctx, employer, who) => allJobs(ctx).some((j) => j.party === String(employer ?? "") && j.worker === String(who ?? "") && j.status !== "ended"));
+  // Asked of every pick of Hire in the palette: who works for whom, from one read of every job for the pass.
+  core.formula("employs", (ctx, employer, who) =>
+    passMemo([ctx.state, ctx.state.entities, ctx.world], "economy.employs", () => new Set(allJobs(ctx).flatMap((j) => (j.party !== null && j.status !== "ended" ? [`${j.party}\u0000${j.worker}`] : [])))).has(`${String(employer ?? "")}\u0000${String(who ?? "")}`),
+  );
   const talks = { observable: "talks business" } as const;
   // Who decides someone's job (ORG-SPEC §3.7): its employer, when that is the actor, or whoever holds the power for it, within its limits and scope.
   const decides = (power: OrgPower): string => `job.employer == self or may(self, job.employer, '${power}')`;

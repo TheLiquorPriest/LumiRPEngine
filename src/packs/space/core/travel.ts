@@ -391,15 +391,11 @@ export function vehicleTrips(ctx: ReadContext, ask: VehicleTripAsk, targets: rea
   const parkMinutes = Math.round(tuning.parkMinutes);
   // A search per set of open modes and weather, shared by the targets that have the same, with where it arrives at each place, read once.
   const searches = new Map<string, DriveSearch>();
-  // What each place is to every target alike, asked once: whether the vehicle may be left there, and its walking weather.
-  const places = Object.keys(ctx.world.places).sort();
-  const parks = new Map<PlaceId, boolean>();
-  const parksAt = (p: PlaceId): boolean => {
-    let ok = parks.get(p);
-    if (ok === undefined) parks.set(p, (ok = ask.canPark(p)));
-    return ok;
-  };
-  const walks = new Map<PlaceId, number>();
+  // What each place is to every target alike, asked once: whether the vehicle may be left there (`canPark`, which the asker keeps), and
+  // its walking weather, kept for the pass, since Drive's options plan a trip to each place apart.
+  const places = passMemo([ctx.world], "space.place_ids", () => Object.keys(ctx.world.places).sort());
+  const parksAt = ask.canPark;
+  const walks = passMemo([ctx.state, ctx.state.entities, ctx.world], "space.walk_weather", () => new Map<PlaceId, number>());
   const walkAt = (p: PlaceId): number => {
     let factor = walks.get(p);
     if (factor === undefined) walks.set(p, (factor = weather ? weather(ctx, p, "walk") : 1));

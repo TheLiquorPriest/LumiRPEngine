@@ -404,7 +404,14 @@ function tripsFor(ctx: ReadContext, vehicle: EntityId, from: PlaceId, targets: r
   const cls = strOf(own(ctx.state.entities, vehicle)?.fields.class);
   const speed = cls === "" ? undefined : own(travelTuningOf(ctx.world).vehicleSpeeds, cls);
   const pov = ctx.world.pov;
-  return plan(ctx, { from, at, modes: modesOf(ctx, vehicle), ...(speed !== undefined ? { speed } : {}), canPark: (p) => canSeePlace(ctx.registry, ctx.world, ctx.state, pov, p) }, targets);
+  // Whether it may be left at a place, kept for the pass: a trip asks it of every place, and Drive's options plan a trip to each place apart.
+  const parks = passMemo([ctx.state, ctx.state.entities, ctx.world], "vehicles.parks", () => new Map<PlaceId, boolean>());
+  const canPark = (p: PlaceId): boolean => {
+    let ok = parks.get(p);
+    if (ok === undefined) parks.set(p, (ok = canSeePlace(ctx.registry, ctx.world, ctx.state, pov, p)));
+    return ok;
+  };
+  return plan(ctx, { from, at, modes: modesOf(ctx, vehicle), ...(speed !== undefined ? { speed } : {}), canPark }, targets);
 }
 
 /** One trip, kept for the read pass: Drive's options ask each one's fuel and minutes, through formulas of their own. */

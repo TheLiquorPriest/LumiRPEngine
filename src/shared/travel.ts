@@ -47,7 +47,7 @@ export interface VehicleTripAsk {
   modes: readonly TravelMode[];
   /** km/h for this vehicle's class, when the world sets one; else each mode's own. */
   speed?: number;
-  /** Where it may be left short of the destination: the driver must know the place. */
+  /** Where it may be left short of the destination: the driver must know the place. Asked of every place for each trip, so the asker keeps its answers. */
   canPark(place: PlaceId): boolean;
 }
 
