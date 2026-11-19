@@ -309,8 +309,10 @@ export class PlayService {
     if (turn !== null && row?.chat !== chat) throw new RouteError(404, `Chat ${chat} has no turn ${turn}.`);
     // A turn joined to another is answered as a fact, naming the turn it joined, whatever kind of chat this is.
     if (turn !== null && row?.joined != null) throw new JoinedTurnError(turn, row.joined);
-    // Asks of the same state at once share one view: the store's key for that state names it (a write between them makes another).
-    const key = s.stateKey(chat, turn);
+    // Asks of the same state at once share one view: the store's key for that state names it (a write between them makes another), with
+    // the chat's head and revision as the kept views name them (`view.ts`), since a comparison that moves the head names no new state.
+    const chatRow = s.chat(chat);
+    const key = `${s.stateKey(chat, turn)}\u0000${chatRow?.head ?? ""}\u0000${chatRow?.revision ?? ""}`;
     const going = this.building.get(key);
     if (going !== undefined) return await going;
     const work = this.stateView(user, chat, turn);
