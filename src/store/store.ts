@@ -16,7 +16,10 @@
 // (`storeIdentity`: what a fold computes, and the shape a state is stored in), never a build's, so a snapshot one build stored serves
 // every later build, and an update replays nothing. `FOLD_VERSION`, or a pack's own version, is bumped when, and only when, a stored
 // state of an earlier build must not be used: its stored shape changed with no migration of the rows, or what a fold computes changed
-// and the past must follow. A bump costs him one pass at his next start (`Preparer`: each chat's path folded again in stretches, a read
+// and the past must follow. The store's areas (`STORE_AREAS`, each folding its own slice of the state) have no version of their own: a
+// change to what an area's fold computes is the same duty, met by bumping `FOLD_VERSION`. A snapshot of kind `base` (a chat's starting
+// state, as the import gives it) is read under any identity, so no bump covers it: a change of the shape it is stored in needs a
+// migration of those rows. A bump costs him one pass at his next start (`Preparer`: each chat's path folded again in stretches, a read
 // of a chat waiting for it). A rule fixed without a bump applies from the next turn; the world as it was played stays as it was stored.
 
 import { Database } from "bun:sqlite";
@@ -736,18 +739,19 @@ export class Store {
     const away = this.away;
     if (away === null) return read();
     for (const asked = new AwayAsked(); ; ) {
-      let job: FoldJob;
+      let job: FoldJob | null = null;
       this.guarding = true;
       try {
         return read();
       } catch (error) {
         if (!(error instanceof FoldAway)) throw error;
-        // The same fold refused again: what the thread held did not serve, and the read folds in place, as it did before the bar.
-        if (!asked.again(error.job)) return inPlace(read);
-        job = error.job;
+        // The same fold refused again: what the thread held did not serve, and the read folds in place (below, the guard down), as it
+        // did before the bar.
+        if (asked.again(error.job)) job = error.job;
       } finally {
         this.guarding = false;
       }
+      if (job === null) return inPlace(read);
       try {
         await this.foldAway(away, job);
       } catch (error) {
@@ -1654,11 +1658,11 @@ export class UserStore {
   tieTurn(id: string, input: { message: string; hash: string; date?: number | null; status?: "done" | "cut"; text?: string | null }): TurnRow {
     const t = this.turnToWrite(id);
     if (t.status === "dropped") throw new StoreInputError(`turn ${id} was dropped`);
-    // A finished turn keeps its state, so a restart reads the chat's newest turns whole and folds nothing (`turnStatesKept` of them, and
-    // one every `snapshotEvery` turns for good). The state held in memory, for a tie folds nothing (it may stand in a write that changed
-    // the turn's changes, which a thread could not read); worked out into rows and stored after the tie, by the next write or soon after,
-    // off the turn's own write (`hold`, `flush`). One not held is stored by the next fold through the node, every `snapshotEvery` turns.
-    const keep = this.heldAt(t.node);
+    // A finished turn every `snapshotEvery` along its path keeps its state for good: the state held in memory, for a tie folds nothing (it
+    // may stand in a write that changed the turn's changes, which a thread could not read), worked out into rows and stored after the
+    // tie, by the next write or soon after, off the turn's own write (`hold`, `flush`); one not held is stored by the next fold through
+    // the node. The chat's head as it stands once the turn's writes settle (its jobs' too) is stored apart (`storeHead`).
+    const keep = (t.depth + 1) % this.store.snapshotEvery === 0 ? this.heldAt(t.node) : null;
     this.write(false, () => {
       this.db.run("UPDATE turn SET message = ?, hash = ?, swipe_date = ?, status = ?, edited = NULL WHERE user = ? AND id = ?", [input.message, input.hash, input.date ?? null, input.status ?? "done", this.id, id]);
       if (input.text !== undefined) this.db.run("UPDATE turn SET text = ? WHERE user = ? AND id = ?", [input.text, this.id, id]);
@@ -2800,6 +2804,33 @@ export class UserStore {
    */
   storeHeld(): void {
     this.db.transaction(() => this.store.flush(this.id))();
+  }
+
+  /**
+   * Stores the state at the chat's head where none is stored there, so a restart reads the chat's newest turns whole and folds nothing:
+   * what a turn's end leaves, once the chat's writes have settled and no run of it goes on (`afterTurns`, its jobs' writes included).
+   * The head folded where it is not held, a long fold on a worker (`offThread`); then `write` stores it (`storeHeld`), letting go of the
+   * chat's states past the newest `turnStatesKept` but those every `snapshotEvery` turns.
+   */
+  async storeHead(chat: string, write: (store: () => void) => Promise<unknown>): Promise<void> {
+    if (await this.store.offThread(() => this.holdHead(chat))) await write(() => this.storeHeld());
+  }
+
+  /** @internal Holds the state at the chat's head for storing (`storeHead`), where its turn is ended and none is stored there: whether it held one. */
+  holdHead(chat: string): boolean {
+    const head = this.chatRead(chat).head;
+    if (head === null) return false;
+    const at = this.db
+      .query<{ chat: string; status: string; mark: string | null; stored: number }, [string, string, string]>(
+        `SELECT t.chat, t.status, m.mark, EXISTS(SELECT 1 FROM snapshot s WHERE s.user = n.user AND s.node = n.key AND (s.kind = 'base' OR s.fingerprint = ?3)) AS stored
+         FROM path_node n JOIN turn t ON t.user = n.user AND t.id = n.turn LEFT JOIN fold_mark m ON m.user = t.user AND m.chat = t.chat WHERE n.user = ?1 AND n.key = ?2`,
+      )
+      .get(this.id, head, this.store.fingerprint);
+    if (!at || at.stored === 1 || at.status === "open") return false;
+    const { folded, upto } = this.foldNode(head);
+    const doc: SnapshotDoc = { state: folded.state, notApplied: folded.notApplied, rebased: folded.rebased };
+    this.store.hold(this.id, [[head, upto, () => snapshotRows(doc), at.chat, this.store.nodeMark(this.id, at.chat, head, at.mark ?? "")]]);
+    return true;
   }
 
   /**

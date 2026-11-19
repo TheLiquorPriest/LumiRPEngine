@@ -73,16 +73,21 @@ export function doorArea(deps: AdapterDeps): LumiverseDoor {
     window: (ask, signal) => lane("window")(ask, signal),
     start: (ask, signal) => lane("start")(ask, signal),
     room: (chat, reply, signal) => lane("room")(chat, reply, signal),
-    // No area fills it: the answer is not known, and the extension keeps every marked secret out by its own fail-closed verdict.
+    // No area fills it: the answer is not known, and the extension keeps every marked secret out by its own fail-closed verdict. The
+    // secrets are read at the state the question's start worked out (the start lane waits while RPE makes the chat ready and folds a long
+    // path on a worker), so they are asked once it is: the lane reading that state again folds nothing on RPE's thread.
     secrecy: async (ask, signal) => {
       const secrecy = filled.secrecy;
       if (secrecy === undefined) throw none("secrecy");
+      await ask.start.catch(() => undefined);
       return secrecy(ask, signal);
     },
-    // No area fills it: the check on receipt cannot work the secrets out, and the turn's record says so.
+    // No area fills it: the check on receipt cannot work the secrets out, and the turn's record says so. As at the question, the start is
+    // worked out by the start lane first, so the check reads a state held and folds nothing on RPE's thread.
     receiptSecrecy: async (ask, signal) => {
       const receiptSecrecy = filled.receiptSecrecy;
       if (receiptSecrecy === undefined) throw none("receiptSecrecy");
+      await lane("start")({ user: ask.user, chat: ask.chat, path: ask.path, point: ask.point }, signal).catch(() => undefined);
       return receiptSecrecy(ask, signal);
     },
     hiddenReadable: (chat) => lane("hiddenReadable")(chat),

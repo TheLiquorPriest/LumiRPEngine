@@ -63,6 +63,8 @@ import { Runs } from "./runs";
 import { stateSearcher, storySearcher } from "./searchers";
 import { webSearcher } from "./web";
 import { STORE_AREAS } from "./store-areas";
+import { unasked } from "../store/away";
+import { afterTurns } from "../store/turn-reads";
 import { RunTimes } from "./spans";
 import { globalConfig, turnSettings } from "./settings";
 import { SinceKept } from "./since";
@@ -263,17 +265,21 @@ export function openAppStore(app: Pick<App, "db" | "log" | "live" | "paths" | "w
   // A walk the store's settings cut short (`engine.maxKindChain`, `maxHolderDepth`, `places.maxVisitDepth`) is logged, once for each chain.
   // A fold over more changes than `store.workerFoldAt` runs on a worker thread, which reads the same file and folds with the same areas (`workers/tasks.ts`).
   const away = { path: app.paths.database, run: (brief: StoreBrief, job: FoldJob) => app.workers.run("fold", { brief, job }) };
-  // What a read folds is stored soon after, in one write for whatever is held by then, so a restart keeps it though nothing is played.
+  // What a read folds, or a turn's end keeps, is stored soon after, in one write for whatever is held by then, so a restart keeps it
+  // though nothing is played.
   const storing = new Set<string>();
   const heldWaiting = (user: string): void => {
     if (storing.has(user)) return;
     storing.add(user);
-    setImmediate(() => {
-      storing.delete(user);
-      app.writes.run(() => store.user(user).storeHeld(), "snapshots a read folded").catch((error: unknown) => {
-        if (!(error instanceof WritesClosed)) app.log.warn("The snapshots a read folded could not be stored; the next write stores them.", { error: error instanceof Error ? error.message : String(error) });
-      });
-    });
+    // RPE's own write, outside the read that held them (`unasked`): its queueing turns no read's bar off.
+    setImmediate(() =>
+      unasked(() => {
+        storing.delete(user);
+        app.writes.run(() => store.user(user).storeHeld(), "snapshots a read folded").catch((error: unknown) => {
+          if (!(error instanceof WritesClosed)) app.log.warn("The snapshots a read folded could not be stored; the next write stores them.", { error: error instanceof Error ? error.message : String(error) });
+        });
+      }),
+    );
   };
   const store = openStore({ db: app.db, registry: createRegistry(ALL_PACKS), worlds, handlerFailed, log: (message, data) => app.log.warn(message, data as Record<string, JsonValue>), areas: STORE_AREAS, away, heldWaiting, ...global.numbers(STORE_SETTING_DEFS) });
   return store;
@@ -725,6 +731,16 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     clock,
     log: app.log,
   });
+  // A turn's end stores the chat's head state once the chat's writes settle and no run of it goes on (its jobs' writes too), so a
+  // restart reads the chat's newest turns whole and folds nothing (`storeHead`).
+  afterTurns(
+    store,
+    (user, chat) => runs.ofChat(user, chat).length > 0,
+    (user, chat) => store.user(user).storeHead(chat, (work) => app.writes.run(work, "the state a turn's end left")),
+    (error) => {
+      if (!(error instanceof WritesClosed)) app.log.warn("A chat's newest state could not be stored after its turn; a restart works it out from the stored state before it.", { error: error instanceof Error ? error.message : String(error) });
+    },
+  );
   // A job a restart cut off is kept as interrupted, and told, on its user's first call of the jobs (§13.5): each user the store holds is
   // listed once now that the harness and the lane its end is told to are made, so his are shown as interrupted at once, before he calls.
   // A list that fails is logged, and the start goes on.

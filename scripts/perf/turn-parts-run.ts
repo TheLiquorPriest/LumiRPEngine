@@ -10,8 +10,8 @@
 // `RPE_PROBE_DEBUG` set, an error's stack goes to standard error too, for a trial on invented data).
 //
 // The copy of the database's folder is RPE's data folder for the run: it takes a first config.json there (no secrets.json is read or
-// made), and a backup of the database there if this build migrates it. The build id names the snapshots the folds use: the id of the
-// build that made them (his server's) folds from them; another folds from the chat's start, as an update does.
+// made), and a backup of the database there if this build migrates it. The build id is RPE's version alone: the folds read the snapshots
+// stored under the store's own identity (`storeIdentity`), whichever build stored them.
 
 import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { rmSync } from "node:fs";
@@ -32,13 +32,14 @@ import { placeLinesAt } from "../../src/places";
 import { tidyHolds } from "../../src/play/path-events";
 import type { JsonObject, JsonValue } from "../../src/shared/json";
 import { trailsOf } from "../../src/quests/trail";
-import { type ChangeInput, timeDue, WORLD_STATE_SECTIONS, worldState, worldStateFolds } from "../../src/store";
+import { type ChangeInput, openStore, timeDue, WORLD_STATE_SECTIONS, worldState, worldStateFolds } from "../../src/store";
 import { storyBrief } from "../../src/story";
 import { maskWorldInfoScanExclusions, SCAN_SETTING, scannedSteps, scanSettingsOf } from "../../src/turn/scan";
 import { turnSettings } from "../../src/turn/settings";
 import { stageAt, stageCues } from "../../src/turn/stage";
 import { guidanceTexts } from "../../src/turn/texts";
 import { castLayouts, NO_SESSION, ON_STAGE_VIEWS, PARTS, tokenCount } from "../../src/turn/turns";
+import { STORE_AREAS } from "../../src/turn/store-areas";
 
 const [rpeDb, filesDir, indexFile, lumiverseDb, chat, build] = process.argv.slice(2);
 if (rpeDb === undefined || filesDir === undefined || indexFile === undefined || lumiverseDb === undefined || chat === undefined || build === undefined) {
@@ -390,6 +391,34 @@ let turn = run?.turn ?? "";
 if (s.turn(turn)?.status !== "open") turn = (await app.writes.run(() => s.beginTurn({ chat, kind: "normal" }), "the probe's turn")).id;
 await timed("the commit: the turn's changes recorded", () => app.writes.run(() => s.addChanges(turn, invented(1)), "the probe's changes"));
 await timed("the commit: the turn tied to its reply", () => app.writes.run(() => s.tieTurn(turn, { message: reply, hash: textHash("An invented reply, the probe's."), date: Date.now() }), "the probe's tie"));
+
+// The chat's head state as the turn's end leaves it, stored once the chat's writes settle and no run of it goes on (`storeHead`): from
+// the tie until its row is there, the settling included, with the longest hold meanwhile (the head's rows worked out, their write, and
+// the notes and lines the same settling stores).
+const tiedNode = s.turn(turn)?.node ?? "";
+await timed("the commit: the head's state stored after the turn's end (from the tie, the settling included)", async () => {
+  const began = performance.now();
+  while ((turns.store.db.query<{ n: number }, [string, string]>("SELECT count(*) AS n FROM snapshot WHERE user = ? AND node = ?").get(owner, tiedNode)?.n ?? 0) === 0) {
+    if (performance.now() - began > 10_000) throw new Error("the head's state was not stored within ten seconds of the turn's end");
+    await Bun.sleep(5);
+  }
+});
+// After a restart: a store opened afresh over the same database, holding nothing, reads the head; and the changes that read folded, as
+// a fold over a bar of 0 says each (none where the head's state is read whole from the one stored).
+let foldedAfresh = 0;
+const afresh = openStore({
+  db: turns.store.db,
+  registry: turns.store.env.registry,
+  worlds: turns.store.env.worlds,
+  areas: STORE_AREAS,
+  fingerprint: turns.store.fingerprint,
+  workerFoldAt: 0,
+  log: (message, data) => {
+    if (message.startsWith("A fold over the bar")) foldedAfresh += typeof data.changes === "number" ? data.changes : 0;
+  },
+});
+await timed("after a restart: the head's state, read by a store opened afresh", () => afresh.user(owner).headState(chat));
+say({ part: "after a restart: the changes the head's read folded", changes: foldedAfresh });
 
 // ---------------------------------------------------------------- what a page reads after it
 

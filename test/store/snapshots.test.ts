@@ -5,6 +5,7 @@ import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { hashJson } from "../../src/shared/hash";
 import { openStore, type Store } from "../../src/store/store";
+import { afterTurns } from "../../src/store/turn-reads";
 import { STORY_STORE_AREA } from "../../src/story";
 import type { SeenMessage, ShownMessage } from "../../src/store/types";
 import { carried, engine, goTo, hand, hashOf, moveStoredClock, play, POV, registry, testStore, tick, USER, type TestStore } from "./fixtures";
@@ -146,5 +147,39 @@ describe("snapshots", () => {
     const warm = ts.s.headState("c").state.world;
     expect(warm.clock - ts.s.stateAt(ts.turns[1]?.id ?? "").state.world.clock).toBe(3 + 30);
     expect(hashJson(reopened(ts).user(USER).headState("c").state.world)).toBe(hashJson(warm));
+  });
+
+  test("a turn's end stores the chat's head once its writes settle, again after a job of it ends, and a restart reads it folding nothing", async () => {
+    let at = 0;
+    const ts = testStore({ snapshotEvery: 25, now: () => ++at });
+    const { s, store } = ts;
+    s.createChat({ id: "c", revision: ts.revision });
+    let settled = Promise.withResolvers<void>();
+    const stop = afterTurns(store, () => false, async (user, chat) => {
+      await store.user(user).storeHead(chat, async (work) => work());
+      settled.resolve();
+    }, (error) => settled.reject(error), 5);
+    const turns = [1, 2, 3, 4, 5, 6].map((n) => play(s, "c", `m${n}`, `Reply ${n}.`, n, engine(tick(n), goTo(POV, places[n % places.length] ?? "cellar"))));
+    const head = turns[5];
+    if (!head) throw new Error("no sixth turn");
+    const stored = (): boolean => store.db.query<{ n: number }, [string, string]>("SELECT count(*) AS n FROM snapshot WHERE user = ? AND node = ?").get(USER, head.node)?.n === 1;
+    expect(stored()).toBe(false);
+    await settled.promise;
+    expect(stored()).toBe(true);
+    // A job of the turn, ended after its reply, lets the state stored at the turn's node go (its change stands from the next turn's
+    // start), and the end stores it again as it now stands, with no write of his.
+    settled = Promise.withResolvers<void>();
+    s.addChanges(head.id, engine(goTo(POV, "common_room")).map((c) => ({ ...c, job: "job-after" })));
+    s.endJob("job-after");
+    expect(stored()).toBe(false);
+    await settled.promise;
+    expect(stored()).toBe(true);
+    stop();
+    const warm = s.headState("c").state;
+    // A restart: a store opened again over the database reads the head whole, folding no change (a bar of 0 would say each).
+    const folded: unknown[] = [];
+    const again = openStore({ db: store.db, registry: registry(), worlds: (r) => ts.worlds.get(r), areas: [STORY_STORE_AREA], workerFoldAt: 0, log: (message, data) => folded.push([message, data]) });
+    expect(hashJson(again.user(USER).headState("c").state)).toBe(hashJson(warm));
+    expect(folded).toEqual([]);
   });
 });

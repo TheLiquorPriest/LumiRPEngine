@@ -134,7 +134,7 @@ export class AwayAsked {
 }
 
 /** Work that may be made again (`awayAgain`), followed through every wait of it: whether the bar is on, and the work it runs inside. */
-export interface Asking {
+interface Asking {
   bar: boolean;
   up: Asking | undefined;
 }
@@ -144,7 +144,7 @@ const asking = new AsyncLocalStorage<Asking>();
 /** Synchronous work running with the bar on (`barred`), however deep. */
 let barredNow = 0;
 
-/** Whether a fold over the bar is refused here: inside barred work, synchronous or awaited, that has committed no write yet. */
+/** Whether a fold over the bar is refused here: inside barred work, synchronous or awaited, that has queued no write yet. */
 export function barOn(): boolean {
   return barredNow > 0 || asking.getStore()?.bar === true;
 }
@@ -170,20 +170,26 @@ export function inPlace<T>(work: () => T): T {
   }
 }
 
-/** The work a write is asked within (the write queue keeps it with the write), to be told when the write is committed (`committed`). */
-export function askingNow(): Asking | undefined {
-  return asking.getStore();
-}
-
-/** A write of `within`'s was committed: the bar is off for it and the work around it, which made again would write it twice. */
-export function committed(within: Asking | undefined): void {
-  for (let at = within; at !== undefined; at = at.up) at.bar = false;
+/**
+ * The work running now queued a write: the bar is off for it and the work around it, which made again would write it twice. Off from
+ * the queueing, not the commit, so a write queued before a refusal and committed after it is never made again.
+ */
+export function writeQueued(): void {
+  for (let at = asking.getStore(); at !== undefined; at = at.up) at.bar = false;
 }
 
 /**
- * Runs `work` (a page's GET) with the bar on until it commits a write: a fold it is refused runs on a thread, and the work is made again,
- * for as long as each refusal names another fold (`AwayAsked`); then, or where the thread's fold failed, it is made once more with the
- * bar off, its folds in place.
+ * Runs `work` outside the work it was started from: what RPE does in the background on its own account (the write queue's turns, a
+ * write storing what reads held), which neither turns that work's bar off by its writes nor is refused under it.
+ */
+export function unasked<T>(work: () => T): T {
+  return asking.exit(work);
+}
+
+/**
+ * Runs `work` (a page's GET) with the bar on until it queues a write or returns: a fold it is refused runs on a thread, and the work is
+ * made again, for as long as each refusal names another fold (`AwayAsked`); then, or where the thread's fold failed, it is made once
+ * more with the bar off, its folds in place.
  */
 export async function awayAgain<T>(work: () => Promise<T>): Promise<T> {
   const asked = new AwayAsked();
@@ -202,6 +208,9 @@ export async function awayAgain<T>(work: () => Promise<T>): Promise<T> {
       } catch {
         return await inPlace(work);
       }
+    } finally {
+      // What it started and did not wait for goes on with the bar off: a refusal there would reach no one to make it again.
+      at.bar = false;
     }
   }
 }

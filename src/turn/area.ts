@@ -147,15 +147,28 @@ export function turnArea(takes: TurnTakes): TurnArea {
       chatPreparing: (user, chat) => preparer?.preparing(user, chat) ?? null,
       door: {
         // A generation in a chat RPE is making ready for this build waits for it, as a page's read does, and for the chat's changes told
-        // before it and waiting with it, so it overtakes none; a generation stopped meanwhile waits no more, and its run ends at once.
+        // before it and waiting with it, so it overtakes none; a generation stopped meanwhile waits no more, and its run ends at once
+        // (the lane begins nothing for a stopped one). Its start is a link of the chat's chain of changes told (`told`), so a change told
+        // after it is handed on once its turn is under way, as when nothing waits, and waits for every change told before it too.
         turns: {
           play: async (turn, out, signal) => {
             const chat = turn.tag.chat;
+            const before = told.get(chat);
+            if (before === undefined && (preparer?.preparing(owner(), chat) ?? null) === null) return await made().lane.play(turn, out, signal);
             const stopped = Promise.withResolvers<void>();
             if (signal.aborted) stopped.resolve();
             else signal.addEventListener("abort", () => stopped.resolve(), { once: true });
-            await Promise.race([Promise.all([preparer?.ready(owner(), chat), told.get(chat)]), stopped.promise]);
-            await made().lane.play(turn, out, signal);
+            let played: Promise<void> | undefined;
+            const begun = Promise.race([Promise.all([preparer?.ready(owner(), chat), before]), stopped.promise]).then(() => {
+              played = made().lane.play(turn, out, signal);
+            });
+            const link = Promise.all([begun.catch(() => undefined), before]).then(() => undefined);
+            told.set(chat, link);
+            void link.finally(() => {
+              if (told.get(chat) === link) told.delete(chat);
+            });
+            await begun;
+            await played;
           },
         },
         changes: { changed, reopened: () => made().lane.reopened() },
@@ -174,8 +187,11 @@ export function turnArea(takes: TurnTakes): TurnArea {
           return { on: window.size !== null, first: window.size === null ? null : historyWindow(path, window, held).first, covered: held };
         },
         // Where a turn not yet begun will start on the question's path, from RPE's own store alone (R-5): the hidden marks it holds laid on
-        // the path. A long fold runs on a worker (`afar`), so the question never stalls other chats.
+        // the path. A chat RPE is making ready for this build waits for it, as a generation does, so the question folds nothing the pass is
+        // about to store; and a long fold runs on a worker (`afar`), so the question never stalls other chats. The door's secrecy, its
+        // window and the receipt's own check read the state this left held, and fold nothing more.
         start: async (ask) => {
+          await preparer?.ready(owner(), ask.chat);
           const { store } = made();
           return await store.afar(() => store.user(owner()).turnStart(ask.chat, ask.path, ask.point));
         },

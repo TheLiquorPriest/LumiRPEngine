@@ -9,7 +9,7 @@
 
 import { Database } from "bun:sqlite";
 import { chmodSync } from "node:fs";
-import { type Asking, askingNow, barred, committed, FoldAway, inPlace } from "../store/away";
+import { barred, FoldAway, inPlace, unasked, writeQueued } from "../store/away";
 import { OWNER_ONLY_FILE } from "./disk";
 
 /** Opens the database file, making it when there is none, for one writer and many readers. */
@@ -46,8 +46,6 @@ interface Job {
   tries: number;
   /** Whether it runs with its folds in place, the bar off (`inPlace`): the worker's fold did not serve it, or failed. */
   inPlace: boolean;
-  /** The work it was asked within, told once it is committed (`committed`). */
-  asking: Asking | undefined;
 }
 
 /**
@@ -85,11 +83,14 @@ export class WriteQueue {
 
   run<T>(write: (db: Database) => T, label = "a write"): Promise<T> {
     if (this.closed) return Promise.reject(new WritesClosed(`RPE is stopping, so ${label} was not made.`));
+    // The work that queues it is not made again after a worker's fold (`awayAgain`): it would queue it twice.
+    writeQueued();
     const done = Promise.withResolvers<T>();
-    this.jobs.push({ write, label, resolve: done.resolve as (value: unknown) => void, reject: done.reject, tries: 0, inPlace: false, asking: askingNow() });
+    this.jobs.push({ write, label, resolve: done.resolve as (value: unknown) => void, reject: done.reject, tries: 0, inPlace: false });
     if (!this.draining) {
       this.draining = true;
-      queueMicrotask(() => this.drain());
+      // The queue's turns are its own, outside whatever work queued the first write (`unasked`).
+      queueMicrotask(() => unasked(() => this.drain()));
     }
     return done.promise;
   }
@@ -155,8 +156,6 @@ export class WriteQueue {
     } finally {
       this.db.run("PRAGMA query_only = ON");
     }
-    // The work it was asked within wrote something: none of it is made again after a worker's fold (`awayAgain`).
-    committed(job.asking);
     job.resolve(result);
   }
 
