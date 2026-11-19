@@ -30,7 +30,7 @@ import { checkChange } from "./input";
 import { chainOf, comparePaths, keptOf, matchTurn, mergeKept, nodeKey, toldWith, turnByHash, turnsShown, type ShowingTurn } from "./path";
 import { BLANK_REVISION, blankWorld } from "./blank";
 import { UserWorlds, type WorldChange, type WorldRevisionRow } from "./worlds";
-import { migrateStore, missingStoreTables } from "./schema";
+import { KEPT_BY_NODE, migrateStore, missingStoreTables } from "./schema";
 import { FoldAway, type AwayFold, type AwayHeld, type FoldJob, type StoreAway, type StoreBrief } from "./away";
 import { TreeView } from "./view";
 import { letGo, STRETCH_MS } from "./prepare";
@@ -1115,13 +1115,7 @@ export class UserStore {
     if (row.revision !== null) return row.revision;
     this.write(this.withBranches(input.id), () => {
       this.db.run("UPDATE chat SET world = ?, revision = ? WHERE user = ? AND id = ?", [input.world, input.revision, this.id, input.id]);
-      this.db.run(
-        `WITH RECURSIVE down(key) AS (
-           SELECT key FROM path_node WHERE user = ?1 AND turn IN (SELECT id FROM turn WHERE user = ?1 AND chat = ?2)
-           UNION SELECT n.key FROM path_node n JOIN down d ON n.user = ?1 AND n.prev = d.key)
-         DELETE FROM snapshot WHERE user = ?1 AND kind = 'cache' AND node IN (SELECT key FROM down)`,
-        [this.id, input.id],
-      );
+      this.dropKept(this.nodesDown("SELECT id FROM turn WHERE user = ?1 AND chat = ?2", input.id), "cache");
     });
     return input.revision;
   }
@@ -1227,13 +1221,7 @@ export class UserStore {
   /** Removes a chat's own rows: its turns, their changes and path nodes, every snapshot on a path through them, its sessions and links, and the chat. */
   private removeChat(id: string): void {
     const turns = "SELECT id FROM turn WHERE user = ?1 AND chat = ?2";
-    this.db.run(
-      `WITH RECURSIVE down(key) AS (
-         SELECT key FROM path_node WHERE user = ?1 AND turn IN (${turns})
-         UNION SELECT n.key FROM path_node n JOIN down d ON n.user = ?1 AND n.prev = d.key)
-       DELETE FROM snapshot WHERE user = ?1 AND node IN (SELECT key FROM down)`,
-      [this.id, id],
-    );
+    this.dropKept(this.nodesDown(turns, id), "every");
     this.db.run(`DELETE FROM change WHERE user = ?1 AND (turn IN (${turns}) OR chat = ?2)`, [this.id, id]);
     this.db.run(`DELETE FROM path_node WHERE user = ?1 AND turn IN (${turns})`, [this.id, id]);
     for (const table of ["turn", "session", "message_link", "reply_reason"]) this.db.run(`DELETE FROM ${table} WHERE user = ? AND chat = ?`, [this.id, id]);
@@ -2115,11 +2103,14 @@ export class UserStore {
     const ids = this.write(later ? this.withBranches(chat) : [chat], () => {
       let ord = (this.db.query<{ ord: number | null }, [string, string]>("SELECT max(ord) AS ord FROM change WHERE user = ? AND chat = ?").get(this.id, chat)?.ord ?? -1) + 1;
       const put = this.db.query("INSERT INTO change (user, turn, chat, ord, lane, op, value, by, handle, standing, precision, source, cite, job, applied, reports, told, created) VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-      return inputs.map((c, i) => {
+      const made = inputs.map((c, i) => {
         const o = outcomes[i] ?? { applied: false, reports: [] };
         const cite = c.cite === undefined || c.cite === null ? null : JSON.stringify(c.cite);
         return Number(put.run(this.id, chat, ord++, c.lane, c.op, JSON.stringify(c.value), c.by ?? null, c.handle ?? null, c.standing ?? null, c.precision ?? null, c.source ?? null, cite, job, o.applied ? 1 : 0, o.reports.length > 0 ? JSON.stringify(o.reports) : null, toldOf(c), now).lastInsertRowid);
       });
+      // Placed before a turn begun at its moment or after (a clock set back, the same moment), it changes that turn's fold and every one after.
+      if (later) this.dropKept(this.nodesDown("SELECT id FROM turn WHERE user = ?1 AND created >= ?2", now), "cache");
+      return made;
     }, later ? undefined : new Set<string>());
     const rows = this.db.query<ChangeDb, [string, string]>("SELECT * FROM change WHERE user = ?1 AND id IN (SELECT value FROM json_each(?2)) ORDER BY ord").all(this.id, JSON.stringify(ids)).map(changeOf);
     return { changes: rows, state };
@@ -2131,15 +2122,7 @@ export class UserStore {
    */
   dropSnapshots(chat: string): number {
     this.chatOrThrow(chat);
-    return this.write(false, () =>
-      this.db.run(
-        `WITH RECURSIVE down(key) AS (
-           SELECT key FROM path_node WHERE user = ?1 AND turn IN (SELECT id FROM turn WHERE user = ?1 AND chat = ?2)
-           UNION SELECT n.key FROM path_node n JOIN down d ON n.user = ?1 AND n.prev = d.key)
-         DELETE FROM snapshot WHERE user = ?1 AND kind = 'cache' AND node IN (SELECT key FROM down)`,
-        [this.id, chat],
-      ).changes,
-    );
+    return this.write(false, () => this.dropKept(this.nodesDown("SELECT id FROM turn WHERE user = ?1 AND chat = ?2", chat), "cache"));
   }
 
   /** Takes back an open turn's staged changes, all or one run's (`handle`: the lead dropping a sub-agent's writes). How many went. */
@@ -2201,7 +2184,7 @@ export class UserStore {
       });
       this.db.run("UPDATE session SET opened_by = ? WHERE user = ? AND opened_by = ?", [into, this.id, held]);
       this.db.run("UPDATE session SET closed_by = ? WHERE user = ? AND closed_by = ?", [into, this.id, held]);
-      this.db.run("DELETE FROM snapshot WHERE user = ?1 AND node IN (SELECT key FROM path_node WHERE user = ?1 AND turn = ?2)", [this.id, held]);
+      this.dropKept(this.db.query<{ key: string }, [string, string]>("SELECT key FROM path_node WHERE user = ? AND turn = ?").all(this.id, held).map((r) => r.key), "every");
       this.db.run("UPDATE turn SET status = 'joined', joined = ? WHERE user = ? AND id = ?", [into, this.id, held]);
       this.dropSnapshotsThrough(into);
     }, new Set([...this.nodesThrough(from.id), ...this.nodesThrough(to.id)]));
@@ -2242,15 +2225,22 @@ export class UserStore {
     return this.turnOrThrow(turn).joined;
   }
 
-  /** Cached snapshots on every path through the turn, and after it, no longer hold. */
+  /** Cached snapshots on every path through the turn, and after it, no longer hold; nor does anything else kept of those nodes (`dropKept`). */
   private dropSnapshotsThrough(turn: string): void {
-    this.db.run(
-      `WITH RECURSIVE down(key) AS (
-         SELECT key FROM path_node WHERE user = ?1 AND turn = ?2
-         UNION SELECT n.key FROM path_node n JOIN down d ON n.user = ?1 AND n.prev = d.key)
-       DELETE FROM snapshot WHERE user = ?1 AND kind = 'cache' AND node IN (SELECT key FROM down)`,
-      [this.id, turn],
-    );
+    this.dropKept(this.nodesDown("SELECT ?2", turn), "cache");
+  }
+
+  /**
+   * Lets go of what is kept of the states at `nodes`, inside the write that changes their folds or removes them: their snapshots (the
+   * cached ones alone, or every kind) and their rows in each table that keeps something worked out from a node's state
+   * (`KEPT_BY_NODE`). So a row of either that is there was worked out from its node's state as it stands. How many snapshots went.
+   */
+  private dropKept(nodes: readonly string[], kinds: "cache" | "every"): number {
+    if (nodes.length === 0) return 0;
+    const list = JSON.stringify(nodes);
+    const gone = this.db.run(`DELETE FROM snapshot WHERE user = ?1 ${kinds === "cache" ? "AND kind = 'cache' " : ""}AND node IN (SELECT value FROM json_each(?2))`, [this.id, list]).changes;
+    for (const table of KEPT_BY_NODE) this.db.run(`DELETE FROM ${table} WHERE user = ?1 AND node IN (SELECT value FROM json_each(?2))`, [this.id, list]);
+    return gone;
   }
 
   /**
@@ -2258,17 +2248,20 @@ export class UserStore {
    * stands rebased at), and every node after one of them. No other node's path holds the turn, so no other fold reads what it wrote.
    */
   private nodesThrough(turn: string): Set<string> {
-    return new Set(
-      this.db
-        .query<{ key: string }, [string, string]>(
-          `WITH RECURSIVE down(key) AS (
-             SELECT key FROM path_node WHERE user = ?1 AND turn = ?2
-             UNION SELECT n.key FROM path_node n JOIN down d ON n.user = ?1 AND n.prev = d.key)
-           SELECT key FROM down`,
-        )
-        .all(this.id, turn)
-        .map((r) => r.key),
-    );
+    return new Set(this.nodesDown("SELECT ?2", turn));
+  }
+
+  /** The nodes the turns `turns` names stand at (a query of turn ids over ?1, the user, and ?2, `arg`), and every node after one of them. */
+  private nodesDown(turns: string, arg: string | number): string[] {
+    return this.db
+      .query<{ key: string }, [string, string | number]>(
+        `WITH RECURSIVE down(key) AS (
+           SELECT key FROM path_node WHERE user = ?1 AND turn IN (${turns})
+           UNION SELECT n.key FROM path_node n JOIN down d ON n.user = ?1 AND n.prev = d.key)
+         SELECT key FROM down`,
+      )
+      .all(this.id, arg)
+      .map((r) => r.key);
   }
 
   /**
@@ -3011,7 +3004,12 @@ export class UserStore {
     // Its changes take effect now, before the first turn begun after this (`jobsAlong`, `ownerOf`): with none begun and no branch made
     // since, they stand in no node's fold, only in the readings of the heads of the chats named, so the write names no node.
     const now = this.store.now();
-    this.write([...chats], () => this.db.run("INSERT INTO job (user, id, ended) VALUES (?, ?, ?) ON CONFLICT (user, id) DO UPDATE SET ended = COALESCE(job.ended, excluded.ended)", [this.id, job, now]), this.begunOrMadeFrom(now) ? undefined : new Set<string>());
+    const later = this.begunOrMadeFrom(now);
+    this.write([...chats], () => {
+      this.db.run("INSERT INTO job (user, id, ended) VALUES (?, ?, ?) ON CONFLICT (user, id) DO UPDATE SET ended = COALESCE(job.ended, excluded.ended)", [this.id, job, now]);
+      // A turn begun at its end or after (a clock set back, the same moment) has its fold, and every one after it, changed.
+      if (later) this.dropKept(this.nodesDown("SELECT id FROM turn WHERE user = ?1 AND created >= ?2", now), "cache");
+    }, later ? undefined : new Set<string>());
   }
 
   /**

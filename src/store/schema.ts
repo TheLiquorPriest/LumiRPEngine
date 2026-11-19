@@ -346,6 +346,14 @@ CREATE TABLE reply_reason (
 /** The tables the store reads and writes, all made by its migrations. */
 export const STORE_TABLES: readonly string[] = ["chat", "message_link", "session", "turn", "path_node", "change", "snapshot", "fold_mark", "world_part", "job", "snapshot_part", "reply_reason"];
 
+/**
+ * Tables that keep something worked out from the state at a path node, by their `user` and `node` columns (a turn's notes, a reply's
+ * line): the store deletes a node's rows in the write that changes the node's fold or removes the node, as it deletes the node's
+ * snapshots, so a row that is there was worked out from the node's state as it stands. What stands only in a chat's reading of its
+ * head (his changes made since its newest turn began, a job ended since) is in no node's fold: a row of it keeps the chat's fold mark.
+ */
+export const KEPT_BY_NODE: readonly string[] = [];
+
 /** The store's tables `db` does not hold. */
 export function missingStoreTables(db: Database): string[] {
   const held = new Set(
