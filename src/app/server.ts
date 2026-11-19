@@ -261,6 +261,8 @@ interface Asked {
   json: () => Promise<unknown>;
   /** For a long route's call: takes its work in hand and answers at once with an id (TCP); null where it is answered directly (the command socket). */
   later: ((work: (signal: AbortSignal) => Promise<Response>) => Response) | null;
+  /** For a page's call over TCP: how long it may run before its work is taken in hand and answered with an id, and what takes it in hand; null where it is answered directly. */
+  late: { ms: number; start(work: Promise<Response>): Response } | null;
 }
 
 /**
@@ -314,7 +316,27 @@ async function answerDeclared(route: DeclaredRoute<any, any, any, any, any, any>
   };
   // A long route's work outlives the request it was asked by: it is never aborted with it.
   if (route.long === true && asked.later !== null) return asked.later(run);
-  return await run(asked.signal);
+  if (asked.late === null) return await run(asked.signal);
+  // A page's request still running after `server.answerLateSeconds` is answered with an id and goes on: the relay's proxy would cut it at
+  // 30 s, and the page ask again for what RPE is still working. Until then it ends with its request; after, it goes on whatever the page does.
+  const work = new AbortController();
+  let handed = false;
+  const ended = (): void => {
+    if (!handed) work.abort(asked.signal.reason);
+  };
+  asked.signal.addEventListener("abort", ended, { once: true });
+  const running = run(work.signal);
+  const waited = Promise.withResolvers<null>();
+  const timer = setTimeout(() => waited.resolve(null), asked.late.ms);
+  try {
+    const first = await Promise.race([running, waited.promise]);
+    if (first !== null) return first;
+    handed = true;
+    return asked.late.start(running);
+  } finally {
+    clearTimeout(timer);
+    asked.signal.removeEventListener("abort", ended);
+  }
 }
 
 export function startServer(parts: ServerParts): RunningServer {
@@ -407,7 +429,8 @@ export function startServer(parts: ServerParts): RunningServer {
       }
       if (rest !== null && rest.decoded === null) return withCors(refusal(path, 400, `The path ${path} has a part that is not well encoded.`), origin);
       const later = on === "tcp" ? (work: (signal: AbortSignal) => Promise<Response>): Response => parts.answers.start(work(new AbortController().signal).catch((error: unknown) => failure(error, path, at, placed.area))) : null;
-      const asked: Asked = { path, params: rest === null ? params : { ...params, "*": rest.decoded ?? "" }, search: url.searchParams, user, auth: call, bytes, signal: request.signal, json: json(true), later };
+      const late = on === "tcp" && route.access === "page" ? { ms: config.server.answerLateSeconds * 1000, start: (work: Promise<Response>): Response => parts.answers.start(work.catch((error: unknown) => failure(error, path, at, placed.area))) } : null;
+      const asked: Asked = { path, params: rest === null ? params : { ...params, "*": rest.decoded ?? "" }, search: url.searchParams, user, auth: call, bytes, signal: request.signal, json: json(true), later, late };
       return withCors(await answerDeclared(route, asked, cursorKey), origin);
     } catch (error) {
       // A Lumiverse sign-in that RPE or Lumiverse refused is told in the log, by the address it came from and never its password.

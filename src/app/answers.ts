@@ -1,10 +1,11 @@
 // Long requests on the relay (plan §4.3, R-4): a page reaches RPE through Lumiverse's relay, whose proxy gives up after 30
 // seconds, so a route that may take longer says so (`long`), and the server answers a page's call to it at once, status 202,
-// with `{ answer: <id> }` and nothing else. The work goes on; its answer, the route's own status and body, is kept here and read
-// from one route, `GET /api/v1/answers/:id`: while the work runs it answers the same 202 and id, once it is done it gives the
-// answer once, and an id it does not hold (never given, read already, or dropped) is 404. An answer never read is dropped
-// `server.answerKeepSeconds` after it was ready. Work that answers at once by naming its own run or job (Settle now, bootstrap)
-// goes on doing so; this is for the rest.
+// with `{ answer: <id> }` and nothing else; any other page's call still running after `server.answerLateSeconds` is answered the
+// same way then (`server.ts`), so a page never asks again for what RPE is still working. The work goes on; its answer, the route's
+// own status and body, is kept here and read from one route, `GET /api/v1/answers/:id`: while the work runs it answers the same 202
+// and id, once it is done it gives the answer once, and an id it does not hold (never given, read already, or dropped) is 404. An
+// answer never read is dropped `server.answerKeepSeconds` after it was ready. Work that answers at once by naming its own run or job
+// (Settle now, bootstrap) goes on doing so; this is for the rest.
 
 import { randomBytes } from "node:crypto";
 import { rawRoute } from "./routes";

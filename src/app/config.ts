@@ -126,6 +126,8 @@ export interface AppConfig {
     headroomBytes: number;
     /** Seconds the answer of a long request, given by id, is kept for reading once ready. */
     answerKeepSeconds: number;
+    /** Seconds a page's request may run before it is answered with an id and goes on, for the page to read once it is done. */
+    answerLateSeconds: number;
   };
   auth: {
     /** How long a page token holds, in minutes. */
@@ -220,7 +222,7 @@ export const CONFIG_DEFAULTS: Readonly<AppConfig> = Object.freeze({
   fromEnvironment: [],
   origins: [],
   hosts: [],
-  server: { bodyBytes: 1024 * 1024, providerBodyBytes: 32 * 1024 * 1024, preflightSeconds: 600, workerParseBytes: 1024 * 1024, idleSeconds: 60, headroomBytes: 1024 * 1024, answerKeepSeconds: 300 },
+  server: { bodyBytes: 1024 * 1024, providerBodyBytes: 32 * 1024 * 1024, preflightSeconds: 600, workerParseBytes: 1024 * 1024, idleSeconds: 60, headroomBytes: 1024 * 1024, answerKeepSeconds: 300, answerLateSeconds: 20 },
   auth: { pageTokenMinutes: 30, commandLineSeconds: 60, webKeyDays: null, webSessionMinutes: 30, nonceSeconds: 60, signInTries: 4, signInPauseMinutes: 15, refusedSignInSeconds: 60 },
   live: { queueEvents: 512, messageBytes: 64 * 1024, follows: 64, chatIdChars: 200, sockets: 64 },
   database: { busyMs: 5000, sliceMs: 10, copiesKept: 3, pieceBytes: 1024 * 1024 },
@@ -274,6 +276,8 @@ export const SERVER_SETTING_DEFS = {
   idleSeconds: { key: "server.idleSeconds", default: D.server.idleSeconds, takes: { type: "whole", least: 0, most: 255 }, levels: GLOBAL, perConnection: false, name: "Idle connection closed after", about: "Seconds a connection may send and be sent nothing before RPE closes it; 0 for no bound. A reply's stream and the live socket stay open by what they send.", effect: "start" },
   headroomBytes: { key: "server.headroomBytes", default: D.server.headroomBytes, takes: whole(0), advice: [{ above: GIB, says: "The server reads over 1 GiB past a route's limit before it refuses a request." }], levels: GLOBAL, perConnection: false, name: "Room above the largest request", about: "Bytes above the largest body any route takes at which the server itself refuses a request, so that each route refuses a body over its own limit in its own words first.", effect: "start" },
   answerKeepSeconds: { key: "server.answerKeepSeconds", default: D.server.answerKeepSeconds, takes: whole(1), advice: [{ above: 86_400, says: "An answer never read is kept over a day." }], levels: GLOBAL, perConnection: false, name: "A long request's answer kept", about: "Seconds the answer of a request RPE answered at once with an id is kept, once ready, for the page to read; one never read is dropped then.", effect: "start" },
+  // Lumiverse's proxy gives up on a page's request through the relay after 30 seconds (`worker-host.ts:771`).
+  answerLateSeconds: { key: "server.answerLateSeconds", default: D.server.answerLateSeconds, takes: whole(1), advice: [{ above: 29, says: "Lumiverse gives up on a page's request through the relay after 30 seconds: a request still running then fails at the page while RPE goes on working it." }], levels: GLOBAL, perConnection: false, name: "A page's request answered later", about: "Seconds a page's request may run before RPE answers it with an id and goes on working it; the page reads the answer by that id once it is ready, and never asks again for what RPE is still working.", effect: "start" },
   busyMs: { key: "database.busyMs", default: D.database.busyMs, takes: whole(0), advice: [{ above: 600_000, says: "A write waits over ten minutes for another program's write." }], levels: GLOBAL, perConnection: false, name: "Wait for another writer", about: "Milliseconds a write waits for another program's write to RPE's database file to finish.", effect: "start" },
   sliceMs: { key: "database.sliceMs", default: D.database.sliceMs, takes: whole(1), advice: [{ above: 10_000, says: "The write queue runs writes over ten seconds at a time while other work waits." }], levels: GLOBAL, perConnection: false, name: "Writes run at a time", about: "Milliseconds the write queue runs writes before it lets other work in.", effect: "start" },
   waitMs: { key: "commandLine.waitMs", default: D.commandLine.waitMs, takes: whole(1), advice: [{ below: 100, says: "A command seldom finds the running server within a tenth of a second." }, { above: 600_000, says: "A command waits over ten minutes for the running server." }], levels: GLOBAL, perConnection: false, name: "The command line waits for RPE", about: "Milliseconds rpe status and rpe connection wait for the running server, and a command waits for the data folder's lock.", effect: "start" },
@@ -425,7 +429,7 @@ export function limitsOf(read: ConfigRead, log: Log | null = null): AppLimits {
     address: checkedSetting(read, s.address, hostName, D.address, log),
     origins: checkedSetting(read, s.origins, listOf(origin), D.origins, log),
     hosts: checkedSetting(read, s.hosts, listOf(hostName), D.hosts, log),
-    server: { bodyBytes: n(s.bodyBytes), providerBodyBytes: n(s.providerBodyBytes), preflightSeconds: n(s.preflightSeconds), workerParseBytes: n(s.workerParseBytes), idleSeconds: n(s.idleSeconds), headroomBytes: n(s.headroomBytes), answerKeepSeconds: n(s.answerKeepSeconds) },
+    server: { bodyBytes: n(s.bodyBytes), providerBodyBytes: n(s.providerBodyBytes), preflightSeconds: n(s.preflightSeconds), workerParseBytes: n(s.workerParseBytes), idleSeconds: n(s.idleSeconds), headroomBytes: n(s.headroomBytes), answerKeepSeconds: n(s.answerKeepSeconds), answerLateSeconds: n(s.answerLateSeconds) },
     auth: { pageTokenMinutes: n(s.pageTokenMinutes), commandLineSeconds: n(s.commandLineSeconds), webKeyDays: read.value(s.webKeyDays) as number | null, webSessionMinutes: n(s.webSessionMinutes), nonceSeconds: n(s.nonceSeconds), signInTries: n(s.signInTries), signInPauseMinutes: n(s.signInPauseMinutes), refusedSignInSeconds: n(s.refusedSignInSeconds) },
     live: { queueEvents: n(s.queueEvents), messageBytes: n(s.messageBytes), follows: n(s.follows), chatIdChars: n(s.chatIdChars), sockets: n(s.sockets) },
     database: { busyMs: n(s.busyMs), sliceMs: n(s.sliceMs), copiesKept: n(s.copiesKept), pieceBytes: n(s.pieceBytes) },
@@ -477,6 +481,7 @@ export function configOf(raw: unknown, env: Env, where: string, limits: AppLimit
         idleSeconds: l.server.idleSeconds,
         headroomBytes: l.server.headroomBytes,
         answerKeepSeconds: l.server.answerKeepSeconds,
+        answerLateSeconds: l.server.answerLateSeconds,
         ...readGroup(value, at, {
           bodyBytes: [wholeIn(1024, 1024 * 1024 * 1024), l.server.bodyBytes],
           providerBodyBytes: [wholeIn(1024, 1024 * 1024 * 1024), l.server.providerBodyBytes],
