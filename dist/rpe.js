@@ -53,6 +53,10 @@ var __require = import.meta.require;
 function useLines(source) {
   installed = source;
   current = undefined;
+  given++;
+}
+function linesGiven() {
+  return given;
 }
 function withLines(source, work) {
   const before = current;
@@ -95,7 +99,7 @@ function wordTable(table, keys) {
     Object.defineProperty(out, key, { enumerable: true, get: () => wordOf(table, key) });
   return out;
 }
-var installed, current, missing = null;
+var installed, current, given = 0, missing = null;
 
 // node_modules/rp-harness/src/model/failure.ts
 function askedIn(words) {
@@ -1582,7 +1586,7 @@ function parseDefinition(file, name, replaces, definitions) {
   const tools = list("tools", "tools by name");
   const outOfReach = list("out_of_reach", "families of tools a search does not reach");
   const reads = list("reads", "instruction files by name, with `rules` for the always-on rules");
-  const given = list("given", "what the agent is handed by name");
+  const given2 = list("given", "what the agent is handed by name");
   const opening = list("opening", "what the agent is given once, when its session opens, by name");
   const limits = {};
   if (h.limits !== undefined && h.limits !== null) {
@@ -1634,7 +1638,7 @@ function parseDefinition(file, name, replaces, definitions) {
       tools,
       outOfReach,
       reads,
-      given,
+      given: given2,
       opening,
       limits,
       ...writer !== undefined ? { writer } : {},
@@ -1891,10 +1895,10 @@ function toolText(text, what) {
   } catch (error) {
     return { description: text.trim(), arguments: {}, problem: error instanceof Error ? error.message : String(error) };
   }
-  const given = file.header.arguments;
+  const given2 = file.header.arguments;
   const args = {};
-  if (isObject2(given)) {
-    for (const [name, said] of Object.entries(given))
+  if (isObject2(given2)) {
+    for (const [name, said] of Object.entries(given2))
       if (typeof said === "string")
         args[name] = said.trim();
   }
@@ -6848,12 +6852,12 @@ function isOwnerRole(v) {
 function worthShares(owners) {
   const out = {};
   const holders = owners.filter((o) => ROLE_RIGHTS[o.role].worth);
-  const given = holders.filter((o) => typeof o.share === "number" && Number.isFinite(o.share) && o.share > 0);
-  const total = given.reduce((a, o) => a + (o.share ?? 0), 0);
+  const given2 = holders.filter((o) => typeof o.share === "number" && Number.isFinite(o.share) && o.share > 0);
+  const total = given2.reduce((a, o) => a + (o.share ?? 0), 0);
   for (const o of owners)
     out[o.party] = out[o.party] ?? 0;
   for (const o of holders)
-    out[o.party] = (out[o.party] ?? 0) + (given.length === 0 ? 100 / holders.length : given.includes(o) ? (o.share ?? 0) * 100 / total : 0);
+    out[o.party] = (out[o.party] ?? 0) + (given2.length === 0 ? 100 / holders.length : given2.includes(o) ? (o.share ?? 0) * 100 / total : 0);
   return out;
 }
 function ownersIn(fields) {
@@ -7912,11 +7916,11 @@ function memoryOverridesOf(raw) {
   const full = memoryConfigOf(raw, DEFAULT_MINDS_MEMORY);
   const out = {};
   for (const part of Object.keys(DEFAULT_MINDS_MEMORY)) {
-    const given = obj(m[part]);
+    const given2 = obj(m[part]);
     const read = full[part];
     const keep = {};
-    for (const key of Object.keys(given))
-      if (hasOwn(read, key) && given[key] === read[key])
+    for (const key of Object.keys(given2))
+      if (hasOwn(read, key) && given2[key] === read[key])
         keep[key] = read[key] ?? null;
     if (Object.keys(keep).length > 0)
       Object.assign(out, { [part]: keep });
@@ -8846,10 +8850,10 @@ function lifeEffect(args, ctx) {
   const subject = typeof args.entity === "string" ? args.entity : "";
   if (!own2(ctx.state.entities, subject))
     return { code: "missing_entity", reason: say("why_theres_no_subject", { subject: labelOf(ctx, subject) }) };
-  const given = args.to;
-  if (given !== undefined && given !== null && typeof given !== "string")
+  const given2 = args.to;
+  if (given2 !== undefined && given2 !== null && typeof given2 !== "string")
     return { code: "bad_args", reason: say("why_a_life_state_is_named_by_its") };
-  const to = typeof given === "string" && given !== "" ? given : null;
+  const to = typeof given2 === "string" && given2 !== "" ? given2 : null;
   if (to !== null && !isLifeState(ctx.world, to))
     return { code: "bad_life", reason: say("why_theres_no_life_state_to", { to }), choices: lifeStatesOf(ctx.world).map(([id]) => id), said: to };
   const who = listeners(ctx, args.tell);
@@ -14016,8 +14020,8 @@ var init_grid_play = __esm(() => {
       const legend = e.data.legend ?? {};
       if (!isRecord(legend) || !Object.keys(legend).every(oneSymbol))
         return reject4("bad_legend", "a legend's symbols are one character each");
-      const given = Object.fromEntries(Object.entries(legend).filter(([, cell]) => cell !== null));
-      if (Object.keys(given).length > 0 && readMap({ id: map, scope: doc?.scope ?? map, layout: ["."], legend: given }).problems.length > 0)
+      const given2 = Object.fromEntries(Object.entries(legend).filter(([, cell]) => cell !== null));
+      if (Object.keys(given2).length > 0 && readMap({ id: map, scope: doc?.scope ?? map, layout: ["."], legend: given2 }).problems.length > 0)
         return reject4("bad_legend", "that is not what a legend's symbol can stand for");
       return squares.length > 0 || Object.keys(legend).length > 0 ? null : reject4("no_change", "no square and no symbol is changed");
     },
@@ -15092,7 +15096,7 @@ var init_events = __esm(() => {
 
 // src/engine/action-lines.ts
 function spoken(def) {
-  const { words: words2, ...given } = def;
+  const { words: words2, ...given2 } = def;
   const id2 = def.id;
   const params = {};
   for (const [name, written] of Object.entries(def.params)) {
@@ -15100,7 +15104,7 @@ function spoken(def) {
     Object.defineProperty(param, "label", { enumerable: true, configurable: true, get: () => say(`action_${id2}_param_${name}`, words2) || written.label });
     params[name] = param;
   }
-  const action = { ...given, params };
+  const action = { ...given2, params };
   Object.defineProperties(action, {
     label: { enumerable: true, configurable: true, get: () => say(`action_${id2}_label`, words2) || id2 },
     description: { enumerable: true, configurable: true, get: () => say(`action_${id2}_description`, words2) || undefined }
@@ -15521,9 +15525,9 @@ function createRegistry(packs) {
           return services.get(String(name));
         },
         query(name) {
-          const given = overrides?.[name];
-          if (given !== undefined)
-            return given;
+          const given2 = overrides?.[name];
+          if (given2 !== undefined)
+            return given2;
           if (!queries.has(String(name)))
             throw new RegistryError(`no query ${String(name)}`);
           return queries.get(String(name));
@@ -20026,18 +20030,18 @@ function* freeSymbols(taken) {
 function symbolsOfTerrain(grid, doors) {
   const legend = { ...DEFAULT_LEGEND };
   const blocked = new Set(grid.blocked);
-  const given = new Map(Object.entries(TERRAIN_SYMBOL));
+  const given2 = new Map(Object.entries(TERRAIN_SYMBOL));
   const free = freeSymbols(new Set(["#", ".", "+", " "]));
   const symbols = grid.terrain.map((t, i) => {
-    let s = given.get(t);
+    let s = given2.get(t);
     if (s === undefined && isDoorTerrain(t, doors)) {
       s = "+";
-      given.set(t, s);
+      given2.set(t, s);
     }
     if (s === undefined) {
       const fresh = free.next().value ?? "?";
       s = fresh;
-      given.set(t, fresh);
+      given2.set(t, fresh);
       legend[fresh] = { terrain: t, ...blocked.has(i) ? { blocked: true } : {} };
     }
     return s;
@@ -28175,8 +28179,8 @@ function donationsReceived(state, org, year) {
   return numOf(own2(donations(state, "received", org), String(year)));
 }
 function deductibleDonors(state) {
-  const given = objOf(objOf(sliceOf(state, "economy").donations).given);
-  return Object.keys(given).filter((donor) => Object.values(objOf(given[donor])).some((y) => numOf(objOf(y).deductible) > 0)).sort();
+  const given2 = objOf(objOf(sliceOf(state, "economy").donations).given);
+  return Object.keys(given2).filter((donor) => Object.values(objOf(given2[donor])).some((y) => numOf(objOf(y).deductible) > 0)).sort();
 }
 function addDonation(state, side, party, year, value) {
   const all = sliceRecord(state, "economy", "donations");
@@ -28700,10 +28704,10 @@ function trustYear(ctx, trust, year) {
   const distributed = paid.reduce((a, [, c]) => a + c, 0);
   const carried = Math.min(distributed, dni);
   const parts = new Map;
-  let given = 0;
+  let given2 = 0;
   for (const [i, [party, cents2]] of paid.entries()) {
-    const part = i === paid.length - 1 ? carried - given : Math.round(carried * cents2 / Math.max(1, distributed));
-    given += part;
+    const part = i === paid.length - 1 ? carried - given2 : Math.round(carried * cents2 / Math.max(1, distributed));
+    given2 += part;
     const ord = dni > 0 ? Math.round(part * ordinary / dni) : 0;
     parts.set(party, { ordinary: ord, dividends: part - ord });
   }
@@ -29936,8 +29940,8 @@ function foundationYear(api, ctx, org, year, december) {
   const nii = income + Math.max(0, g.short + g.long);
   const excise = Math.round(nii * terms.excisePct / 100);
   const payout2 = Math.max(0, Math.round(assets * terms.payoutPct / 100) - excise);
-  const given = donationsGiven(ctx.state, org, year);
-  const grants = given.deductible + given.other;
+  const given2 = donationsGiven(ctx.state, org, year);
+  const grants = given2.deductible + given2.other;
   const priorShortfall = Math.max(0, numOf(closedYear(ctx.state, org, year - 1)?.shortfall));
   const toPrior = Math.min(grants, priorShortfall);
   const undistributed = priorShortfall - toPrior;
@@ -30042,10 +30046,10 @@ function consentEvents(api, deps, ctx, a) {
   const total = holders.reduce((s, h) => s + h.share, 0);
   if (holders.length === 0 || total <= 0)
     return { code: "no_owners", reason: say("why_org_has_no_holders_to_consent", { org: labelOf(ctx, org) }) };
-  let given = 0;
+  let given2 = 0;
   const parts = holders.map((h, i) => {
-    const part = i === holders.length - 1 ? cents2 - given : Math.round(cents2 * h.share / total);
-    given += part;
+    const part = i === holders.length - 1 ? cents2 - given2 : Math.round(cents2 * h.share / total);
+    given2 += part;
     return { party: h.party, cents: part, ...api.partyKind(ctx, h.party) === "business" ? { deductPct: deps.deductionPct(ctx, h.party, org) } : {} };
   });
   const text4 = say("org_log_declared_a_consent_dividend_of_cents_for", { cents: api.money(ctx, cents2), year });
@@ -32511,10 +32515,10 @@ function holdersOf4(api, ctx, business) {
 }
 function splitByShare(cents2, rows2) {
   const total = rows2.reduce((a, r) => a + r.share, 0);
-  let given = 0;
+  let given2 = 0;
   return rows2.map((r, i) => {
-    const part = i === rows2.length - 1 ? cents2 - given : total > 0 ? Math.round(cents2 * r.share / total) : 0;
-    given += part;
+    const part = i === rows2.length - 1 ? cents2 - given2 : total > 0 ? Math.round(cents2 * r.share / total) : 0;
+    given2 += part;
     return { party: r.party, cents: part };
   });
 }
@@ -33332,9 +33336,9 @@ function counted(api, ctx, business) {
   const owners = api.ownersOf(ctx.state, business);
   return countsUnits(owners) ? owners : countedIn(owners, unitsToCount(ctx));
 }
-function priced(api, ctx, business, owners, units, given) {
-  if (typeof given === "number" && Number.isFinite(given)) {
-    const each = Math.round(given);
+function priced(api, ctx, business, owners, units, given2) {
+  if (typeof given2 === "number" && Number.isFinite(given2)) {
+    const each = Math.round(given2);
     return each >= 0 && Number.isSafeInteger(each * units) ? { each, cents: each * units } : reject11("bad_amount", say("why_a_price_is_a_whole_amount"));
   }
   const market = marketValueOf(ctx, business);
@@ -33966,11 +33970,11 @@ function ordinaryIncome(api, ctx, person, year) {
 }
 function deductionFor(ctx, person, year, filing, agi) {
   const t = federalTables(ctx);
-  const given = donationsGiven(ctx.state, person, year).deductible;
-  if (given <= 0)
+  const given2 = donationsGiven(ctx.state, person, year).deductible;
+  if (given2 <= 0)
     return t.standardDeduction[filing];
-  const toFoundations = Math.min(given, foundationGifts(ctx.state, person, year));
-  const toPublic = given - toFoundations;
+  const toFoundations = Math.min(given2, foundationGifts(ctx.state, person, year));
+  const toPublic = given2 - toFoundations;
   const allowance = year >= t.charitable.nonItemizerFrom ? Math.min(toPublic, t.charitable.nonItemizer[filing]) : 0;
   const limit = Math.max(0, agi) * t.charitable.agiLimitPct / 100;
   const fromPublic = Math.min(toPublic, limit);
@@ -35502,10 +35506,10 @@ function paySchedule(args, ctx) {
     return reject12("not_owner", refusal);
   const cal = calendarOf(ctx.world);
   const weekly = every === "weekly" || every === "biweekly";
-  const given = strOf(args.anchor);
-  const anchor = given === "" ? null : dayOfField(cal, given);
-  if (given !== "" && anchor === null)
-    return reject12("bad_date", say("why_given_isnt_a_date", { given }));
+  const given2 = strOf(args.anchor);
+  const anchor = given2 === "" ? null : dayOfField(cal, given2);
+  if (given2 !== "" && anchor === null)
+    return reject12("bad_date", say("why_given_isnt_a_date", { given: given2 }));
   const weekday = anchor !== null ? dateAt(cal, clockAt(cal, anchor, 0)).weekday : typeof args.weekday === "number" && Number.isInteger(args.weekday) && args.weekday >= 0 && args.weekday <= 6 ? args.weekday : 5;
   const from = today2(ctx);
   const first = anchor ?? from + ((weekday - dateAt(cal, clockAt(cal, from, 0)).weekday) % 7 + 7) % 7;
@@ -36027,11 +36031,11 @@ function distribution(ctx, api, business, months, trust = false) {
   const lines = [];
   const extra = [];
   const parts = [];
-  let given = 0;
+  let given2 = 0;
   let paid = 0;
   for (const [i, o] of owners.entries()) {
-    const cents2 = i === owners.length - 1 ? owed - given : Math.round(owed * o.share / shareSum);
-    given += cents2;
+    const cents2 = i === owners.length - 1 ? owed - given2 : Math.round(owed * o.share / shareSum);
+    given2 += cents2;
     if (cents2 <= 0)
       continue;
     const r = route?.(ctx, o.party, business) ?? null;
@@ -38167,10 +38171,10 @@ function delist(api, ctx, a) {
   if (denied)
     return denied;
   const market = Math.round(quoteOf(ctx, listing.asset) ?? listing.price);
-  const given = typeof a.price === "number" && Number.isFinite(a.price) ? Math.round(a.price) : null;
-  if (given !== null && given < market)
+  const given2 = typeof a.price === "number" && Number.isFinite(a.price) ? Math.round(a.price) : null;
+  if (given2 !== null && given2 < market)
     return reject11("declined", say("why_the_public_sells_at_no_less_than", { market: moneyWords(ctx, market) }));
-  const each = given ?? market;
+  const each = given2 ?? market;
   const float = listedFloat(ctx, listing.asset);
   const source = operatingAccount(api, ctx, business);
   if (!source)
@@ -38286,7 +38290,7 @@ function publicPayout(api, ctx, business, cents2) {
     else
       lines.push({ account, amount });
   };
-  let given = 0;
+  let given2 = 0;
   for (const holding of holdingIds(ctx.state)) {
     const f = own2(ctx.state.entities, holding)?.fields;
     if (f?.asset !== listing.asset)
@@ -38294,7 +38298,7 @@ function publicPayout(api, ctx, business, cents2) {
     const qty = qtyOf(lotsOf(ctx, holding));
     if (qty <= QTY_EPSILON)
       continue;
-    const share2 = Math.min(part - given, Math.round(part * qty / listing.float));
+    const share2 = Math.min(part - given2, Math.round(part * qty / listing.float));
     if (share2 <= 0)
       continue;
     const account = accountOfHolding(ctx.state, holding);
@@ -38308,10 +38312,10 @@ function publicPayout(api, ctx, business, cents2) {
       if (l.account !== source)
         add(l.account, l.amount);
     extra.push({ type: "economy.income", data: { source: holding, cents: paid.paid, kind: "dividend" } });
-    given += paid.paid;
+    given2 += paid.paid;
   }
-  if (part - given > 0)
-    add(marketOf(api, listing.asset), part - given);
+  if (part - given2 > 0)
+    add(marketOf(api, listing.asset), part - given2);
   return { cents: part, lines, extra };
 }
 function fairUnit(api, ctx, business) {
@@ -43169,12 +43173,12 @@ function vehicleNamed(ctx, item, category) {
 function quote(ctx, args, payer, qty) {
   const place2 = placeOfEntity(ctx.state, payer);
   const named = strOf(args.item);
-  const given = strOf(args.category);
+  const given2 = strOf(args.category);
   const cls = strOf(args.class);
-  const catalogRow = named === "" ? null : rowOf(ctx, "economy.catalog", named) ? named : matchCatalog(ctx, named, place2, given);
-  const vehicleFirst = given === VEHICLE_CATEGORY || cls !== "";
+  const catalogRow = named === "" ? null : rowOf(ctx, "economy.catalog", named) ? named : matchCatalog(ctx, named, place2, given2);
+  const vehicleFirst = given2 === VEHICLE_CATEGORY || cls !== "";
   const said2 = typeof args.price === "number" && args.price > 0 ? Math.round(args.price) : undefined;
-  const wordsClass = vehicleFirst || catalogRow !== null ? null : vehicleNamed(ctx, named, given);
+  const wordsClass = vehicleFirst || catalogRow !== null ? null : vehicleNamed(ctx, named, given2);
   const vehicle = vehicleFirst || wordsClass !== null ? optionalQuery(ctx, "vehicles.priced")?.(ctx, [named, strOf(args.name)].filter((w) => w !== "").join(" "), place2, cls || (wordsClass ?? undefined), args.new === true) ?? null : null;
   if (vehicle) {
     const unit3 = said2 === undefined ? vehicle.cents : args.exact === true ? said2 : Math.min(vehicle.band.max, Math.max(vehicle.band.min, said2));
@@ -43183,7 +43187,7 @@ function quote(ctx, args, payer, qty) {
     return { price, row: null, vehicle, ...clamped && said2 !== undefined ? { narrated: { cents: said2, limited: "band" } } : {} };
   }
   const row = catalogRow;
-  const category = given !== "" ? given : !row && rowOf(ctx, "economy.categories", named) ? named : "";
+  const category = given2 !== "" ? given2 : !row && rowOf(ctx, "economy.categories", named) ? named : "";
   const rowDef = row ? rowOf(ctx, "economy.catalog", row) : undefined;
   const asIs = (cents2) => ({ cents: cents2, unitCents: Math.round(cents2 / qty), band: { min: cents2, typical: cents2, max: cents2 }, source: row ? "catalog" : "category", clamped: false, name: strOf(rowDef?.name, named || "something"), category: rowDef ? strOf(rowDef.category) : rowOf(ctx, "economy.categories", category) ? category : "misc" });
   if (said2 !== undefined && args.exact === true)
@@ -44685,9 +44689,9 @@ function lintAdjudication(world) {
   const described = ["weight", "max", "advantageAt"];
   const description = isRecord(raw.description) ? raw.description : {};
   const read = [...values.map((k) => [k, raw[k], policy[k]]), ...described.map((k) => [`description.${k}`, description[k], policy.description[k]])];
-  for (const [key, given, plays] of read) {
-    if (given !== undefined && given !== plays)
-      issues.push({ severity: "warning", path: `${at}.${key}`, code: "adjudication_value", message: say("lint_key_cant_be_given_it_plays_as", { key, given: JSON.stringify(given), plays: JSON.stringify(plays) }) });
+  for (const [key, given2, plays] of read) {
+    if (given2 !== undefined && given2 !== plays)
+      issues.push({ severity: "warning", path: `${at}.${key}`, code: "adjudication_value", message: say("lint_key_cant_be_given_it_plays_as", { key, given: JSON.stringify(given2), plays: JSON.stringify(plays) }) });
   }
   const named = ADJUDICATION_PRESET_IDS.find((p) => p === raw.preset && p !== "custom");
   if (named && policy.preset === "custom") {
@@ -49517,9 +49521,9 @@ function fuelProduct(ctx, vehicle) {
   return { catalog: type === "diesel" ? marine ? "marine_diesel" : "diesel" : marine ? "marine_gasoline" : "gasoline_regular", perUnit: 0, unit: "gal", capacity: numOf(row?.tank_capacity_gal, 15) };
 }
 function driverOf2(ctx, vehicle, said2) {
-  const given = strOf(said2);
-  if (given !== "")
-    return given;
+  const given2 = strOf(said2);
+  if (given2 !== "")
+    return given2;
   const recorded2 = own2(ctx.state.entities, vehicle)?.fields.driver;
   return typeof recorded2 === "string" && own2(ctx.state.entities, recorded2) !== undefined && !isGone(ctx.state, recorded2) ? recorded2 : null;
 }
@@ -49578,9 +49582,9 @@ function spawnVehicle(ctx, spec) {
   Object.assign(fields, spec.fields ?? {});
   return { entity: id2, events: [{ type: "spawn", entity: { id: id2, kind: "vehicle", name, tier: "background", fields, relations: holder ? [{ type: "in", to: holder }] : [] } }] };
 }
-function pricedVehicle(ctx, words4, given, fresh) {
+function pricedVehicle(ctx, words4, given2, fresh) {
   const table = ctx.tables.get("vehicles.classes");
-  const cls = given !== undefined && own2(table?.rows ?? {}, given) ? given : matchVehicleClass(words4, table);
+  const cls = given2 !== undefined && own2(table?.rows ?? {}, given2) ? given2 : matchVehicleClass(words4, table);
   const row = cls ? own2(table?.rows ?? {}, cls) : undefined;
   if (!cls || !row)
     return null;
@@ -50389,11 +50393,11 @@ function deltasFor(ctx, appraisal) {
     return Object.fromEntries(Object.entries(custom).map(([k, v]) => [k, numOf(v)]));
   return { ...own2(APPRAISALS, appraisal) ?? {} };
 }
-function appraiseWith(ctx, from, to, appraisal, why, mutual, given) {
-  if (!own2(ctx.state.entities, from) || !own2(ctx.state.entities, to) || from === to && !given)
+function appraiseWith(ctx, from, to, appraisal, why, mutual, given2) {
+  if (!own2(ctx.state.entities, from) || !own2(ctx.state.entities, to) || from === to && !given2)
     return [];
   const level = ctx.levelOf(from, "relationships");
-  if (level === 0 && !given)
+  if (level === 0 && !given2)
     return [];
   const axes = axesOf(ctx).map((a) => a.id);
   const raw = deltasFor(ctx, appraisal);
@@ -50401,24 +50405,24 @@ function appraiseWith(ctx, from, to, appraisal, why, mutual, given) {
   if (known.length === 0)
     return [];
   let deltas;
-  if (level >= 3 || given)
+  if (level >= 3 || given2)
     deltas = Object.fromEntries(known);
   else {
     const mean = Math.round(known.reduce((a, [, v]) => a + v, 0) / axes.length * 10) / 10;
     deltas = Object.fromEntries(axes.map((a) => [a, mean]));
   }
   const npc = from !== ctx.world.pov && to !== ctx.world.pov;
-  const anchor = anchorAfter(ctx, from, to, deltas, ctx.state.clock, given);
-  const back = mutual ? anchorAfter(ctx, to, from, deltas, ctx.state.clock, given) : null;
+  const anchor = anchorAfter(ctx, from, to, deltas, ctx.state.clock, given2);
+  const back = mutual ? anchorAfter(ctx, to, from, deltas, ctx.state.clock, given2) : null;
   const sameBack = back !== null && JSON.stringify(back) === JSON.stringify(anchor);
-  return [{ type: "relationships.regard", data: { from, to, deltas, why: why ?? (typeof appraisal === "string" ? appraisal : "change"), ...mutual ? { mutual: true } : {}, ...npc ? { npc: true } : {}, ...given ? { asGiven: true } : {}, anchor, ...back && !sameBack ? { back } : {} } }];
+  return [{ type: "relationships.regard", data: { from, to, deltas, why: why ?? (typeof appraisal === "string" ? appraisal : "change"), ...mutual ? { mutual: true } : {}, ...npc ? { npc: true } : {}, ...given2 ? { asGiven: true } : {}, anchor, ...back && !sameBack ? { back } : {} } }];
 }
-function anchorAfter(ctx, from, to, deltas, at, given) {
+function anchorAfter(ctx, from, to, deltas, at, given2) {
   const current2 = regardAxes(ctx, from, to);
   const out = {};
   for (const a of axesOf(ctx)) {
     const value = Math.round(((current2[a.id] ?? 0) + numOf(deltas[a.id])) * 10) / 10;
-    out[a.id] = given ? value : Math.max(a.min, Math.min(a.max, value));
+    out[a.id] = given2 ? value : Math.max(a.min, Math.min(a.max, value));
   }
   out.t = at;
   return out;
@@ -50650,10 +50654,10 @@ var init_core7 = __esm(() => {
             return reject20("missing_entity", say("why_regard_needs_two_entities"));
           const delta = numOf(a.delta);
           const axis = strOf(a.axis);
-          const given = a.asGiven === true;
-          if (given && axis !== "" && !axesOf(ctx).some((x) => x.id === axis))
+          const given2 = a.asGiven === true;
+          if (given2 && axis !== "" && !axesOf(ctx).some((x) => x.id === axis))
             return { ...reject20("bad_axis", say("why_no_regard_axis_axis", { axis })), said: axis, choices: axesOf(ctx).map((x) => x.id) };
-          return appraiseWith(ctx, from, to, axis ? { [axis]: delta } : Object.fromEntries(axesOf(ctx).map((x) => [x.id, delta])), strOf(a.why, "change"), undefined, given);
+          return appraiseWith(ctx, from, to, axis ? { [axis]: delta } : Object.fromEntries(axesOf(ctx).map((x) => [x.id, delta])), strOf(a.why, "change"), undefined, given2);
         }
       });
       r.action({ id: "chat_with", pack: "relationships", params: { target: { type: "ref", ref: "person" }, minutes: STATED_MINUTES }, requires: ["at(target, here)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "target", to: "self", appraisal: CONVERSATION, mutual: true } }] }, duration: CHAT_FOR, activity: { type: "chat", until: `clock + (${CHAT_FOR})` }, lexicon: ["chat with", "talk to", "catch up with"], observable: "chats" });
@@ -52954,8 +52958,8 @@ function slotDays(ctx, slot) {
   return first === last ? [first] : [first, last];
 }
 function invitation(ctx, who, ask) {
-  const given = sliceOf(ctx.state, "castlife").invitations;
-  if (!mayInvite(ctx, who, ask.place) || Array.isArray(given) && given.some((i) => objOf(i).key === ask.key))
+  const given2 = sliceOf(ctx.state, "castlife").invitations;
+  if (!mayInvite(ctx, who, ask.place) || Array.isArray(given2) && given2.some((i) => objOf(i).key === ask.key))
     return [];
   const text5 = invitationText(ctx, who, ask.place, ask.at, ctx.world.pov);
   return [{ type: "castlife.invitation", data: { agent: who, place: ask.place, at: ask.at, text: text5, key: ask.key, origin: ask.origin.type === "plan" ? `plan:${ask.origin.plan}` : `routine:${ask.origin.block}` } }, ...text5 === "" ? [] : [{ type: ENGINE_EVENTS.signal, data: { class: "invitation", text: text5, entity: who } }]];
@@ -54873,8 +54877,8 @@ function neededWords(registry, world, action, name, choices) {
 }
 function missingWords(ctx, action, params, actor2) {
   for (const [name, def] of Object.entries(action.params)) {
-    const given = Object.hasOwn(params, name) ? params[name] : undefined;
-    if (def.optional !== true && (given === undefined || given === null || given === ""))
+    const given2 = Object.hasOwn(params, name) ? params[name] : undefined;
+    if (def.optional !== true && (given2 === undefined || given2 === null || given2 === ""))
       return neededWords(ctx.registry, ctx.world, action, name, paramChoices(ctx, def, actor2));
   }
   return null;
@@ -54904,12 +54908,12 @@ function prepare(reg, world, state2, req) {
     return { code: "missing_actor", reason: say("why_no_entity_who", { who: labelOf({ world, state: state2 }, actor2) }) };
   const bindings = { self: actor2, actor: actor2 };
   const params = {};
-  const given = req.params ?? {};
-  const missing2 = missingWords(reg.context(world, state2), action, given, actor2);
+  const given2 = req.params ?? {};
+  const missing2 = missingWords(reg.context(world, state2), action, given2, actor2);
   if (missing2 !== null)
     return { code: "missing_param", reason: missing2 };
   for (const [name, def] of Object.entries(action.params)) {
-    const raw = own2(given, name);
+    const raw = own2(given2, name);
     if (raw === undefined || raw === null || raw === "")
       continue;
     if (def.type === "ref") {
@@ -54995,9 +54999,9 @@ function unmetNeeds(reg, world, state2, needs, params) {
     if (value !== undefined)
       picks[name] = value;
   }
-  const given = (name) => Object.prototype.hasOwnProperty.call(picks, name);
+  const given2 = (name) => Object.prototype.hasOwnProperty.call(picks, name);
   const reads = (req) => identifiers(req).filter((name) => Object.prototype.hasOwnProperty.call(named.params, name));
-  const action = { ...named, params: Object.fromEntries(Object.entries(named.params).filter(([name]) => given(name))), requires: named.requires.filter((req) => reads(requirementExpr(req)).every(given)) };
+  const action = { ...named, params: Object.fromEntries(Object.entries(named.params).filter(([name]) => given2(name))), requires: named.requires.filter((req) => reads(requirementExpr(req)).every(given2)) };
   const p = prepare(reg, world, state2, { action, params: picks });
   return "code" in p ? p : firstUnmet(action, scopeEnv({ reg, ctx: reg.context(world, state2), bindings: p.bindings, vars: p.vars }));
 }
@@ -56092,10 +56096,10 @@ function namedFoes(ctx, v, here) {
 function startFight(a, ctx) {
   const rules = rulesOf(ctx.world);
   const pov = ctx.world.pov;
-  const given = idsOf(a.with);
-  const party = given.length > 0 ? given : [pov];
+  const given2 = idsOf(a.with);
+  const party = given2.length > 0 ? given2 : [pov];
   let foes;
-  if (given.length > 0)
+  if (given2.length > 0)
     foes = idsOf(a.foes);
   else {
     if (fightsOf(ctx.state).some((f) => fighterOf(f, pov)))
@@ -57321,13 +57325,13 @@ function knowledgeEdit(ctx, op, name) {
   if (!isHolding(h))
     return reject24("bad_value", say("why_a_holding_is_how_its_held_and"));
   const self2 = h.by === op.entity;
-  const given = self2 ? { ...h, by: null, how: h.how === "told" ? "witnessed" : h.how } : h;
-  const named = peopleIn(ctx, [...given.by === null ? [] : [given.by], ...Array.isArray(given.keptFrom) ? given.keptFrom : []]);
+  const given2 = self2 ? { ...h, by: null, how: h.how === "told" ? "witnessed" : h.how } : h;
+  const named = peopleIn(ctx, [...given2.by === null ? [] : [given2.by], ...Array.isArray(given2.keptFrom) ? given2.keptFrom : []]);
   if (!Array.isArray(named))
     return named;
-  if (given.evidence.some((ref2) => ref2 === op.fact || !isWitnessRef(ref2) && !own2(k.facts, ref2)))
+  if (given2.evidence.some((ref2) => ref2 === op.fact || !isWitnessRef(ref2) && !own2(k.facts, ref2)))
     return reject24("missing_fact", say("why_a_holding_rests_on_facts_the_minds"));
-  const next = holdingOf(given, op.entity);
+  const next = holdingOf(given2, op.entity);
   if (before2 && JSON.stringify(holdingOf(before2, op.entity)) === JSON.stringify(next))
     return reject24("no_change", say("why_nothing_to_change"));
   return [{ type: MINDS_EVENTS.learn, data: { who: [op.entity], fact: op.fact, how: next.how, by: next.by, evidence: next.evidence, belief: next.belief, confidence: next.confidence, ...next.keptFrom ? { keptFrom: next.keptFrom } : {}, msg: next.since.msg, at: next.since.at } }];
@@ -59948,10 +59952,10 @@ function groupEvents(ctx, by, name, kind) {
   return [spawn2, ...linked, orgLog(w.ctx, id2, say("org_log_by_founded_name_a_label_and_leads", { by: labelOf(ctx, by), name, label: of.label.toLowerCase() }), { by, names: [by] })];
 }
 function foundEvents(ctx, args) {
-  const given = strOf(args.by);
-  const founder = strOf(args.founder) || given || ctx.world.pov;
+  const given2 = strOf(args.by);
+  const founder = strOf(args.founder) || given2 || ctx.world.pov;
   const person2 = (id2) => kindIs(ctx.registry, ctx.world, own2(ctx.state.entities, id2)?.kind ?? "", "person") && !isGone(ctx.state, id2);
-  const by = given !== "" ? given : person2(founder) ? founder : "";
+  const by = given2 !== "" ? given2 : person2(founder) ? founder : "";
   if (by !== "" && !person2(by))
     return refuse4("bad_founder", say("why_only_a_person_founds_an_organization_for"));
   const type = strOf(args.type);
@@ -60157,8 +60161,8 @@ class Page {
   titleOf(who, rows2) {
     const { subject } = this;
     const via = rows2.find((r) => r.via !== undefined)?.via;
-    const given = subject.exists ? orgTitle(this.ctx, who, rows2.every((r) => r.via !== undefined) && via !== undefined ? via : subject.id) : null;
-    return given ?? HOW_WORDS[HOW_ORDER.find((h) => rows2.some((r) => r.how === h)) ?? "member"];
+    const given2 = subject.exists ? orgTitle(this.ctx, who, rows2.every((r) => r.via !== undefined) && via !== undefined ? via : subject.id) : null;
+    return given2 ?? HOW_WORDS[HOW_ORDER.find((h) => rows2.some((r) => r.how === h)) ?? "member"];
   }
   here(who) {
     return together(this.ctx.world, this.at, placeOfEntity(this.ctx.state, who));
@@ -60855,8 +60859,8 @@ function revokeDelegation(ctx, a) {
     const may = mayAct(ctx, by, org, "delegate");
     if (!may.ok)
       return refuse5("not_allowed", may.reason);
-    const given = Array.isArray(f.powers) ? f.powers.filter(isOrgPower) : [];
-    const beyond2 = given.find((p) => orgPower(ctx, by, org, p) === null);
+    const given2 = Array.isArray(f.powers) ? f.powers.filter(isOrgPower) : [];
+    const beyond2 = given2.find((p) => orgPower(ctx, by, org, p) === null);
     if (beyond2 !== undefined)
       return refuse5("not_allowed", say("why_by_may_not_beyond_for_org_so", { by: labelOf(ctx, by), beyond: powerWords[beyond2], org: labelOf(ctx, org) }));
   }
@@ -63213,14 +63217,14 @@ function personTitles(ctx, who) {
     const mine = rows2.filter((r) => r.who === pov);
     if (mine.length === 0 && !canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, org))
       continue;
-    const given = orgTitle(ctx, who, org);
-    if (given === null || given.trim() === "")
+    const given2 = orgTitle(ctx, who, org);
+    if (given2 === null || given2.trim() === "")
       continue;
-    const bare = bareTitles().has(given.trim().toLowerCase());
+    const bare = bareTitles().has(given2.trim().toLowerCase());
     if (bare && mine.length === 0)
       continue;
-    const role = given === HOW_WORDS.owner ? theirs.find((r) => r.how === "owner")?.role : undefined;
-    const title = role !== undefined && role !== "owner" ? role.replace(/_/g, " ") : given;
+    const role = given2 === HOW_WORDS.owner ? theirs.find((r) => r.how === "owner")?.role : undefined;
+    const title = role !== undefined && role !== "owner" ? role.replace(/_/g, " ") : given2;
     const orgName = own2(ctx.state.entities, org)?.name ?? org;
     const staffOnly = theirs.every((r) => r.how === "staff");
     const phrase = / of /i.test(title) ? lowerFirst(title) : say("feed_title_atof_orgname", { title: lowerFirst(title), orgName, if_staffOnly: !!staffOnly });
@@ -64192,7 +64196,7 @@ function worked(ctx, who, v, fallback) {
     reading--;
   }
 }
-function modifiersOf(ctx, rules, who, given = [], wants = () => true) {
+function modifiersOf(ctx, rules, who, given2 = [], wants = () => true) {
   const out = [];
   const add = (mods, source, from, choice) => {
     for (const m of mods) {
@@ -64252,7 +64256,7 @@ function modifiersOf(ctx, rules, who, given = [], wants = () => true) {
   const sizeRow = own2(rowsOf(ctx, rules, "sizes"), size);
   if (sizeRow)
     add(modifiersIn(sizeRow.modifiers), "size", labelOfRow(sizeRow, size));
-  add(given, "given", say("d20_given"));
+  add(given2, "given", say("d20_given"));
   return out;
 }
 function namesOf4(to) {
@@ -64261,9 +64265,9 @@ function namesOf4(to) {
 function bears(to, names) {
   return names.some((n) => n === to || n.startsWith(`${to}.`));
 }
-function stacked(ctx, rules, who, to, filter, given = []) {
+function stacked(ctx, rules, who, to, filter, given2 = []) {
   const names = namesOf4(to);
-  const mods = modifiersOf(ctx, rules, who, given, (t) => bears(t, names)).filter((m) => m.limit !== true && m.value !== 0 && (filter === undefined || filter.types.includes(m.type ?? "untyped") === filter.keep));
+  const mods = modifiersOf(ctx, rules, who, given2, (t) => bears(t, names)).filter((m) => m.limit !== true && m.value !== 0 && (filter === undefined || filter.types.includes(m.type ?? "untyped") === filter.keep));
   const stack = new Set(rules.bonuses.stack);
   const best = new Map;
   for (const m of mods) {
@@ -64393,7 +64397,7 @@ function termMods(ctx, rules, who, n, vars) {
   const filter = n.name === "bonus" ? undefined : { types: namesOf4(arg(2)), keep: n.name === "bonus_only" };
   return stacked(ctx, rules, who, to, filter);
 }
-function explain(ctx, rules, who, name, given = {}, bindings = {}) {
+function explain(ctx, rules, who, name, given2 = {}, bindings = {}) {
   const src = own2(rules.totals, name);
   if (typeof src !== "string")
     return null;
@@ -64403,7 +64407,7 @@ function explain(ctx, rules, who, name, given = {}, bindings = {}) {
   } catch {
     return null;
   }
-  const vars = { ...UNBOUND, ...given };
+  const vars = { ...UNBOUND, ...given2 };
   const env = scopeEnv({ reg: ctx.registry, ctx, bindings: { ...bindings, self: who }, vars });
   const terms2 = [];
   termsOf(program.root, 1, terms2);
@@ -64803,17 +64807,17 @@ function stoppedBy(s, who, types, physical) {
   const words6 = [reduction > 0 ? say("d20_reduction", { amount: reduction, from }) : "", resist > 0 ? say("d20_resistance", { amount: resist, from: rfrom }) : ""].filter((w) => w !== "").join(", ");
   return { amount: reduction + resist, words: words6 };
 }
-function savePlan(s, who, said2, given) {
+function savePlan(s, who, said2, given2) {
   const rules = s.rules;
   const id2 = saveNamed(rules, said2) ?? said2;
   const e = explain(s.ctx, rules, who, `save.${id2}`);
-  const extra = given.length > 0 ? sumOf(stacked(s.ctx, rules, who, `save.${id2}`, undefined, given)) - sumOf(stacked(s.ctx, rules, who, `save.${id2}`)) : 0;
-  const parts = [e ? partsWords(e) : "", ...given.map((g) => modWords({ to: g.to, value: Number(g.value), type: g.type ?? null, source: "given", from: say("d20_given"), ...g.note !== undefined ? { note: g.note } : {}, counted: true }))].filter((p) => p !== "").join(", ");
+  const extra = given2.length > 0 ? sumOf(stacked(s.ctx, rules, who, `save.${id2}`, undefined, given2)) - sumOf(stacked(s.ctx, rules, who, `save.${id2}`)) : 0;
+  const parts = [e ? partsWords(e) : "", ...given2.map((g) => modWords({ to: g.to, value: Number(g.value), type: g.type ?? null, source: "given", from: say("d20_given"), ...g.note !== undefined ? { note: g.note } : {}, counted: true }))].filter((p) => p !== "").join(", ");
   return { id: id2, bonus: (e?.total ?? 0) + extra, parts };
 }
-function rollSave(s, who, said2, dc, given, rng, ruled, spent = null) {
+function rollSave(s, who, said2, dc, given2, rng, ruled, spent = null) {
   const rules = s.rules;
-  const { id: id2, bonus, parts } = savePlan(s, who, said2, given);
+  const { id: id2, bonus, parts } = savePlan(s, who, said2, given2);
   if (ruled === "success" || ruled === "failure")
     return { save: id2, natural: null, total: bonus, outcome: ruled, parts, words: say("d20_save_ruled", { save: saveLabel(rules, id2), outcome: say(`d20_outcome_${ruled}`) }) };
   const natural = d20(rng);
@@ -64833,7 +64837,7 @@ function checkPlan(s, who, p) {
   if (!skill && ability === null)
     return reject25("d20_no_skill", say("why_d20_no_skill", { said: said2, skills: Object.keys(rowsOf(s.ctx, rules, "skills")).join(", "), abilities: rules.abilities.join(", ") }));
   const name = skill ? `skill.${skill.id}` : `ability_check.${ability ?? ""}`;
-  const given = givenMods(p.mods, name);
+  const given2 = givenMods(p.mods, name);
   const explainOf = (id2) => {
     if (skill)
       return explain(s.ctx, rules, id2, "skill", { skill: skill.id, key: skill.id, weapon: skill.id }) ?? { total: 0, parts: [] };
@@ -64842,7 +64846,7 @@ function checkPlan(s, who, p) {
     return { total: m + sumOf(mods), parts: [{ value: m, words: say("d20_part_ability", { value: signed(m), ability: ability ?? "" }) }, ...mods.length > 0 ? [{ value: sumOf(mods), words: mods.map(modWords).join(", "), mods }] : []] };
   };
   const mine = explainOf(who);
-  const extra = given.length > 0 ? sumOf(stacked(s.ctx, rules, who, name, undefined, given)) - sumOf(stacked(s.ctx, rules, who, name)) : 0;
+  const extra = given2.length > 0 ? sumOf(stacked(s.ctx, rules, who, name, undefined, given2)) - sumOf(stacked(s.ctx, rules, who, name)) : 0;
   const notes = [];
   if (skill && skill.row.trained === true && (own2(ranksOf(s.ctx, who), skill.id) ?? 0) <= 0)
     notes.push(say("d20_untrained", { skill: labelOfRow(skill.row, skill.id) }));
@@ -64856,7 +64860,7 @@ function checkPlan(s, who, p) {
     const theirSkill = text6(p.vs_skill) === "" ? skill : rowOf3(s.ctx, rules, "skills", text6(p.vs_skill));
     against = { who: vs, theirs: theirSkill ? explain(s.ctx, rules, vs, "skill", { skill: theirSkill.id, key: theirSkill.id }) ?? { total: 0, parts: [] } : explainOf(vs) };
   }
-  return { what: skill ? labelOfRow(skill.row, skill.id) : ability ?? "", mine, extra, given, notes, helpers, dc: difficultyOf2(s.ctx, rules, p.difficulty), take: take ? { said: text6(p.take), value: take.value } : null, vs: against };
+  return { what: skill ? labelOfRow(skill.row, skill.id) : ability ?? "", mine, extra, given: given2, notes, helpers, dc: difficultyOf2(s.ctx, rules, p.difficulty), take: take ? { said: text6(p.take), value: take.value } : null, vs: against };
 }
 function saveCall(s, who, p) {
   const rules = s.rules;
@@ -65029,10 +65033,10 @@ function planWith(s, who, w, p, target) {
   const totalName = w.natural?.total ?? (ranged ? a.totals.ranged : a.totals.melee);
   const vars = { weapon: w.rowId, key: w.rowId, ...apart !== null ? { distance: apart } : {} };
   const bindings = target !== null ? { target } : {};
-  const given = givenMods(p.mods, "attack");
-  const toAc = given.filter((m) => m.to === "ac" || m.to.startsWith("ac."));
-  const toRoll = given.filter((m) => !toAc.includes(m) && !m.to.startsWith("damage"));
-  const toDamage = given.filter((m) => m.to.startsWith("damage"));
+  const given2 = givenMods(p.mods, "attack");
+  const toAc = given2.filter((m) => m.to === "ac" || m.to.startsWith("ac."));
+  const toRoll = given2.filter((m) => !toAc.includes(m) && !m.to.startsWith("damage"));
+  const toDamage = given2.filter((m) => m.to.startsWith("damage"));
   const roll = situated(() => explain(s.ctx, rules, who, totalName, vars, bindings)) ?? { total: 0, parts: [] };
   const extras = [];
   const enh = w.item ? thingNumber(s.ctx, w.item, D20_FIELDS.enhancement) : 0;
@@ -65621,11 +65625,11 @@ var DIE = "1d20", PERCENT = "1d100", text6 = (v) => typeof v === "string" ? v.tr
   const prog = own2(s.ctx.world.ruleset?.progression ?? {}, rules.levels.progression);
   const field = prog?.xpField ?? "xp";
   const all = andAlso(who, p.also, s.ctx);
-  const given = numberIn(p.xp ?? null);
+  const given2 = numberIn(p.xp ?? null);
   const each = new Map;
-  if (given !== null)
+  if (given2 !== null)
     for (const one of all)
-      each.set(one, given);
+      each.set(one, given2);
   else {
     const overcome = ids2(p.overcame);
     if (overcome.length === 0)
@@ -104702,10 +104706,10 @@ function runOf2(ids3, entities) {
 }
 function snapshotRows(doc) {
   const parts = {};
-  const given = new Map;
+  const given2 = new Map;
   const put3 = (key, body, hash = hashOf(body)) => {
     parts[key] = hash;
-    given.set(hash, body);
+    given2.set(hash, body);
   };
   const { world, areas, ...beside } = doc.state;
   const ids3 = Object.keys(world.entities);
@@ -104719,7 +104723,7 @@ function snapshotRows(doc) {
   for (const [id2, slice2] of Object.entries(areas ?? {}))
     put3(`a:${id2}`, sliceText(slice2));
   put3("s", JSON.stringify(areas === undefined ? beside : { ...beside, areas: Object.keys(areas) }));
-  return { manifest: JSON.stringify({ parts, notApplied: doc.notApplied, rebased: doc.rebased }), parts: [...given] };
+  return { manifest: JSON.stringify({ parts, notApplied: doc.notApplied, rebased: doc.rebased }), parts: [...given2] };
 }
 function sliceText(slice2) {
   const hit = slices.get(slice2);
@@ -107482,6 +107486,7 @@ class Store {
   folds = new Map;
   byChat = new Map;
   held = new Map;
+  marksSince = new Map;
   compared = new Map;
   views = new WeakMap;
   envs = new Map;
@@ -107525,9 +107530,9 @@ class Store {
     const log = options.log;
     setWalkLimits({ kindChain: options.kindChain, holderDepth: options.holderDepth, visitDepth: options.visitDepth }, log && ((cut) => log("An engine walk stopped at its setting; what lies past it is not counted.", { walk: cut.walk, setting: WALK_SETTINGS[cut.walk], from: cut.from, at: cut.at, limit: cut.limit })));
     const walks = walkLimits();
-    const given = options.fingerprint ?? hashParts("rpe.store", String(FOLD_VERSION), ...options.registry.packs.map((p) => `${p.id}@${p.version}`));
+    const given2 = options.fingerprint ?? hashParts("rpe.store", String(FOLD_VERSION), ...options.registry.packs.map((p) => `${p.id}@${p.version}`));
     const usual = walks.kindChain === WALK_DEFAULTS.kindChain && walks.holderDepth === WALK_DEFAULTS.holderDepth && walks.visitDepth === WALK_DEFAULTS.visitDepth;
-    this.fingerprint = usual ? given : hashParts(given, "walks", String(walks.kindChain), String(walks.holderDepth), String(walks.visitDepth));
+    this.fingerprint = usual ? given2 : hashParts(given2, "walks", String(walks.kindChain), String(walks.holderDepth), String(walks.visitDepth));
     this.viewOptions = { ownOnly: options.ownOnly ?? STORE_DEFAULTS.ownOnly, notable: Math.max(0, Math.floor(options.notable ?? STORE_DEFAULTS.notable)), placeDepth: whole4(options.placeDepth, STORE_DEFAULTS.placeDepth, 1) };
     this.now = options.now ?? Date.now;
     this.worldTold = options.worldChanged;
@@ -107614,12 +107619,24 @@ class Store {
   async foldAway(away, job) {
     const before2 = new Map(this.db.query("SELECT chat, mark FROM fold_mark WHERE user = ?").all(job.user).map((r) => [r.chat, r.mark]));
     const done = await away.run({ path: away.path, ...this.forThreads }, job);
+    const here = (chat, node, mark2) => {
+      const read = mark2.startsWith(NODE_MARK) ? mark2.slice(NODE_MARK.length) : mark2;
+      const now = this.markOf(job.user, chat);
+      if (read !== (before2.get(chat) ?? "") || read !== now)
+        return null;
+      return mark2.startsWith(NODE_MARK) ? this.nodeMark(job.user, chat, node, now) : mark2;
+    };
+    const prefix = `${job.user}\x00`;
     for (const f of done.folds) {
-      if (f.chat !== null && (f.mark !== (before2.get(f.chat) ?? "") || f.mark !== this.markOf(job.user, f.chat)))
+      const mark2 = f.chat === null || f.mark === null ? f.mark : here(f.chat, f.key.slice(prefix.length), f.mark);
+      if (f.chat !== null && mark2 === null)
         continue;
-      this.keep(f.key, f.folded, f.upto, job.user, f.chat, f.mark);
+      this.keep(f.key, f.folded, f.upto, job.user, f.chat, mark2);
     }
-    this.hold(job.user, done.held);
+    this.hold(job.user, done.held.flatMap(([node, upto, rows2, chat, mark2]) => {
+      const ours = here(chat, node, mark2);
+      return ours === null ? [] : [[node, upto, rows2, chat, ours]];
+    }));
     for (const said2 of done.logs)
       this.log?.(said2.message, said2.data);
     for (const f of done.failures)
@@ -107639,14 +107656,32 @@ class Store {
   markOf(user, chat) {
     return this.db.query("SELECT mark FROM fold_mark WHERE user = ? AND chat = ?").get(user, chat)?.mark ?? "";
   }
-  newMarks(user, chats) {
+  newMarks(user, chats, nodes) {
     const put3 = this.db.query("INSERT INTO fold_mark (user, chat, mark) VALUES (?, ?, ?) ON CONFLICT (user, chat) DO UPDATE SET mark = excluded.mark");
-    for (const chat of chats)
-      put3.run(user, chat, crypto.randomUUID());
+    for (const chat of chats) {
+      const group = `${user}\x00${chat}`;
+      const before2 = this.markOf(user, chat);
+      const mark2 = crypto.randomUUID();
+      put3.run(user, chat, mark2);
+      const was = this.marksSince.get(group);
+      if (nodes === undefined || was !== undefined && was.newest !== before2 || (was?.named.size ?? 0) + nodes.size > NODES_NAMED_MOST) {
+        this.marksSince.set(group, { newest: mark2, base: mark2, named: new Map });
+        continue;
+      }
+      const since = was ?? { newest: before2, base: before2, named: new Map };
+      since.newest = mark2;
+      for (const node of nodes)
+        since.named.set(node, mark2);
+      this.marksSince.set(group, since);
+    }
   }
-  cached(key, mark2) {
+  nodeMark(user, chat, node, current3 = this.markOf(user, chat)) {
+    const since = this.marksSince.get(`${user}\x00${chat}`);
+    return `${NODE_MARK}${since === undefined || since.newest !== current3 ? current3 : since.named.get(node) ?? since.base}`;
+  }
+  cached(key, ...marks) {
     const hit = this.folds.get(key);
-    if (!hit || hit.mark !== null && hit.mark !== mark2)
+    if (!hit || hit.mark !== null && !marks.includes(hit.mark))
       return null;
     const group = key.slice(0, key.indexOf("\x00") + 1) + (hit.chat ?? "~");
     const keys = this.byChat.get(group);
@@ -107718,15 +107753,15 @@ class Store {
       return;
     this.held.delete(user);
     const marks = new Map;
-    const holds4 = (row) => {
+    const holds4 = (node, row) => {
       let mark2 = marks.get(row.chat);
       if (mark2 === undefined) {
         mark2 = this.markOf(user, row.chat);
         marks.set(row.chat, mark2);
       }
-      return mark2 === row.mark;
+      return row.mark === mark2 || row.mark === this.nodeMark(user, row.chat, node, mark2);
     };
-    const rows2 = [...held3].filter(([, row]) => holds4(row));
+    const rows2 = [...held3].filter(([node, row]) => holds4(node, row));
     for (const [, row] of rows2)
       this.putParts(user, row.rows.parts);
     const waiting = new Map;
@@ -107811,14 +107846,14 @@ class UserStore {
   get db() {
     return this.store.db;
   }
-  write(chats, fn) {
+  write(chats, fn, nodes) {
     return this.db.transaction(() => {
       this.store.flush(this.id);
       if (chats !== false)
-        this.store.newMarks(this.id, chats);
+        this.store.newMarks(this.id, chats, nodes);
       const out = fn();
       if (chats !== false)
-        this.store.newMarks(this.id, chats);
+        this.store.newMarks(this.id, chats, nodes);
       else
         this.store.flush(this.id);
       this.store.wrote(this.id, chats === false ? null : chats);
@@ -107830,6 +107865,16 @@ class UserStore {
            SELECT ?2 UNION SELECT l.chat FROM message_link l JOIN kin k ON l.user = ?1 AND l.source_chat = k.chat)
          SELECT k.chat FROM kin k JOIN chat c ON c.user = ?1 AND c.id = k.chat
          WHERE k.chat = ?2 OR EXISTS (SELECT 1 FROM json_each(c.path) j WHERE json_extract(j.value, '$.turn') = ?3)`).all(this.id, turn.chat, turn.id).map((r) => r.chat);
+  }
+  foldsThrough(turn) {
+    return this.db.query(`WITH RECURSIVE down(key) AS (
+           SELECT key FROM path_node WHERE user = ?1 AND turn = ?2
+           UNION SELECT n.key FROM path_node n JOIN down d ON n.user = ?1 AND n.prev = d.key),
+         after(turn) AS (SELECT DISTINCT n.turn FROM down d JOIN path_node n ON n.user = ?1 AND n.key = d.key),
+         played(chat) AS (SELECT ?3 UNION SELECT t.chat FROM after a JOIN turn t ON t.user = ?1 AND t.id = a.turn),
+         kin(chat) AS (SELECT chat FROM played UNION SELECT l.chat FROM message_link l JOIN kin k ON l.user = ?1 AND l.source_chat = k.chat)
+         SELECT k.chat FROM kin k JOIN chat c ON c.user = ?1 AND c.id = k.chat
+         WHERE k.chat IN (SELECT chat FROM played) OR EXISTS (SELECT 1 FROM json_each(c.path) j WHERE json_extract(j.value, '$.turn') IN (SELECT turn FROM after))`).all(this.id, turn.id, turn.chat).map((r) => r.chat);
   }
   withBranches(chat) {
     return this.db.query("WITH RECURSIVE kin(chat) AS (SELECT ?2 UNION SELECT l.chat FROM message_link l JOIN kin k ON l.user = ?1 AND l.source_chat = k.chat) SELECT chat FROM kin").all(this.id, chat).map((r) => r.chat);
@@ -108520,7 +108565,7 @@ class UserStore {
     const outcomes = inputs.map((_, i) => refused2?.has(i) === true ? { applied: false, reports: [refused2.get(i)] } : landed.get(i) ?? { applied: false, reports: [] });
     const now = this.store.now();
     let ord = (existing.at(-1)?.ord ?? -1) + 1;
-    const through2 = this.throughTurn(turn);
+    const through2 = this.foldsThrough(turn);
     const ids3 = this.write(through2, () => {
       const put3 = this.db.query("INSERT INTO change (user, turn, ord, lane, op, value, by, handle, standing, precision, source, cite, job, applied, reports, told, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
       const made = inputs.map((c, i) => {
@@ -108530,9 +108575,9 @@ class UserStore {
       });
       this.dropSnapshotsThrough(turnId);
       return made;
-    });
+    }, this.nodesThrough(turnId));
     if (jobs.length === 0)
-      this.store.keep(this.cacheKey(turn.node), { ...inside2.folded, state: state2 }, Math.max(inside2.upto, ...ids3), this.id, turn.chat, this.store.markOf(this.id, turn.chat));
+      this.store.keep(this.cacheKey(turn.node), { ...inside2.folded, state: state2 }, Math.max(inside2.upto, ...ids3), this.id, turn.chat, this.store.nodeMark(this.id, turn.chat, turn.node));
     const rows2 = this.db.query("SELECT * FROM change WHERE user = ?1 AND id IN (SELECT value FROM json_each(?2)) ORDER BY ord").all(this.id, JSON.stringify(ids3)).map(changeOf2);
     return { changes: rows2, state: state2 };
   }
@@ -108565,20 +108610,13 @@ class UserStore {
       if (at !== undefined)
         refused2.set(i, typeof at === "number" ? { code: "later_value", values: { turn: at } } : at);
     });
-    const prev = this.db.query("SELECT prev FROM path_node WHERE user = ? AND key = ?").get(this.id, turn.node)?.prev ?? null;
-    const kept4 = (prev === null ? [] : this.chainRows(prev)).flatMap((r) => {
-      const held3 = this.store.cached(this.cacheKey(r.key), this.store.markOf(this.id, r.chat));
-      return held3 === null ? [] : [{ key: r.key, chat: r.chat, held: held3 }];
-    });
     const added = this.addChanges(turnId, inputs, refused2);
-    for (const k of kept4)
-      this.store.keep(this.cacheKey(k.key), k.held.folded, k.held.upto, this.id, k.chat, this.store.markOf(this.id, k.chat));
     const landed = [];
     for (const [chat, after] of stretches) {
       const notApplied = this.headState(chat).notApplied.filter((n) => !(had.get(chat)?.has(n.change) ?? false));
       const rebased = { from: after[0].message, to: after.at(-1).message, turns: after.map((e) => e.turn) };
-      const kept5 = this.chatDb(chat)?.kept;
-      this.write(false, () => this.db.run("UPDATE chat SET kept = ? WHERE user = ? AND id = ?", [JSON.stringify(mergeKept(kept5 === null || kept5 === undefined ? {} : JSON.parse(kept5), { rebased, notApplied })), this.id, chat]));
+      const kept4 = this.chatDb(chat)?.kept;
+      this.write(false, () => this.db.run("UPDATE chat SET kept = ? WHERE user = ? AND id = ?", [JSON.stringify(mergeKept(kept4 === null || kept4 === undefined ? {} : JSON.parse(kept4), { rebased, notApplied })), this.id, chat]));
       landed.push({ chat, rebased, notApplied });
     }
     return { changes: added.changes, landed };
@@ -108611,7 +108649,8 @@ class UserStore {
     const items = inputs.map((c) => ({ op: c.op, value: structuredClone(c.value), turn: "", n, by: c.by ?? null, cite: c.cite ?? null, precision: c.precision ?? null, standing: c.standing ?? null, source: c.source ?? null }));
     const outcomes = applyChecked(env, state2, items, new Set);
     const now = this.store.now();
-    const ids3 = this.write([chat], () => {
+    const later = this.begunOrMadeFrom(now);
+    const ids3 = this.write(later ? this.withBranches(chat) : [chat], () => {
       let ord = (this.db.query("SELECT max(ord) AS ord FROM change WHERE user = ? AND chat = ?").get(this.id, chat)?.ord ?? -1) + 1;
       const put3 = this.db.query("INSERT INTO change (user, turn, chat, ord, lane, op, value, by, handle, standing, precision, source, cite, job, applied, reports, told, created) VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
       return inputs.map((c, i) => {
@@ -108619,7 +108658,7 @@ class UserStore {
         const cite = c.cite === undefined || c.cite === null ? null : JSON.stringify(c.cite);
         return Number(put3.run(this.id, chat, ord++, c.lane, c.op, JSON.stringify(c.value), c.by ?? null, c.handle ?? null, c.standing ?? null, c.precision ?? null, c.source ?? null, cite, job, o.applied ? 1 : 0, o.reports.length > 0 ? JSON.stringify(o.reports) : null, toldOf2(c), now).lastInsertRowid);
       });
-    });
+    }, later ? undefined : new Set);
     const rows2 = this.db.query("SELECT * FROM change WHERE user = ?1 AND id IN (SELECT value FROM json_each(?2)) ORDER BY ord").all(this.id, JSON.stringify(ids3)).map(changeOf2);
     return { changes: rows2, state: state2 };
   }
@@ -108634,29 +108673,29 @@ class UserStore {
     const turn = this.turnToWrite(turnId);
     if (turn.status !== "open")
       throw new StoreInputError(`turn ${turnId} is ${turn.status}: only an open turn's staged changes can be taken back`);
-    return this.write(this.throughTurn(turn), () => {
+    return this.write(this.foldsThrough(turn), () => {
       const r = handle === undefined ? this.db.run("DELETE FROM change WHERE user = ? AND turn = ?", [this.id, turnId]) : this.db.run("DELETE FROM change WHERE user = ? AND turn = ? AND handle = ?", [this.id, turnId, handle]);
       this.dropSnapshotsThrough(turnId);
       return r.changes;
-    });
+    }, this.nodesThrough(turnId));
   }
   takeBack(turnId, after) {
     const turn = this.turnToWrite(turnId);
     if (turn.status === "dropped")
       throw new StoreInputError(`turn ${turnId} was dropped`);
-    return this.write(this.throughTurn(turn), () => {
+    return this.write(this.foldsThrough(turn), () => {
       const r = this.db.run("DELETE FROM change WHERE user = ? AND turn = ? AND ord > ? AND job IS NULL", [this.id, turnId, after]);
       this.dropSnapshotsThrough(turnId);
       return r.changes;
-    });
+    }, this.nodesThrough(turnId));
   }
   joinTurn(held3, into) {
-    const { to } = joinable(this.db, this.id, held3, into);
+    const { from, to } = joinable(this.db, this.id, held3, into);
     const moved3 = this.changes(held3);
     const own3 = this.changes(into);
     const outcomes = this.landing(to, own3, moved3);
     const next = (own3.at(-1)?.ord ?? -1) + 1;
-    this.write(this.throughTurn(to), () => {
+    this.write([...new Set([...this.foldsThrough(from), ...this.foldsThrough(to)])], () => {
       const put3 = this.db.query("UPDATE change SET turn = ?, ord = ?, applied = ?, reports = ? WHERE user = ? AND id = ?");
       moved3.forEach((c, i) => {
         const o = outcomes[i] ?? { applied: false, reports: [] };
@@ -108667,7 +108706,7 @@ class UserStore {
       this.db.run("DELETE FROM snapshot WHERE user = ?1 AND node IN (SELECT key FROM path_node WHERE user = ?1 AND turn = ?2)", [this.id, held3]);
       this.db.run("UPDATE turn SET status = 'joined', joined = ? WHERE user = ? AND id = ?", [into, this.id, held3]);
       this.dropSnapshotsThrough(into);
-    });
+    }, new Set([...this.nodesThrough(from.id), ...this.nodesThrough(to.id)]));
     const ids3 = new Set(moved3.map((c) => c.id));
     return this.changes(into).filter((c) => ids3.has(c.id));
   }
@@ -108704,12 +108743,21 @@ class UserStore {
          UNION SELECT n.key FROM path_node n JOIN down d ON n.user = ?1 AND n.prev = d.key)
        DELETE FROM snapshot WHERE user = ?1 AND kind = 'cache' AND node IN (SELECT key FROM down)`, [this.id, turn]);
   }
+  nodesThrough(turn) {
+    return new Set(this.db.query(`WITH RECURSIVE down(key) AS (
+             SELECT key FROM path_node WHERE user = ?1 AND turn = ?2
+             UNION SELECT n.key FROM path_node n JOIN down d ON n.user = ?1 AND n.prev = d.key)
+           SELECT key FROM down`).all(this.id, turn).map((r) => r.key));
+  }
+  begunOrMadeFrom(at) {
+    return this.db.query("SELECT EXISTS(SELECT 1 FROM turn WHERE user = ?1 AND created >= ?2) OR EXISTS(SELECT 1 FROM chat WHERE user = ?1 AND created >= ?2) AS any").get(this.id, at)?.any === 1;
+  }
   stateAt(turnId) {
     return this.foldNode(this.turnToWrite(turnId).node).folded;
   }
   foldKey(turnId) {
     const t = this.turnToWrite(turnId);
-    return `${this.id}\x00${t.node}\x00${this.store.markOf(this.id, t.chat)}`;
+    return `${this.id}\x00${t.node}\x00${this.store.nodeMark(this.id, t.chat, t.node)}`;
   }
   stateKey(chat, turnId) {
     const row = this.chatRead(chat);
@@ -108910,11 +108958,11 @@ class UserStore {
     }
     const own3 = this.foldNode(node).folded.state;
     const doc = { state: { ...own3, world }, notApplied: [], rebased: [] };
-    this.write(this.throughTurn(turn), () => {
+    this.write(this.foldsThrough(turn), () => {
       const upto = this.db.query("SELECT max(id) AS n FROM change WHERE user = ?").get(this.id)?.n ?? 0;
       this.store.storeSnapshot(this.id, node, "base", upto, snapshotRows(doc));
       this.dropSnapshotsThrough(turnId);
-    });
+    }, this.nodesThrough(turnId));
   }
   initial(revision) {
     const from = revision ?? BLANK_REVISION;
@@ -108946,8 +108994,8 @@ class UserStore {
     const own3 = this.db.query("SELECT t.chat, m.mark FROM path_node n JOIN turn t ON t.user = n.user AND t.id = n.turn LEFT JOIN fold_mark m ON m.user = t.user AND m.chat = t.chat WHERE n.user = ?1 AND n.key = ?2").get(this.id, node);
     if (!own3)
       throw new StoreInputError(`no path node ${node}`);
-    const mark2 = own3.mark ?? "";
-    const hit = this.store.cached(this.cacheKey(node), mark2);
+    const mark2 = this.store.nodeMark(this.id, own3.chat, node, own3.mark ?? "");
+    const hit = this.store.cached(this.cacheKey(node), mark2, own3.mark ?? "");
     if (hit)
       return { folded: hit.folded, upto: hit.upto };
     const chain = this.db.query(`WITH RECURSIVE up(key, prev, turn, depth, snap) AS (
@@ -108960,13 +109008,14 @@ class UserStore {
          LEFT JOIN fold_mark m ON m.user = ?1 AND m.chat = t.chat ORDER BY up.depth`).all(this.id, this.store.fingerprint, node);
     if (chain.length === 0)
       throw new StoreInputError(`no path node ${node}`);
-    const at = new Map(chain.map((c) => [c.key, { chat: c.chat, mark: c.mark ?? "" }]));
+    const at = new Map(chain.map((c) => [c.key, { chat: c.chat, mark: this.store.nodeMark(this.id, c.chat, c.key, c.mark ?? ""), now: c.mark ?? "" }]));
     let from = -1;
     let start = null;
     let base = null;
     for (let i = chain.length - 2;i >= 0; i--) {
       const c = chain[i];
-      const held3 = c === undefined ? null : this.store.cached(this.cacheKey(c.key), c.mark ?? "");
+      const of = c === undefined ? undefined : at.get(c.key);
+      const held3 = c === undefined || of === undefined ? null : this.store.cached(this.cacheKey(c.key), of.mark, of.now);
       if (!held3)
         continue;
       from = i;
@@ -109139,8 +109188,15 @@ class UserStore {
     return path.length === 0 ? [] : this.jobsAlong(path).pending;
   }
   endJob(job) {
-    const chats = this.db.query("SELECT DISTINCT COALESCE(c.chat, t.chat) AS chat FROM change c LEFT JOIN turn t ON t.user = c.user AND t.id = c.turn WHERE c.user = ?1 AND c.job = ?2").all(this.id, job).flatMap((r) => r.chat === null ? [] : [r.chat]);
-    this.write(chats, () => this.db.run("INSERT INTO job (user, id, ended) VALUES (?, ?, ?) ON CONFLICT (user, id) DO UPDATE SET ended = COALESCE(job.ended, excluded.ended)", [this.id, job, this.store.now()]));
+    const rows2 = this.db.query("SELECT DISTINCT chat, turn FROM change WHERE user = ?1 AND job = ?2").all(this.id, job);
+    const chats = new Set;
+    for (const r of rows2) {
+      const turn = r.chat === null ? this.turn(r.turn) : null;
+      for (const chat of r.chat !== null ? this.withBranches(r.chat) : turn === null ? [] : this.foldsThrough(turn))
+        chats.add(chat);
+    }
+    const now = this.store.now();
+    this.write([...chats], () => this.db.run("INSERT INTO job (user, id, ended) VALUES (?, ?, ?) ON CONFLICT (user, id) DO UPDATE SET ended = COALESCE(job.ended, excluded.ended)", [this.id, job, now]), this.begunOrMadeFrom(now) ? undefined : new Set);
   }
   jobsBefore(turnId) {
     return this.changesBefore(turnId).filter((c) => c.change.chat === null);
@@ -109367,7 +109423,7 @@ class UserStore {
     return this.write(false, () => this.db.query("UPDATE chat SET world = NULL WHERE user = ? AND world = ? AND deleted IS NULL RETURNING id").all(this.id, world).map((row) => row.id));
   }
 }
-var STORE_DEFAULTS, FOLD_VERSION = 8, LONG_FOLD_MS = 1000;
+var STORE_DEFAULTS, FOLD_VERSION = 8, LONG_FOLD_MS = 1000, NODE_MARK = "node:", NODES_NAMED_MOST = 8192;
 var init_store = __esm(() => {
   init_json();
   init_scope();
@@ -109849,7 +109905,7 @@ function hostTool(spec, text8, area) {
     description: text8.description,
     parameters: described(spec.properties, spec.required, text8),
     async run(args, ctx) {
-      const given = typeof args === "object" && args !== null && !Array.isArray(args) ? args : {};
+      const given2 = typeof args === "object" && args !== null && !Array.isArray(args) ? args : {};
       const { scope } = ctx;
       if (scope.chat === undefined)
         return new Reply(area.lines).line("no_chat_run", { tool: spec.name }).fail().result();
@@ -109857,7 +109913,7 @@ function hostTool(spec, text8, area) {
       const lines = use.lines;
       const call = area.call({ scope, agent: ctx.agent, callId: ctx.callId, signal: ctx.signal, tool: spec.name, lines, reply: () => new Reply(lines) });
       try {
-        return (await spec.run(given, call)).result();
+        return (await spec.run(given2, call)).result();
       } catch (error) {
         if (ctx.signal.aborted)
           throw error;
@@ -111183,6 +111239,14 @@ function timeOf(view, place2 = scenePlaceOf(view)) {
 function said2(v) {
   return typeof v === "string" ? v : JSON.stringify(v);
 }
+function worldStateFolds(store, turn) {
+  const t = store.turn(turn);
+  if (t === null)
+    return;
+  store.stateAt(t.id);
+  if (t.parent !== null && store.turn(t.parent) !== null)
+    store.startOf(t.parent);
+}
 function worldState(store, input) {
   const turn = store.turn(input.turn);
   if (!turn || turn.chat !== input.chat)
@@ -111460,22 +111524,22 @@ function holdLine(h, nameOf9, view) {
   return { kind: "unsettled_hold", depth: 0, fields };
 }
 function dueShown(part, source, state2, span, room, line3, at = null, skip2 = () => false, except = [], through2 = 0) {
-  for (let most = 1;; most *= 2) {
+  const read = (most) => {
     const listing = source.due(state2, span, at, most, except);
     const items = listing.items.filter((d) => !skip2(d));
-    const lines = items.map(line3);
-    const read = { lines, items, fetched: listing.items.length, more: listing.more };
-    if (through2 > 0) {
-      if (listing.more === 0 || listing.items.length < most || most >= through2)
-        return read;
-      continue;
-    }
+    return { lines: items.map(line3), items, fetched: listing.items.length, more: listing.more };
+  };
+  if (through2 > 0)
+    return read(through2);
+  for (let most = 1;; most *= 2) {
+    const got = read(most);
+    const { lines } = got;
     let used = 0;
     let k = 0;
     for (;k < lines.length && used + costOf4(part, lines[k]) <= room; k++)
       used += costOf4(part, lines[k]);
-    if (k < lines.length || used === 0 && lines.length > 0 || listing.more === 0 || listing.items.length < most)
-      return read;
+    if (k < lines.length || used === 0 && lines.length > 0 || got.more === 0 || got.fetched < most)
+      return got;
   }
 }
 function fitLists(part, lists, room) {
@@ -111512,12 +111576,12 @@ function horizonLines(view, ref2, depth2, maps, reading2, placeLines2) {
   const lines = view.query(ref2, depth2, reading2)?.lines ?? [];
   if (depth2 !== "full" || !ref2.startsWith("place:"))
     return lines;
-  const given = placeLines2?.(ref2, lines) ?? lines;
+  const given2 = placeLines2?.(ref2, lines) ?? lines;
   const map = mapLine(view, ref2, maps);
   if (map === null)
-    return given;
-  const at = given.findIndex((l, i) => i > 0 && l.kind.startsWith("level_"));
-  return at < 0 ? [...given, map] : [...given.slice(0, at), map, ...given.slice(at)];
+    return given2;
+  const at = given2.findIndex((l, i) => i > 0 && l.kind.startsWith("level_"));
+  return at < 0 ? [...given2, map] : [...given2.slice(0, at), map, ...given2.slice(at)];
 }
 function onTheWay(view, places2, due, ahead, room, nameOf9) {
   const now = view.state.world.clock;
@@ -112625,17 +112689,17 @@ function provenanceOf(op, agent) {
   const standing3 = op.standing;
   if (standing3 !== undefined && !STANDINGS.includes(standing3))
     return { field: "standing", value: standing3, choices: STANDINGS };
-  const given = op.source;
+  const given2 = op.source;
   const marks = [];
   let source = null;
   let consent;
-  if (given === undefined || given === null)
+  if (given2 === undefined || given2 === null)
     marks.push(MARKS.unsourced);
   else {
-    const from = typeof given === "object" && !Array.isArray(given) ? given.from : given;
+    const from = typeof given2 === "object" && !Array.isArray(given2) ? given2.from : given2;
     if (!SOURCE_KINDS2.includes(from ?? null))
       return { field: "source.from", value: from ?? null, choices: SOURCE_KINDS2 };
-    const cites = typeof given === "object" && !Array.isArray(given) ? given : {};
+    const cites = typeof given2 === "object" && !Array.isArray(given2) ? given2 : {};
     source = { from };
     const lore2 = text9(cites.lore);
     const message = text9(cites.message);
@@ -112700,8 +112764,8 @@ function citeOf(p) {
 function stampOf(p) {
   return { source: p.source?.from ?? null, precision: p.precision, standing: p.standing, cite: citeOf(p) };
 }
-function provenanceLeniently(given, agent) {
-  const rest2 = { ...given };
+function provenanceLeniently(given2, agent) {
+  const rest2 = { ...given2 };
   const left2 = [];
   for (;; ) {
     const read = provenanceOf(rest2, agent);
@@ -112731,14 +112795,14 @@ var init_source = __esm(() => {
 });
 
 // src/cast/source.ts
-function readSource(call, it, given) {
-  const { prov, left: left2 } = provenanceLeniently(given, call.agent);
+function readSource(call, it, given2) {
+  const { prov, left: left2 } = provenanceLeniently(given2, call.agent);
   for (const u of left2)
     it.unread.push({ line: "unreadable_op", fields: { n: it.n, op: it.op ?? "", field: u.field, value: JSON.stringify(u.value), choices: textOf2(u.choices) } });
   it.prov = prov;
 }
-function readOwnSource(call, it, given) {
-  readSource(call, it, given);
+function readOwnSource(call, it, given2) {
+  readSource(call, it, given2);
   const prov = it.prov;
   if (prov === undefined || prov.source !== null)
     return;
@@ -112944,7 +113008,7 @@ function heldNot(ctx, where, name, secret, code) {
   const near = nearestOf(secret, Object.keys(readKnowledge(ctx.state).facts), IFACE_DEFAULTS).slice(0, IFACE_DEFAULTS.nearMatches);
   return { line: "unknown_secret", fields: { ...where, who: name, secret, code, near: textOf2(near) } };
 }
-async function secretsHeld(world, where, holder, teller, turn, said3, confidence, unread, given = {}) {
+async function secretsHeld(world, where, holder, teller, turn, said3, confidence, unread, given2 = {}) {
   const held3 = [];
   const ctx = world.ctx;
   if (ctx === null) {
@@ -112960,8 +113024,8 @@ async function secretsHeld(world, where, holder, teller, turn, said3, confidence
     }
     if (who === null)
       continue;
-    const how = who.self && given.how === "told" ? "witnessed" : given.how;
-    const events3 = await world.hold({ holder: who.holder, fact, teller: who.by, since: { msg: turn?.message ?? null, at: turn?.storyTime ?? ctx.state.clock }, confidence: given.sure ?? confidence, ...how !== undefined ? { how } : {}, ...given.belief !== undefined ? { belief: given.belief } : {} });
+    const how = who.self && given2.how === "told" ? "witnessed" : given2.how;
+    const events3 = await world.hold({ holder: who.holder, fact, teller: who.by, since: { msg: turn?.message ?? null, at: turn?.storyTime ?? ctx.state.clock }, confidence: given2.sure ?? confidence, ...how !== undefined ? { how } : {}, ...given2.belief !== undefined ? { belief: given2.belief } : {} });
     if ("code" in events3)
       unread.push(heldNot(world.ctx ?? ctx, where, holderName(holder), secret, events3.code));
     else
@@ -113109,8 +113173,8 @@ var init_sources = __esm(() => {
 function isUnread(v) {
   return typeof v === "object" && v !== null && "line" in v;
 }
-function ignoredOf(given, reads) {
-  return Object.keys(given).filter((k) => !reads.includes(k) && given[k] !== undefined && given[k] !== null);
+function ignoredOf(given2, reads) {
+  return Object.keys(given2).filter((k) => !reads.includes(k) && given2[k] !== undefined && given2[k] !== null);
 }
 function refused2(reply, items, readsOf2) {
   for (const it of items) {
@@ -113207,9 +113271,9 @@ function readArg(lines, n, op, field, kind, said3, scale = 100) {
       return number !== null && Number.isInteger(number) && number >= 0 ? number : unreadable([], "whole");
   }
 }
-function outsideDimensions(it, given) {
+function outsideDimensions(it, given2) {
   for (const key of [...it.ignored]) {
-    const said3 = given[key];
+    const said3 = given2[key];
     const number = typeof said3 === "number" ? said3 : typeof said3 === "string" && said3.trim() !== "" && Number.isFinite(Number(said3)) ? Number(said3) : null;
     if (number === null)
       continue;
@@ -113243,18 +113307,18 @@ async function boundOf(r, character) {
   return bound;
 }
 async function readOp2(r, n, raw) {
-  const given = isRecord(raw) ? raw : null;
-  const op = typeof given?.op === "string" ? given.op.trim() : undefined;
-  if (given === null || op === undefined || !UPDATE_OPERATIONS.includes(op)) {
-    return { n, fatal: [{ line: "unknown_op", fields: { n, value: JSON.stringify(given?.op ?? null), choices: textOf2(UPDATE_OPERATIONS) } }], unread: [], ignored: [] };
+  const given2 = isRecord(raw) ? raw : null;
+  const op = typeof given2?.op === "string" ? given2.op.trim() : undefined;
+  if (given2 === null || op === undefined || !UPDATE_OPERATIONS.includes(op)) {
+    return { n, fatal: [{ line: "unknown_op", fields: { n, value: JSON.stringify(given2?.op ?? null), choices: textOf2(UPDATE_OPERATIONS) } }], unread: [], ignored: [] };
   }
   const name = op;
-  const out = { n, op, fatal: [], unread: [], ignored: ignoredOf(given, ["op", ...readsOf2(op).reads]) };
+  const out = { n, op, fatal: [], unread: [], ignored: ignoredOf(given2, ["op", ...readsOf2(op).reads]) };
   const unreadable = (u) => {
     out.fatal.push(u);
     return out;
   };
-  const who = readArg(r.call.lines, n, op, "who", "name", given.who);
+  const who = readArg(r.call.lines, n, op, "who", "name", given2.who);
   let character = null;
   if (isUnread(who))
     out.fatal.push(who);
@@ -113264,7 +113328,7 @@ async function readOp2(r, n, raw) {
     character = characterNamed(r.call, r.cast, r.fresh, who);
   const value = {};
   for (const [field, kind] of Object.entries(ARGS[name])) {
-    const got = readArg(r.call.lines, n, op, field, kind, given[field], r.call.settings.dimensionScale);
+    const got = readArg(r.call.lines, n, op, field, kind, given2[field], r.call.settings.dimensionScale);
     if (isUnread(got)) {
       out.unread.push(got);
       if (got.applied !== undefined)
@@ -113336,7 +113400,7 @@ async function readOp2(r, n, raw) {
       return out;
     }
     case "relationship": {
-      outsideDimensions(out, given);
+      outsideDimensions(out, given2);
       if (typeof value.with !== "string")
         return needed(out, ["with"]);
       if (Object.keys(value).length === 1)
@@ -113431,8 +113495,8 @@ async function readOp2(r, n, raw) {
         const turn = r.call.scope.turn;
         const learned = turn === undefined ? null : r.call.deps.store.user(r.call.scope.user).turn(turn);
         const v = planned2.value;
-        const given2 = { ...typeof v.learned === "string" ? { how: v.learned } : {}, ...typeof v.belief === "string" ? { belief: v.belief } : {}, ...typeof v.sure === "number" ? { sure: v.sure } : {} };
-        const [held3] = await secretsHeld(r.world, { n, op, field: "secret" }, character, v.told_by, learned, [secret], r.call.settings.secretConfidence, out.unread, given2);
+        const given3 = { ...typeof v.learned === "string" ? { how: v.learned } : {}, ...typeof v.belief === "string" ? { belief: v.belief } : {}, ...typeof v.sure === "number" ? { sure: v.sure } : {} };
+        const [held3] = await secretsHeld(r.world, { n, op, field: "secret" }, character, v.told_by, learned, [secret], r.call.settings.secretConfidence, out.unread, given3);
         if (held3 === undefined)
           delete planned2.value.secret;
         else {
@@ -113699,9 +113763,9 @@ function unchecked(names) {
 function listOf4(said3) {
   return said3 === undefined || said3 === null ? [] : Array.isArray(said3) ? said3 : [said3];
 }
-function readFields(call, it, given, kinds, value) {
+function readFields(call, it, given2, kinds, value) {
   for (const [field, kind] of Object.entries(kinds)) {
-    const got = readArg(call.lines, it.n, it.op ?? "", field, kind, given[field], call.settings.dimensionScale);
+    const got = readArg(call.lines, it.n, it.op ?? "", field, kind, given2[field], call.settings.dimensionScale);
     if (isUnread(got)) {
       it.unread.push(got);
       if (got.applied !== undefined)
@@ -113847,12 +113911,12 @@ async function remember(args, call) {
       items.push(notAnItem(n, "memory", "memory", raw));
       continue;
     }
-    const given = raw;
-    const it = { n, op: "memory", fatal: [], unread: [], ignored: ignoredOf(given, MEMORY_READS.reads) };
+    const given2 = raw;
+    const it = { n, op: "memory", fatal: [], unread: [], ignored: ignoredOf(given2, MEMORY_READS.reads) };
     items.push(it);
     const value = {};
-    readFields(call, it, given, { id: "name", ...memoryKinds(call.settings), from: "texts", top: "flag", taken: "texts" }, value);
-    readOwnSource(call, it, given);
+    readFields(call, it, given2, { id: "name", ...memoryKinds(call.settings), from: "texts", top: "flag", taken: "texts" }, value);
+    readOwnSource(call, it, given2);
     const { id: id2, taken, ...fields2 } = value;
     if (id2 !== undefined && strangers(self2, "memory", [id2]).length > 0) {
       it.fatal.push({ line: "unknown_id", fields: { n, op: "memory", who: self2.character.name, part: "memory", id: JSON.stringify(id2), near: nearOwn(self2, "memory", String(id2)) } });
@@ -113937,11 +114001,11 @@ async function dream(args, call) {
       items.push(notAnItem(i + 1, "connection", "connect", raw));
       continue;
     }
-    const given = raw;
-    const c = { n: i + 1, op: "connection", fatal: [], unread: [], ignored: ignoredOf(given, CONNECTION_READS.reads) };
+    const given2 = raw;
+    const c = { n: i + 1, op: "connection", fatal: [], unread: [], ignored: ignoredOf(given2, CONNECTION_READS.reads) };
     const fields2 = {};
-    readFields(call, c, given, { memories: "texts", ...memoryKinds(call.settings) }, fields2);
-    readOwnSource(call, c, given);
+    readFields(call, c, given2, { memories: "texts", ...memoryKinds(call.settings) }, fields2);
+    readOwnSource(call, c, given2);
     needed(c, CONNECTION_READS.needs.filter((f) => fields2[f] === undefined));
     items.push(c);
     connections.push({ it: c, fields: fields2 });
@@ -114090,12 +114154,12 @@ async function mindSet(args, call) {
       items.push(notAnItem(n, "mind", "entries", raw));
       continue;
     }
-    const given = raw;
-    const it = { n, op: "mind", fatal: [], unread: [], ignored: ignoredOf(given, ENTRY_READS.reads) };
+    const given2 = raw;
+    const it = { n, op: "mind", fatal: [], unread: [], ignored: ignoredOf(given2, ENTRY_READS.reads) };
     items.push(it);
     const value = {};
-    readFields(call, it, given, ENTRY, value);
-    readOwnSource(call, it, given);
+    readFields(call, it, given2, ENTRY, value);
+    readOwnSource(call, it, given2);
     const { id: id2, ...fields2 } = value;
     const item = id2 === undefined ? undefined : self2.reading.record.items.get(id2);
     if (id2 !== undefined && (item === undefined || item.part !== "mind" || item.character !== self2.character.id || !MIND_KINDS.includes(item.fields.kind))) {
@@ -114135,13 +114199,13 @@ async function relate(args, call) {
       items.push(notAnItem(n, "relationship", "relationships", raw));
       continue;
     }
-    const given = raw;
-    const it = { n, op: "relationship", fatal: [], unread: [], ignored: ignoredOf(given, RELATIONSHIP_READS.reads) };
+    const given2 = raw;
+    const it = { n, op: "relationship", fatal: [], unread: [], ignored: ignoredOf(given2, RELATIONSHIP_READS.reads) };
     items.push(it);
     const value = {};
-    readFields(call, it, given, RELATIONSHIP, value);
-    outsideDimensions(it, given);
-    readOwnSource(call, it, given);
+    readFields(call, it, given2, RELATIONSHIP, value);
+    outsideDimensions(it, given2);
+    readOwnSource(call, it, given2);
     if (typeof value.with !== "string") {
       needed(it, ["with"]);
       continue;
@@ -114224,20 +114288,20 @@ function perceptionView(reading2, item) {
   return { id: item.id, ...fields2, message: reading2.record.at.replyOf(perceivedTurn(item)), ...item.dropped ? { dropped: true } : {} };
 }
 async function readPerception(call, cast, world, fresh, n, raw) {
-  const given = isRecord(raw) ? raw : null;
-  if (given === null)
+  const given2 = isRecord(raw) ? raw : null;
+  if (given2 === null)
     return { n, fatal: [{ line: "unreadable_op", fields: { n, op: OP, field: OP, value: JSON.stringify(raw) } }], unread: [], ignored: [] };
-  const out = { n, op: OP, fatal: [], unread: [], ignored: ignoredOf(given, READS2.reads) };
+  const out = { n, op: OP, fatal: [], unread: [], ignored: ignoredOf(given2, READS2.reads) };
   const value = {};
   for (const [field, kind] of Object.entries(ARGS2)) {
-    const got = readArg(call.lines, n, OP, field, kind, given[field]);
+    const got = readArg(call.lines, n, OP, field, kind, given2[field]);
     if (isUnread(got))
       out.unread.push(got);
     else if (got !== undefined)
       value[field] = got;
   }
   const { id: id2, who, message, knows: knows2, secrets, ...fields2 } = value;
-  const cleared = Array.isArray(given.knows) && given.knows.length === 0;
+  const cleared = Array.isArray(given2.knows) && given2.knows.length === 0;
   if (typeof who !== "string")
     return needed(out, ["who"]);
   const character = characterNamed(call, cast, fresh, who);
@@ -114285,10 +114349,10 @@ async function readPerception(call, cast, world, fresh, n, raw) {
     return secretsHeldAgain(world.ctx, { n, op: OP, field: "secrets" }, character, k.fields.told_by, call.deps.store.user(call.scope.user).turn(k.opened), [fact], call.settings.secretConfidence, out.unread);
   });
   if (back !== null && back.apart.length > 0) {
-    const given2 = new Set([...cast.record.of(character.id, "knowledge"), ...stands].flatMap((k) => secretOf(k) ?? []));
+    const given3 = new Set([...cast.record.of(character.id, "knowledge"), ...stands].flatMap((k) => secretOf(k) ?? []));
     for (const k of back.apart) {
       const secret = secretOf(k);
-      out.unread.push({ line: "still_struck", fields: { n, op: OP, id: k.id, from: item?.id ?? "", ...typeof k.fields.text === "string" ? { text: k.fields.text } : {}, ...secret !== null && !given2.has(secret) ? { secret } : {} }, kept: true });
+      out.unread.push({ line: "still_struck", fields: { n, op: OP, id: k.id, from: item?.id ?? "", ...typeof k.fields.text === "string" ? { text: k.fields.text } : {}, ...secret !== null && !given3.has(secret) ? { secret } : {} }, kept: true });
     }
   }
   const kept4 = gave.filter((k) => !struck.includes(k));
@@ -115402,12 +115466,12 @@ function problemList(s, value, at) {
       const out = [];
       for (const [name, f] of Object.entries(s.fields)) {
         const { of, optional: optional2 } = fieldOf2(f);
-        const given = Object.hasOwn(value, name) ? value[name] : undefined;
-        if (given === undefined) {
+        const given2 = Object.hasOwn(value, name) ? value[name] : undefined;
+        if (given2 === undefined) {
           if (!optional2)
             out.push({ kind: "needs", at, name, shape: of });
         } else
-          out.push(...problemList(of, given, `${at}.${name}`));
+          out.push(...problemList(of, given2, `${at}.${name}`));
       }
       for (const name of Object.keys(value))
         if (!Object.hasOwn(s.fields, name) && value[name] !== undefined)
@@ -115477,24 +115541,24 @@ function isJson(value) {
     return value.every(isJson);
   return isRecord(value) && Object.values(value).every(isJson);
 }
-function queryValue(s, given) {
+function queryValue(s, given2) {
   switch (s.kind) {
     case "text":
     case "oneOf":
-      return given;
+      return given2;
     case "number":
-      return DECIMAL.test(given) ? Number(given) : undefined;
+      return DECIMAL.test(given2) ? Number(given2) : undefined;
     case "yesNo":
-      return given === "true" ? true : given === "false" ? false : undefined;
+      return given2 === "true" ? true : given2 === "false" ? false : undefined;
     case "literal":
-      return typeof s.value === "number" ? DECIMAL.test(given) ? Number(given) : undefined : typeof s.value === "boolean" ? given === "true" ? true : given === "false" ? false : undefined : given;
+      return typeof s.value === "number" ? DECIMAL.test(given2) ? Number(given2) : undefined : typeof s.value === "boolean" ? given2 === "true" ? true : given2 === "false" ? false : undefined : given2;
   }
 }
-function readQuery(fields2, given, route) {
+function readQuery(fields2, given2, route) {
   const names = Object.keys(fields2);
   const value = {};
-  for (const name of new Set(given.keys())) {
-    const all3 = given.getAll(name);
+  for (const name of new Set(given2.keys())) {
+    const all3 = given2.getAll(name);
     if (!Object.hasOwn(fields2, name))
       return {
         ok: false,
@@ -119500,10 +119564,10 @@ function startServer(parts) {
       };
       if ("raw" in route2) {
         await before2();
-        const given = bytes === null ? request : new Request(request.url, { method: request.method, headers: request.headers, body: bytes, signal: request.signal });
+        const given2 = bytes === null ? request : new Request(request.url, { method: request.method, headers: request.headers, body: bytes, signal: request.signal });
         const openLiveSocket = (headers) => server2?.upgrade(request, { data: { follows: new Map, auth: call, ends: undefined, catchUp: undefined, counted: false }, ...headers === undefined ? {} : { headers } }) ?? false;
         const untimed = () => server2?.timeout(request, 0);
-        const response = await route2.raw(given, { params: rest2 === null ? params : { ...params, "*": rest2.decoded ?? rest2.sent }, user, auth: call, openLiveSocket, json: json3(false), untimed });
+        const response = await route2.raw(given2, { params: rest2 === null ? params : { ...params, "*": rest2.decoded ?? rest2.sent }, user, auth: call, openLiveSocket, json: json3(false), untimed });
         return response === undefined ? undefined : withCors(response, origin2);
       }
       if (rest2 !== null && rest2.decoded === null)
@@ -121531,10 +121595,10 @@ function struck(deps, user, chat, said3, ask, confidence) {
       return secretsHeldAgain(ctx, { n: 1, op: item.part, field: "secret" }, character, k.fields.told_by, r.s.turn(k.opened), [fact], confidence, unread);
     });
     record5(holds5.flatMap((h) => h.events));
-    const given = new Set([...r.record.of(character.id, "knowledge"), ...knowledge].flatMap((k) => secretOf(k) ?? []));
+    const given2 = new Set([...r.record.of(character.id, "knowledge"), ...knowledge].flatMap((k) => secretOf(k) ?? []));
     const left2 = back.apart.map((k) => {
       const secret = secretOf(k);
-      return { id: k.id, from: item.id, ...typeof k.fields.text === "string" ? { text: k.fields.text } : {}, ...secret !== null && !given.has(secret) ? { secret } : {} };
+      return { id: k.id, from: item.id, ...typeof k.fields.text === "string" ? { text: k.fields.text } : {}, ...secret !== null && !given2.has(secret) ? { secret } : {} };
     });
     return { item: item.id, changed: true, also: also.map((k) => k.id), letGo: [], held: holds5.flatMap((h) => h.events.length > 0 ? [h.fact] : []), left: left2, unread };
   }, "striking an entry of the cast from a page");
@@ -121947,11 +122011,11 @@ ${character.id}`) ?? []).filter((id2) => !takenBy(character.id).has(id2)),
         const seen = await seenNow(deps, user, params.chat, found.id);
         return edited2(deps, user, params.chat, params.character, "redrawing a base from the Cast page", (e) => {
           const standing3 = baseOf2(e.db, user, e.character.id, params.chat);
-          const given = BASE_PARTS.filter((p) => body[p] !== undefined);
-          if (given.length === 0)
+          const given2 = BASE_PARTS.filter((p) => body[p] !== undefined);
+          if (given2.length === 0)
             return { changed: false, notes: [{ line: "page_nothing_to_edit", fields: { who: e.character.name } }] };
           const texts4 = {};
-          for (const p of given)
+          for (const p of given2)
             if (standing3.get(p)?.text !== body[p])
               texts4[p] = body[p];
           if (Object.keys(texts4).length === 0)
@@ -123171,10 +123235,10 @@ var init_fixture = __esm(() => {
 });
 
 // src/story/path.ts
-function storyAt(user, chat, turn, given) {
-  const messages = given ?? user.path(chat);
+function storyAt(user, chat, turn, given2) {
+  const messages = given2 ?? user.path(chat);
   const numbers4 = new Map(messages.map((m, i) => [m.message, i]));
-  const line3 = given === undefined ? user.line(chat) : messages.flatMap((m, i) => m.turn !== null && !m.user ? [{ turn: m.turn, at: i }] : []);
+  const line3 = given2 === undefined ? user.line(chat) : messages.flatMap((m, i) => m.turn !== null && !m.user ? [{ turn: m.turn, at: i }] : []);
   const replies = new Map(line3.map((l) => [l.turn, l.at]));
   const onPath = line3.map((l) => l.turn);
   let turns = onPath;
@@ -123549,7 +123613,7 @@ function nextChange2(store) {
 }
 function recordStory(store, writer, list3) {
   const first = nextChange2(store);
-  const given = new Map;
+  const given2 = new Map;
   const items = [];
   const inputs = list3.map((w, i) => {
     const base = { lane: "story", by: writer.by, handle: writer.agent, source: writer.source ?? null };
@@ -123557,9 +123621,9 @@ function recordStory(store, writer, list3) {
       items.push(null);
       return { ...base, ...w.stamp ?? {}, op: STORY_OPS.overlay, value: { entry: w.entry, note: w.note } };
     }
-    const item = w.item === null ? newItemId2(w.part, first + i) : given.get(w.item) ?? w.item;
+    const item = w.item === null ? newItemId2(w.part, first + i) : given2.get(w.item) ?? w.item;
     if (w.item === null && w.stand !== undefined)
-      given.set(w.stand, item);
+      given2.set(w.stand, item);
     items.push(item);
     return { ...base, ...w.stamp ?? {}, op: STORY_OPS.write, value: { part: w.part, item, value: w.value } };
   });
@@ -123769,6 +123833,8 @@ function factReader(at2) {
   const times = new Map;
   const story = new StoryRecord(storyAt(at2.u, at2.chat, at2.turn), storySliceOf(at2.state), questSliceOf(at2.state));
   const timeOf2 = (turn) => {
+    if (turn === "")
+      return null;
     if (!times.has(turn)) {
       const clock = clockOfState(at2.env, at2.u.stateAt(turn).state);
       times.set(turn, clock === null ? null : clock.text(clock.now));
@@ -123932,10 +123998,10 @@ function makesPlace(a) {
   return a.def.name === "place" && a.args.what === undefined && typeof a.args.name === "string";
 }
 function entriesNamed(a) {
-  const given = a.args.sources;
-  if (!Array.isArray(given))
+  const given2 = a.args.sources;
+  if (!Array.isArray(given2))
     return [];
-  return given.flatMap((s) => typeof s === "string" ? [s.trim()] : typeof s === "object" && s !== null && !Array.isArray(s) && typeof s.entry === "string" ? [s.entry.trim()] : []).filter((e) => e !== "");
+  return given2.flatMap((s) => typeof s === "string" ? [s.trim()] : typeof s === "object" && s !== null && !Array.isArray(s) && typeof s.entry === "string" ? [s.entry.trim()] : []).filter((e) => e !== "");
 }
 async function prepareBases(call, asked3) {
   const read = call.deps.placeSources;
@@ -124631,13 +124697,13 @@ function freshId3(o, base) {
       return `${slug5}_${i}`;
 }
 function sourcesArg(o) {
-  const given = o.args.sources;
-  if (given === undefined || given === null)
+  const given2 = o.args.sources;
+  if (given2 === undefined || given2 === null)
     return;
-  if (!Array.isArray(given))
-    return notAs(o, "sources", given, "sources");
+  if (!Array.isArray(given2))
+    return notAs(o, "sources", given2, "sources");
   const out = [];
-  for (const s of given) {
+  for (const s of given2) {
     const entry = typeof s === "string" ? s.trim() : isRecord(s) && typeof s.entry === "string" ? s.entry.trim() : "";
     if (entry === "")
       return notAs(o, "sources", s ?? null, "sources");
@@ -124658,10 +124724,10 @@ function makePlace2(o, name, kind) {
   if (isUnread2(sources))
     return sources;
   const words11 = textArg(o.args, "base") ?? textArg(o.args, "description");
-  const given = o.args.fields;
-  if (given !== undefined && given !== null && !isRecord(given))
-    return notAs(o, "fields", given, "fields");
-  const fields2 = { ...isRecord(given) ? given : {}, ...owner2 ? { owner: owner2.id } : {} };
+  const given2 = o.args.fields;
+  if (given2 !== undefined && given2 !== null && !isRecord(given2))
+    return notAs(o, "fields", given2, "fields");
+  const fields2 = { ...isRecord(given2) ? given2 : {}, ...owner2 ? { owner: owner2.id } : {} };
   delete fields2.description;
   const from = w.events.length;
   let made;
@@ -125036,31 +125102,31 @@ function provenanceLines(reply, n, op, prov) {
   if (prov.marks.includes(MARKS.noConsent))
     reply.line("invented_unconsented", fields2);
 }
-function provenanceFor(r, n, op, given, out, futureStanding) {
+function provenanceFor(r, n, op, given2, out, futureStanding) {
   if (r.agent === undefined)
     return;
-  const { standing: _kept, ...rest2 } = given;
-  const { prov, left: left2 } = provenanceLeniently(futureStanding !== undefined || op === "future" ? rest2 : given, r.agent);
+  const { standing: _kept, ...rest2 } = given2;
+  const { prov, left: left2 } = provenanceLeniently(futureStanding !== undefined || op === "future" ? rest2 : given2, r.agent);
   for (const u of left2)
     out.unread.push({ line: "unreadable_op", fields: { n, op, field: u.field, value: JSON.stringify(u.value), choices: textOf2(u.choices) } });
   return futureStanding !== undefined ? { ...prov, standing: futureStanding } : prov;
 }
 function readOp3(r, n, raw) {
-  const given = isRecord(raw) ? raw : null;
-  const op = typeof given?.op === "string" ? given.op.trim() : undefined;
-  if (given === null || op === undefined || op !== OVERLAY2 && !BY_NAME.has(op)) {
-    return { n, fatal: [{ line: "unknown_op", fields: { n, value: JSON.stringify(given?.op ?? null), choices: textOf2(STORY_OPERATIONS) } }], unread: [], ignored: [] };
+  const given2 = isRecord(raw) ? raw : null;
+  const op = typeof given2?.op === "string" ? given2.op.trim() : undefined;
+  if (given2 === null || op === undefined || op !== OVERLAY2 && !BY_NAME.has(op)) {
+    return { n, fatal: [{ line: "unknown_op", fields: { n, value: JSON.stringify(given2?.op ?? null), choices: textOf2(STORY_OPERATIONS) } }], unread: [], ignored: [] };
   }
   const reads = new Set(["op", ...takesOf(op).reads, ...PROVENANCE_KEYS]);
-  const out = { n, op, fatal: [], unread: [], ignored: Object.keys(given).filter((k) => !reads.has(k) && given[k] !== undefined && given[k] !== null) };
+  const out = { n, op, fatal: [], unread: [], ignored: Object.keys(given2).filter((k) => !reads.has(k) && given2[k] !== undefined && given2[k] !== null) };
   if (op === OVERLAY2) {
-    const entry = readArg2(r, n, op, "entry", "text", given.entry);
-    const note3 = readArg2(r, n, op, "text", "text", given.text);
+    const entry = readArg2(r, n, op, "entry", "text", given2.entry);
+    const note3 = readArg2(r, n, op, "text", "text", given2.text);
     const missing2 = [entry === undefined ? "entry" : null, note3 === undefined ? "text" : null].filter((f) => f !== null);
     if (entry === undefined || note3 === undefined)
       out.fatal.push({ line: "needs", fields: { n, op, fields: missing2 } });
     else {
-      const prov2 = provenanceFor(r, n, op, given, out);
+      const prov2 = provenanceFor(r, n, op, given2, out);
       out.read = { n, op, entry, note: note3, ...prov2 !== undefined ? { prov: prov2 } : {} };
     }
     return out;
@@ -125068,15 +125134,15 @@ function readOp3(r, n, raw) {
   const def = BY_NAME.get(op);
   const value = {};
   for (const [field3, kind] of Object.entries(def.args)) {
-    const got = readArg2(r, n, op, field3, kind, given[field3]);
+    const got = readArg2(r, n, op, field3, kind, given2[field3]);
     if (isUnread3(got))
       out.unread.push(got);
     else if (got !== undefined)
       value[field3 === "from" ? def.part === "beat" ? "message" : "first" : field3 === "to" ? "last" : field3] = got;
-    else if (r.blanking === true && isBlank(given[field3]) && (kind === "text" || kind === "due" || kind === "names"))
+    else if (r.blanking === true && isBlank(given2[field3]) && (kind === "text" || kind === "due" || kind === "names"))
       value[field3] = kind === "names" ? [] : "";
   }
-  const found = findItem(r, def, n, given, value);
+  const found = findItem(r, def, n, given2, value);
   if (isUnread3(found)) {
     out.fatal.push(found);
     return out;
@@ -125115,14 +125181,14 @@ function readOp3(r, n, raw) {
   if (typeof value.due === "string")
     reports.push({ line: r.clock === null ? "no_clock" : "unreadable_time", fields: { n, op, field: "due", value: JSON.stringify(value.due) } });
   r.record.apply({ part: def.part, item: found.item, value, turn: r.turn ?? "" });
-  const prov = provenanceFor(r, n, op, given, out, def.part === "future" && typeof value.standing === "string" ? value.standing : undefined);
+  const prov = provenanceFor(r, n, op, given2, out, def.part === "future" && typeof value.standing === "string" ? value.standing : undefined);
   out.read = { n, op, part: def.part, item: found.item, fresh: found.fresh, value, reports, ...prov !== undefined ? { prov } : {} };
   return out;
 }
 function readCorrection(r, item, fields2) {
   const reading2 = { ...r, turn: item.part === "record" ? item.opened : null, blanking: true, near: (said4, part) => nearIds2(r.lines, STORY_DEFAULTS, r.record, said4, part) };
-  const given = { ...fields2, op: item.part, id: item.id, ...item.part === "arc" ? { who: item.fields.who ?? "" } : {} };
-  const out = readOp3(reading2, 1, given);
+  const given2 = { ...fields2, op: item.part, id: item.id, ...item.part === "arc" ? { who: item.fields.who ?? "" } : {} };
+  const out = readOp3(reading2, 1, given2);
   const fatal = out.fatal[0];
   if (fatal !== undefined)
     return { refused: fatal };
@@ -126540,7 +126606,7 @@ function marksAt(e) {
 function secretTexts(also = {}) {
   const entries2 = (also.entries ?? []).filter((e) => !engineWroteEntry(e.extensions));
   const out = { texts: new Map, sources: new Map, originals: new Map, marks: new Map, read: new Set(entries2.map((e) => e.id)) };
-  const given = new Map(entries2.map((e) => [e.id, e]));
+  const given2 = new Map(entries2.map((e) => [e.id, e]));
   for (const entry of Object.values(also.world?.lore ?? {})) {
     const fields2 = worldFields(entry);
     if (!fields2)
@@ -126550,7 +126616,7 @@ function secretTexts(also = {}) {
     if (source2.kind !== "book")
       continue;
     add(out.sources, `${source2.bookId}/${source2.entryId}`, fields2);
-    const now = given.get(source2.entryId);
+    const now = given2.get(source2.entryId);
     if (now)
       add(out.texts, heldTextOf(now, now.content), fields2);
   }
@@ -127747,8 +127813,8 @@ function onScreen(w) {
 function statedSpan(reg, world, step) {
   const def = step ? findAction(reg, world, step.action) : undefined;
   return Object.entries(def?.params ?? {}).some(([name, p]) => {
-    const given = step?.params[name];
-    return p.type === "duration" && typeof given === "number" && given > 0;
+    const given2 = step?.params[name];
+    return p.type === "duration" && typeof given2 === "number" && given2 > 0;
   });
 }
 function povSpan(w) {
@@ -134520,9 +134586,9 @@ async function carrySettings(today6, items, globalConfig, earlier, registry2, co
           keptInRpe.push({ from, to });
     }
     if (readSome) {
-      const given = new Set(puts.map((p) => `setting ${p.to}`));
+      const given2 = new Set(puts.map((p) => `setting ${p.to}`));
       for (const [what, was] of earlier) {
-        if (!what.startsWith("setting ") || given.has(what))
+        if (!what.startsWith("setting ") || given2.has(what))
           continue;
         const key = what.slice("setting ".length);
         const path = key.split(".");
@@ -134720,8 +134786,8 @@ async function carryOwnFiles(today6, items, places2, history, models) {
     for (const tool of run2.tools)
       if (tools !== null && !tools.has(tool))
         out.deadTools.push({ agent: id3, tool });
-    const given = def.given === "request" ? ["chat:history[-1:]"] : undefined;
-    const header3 = { name: id3, description: text10(def.description), model: choice?.carried?.id ?? "default", effort: run2.effort ?? undefined, tools_as: run2.toolsAs ?? undefined, tools: run2.tools.filter((t) => tools === null || tools.has(t)), given, limits: Object.keys(run2.limits).length > 0 ? run2.limits : undefined };
+    const given2 = def.given === "request" ? ["chat:history[-1:]"] : undefined;
+    const header3 = { name: id3, description: text10(def.description), model: choice?.carried?.id ?? "default", effort: run2.effort ?? undefined, tools_as: run2.toolsAs ?? undefined, tools: run2.tools.filter((t) => tools === null || tools.has(t)), given: given2, limits: Object.keys(run2.limits).length > 0 ? run2.limits : undefined };
     if (await put4("", IMPORTED, `${IMPORTED_AGENTS}/${id3}.md`, headed(header3, text10(def.instructions) ?? "")))
       out.agents++;
     await put4("", IMPORTED, `${IMPORTED_AGENTS}/${id3}.original.json`, `${JSON.stringify(def, null, 2)}
@@ -135839,19 +135905,19 @@ function namedValue(value) {
 function readInput(raw) {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw))
     return { unreadable: "entry", value: JSON.stringify(raw ?? null) };
-  const given = raw;
-  const text12 = (name) => typeof given[name] === "string" && given[name].trim() !== "" ? given[name].replace(/\s+/g, " ").trim() : null;
+  const given2 = raw;
+  const text12 = (name) => typeof given2[name] === "string" && given2[name].trim() !== "" ? given2[name].replace(/\s+/g, " ").trim() : null;
   const id3 = text12("id");
   const kind = text12("kind");
   const line3 = text12("line");
-  const revision = typeof given.revision === "number" && Number.isFinite(given.revision) ? String(given.revision) : text12("revision");
+  const revision = typeof given2.revision === "number" && Number.isFinite(given2.revision) ? String(given2.revision) : text12("revision");
   const needs2 = [...id3 === null ? ["id"] : [], ...revision === null ? ["revision"] : [], ...kind === null ? ["kind"] : [], ...line3 === null ? ["line"] : []];
   if (id3 === null || revision === null || kind === null || line3 === null)
     return { needs: needs2 };
   for (const name of ["defines", "related"])
-    if (given[name] !== undefined && !Array.isArray(given[name]))
-      return { unreadable: name, value: JSON.stringify(given[name]) };
-  const defines = (given.defines ?? []).flatMap((b) => {
+    if (given2[name] !== undefined && !Array.isArray(given2[name]))
+      return { unreadable: name, value: JSON.stringify(given2[name]) };
+  const defines = (given2.defines ?? []).flatMap((b) => {
     if (typeof b === "string" && b.trim() !== "")
       return [{ what: b.trim(), aspect: "" }];
     if (typeof b !== "object" || b === null)
@@ -135859,9 +135925,9 @@ function readInput(raw) {
     const { what, aspect } = b;
     return typeof what === "string" && what.trim() !== "" ? [{ what: what.trim(), aspect: typeof aspect === "string" ? aspect.trim() : "" }] : [];
   });
-  const related2 = (given.related ?? []).filter((r) => typeof r === "string" && r.trim() !== "").map((r) => r.trim());
+  const related2 = (given2.related ?? []).filter((r) => typeof r === "string" && r.trim() !== "").map((r) => r.trim());
   const fields2 = {};
-  for (const [name, value] of Object.entries(given)) {
+  for (const [name, value] of Object.entries(given2)) {
     const kept4 = isFieldName(name) ? namedValue(value) : null;
     if (kept4 !== null)
       fields2[name] = kept4;
@@ -135884,13 +135950,13 @@ async function loreTools(deps) {
       description: file.render().text.trim(),
       parameters: described2(spec.properties, spec.required, typeof said4 === "object" && said4 !== null && !Array.isArray(said4) ? said4 : {}),
       async run(args, ctx) {
-        const given = typeof args === "object" && args !== null && !Array.isArray(args) ? args : {};
+        const given2 = typeof args === "object" && args !== null && !Array.isArray(args) ? args : {};
         if (ctx.scope.chat === undefined)
           return new Answer(lines).data({ refused: "no_chat" }).line("no_chat", { tool: spec.name }).fail().result();
         const at2 = { user: ctx.scope.user, chat: ctx.scope.chat, ...ctx.scope.turn !== undefined ? { turn: ctx.scope.turn } : {} };
         const call = { at: at2, ctx, deps, answer: new Answer(lines) };
         try {
-          return (await spec.run(given, call)).result();
+          return (await spec.run(given2, call)).result();
         } catch (error) {
           const refused4 = new Answer(lines);
           if (error instanceof LoreRefusal)
@@ -136488,10 +136554,10 @@ class LoreIndex {
       return null;
     const now = (this.deps.now ?? Date.now)();
     const value = (field4) => {
-      const given = edit[field4];
-      if (given === undefined || given === null)
+      const given2 = edit[field4];
+      if (given2 === undefined || given2 === null)
         return null;
-      return typeof given === "string" ? given : JSON.stringify(given);
+      return typeof given2 === "string" ? given2 : JSON.stringify(given2);
     };
     const world = this.deps.lore.worldAt(at2);
     await this.deps.writes.run((db) => {
@@ -140277,9 +140343,9 @@ async function carryChatSettings(input) {
         } else
           out.keptInRpe.push({ chat, from: w.from, to });
       }
-      const given = new Set(wanted.map((w) => keyOf4(config3, w.key)));
+      const given2 = new Set(wanted.map((w) => keyOf4(config3, w.key)));
       for (const [what, was] of earlier) {
-        if (!what.startsWith(`chat setting ${config3}\x00`) || given.has(what) || put4.has(what))
+        if (!what.startsWith(`chat setting ${config3}\x00`) || given2.has(what) || put4.has(what))
           continue;
         const key = what.slice(`chat setting ${config3}\x00`.length);
         const path = key.split(".");
@@ -140498,9 +140564,9 @@ async function carryConnections(port, user, runtime, files, serial, earlier) {
   for (const c of book.connections) {
     if (!there.has(c.id))
       continue;
-    const given = placeOf8(c);
+    const given2 = placeOf8(c);
     const ourPlace = places2[c.id] ?? placeOf8(held3.find((h) => h.id === c.id) ?? {});
-    const apart = (Object.hasOwn(keys, c.id) || Object.hasOwn(headers, c.id)) && ourPlace !== given;
+    const apart = (Object.hasOwn(keys, c.id) || Object.hasOwn(headers, c.id)) && ourPlace !== given2;
     const joins = !apart || !kept4.has(c.id);
     if (apart && joins) {
       delete keys[c.id];
@@ -140542,8 +140608,8 @@ async function carryConnections(port, user, runtime, files, serial, earlier) {
     }
     if (!joins)
       continue;
-    if ((Object.hasOwn(keys, c.id) || Object.hasOwn(headers, c.id)) && given !== undefined)
-      places2[c.id] = given;
+    if ((Object.hasOwn(keys, c.id) || Object.hasOwn(headers, c.id)) && given2 !== undefined)
+      places2[c.id] = given2;
     else
       delete places2[c.id];
   }
@@ -149031,13 +149097,13 @@ async function reportOf(today6, options = {}) {
       } else if (/^(agents\/blobs\/[0-9a-f]{32}|harness\/blobs\/[0-9a-f]{2}\/[0-9a-f]{64})$/.test(item.path))
         item.note = "no record, area or file names it; the previous build's clean-up removes a text nothing names after a week, so it is kept whole here";
     }
-    const given = options.given ?? [];
-    const gave = given.map(() => 0);
+    const given2 = options.given ?? [];
+    const gave = given2.map(() => 0);
     for (const item of items) {
       if (item.row !== null)
         continue;
-      const at4 = given.findIndex((g2) => g2.path === item.path || g2.path === `${item.where}: ${item.path}` || g2.path.endsWith("/") && (item.path.startsWith(g2.path) || `${item.where}: ${item.path}`.startsWith(g2.path)));
-      const g = given[at4];
+      const at4 = given2.findIndex((g2) => g2.path === item.path || g2.path === `${item.where}: ${item.path}` || g2.path.endsWith("/") && (item.path.startsWith(g2.path) || `${item.where}: ${item.path}`.startsWith(g2.path)));
+      const g = given2[at4];
       if (g === undefined)
         continue;
       gave[at4] = (gave[at4] ?? 0) + 1;
@@ -149099,7 +149165,7 @@ async function reportOf(today6, options = {}) {
       unsent: found.runtime.unsent.map((u) => ({ runtime: u.runtime, files: u.files.size, kept: u.kept, why: u.why })),
       runtime: { taken: found.runtime.runtimes.map(({ name, why, config: config3 }) => ({ name, why, unit: config3.service?.unit ?? null, source: config3.source })).at(0) ?? null, leftAlone: found.runtime.leftAlone, archived: found.runtime.archived },
       ...disowned === null ? {} : { disowned },
-      ...given.length > 0 ? { given: given.map((g, i) => ({ ...g, found: gave[i] ?? 0 })) } : {},
+      ...given2.length > 0 ? { given: given2.map((g, i) => ({ ...g, found: gave[i] ?? 0 })) } : {},
       ...(options.refused ?? []).length > 0 ? { refused: [...options.refused ?? []] } : {},
       standIn: { writes: writes2, logged },
       lumiverse: db.marks(chatRows, sources.identifier, found.runtime.runtimes.flatMap((r) => runtimeOrigins(r.config.listen, r.config.port))),
@@ -151637,8 +151703,8 @@ var init_ops_things = __esm(() => {
       if (isUnread2(to))
         return to;
       const company2 = [];
-      const given = o.args.with;
-      for (const said5 of Array.isArray(given) ? given : typeof given === "string" || typeof given === "object" && given !== null ? [given] : []) {
+      const given2 = o.args.with;
+      for (const said5 of Array.isArray(given2) ? given2 : typeof given2 === "string" || typeof given2 === "object" && given2 !== null ? [given2] : []) {
         const entry = typeof said5 === "object" && said5 !== null && !Array.isArray(said5) ? said5 : null;
         const name = entry !== null ? entry.who : said5;
         if (typeof name !== "string")
@@ -152218,11 +152284,11 @@ function writeQuest(o, op, value) {
     QUESTS_IN_CALL.set(o.draft, out.slice);
 }
 function refsOf3(o, field6, want) {
-  const given = o.args[field6];
-  if (given === undefined || given === null)
+  const given2 = o.args[field6];
+  if (given2 === undefined || given2 === null)
     return;
   const refs = [];
-  for (const name of Array.isArray(given) ? given : [given]) {
+  for (const name of Array.isArray(given2) ? given2 : [given2]) {
     const r = find(o, field6, want, false, name);
     if (isUnread2(r))
       return r;
@@ -152241,13 +152307,13 @@ function threadArg(o) {
   return { line: "unknown_thread", fields: { n: o.n, op: o.op, thread, near: textOf2(near) } };
 }
 function stageList(o) {
-  const given = o.args.stages;
-  if (given === undefined || given === null)
+  const given2 = o.args.stages;
+  if (given2 === undefined || given2 === null)
     return;
-  if (!Array.isArray(given))
-    return notAs(o, "stages", given, "list");
+  if (!Array.isArray(given2))
+    return notAs(o, "stages", given2, "list");
   const out = [];
-  for (const s of given) {
+  for (const s of given2) {
     const id3 = isRecord(s) ? typeof s.stage === "string" ? s.stage : typeof s.id === "string" ? s.id : "" : "";
     if (!isRecord(s) || id3.trim() === "")
       return notAs(o, "stages", s ?? null, "stage");
@@ -152262,16 +152328,16 @@ function stageList(o) {
   return out;
 }
 function shownArg(o) {
-  const given = o.args.show;
-  if (given === undefined)
+  const given2 = o.args.show;
+  if (given2 === undefined)
     return o.args.reveal === true ? "all" : undefined;
-  if (given === "all" || given === "none")
-    return given;
-  if (given === "default" || given === null)
+  if (given2 === "all" || given2 === "none")
+    return given2;
+  if (given2 === "default" || given2 === null)
     return null;
-  if (Array.isArray(given) && given.every((s) => typeof s === "string" && s.trim() !== ""))
-    return given.map((s) => String(s).trim());
-  return notAs(o, "show", given, "stage_list");
+  if (Array.isArray(given2) && given2.every((s) => typeof s === "string" && s.trim() !== ""))
+    return given2.map((s) => String(s).trim());
+  return notAs(o, "show", given2, "stage_list");
 }
 function stageOf(stages, said5) {
   const lower = said5.toLowerCase();
@@ -152694,11 +152760,11 @@ var init_ops_values = __esm(() => {
     provenance: false,
     example: { op: "horizon", list: ["common_room", { at: "market_square", depth: 1 }, "odile"] },
     run(o) {
-      const given = o.args.list;
-      if (!Array.isArray(given))
-        return notAs(o, "list", given ?? null, "list");
+      const given2 = o.args.list;
+      if (!Array.isArray(given2))
+        return notAs(o, "list", given2 ?? null, "list");
       const entries3 = [];
-      for (const item of given) {
+      for (const item of given2) {
         const said5 = isRecord(item) ? item.at : item;
         const depth3 = isRecord(item) && typeof item.depth === "number" && Number.isInteger(item.depth) && item.depth >= 0 ? item.depth : "full";
         const r = find(o, "list", "point", false, said5);
@@ -153106,12 +153172,12 @@ var init_ops_act = __esm(() => {
       }
       if (own2(w.state.entities, actor2) === undefined)
         return { line: "needs", fields: { n: o.n, op: o.op, fields: ["who"] } };
-      const given = o.args.params ?? {};
-      if (!isRecord(given))
-        return notAs(o, "params", given, "fields");
+      const given2 = o.args.params ?? {};
+      if (!isRecord(given2))
+        return notAs(o, "params", given2, "fields");
       const names2 = Object.keys(action2.params);
       const params = {};
-      for (const [name, said5] of Object.entries(given)) {
+      for (const [name, said5] of Object.entries(given2)) {
         const def = own2(action2.params, name);
         if (def === undefined)
           return { line: "unreadable_op", fields: { n: o.n, op: o.op, field: `params.${name}`, value: JSON.stringify(said5), choices: textOf2(names2) }, data: { field: `params.${name}`, choices: names2 } };
@@ -153492,7 +153558,7 @@ var init_apply = __esm(() => {
     reveal: YES_NO,
     axis: TEXT2,
     change: NUMBER2,
-    list: TEXTS,
+    list: { type: "array", items: { anyOf: [TEXT2, { type: "object", required: ["at"], properties: { at: TEXT2, depth: { anyOf: [WHOLE, { const: "full" }] } } }] } },
     name: TEXT2,
     kind: TEXT2,
     tier: TEXT2,
@@ -153700,7 +153766,7 @@ function putMap(o, id3, current3, next, what, how, members = []) {
   o.reply.line(how === "changed" ? "world_map_changed" : how === "removed" ? "world_map_removed" : "world_map_made", { what, members: textOf2(members) });
   return;
 }
-function given(o, fields3) {
+function given2(o, fields3) {
   return fields3.filter((f) => o.args[f] !== undefined && o.args[f] !== null);
 }
 function fromZero2(o, field6) {
@@ -153793,7 +153859,7 @@ var init_today2 = __esm(() => {
         return opens;
       const placed2 = { ...current3 ?? { id: id3 }, ...name !== undefined ? { name } : {}, ...(x !== null || y !== null) && px !== undefined && py !== undefined ? { at: [px, py] } : {}, ...opens !== null ? { opens: opens.id } : {} };
       const next = { ...map, places: current3 ? places2.map((p) => p === current3 ? placed2 : p) : [...places2, placed2] };
-      return putMap(o, mapId, map, next, about2(placed2), current3 ? "changed" : "made", given(o, MAP_PLACE_ARGS));
+      return putMap(o, mapId, map, next, about2(placed2), current3 ? "changed" : "made", given2(o, MAP_PLACE_ARGS));
     }
   };
   mapLink = {
@@ -153848,7 +153914,7 @@ var init_today2 = __esm(() => {
         link2 = { from: from.id, to: to.id, ...mode !== undefined ? { mode } : {}, minutes: minutes2, ...oneWay === true ? { bidirectional: false } : {} };
       }
       const next = { ...map, links: current3 ? links.map((l) => l === current3 ? link2 : l) : [...links, link2] };
-      return putMap(o, mapId, map, next, what, current3 ? "changed" : "made", given(o, ["minutes", "one_way"]));
+      return putMap(o, mapId, map, next, what, current3 ? "changed" : "made", given2(o, ["minutes", "one_way"]));
     }
   };
   SETTING_ARGS = ["display", "grid_movement", "sight_radius", "travel_simulation"];
@@ -153869,7 +153935,7 @@ var init_today2 = __esm(() => {
         return { line: "unreadable_op", fields: { n: o.n, op: o.op, field: "sight_radius", value: JSON.stringify(sight) } };
       const movement = typeof o.args.grid_movement === "boolean" ? o.args.grid_movement : undefined;
       const simulation = typeof o.args.travel_simulation === "boolean" ? o.args.travel_simulation : undefined;
-      const changes = given(o, SETTING_ARGS);
+      const changes = given2(o, SETTING_ARGS);
       if (changes.length === 0)
         return { line: "needs_any", fields: { n: o.n, op: o.op, fields: SETTING_ARGS } };
       const world = o.reading.world;
@@ -154644,16 +154710,16 @@ var init_maptools = __esm(() => {
       const rows2 = rowsOf3(o);
       if (isUnread2(rows2))
         return rows2;
-      const given2 = legendGiven(o, o.args.legend, false);
-      if (isUnread2(given2))
-        return given2;
+      const given3 = legendGiven(o, o.args.legend, false);
+      if (isUnread2(given3))
+        return given3;
       const feet = numberArg(o.args, "feet");
       if (feet !== undefined && !(feet > 0))
         return { line: "unreadable_op", fields: { n: o.n, op: o.op, field: "feet", value: JSON.stringify(feet) } };
       const played = r.world;
       const laying = {
         rows: rows2,
-        ...Object.keys(given2.legend).length > 0 ? { legend: given2.legend } : {},
+        ...Object.keys(given3.legend).length > 0 ? { legend: given3.legend } : {},
         ...textArg(o.args, "title") !== undefined ? { title: textArg(o.args, "title") ?? "" } : {},
         ...feet !== undefined ? { metres: feet * METRES_PER_FOOT } : {}
       };
@@ -154696,7 +154762,7 @@ var init_maptools = __esm(() => {
         reportAll(o, after2, laid.reports);
         o.after(() => ({ laid: { map: now.drawn.id, place: whoIs(after2, scope2), width: now.drawn.width, height: now.drawn.height, size: distanceData(now.drawn, 1), ...laid.sizeDefaulted ? { sizeAssumed: true } : {}, ...laid.opens !== undefined ? { opensFrom: laid.opens } : {}, step: { ...now.drawn.scale.step } } }));
       }
-      sayRead(o, given2.read);
+      sayRead(o, given3.read);
       return;
     }
   };
@@ -154720,10 +154786,10 @@ var init_maptools = __esm(() => {
       const strokes = strokesOf(o);
       if (isUnread2(strokes))
         return strokes;
-      const given2 = legendGiven(o, o.args.legend, true);
-      if (isUnread2(given2))
-        return given2;
-      const legend = given2.legend;
+      const given3 = legendGiven(o, o.args.legend, true);
+      if (isUnread2(given3))
+        return given3;
+      const legend = given3.legend;
       const say2 = { lines: o.call.lines, world: layers.world, state: w.state };
       const lifts = liftsOf(o, say2, layers);
       if (isUnread2(lifts))
@@ -154756,7 +154822,7 @@ var init_maptools = __esm(() => {
       const count2 = done.changes.reduce((n, c) => n + (isRecord(c.value) && isRecord(c.value.data) && Array.isArray(c.value.data.squares) ? c.value.data.squares.length : 0), 0);
       o.reply.line("edited", { place: whoIs(say2, layers.drawn.scope), count: count2, symbols: textOf2(Object.keys(legend)) });
       o.after(() => ({ edited: { map: layers.drawn.map ?? layers.drawn.id, squares: count2, legend: Object.keys(legend), ...things2.length > 0 ? { things: things2 } : {} } }));
-      sayRead(o, given2.read);
+      sayRead(o, given3.read);
       return;
     }
   };
@@ -154963,11 +155029,11 @@ var init_business2 = __esm(() => {
         const near = nearestOf(said5, all3.map((d) => d.type), o.call.settings).slice(0, o.call.settings.nearMatches);
         return { line: "unknown_effect", fields: { n: o.n, op: o.op, effect: said5, effects: textOf2(near.length > 0 ? near : all3.map((d) => d.type)) }, data: { effects: all3.map((d) => d.type) } };
       }
-      const given2 = o.args.args;
-      if (given2 !== undefined && given2 !== null && !isRecord(given2))
-        return notAs(o, "args", given2, "fields");
+      const given3 = o.args.args;
+      if (given3 !== undefined && given3 !== null && !isRecord(given3))
+        return notAs(o, "args", given3, "fields");
       const from = o.draft.w.events.length;
-      const refused4 = effectChange(o, { type: def.type, args: { ...given2 ?? {} } });
+      const refused4 = effectChange(o, { type: def.type, args: { ...given3 ?? {} } });
       if (refused4 !== null)
         return notApplicable(o, refused4.code);
       o.draft.record(o.n, o.op, "engine", o.prov, from);
@@ -155107,10 +155173,10 @@ var init_calendar2 = __esm(() => {
         rule3 = { type: "fixed", ...fixed };
       }
       if (o.args.rule !== undefined && o.args.rule !== null) {
-        const given2 = dateRuleOf(o.args.rule);
-        if (given2 === null)
+        const given3 = dateRuleOf(o.args.rule);
+        if (given3 === null)
           return notAs(o, "rule", o.args.rule, "date_rule");
-        rule3 = given2;
+        rule3 = given3;
       }
       const label3 = textArg(o.args, "label") ?? (held3 === undefined ? said5 : undefined);
       if (held3 === undefined && rule3 === undefined)
@@ -155236,10 +155302,10 @@ function percent(p) {
 function actionsOf(r) {
   return offeredActions(r.registry, r.ctx);
 }
-function paramValue2(r, field6, def, given2) {
-  const said5 = typeof given2 === "string" ? given2.trim() : "";
+function paramValue2(r, field6, def, given3) {
+  const said5 = typeof given3 === "string" ? given3.trim() : "";
   if (!def || said5 === "")
-    return given2;
+    return given3;
   switch (def.type) {
     case "ref": {
       const f = foundIn(r, field6, said5, def.ref === "place" ? "place" : "entity");
@@ -155247,7 +155313,7 @@ function paramValue2(r, field6, def, given2) {
     }
     case "list": {
       if (def.ref === undefined)
-        return given2;
+        return given3;
       const ids3 = [];
       for (const part of said5.split(",").map((p) => p.trim())) {
         if (part === "")
@@ -155261,13 +155327,13 @@ function paramValue2(r, field6, def, given2) {
     }
     case "number":
     case "duration":
-      return Number.isFinite(Number(said5)) ? Number(said5) : given2;
+      return Number.isFinite(Number(said5)) ? Number(said5) : given3;
     case "money":
-      return parseMoneyInput(said5, r.world.currency) ?? given2;
+      return parseMoneyInput(said5, r.world.currency) ?? given3;
     case "bool":
-      return said5 === "true" ? true : said5 === "false" ? false : given2;
+      return said5 === "true" ? true : said5 === "false" ? false : given3;
     default:
-      return given2;
+      return given3;
   }
 }
 var FAMILY6 = "checks", odds, CHECK_TOOLS;
@@ -155302,11 +155368,11 @@ var init_checks2 = __esm(() => {
       }
       if (actor2 === "")
         return { line: "needs_field", fields: { field: "actor" } };
-      const given2 = args.params ?? {};
-      if (!isRecord(given2))
-        return { line: "unreadable", fields: { field: "params", value: JSON.stringify(given2), wants: r.lines.line("wants_fields") ?? "" } };
+      const given3 = args.params ?? {};
+      if (!isRecord(given3))
+        return { line: "unreadable", fields: { field: "params", value: JSON.stringify(given3), wants: r.lines.line("wants_fields") ?? "" } };
       const params = {};
-      for (const [name, value] of Object.entries(given2)) {
+      for (const [name, value] of Object.entries(given3)) {
         const v2 = paramValue2(r, name, own2(action2.params, name), value);
         if (isUnread2(v2))
           return v2;
@@ -155672,8 +155738,8 @@ var init_money2 = __esm(() => {
       const account2 = find(o, "account", "thing");
       if (isUnread2(account2))
         return account2;
-      const given2 = numberArg(o.args, "amount");
-      const cents2 = given2 === undefined ? 0 : minorUnits(o.reading, given2);
+      const given3 = numberArg(o.args, "amount");
+      const cents2 = given3 === undefined ? 0 : minorUnits(o.reading, given3);
       if (cents2 === 0)
         return notAs(o, "amount", o.args.amount ?? null, "amount_not_zero");
       const w = o.draft.w;
@@ -156005,11 +156071,11 @@ var init_people2 = __esm(() => {
       const e = find(o, "entity", "entity");
       if (isUnread2(e))
         return e;
-      const given2 = o.args.class;
-      if (!isRecord(given2) || !Object.values(given2).every((v) => Array.isArray(v) && v.every((x) => typeof x === "string")))
-        return notAs(o, "class", given2 ?? null, "class");
+      const given3 = o.args.class;
+      if (!isRecord(given3) || !Object.values(given3).every((v) => Array.isArray(v) && v.every((x) => typeof x === "string")))
+        return notAs(o, "class", given3 ?? null, "class");
       const tags = Array.isArray(o.args.tags) ? o.args.tags.filter((t) => typeof t === "string") : [];
-      return built(o, { op: "classify", entity: e.id, class: given2, tags }, e.id);
+      return built(o, { op: "classify", entity: e.id, class: given3, tags }, e.id);
     },
     shows(o, state2) {
       const found = o.reading.find(String(o.args.entity), "entity");
@@ -156113,13 +156179,13 @@ var init_people2 = __esm(() => {
 
 // src/iface/families/places.ts
 function aliasesOf(o, name) {
-  const given2 = o.args.aliases;
-  if (given2 === undefined || given2 === null)
+  const given3 = o.args.aliases;
+  if (given3 === undefined || given3 === null)
     return;
-  if (!Array.isArray(given2) || !given2.every((a) => typeof a === "string"))
-    return notAs(o, "aliases", given2, "names");
+  if (!Array.isArray(given3) || !given3.every((a) => typeof a === "string"))
+    return notAs(o, "aliases", given3, "names");
   const seen = new Set([name.toLowerCase()]);
-  return given2.map((a) => String(a).trim()).filter((a) => a !== "" && !seen.has(a.toLowerCase()) && seen.add(a.toLowerCase()) !== undefined);
+  return given3.map((a) => String(a).trim()).filter((a) => a !== "" && !seen.has(a.toLowerCase()) && seen.add(a.toLowerCase()) !== undefined);
 }
 function positive(o, field6) {
   const v = o.args[field6];
@@ -157728,15 +157794,15 @@ var init_things3 = __esm(() => {
       if (isUnread2(item))
         return item;
       const ways = ["in", "at", "owner", "clear"];
-      const given2 = ways.filter((f) => f === "owner" || f === "clear" ? o.args[f] === true : textArg(o.args, f) !== undefined);
-      if (given2.length !== 1)
+      const given3 = ways.filter((f) => f === "owner" || f === "clear" ? o.args[f] === true : textArg(o.args, f) !== undefined);
+      if (given3.length !== 1)
         return { line: "needs_one", fields: { n: o.n, op: o.op, fields: ways } };
       let rest2;
-      if (given2[0] === "clear")
+      if (given3[0] === "clear")
         rest2 = null;
-      else if (given2[0] === "owner")
+      else if (given3[0] === "owner")
         rest2 = "owner";
-      else if (given2[0] === "in") {
+      else if (given3[0] === "in") {
         const found = find(o, "in", "entity");
         if (isUnread2(found))
           return found;
@@ -157999,8 +158065,8 @@ function invitationsOf(ctx, who, blocks2) {
     return { type: "legacy" };
   };
   const sent = recorded2.map((inv) => view2(strOf(inv.agent), strOf(inv.key), typeof inv.at === "number" ? inv.at : 0, typeof inv.place === "string" ? inv.place : null, originOf(inv), "sent", [pov]));
-  const given2 = new Set(sent.map((s) => s.key));
-  const coming = who === pov ? [] : asksOf(ctx, who, [day2, day2 + 1]).filter((a) => a.ask >= ctx.state.clock && !given2.has(a.key)).map((a) => view2(who, a.key, a.at, a.place, a.origin.type === "plan" ? a.origin : routineOrigin(who, a.origin.block), "planned", [pov]));
+  const given3 = new Set(sent.map((s) => s.key));
+  const coming = who === pov ? [] : asksOf(ctx, who, [day2, day2 + 1]).filter((a) => a.ask >= ctx.state.clock && !given3.has(a.key)).map((a) => view2(who, a.key, a.at, a.place, a.origin.type === "plan" ? a.origin : routineOrigin(who, a.origin.block), "planned", [pov]));
   const laid = blocks2.flatMap((b) => b.origin.type === "invitation" ? [view2(b.origin.host, `${b.origin.host}:invited:${b.origin.block}:${day2}`, b.start, b.place, routineOrigin(b.origin.host, b.origin.block), "planned", [who])] : []);
   return { made: [...sent.filter((s) => s.host === who), ...coming], received: who === pov ? sent : laid };
 }
@@ -158436,13 +158502,13 @@ var init_vehicles2 = __esm(() => {
           return rider;
         riders.push(rider.id);
       }
-      const given2 = {};
+      const given3 = {};
       for (const field6 of ["fuel_pct", "miles", "hours"]) {
         const n = numberArg2(o, field6);
         if (typeof n === "object")
           return n;
         if (n !== undefined)
-          given2[field6] = n;
+          given3[field6] = n;
       }
       const e = own2(w.state.entities, vehicle.id);
       const recorded2 = e?.fields.driver;
@@ -158463,9 +158529,9 @@ var init_vehicles2 = __esm(() => {
         o.reply.report("no_fuel", { n: o.n, op: o.op, what });
       if (driver !== null && !(own2(w.state.entities, driver)?.relations.some((r) => r.type === "in" && r.to === vehicle.id) ?? false) && placeOfEntity(w.state, driver) !== placeOfEntity(w.state, vehicle.id))
         o.reply.report("driver_not_aboard", { n: o.n, op: o.op, who: named2(o.reading, driver), what });
-      if (given2.miles !== undefined && typeof e?.fields.odometer_mi !== "number")
+      if (given3.miles !== undefined && typeof e?.fields.odometer_mi !== "number")
         o.reply.report("not_recorded", { n: o.n, op: o.op, what, field: "odometer_mi" });
-      if (given2.hours !== undefined && typeof e?.fields.engine_hours !== "number")
+      if (given3.hours !== undefined && typeof e?.fields.engine_hours !== "number")
         o.reply.report("not_recorded", { n: o.n, op: o.op, what, field: "engine_hours" });
       const tables = {};
       if (leg !== null && use2 !== null) {
@@ -158478,7 +158544,7 @@ var init_vehicles2 = __esm(() => {
       }
       o.after(() => Object.keys(tables).length > 0 ? { tables } : {});
       const from = w.events.length;
-      const args = { vehicle: vehicle.id, to: to.id, riders, ...given2 };
+      const args = { vehicle: vehicle.id, to: to.id, riders, ...given3 };
       if (driver !== null)
         args.driver = driver;
       if (park !== undefined)
@@ -158487,7 +158553,7 @@ var init_vehicles2 = __esm(() => {
       if (refused5 !== null)
         return notApplicable(o, refused5.code);
       if (o.args.sums === true && leg !== null) {
-        const filled = driveSums(w.ctx, vehicle.id, leg).filter((ev) => !("field" in ev) || given2[ev.field] === undefined && !(ev.field === "odometer_mi" && given2.miles !== undefined) && !(ev.field === "engine_hours" && given2.hours !== undefined));
+        const filled = driveSums(w.ctx, vehicle.id, leg).filter((ev) => !("field" in ev) || given3[ev.field] === undefined && !(ev.field === "odometer_mi" && given3.miles !== undefined) && !(ev.field === "engine_hours" && given3.hours !== undefined));
         const bad2 = o.draft.fillWith(filled);
         if (bad2)
           return notApplicable(o, bad2.code);
@@ -158527,7 +158593,7 @@ var init_vehicles2 = __esm(() => {
 });
 
 // src/iface/families/upkeep.ts
-function given2(o, field6) {
+function given3(o, field6) {
   const said5 = o.args[field6];
   if (said5 === undefined || said5 === null)
     return;
@@ -158538,7 +158604,7 @@ function payment(o) {
   const payer = o.args.payer === undefined || o.args.payer === null ? undefined : find(o, "payer", "party");
   if (payer !== undefined && isUnread2(payer))
     return payer;
-  const cost = given2(o, "cost");
+  const cost = given3(o, "cost");
   if (typeof cost === "object")
     return cost;
   if (payer === undefined && cost === undefined)
@@ -158569,7 +158635,7 @@ var init_upkeep = __esm(() => {
       const vehicle = vehicleNamed2(o);
       if (isUnread2(vehicle))
         return vehicle;
-      const fuel = given2(o, "fuel_pct");
+      const fuel = given3(o, "fuel_pct");
       if (fuel === undefined || typeof fuel === "object")
         return fuel ?? { line: "needs", fields: { n: o.n, op: o.op, fields: ["fuel_pct"] } };
       const paid = payment(o);
@@ -158607,7 +158673,7 @@ var init_upkeep = __esm(() => {
       const status3 = o.args.status;
       if (status3 !== undefined && status3 !== null && !STATUSES2.some((x) => x === status3))
         return { line: "unreadable_op", fields: { n: o.n, op: o.op, field: "status", value: JSON.stringify(status3), choices: STATUSES2.join(", ") } };
-      const condition4 = given2(o, "condition");
+      const condition4 = given3(o, "condition");
       if (typeof condition4 === "object")
         return condition4;
       const paid = payment(o);
@@ -158864,8 +158930,8 @@ function splitFile2(text15, what) {
 `) };
 }
 function filled(text15, header3, fields3, path2) {
-  const given3 = Object.fromEntries(Object.entries(fields3 ?? {}).filter(([, value]) => value !== undefined));
-  const done = renderTemplate(text15, { ...header3, ...given3 }, { path: path2 });
+  const given4 = Object.fromEntries(Object.entries(fields3 ?? {}).filter(([, value]) => value !== undefined));
+  const done = renderTemplate(text15, { ...header3, ...given4 }, { path: path2 });
   return done.text === undefined ? null : { text: done.text, missing: done.missing };
 }
 function partOf(text15, name, kind, source2) {
@@ -162095,7 +162161,7 @@ async function readFound(loc, at3, ask) {
   const part = await readLines(at3.disk, ask.line ?? 1, ask.lines ?? (await treeSettingsOf(loc)).readLines);
   return { ...file, bytes: part.bytes, text: part.text, lines: part.lines, from: part.from, to: part.to, more: part.to < part.lines };
 }
-async function handedOf(loc, agent, given3) {
+async function handedOf(loc, agent, given4) {
   const pins = (await namesInForce(loc)).pins.filter((p) => p.agent === agent);
   const pinned = await Promise.all(pins.map(async (p) => {
     const found = await locate2(loc, p.file);
@@ -162104,7 +162170,7 @@ async function handedOf(loc, agent, given3) {
       return { from: "pin", ref: p.file, pinnedAt: p.level, problem: "No file of this name is in the files now, so nothing is handed for it (a file of this name in a turn's own folder is found when the turn runs)." };
     return { from: "pin", ref: p.file, pinnedAt: p.level, path: found.at.path, level: found.at.level, text: text15 };
   }));
-  return [...given3.map((ref2) => ({ from: "definition", ref: ref2 })), ...pinned];
+  return [...given4.map((ref2) => ({ from: "definition", ref: ref2 })), ...pinned];
 }
 function fileRoutes(kit) {
   const { deps, own: own3 } = kit;
@@ -162124,8 +162190,8 @@ function fileRoutes(kit) {
       handle: async ({ user, query: query3 }) => {
         const chat = chatOf3(query3.chat);
         const [parts, definitions] = await Promise.all([deps.stack(user, chat, query3.agent), deps.guidance(user, chat).definitions()]);
-        const given3 = definitions.find((d) => d.name === query3.agent)?.given ?? [];
-        return { agent: query3.agent, parts, handed: await handedOf(own3.locationOf(user, chat), query3.agent, given3) };
+        const given4 = definitions.find((d) => d.name === query3.agent)?.given ?? [];
+        return { agent: query3.agent, parts, handed: await handedOf(own3.locationOf(user, chat), query3.agent, given4) };
       }
     }),
     route({
@@ -164187,7 +164253,9 @@ function tidyHolds(store2, user, turn, tidy2) {
     return [];
   const left2 = new Set(tidy2.left);
   const ctx = store2.env.registry.context(world, state2.world);
-  return tidyFindings(ctx, pathEventsBefore(s, turn), { kinds: TURN_KINDS }).filter((f) => !left2.has(f.key));
+  const found = tidyFindings(ctx, [], { kinds: TURN_KINDS });
+  const read3 = found.some((f) => f.kind === "too_big") ? tidyFindings(ctx, pathEventsBefore(s, turn), { kinds: TURN_KINDS }) : found;
+  return read3.filter((f) => !left2.has(f.key));
 }
 var TURN_KINDS;
 var init_path_events = __esm(() => {
@@ -164885,8 +164953,8 @@ function unfitWords(reg, world, state2, unfit, typed, secrets, mayKnow, nameMost
     const kind = place3 ? "place" : (reg.kinds.get(def.ref)?.label ?? own2(world.kinds, def.ref)?.label ?? def.ref).toLowerCase();
     return { line: "not_kind", fields: { name: known2, kind } };
   }
-  const given3 = id3.replace(/_+/g, " ").trim();
-  const said5 = given3 === "" ? undefined : new RegExp(`(?<![\\p{L}\\p{N}])${given3.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu").exec(typed)?.[0];
+  const given4 = id3.replace(/_+/g, " ").trim();
+  const said5 = given4 === "" ? undefined : new RegExp(`(?<![\\p{L}\\p{N}])${given4.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu").exec(typed)?.[0];
   if (said5 === undefined || said5.length > nameMost)
     return none;
   return { line: `not_known_${what}`, fields: { name: said5 } };
@@ -165127,7 +165195,8 @@ async function chatView(input) {
   if (row === null || row.world === null)
     return notWorldView(chat);
   const registry2 = store2.env.registry;
-  const key2 = JSON.stringify([s.stateKey(chat, input.turn), row.head, input.map, input.knowledge, input.offstage]);
+  const lines = linesGiven();
+  const key2 = JSON.stringify([s.stateKey(chat, input.turn), row.head, row.revision, lines, input.map, input.knowledge, input.offstage]);
   let kept5 = built2.get(key2);
   if (kept5 !== undefined) {
     built2.delete(key2);
@@ -165142,11 +165211,13 @@ async function chatView(input) {
     const at3 = input.turn ?? headTurn(s, chat);
     const elapsed = at3 === null ? 0 : state2.clock - s.startOf(at3).state.world.clock;
     kept5 = { ...await buildParts(input, s, folded, world, state2, elapsed), world, revision: state2.revision, lag: definitionsLag(state2), place: placeOfEntity(state2, world.pov) };
-    built2.set(key2, kept5);
-    for (const old of built2.keys()) {
-      if (built2.size <= VIEWS_KEPT)
-        break;
-      built2.delete(old);
+    if (linesGiven() === lines) {
+      built2.set(key2, kept5);
+      for (const old of built2.keys()) {
+        if (built2.size <= VIEWS_KEPT)
+          break;
+        built2.delete(old);
+      }
     }
   }
   const packs = {};
@@ -165239,11 +165310,11 @@ function pathTurns2(s, chat, turning) {
   const turns = s.path(chat).flatMap((e) => e.turn === null ? [] : [e.turn]);
   return turning ? turns.slice(0, -1) : turns;
 }
-function partiesOf(params, actor2, given3) {
+function partiesOf(params, actor2, given4) {
   return [
     actor2,
     ...Object.entries(params).flatMap(([name, def]) => {
-      const named4 = own2(given3, name);
+      const named4 = own2(given4, name);
       return def.type === "ref" && typeof named4 === "string" ? [named4] : [];
     })
   ];
@@ -167608,6 +167679,7 @@ ${turn}`) ?? 0;
       try {
         const drawnGiven = await this.#drawnGiven(scope2, settings.lead, maps);
         const u = this.#d.store.user(scope2.user);
+        await this.#d.store.afar(() => worldStateFolds(u, scope2.turn));
         const placeLines3 = placeLinesAt(u, this.#d.store.env, scope2.chat, scope2.turn, settings.places, settings.map);
         const holds6 = tidyHolds(this.#d.store, scope2.user, scope2.turn, settings.taps.tidy);
         const rendered = (fields3) => void this.#d.harness().parts.keep(scope2, "prompt", PARTS4.worldState, fields3).catch((error) => this.#d.log.warn("The world state's rendered values could not be kept.", { turn: scope2.turn, error: words13(error) }));
@@ -168391,6 +168463,7 @@ async function compiledWorld(deps, scope2, guidance, maps) {
   const part = readPart(layout.text, "world-state");
   const settings = await turnSettings(deps.files, scope2, deps.log);
   const map = maps ? mapView(await mapWording(guidanceTexts(deps.files, scope2, deps.log)), settings.map) : undefined;
+  await deps.store.afar(() => worldStateFolds(store2, turn));
   return { part, ahead: settings.worldState.dueAhead, state: worldState(store2, { chat: scope2.chat, turn, layout: part, ...map !== undefined ? { map } : {}, due: deps.due, settings: settings.worldState, charsPerToken: settings.charsPerToken }) };
 }
 function sectionOf(world, section) {
@@ -168584,22 +168657,22 @@ function turnEvents(deps) {
     async attachments(at3, agent, refs, moment) {
       await tell2(at3, "attachments", { agent, refs, moment });
       if (at3.chat === undefined) {
-        const given4 = [];
+        const given5 = [];
         for (const { ref: ref2, own: own3 } of refs) {
           if (own3)
             continue;
           try {
             const text15 = await deps.views?.(at3, agent, ref2) ?? null;
             if (text15 !== null)
-              given4.push({ name: ref2, text: text15 });
+              given5.push({ name: ref2, text: text15 });
           } catch (error) {
             deps.log.warn("What a job of no chat was to be given by name could not be read.", { agent: agent.id, ref: ref2, error: error instanceof Error ? error.message : String(error) });
           }
         }
-        return given4;
+        return given5;
       }
-      const given3 = await givenViews(deps, at3, agent, refs.flatMap(({ ref: ref2, own: own3 }) => own3 ? [] : [ref2]), moment);
-      return given3.flatMap(({ ref: ref2, text: text15 }) => text15 === null ? [] : [{ name: ref2, text: text15 }]);
+      const given4 = await givenViews(deps, at3, agent, refs.flatMap(({ ref: ref2, own: own3 }) => own3 ? [] : [ref2]), moment);
+      return given4.flatMap(({ ref: ref2, text: text15 }) => text15 === null ? [] : [{ name: ref2, text: text15 }]);
     },
     consent: (scope2, grant3) => keep2(scope2, "consent", grant3.by, grant3.topic, grant3),
     gapCheck: (scope2, check5) => keep2(scope2, "gap-check", check5.by, check5.topic, check5),
@@ -169819,21 +169892,21 @@ function parseHooks(file) {
       problems.push(problemAt(at3, items.field, `\`${moment}:\` is a list of hooks, each with a name and a command: \`- { name: sourced-writes, command: ./check-source.sh }\`.`));
       continue;
     }
-    value.forEach((given3, i) => {
-      const name = isMapping2(given3) && typeof given3.name === "string" ? given3.name.trim() : "";
+    value.forEach((given4, i) => {
+      const name = isMapping2(given4) && typeof given4.name === "string" ? given4.name.trim() : "";
       const line3 = (name !== "" ? items.find(name) : undefined) ?? items.field;
       const problem = (message) => problems.push(problemAt(at3, line3, `Hook ${name !== "" ? name : i + 1} of \`${moment}:\`: ${message}`));
-      if (!isMapping2(given3))
+      if (!isMapping2(given4))
         return problem("a hook is `{ name, command }`, with a `timeout` in seconds where it needs its own, so it is left out.");
-      const command = typeof given3.command === "string" ? given3.command.trim() : "";
+      const command = typeof given4.command === "string" ? given4.command.trim() : "";
       if (name === "" || command === "")
         return problem("it needs a `name` and a `command`, so it is left out.");
       if (named4.has(name))
         return problem("another hook in this file has the name, so this one is left out.");
-      const timeout = given3.timeout;
+      const timeout = given4.timeout;
       if (timeout !== undefined && (typeof timeout !== "number" || !Number.isInteger(timeout) || timeout < 1))
         return problem("`timeout` is a whole number of seconds, 1 or more, so it is left out.");
-      for (const key2 of Object.keys(given3))
+      for (const key2 of Object.keys(given4))
         if (!HOOK_FIELDS.includes(key2))
           problem(`\`${key2}\` is not a field a hook has, and is not read. Its fields are: ${HOOK_FIELDS.join(", ")}.`);
       named4.add(name);
@@ -169965,7 +170038,7 @@ function parseMcp(file) {
     return { servers: [], problems };
   }
   const servers = [];
-  for (const [name, given3] of Object.entries(raw.servers)) {
+  for (const [name, given4] of Object.entries(raw.servers)) {
     const own3 = [];
     const problem = (message) => own3.push(message);
     if (!SERVER_NAME.test(name))
@@ -169974,26 +170047,26 @@ function parseMcp(file) {
     let written3;
     let env = {};
     let description;
-    if (!isObject6(given3))
+    if (!isObject6(given4))
       problem("A server is an object: a `command` it is started by, or an `address` it is reached at.");
     else {
-      if (typeof given3.description === "string" && given3.description.trim() !== "")
-        description = given3.description.trim();
-      else if (given3.description !== undefined)
+      if (typeof given4.description === "string" && given4.description.trim() !== "")
+        description = given4.description.trim();
+      else if (given4.description !== undefined)
         problem("`description` is one line of text: what the server is for.");
-      const command = typeof given3.command === "string" && given3.command.trim() !== "" ? given3.command.trim() : undefined;
-      const address = typeof given3.address === "string" && given3.address.trim() !== "" ? given3.address.trim() : undefined;
+      const command = typeof given4.command === "string" && given4.command.trim() !== "" ? given4.command.trim() : undefined;
+      const address = typeof given4.address === "string" && given4.address.trim() !== "" ? given4.address.trim() : undefined;
       if (command === undefined === (address === undefined))
         problem("A server is started by a `command` or reached at an `address`: one of the two.");
       else if (command !== undefined) {
-        const args = given3.args ?? [];
+        const args = given4.args ?? [];
         if (!Array.isArray(args) || !args.every((a) => typeof a === "string"))
           problem('`args` is a list of the command\'s arguments, each text: `["--port", "0"]`.');
         else
           written3 = [command, ...args.map(quoted3)].join(" ");
-        if (given3.headers !== undefined)
+        if (given4.headers !== undefined)
           problem("`headers` goes with `address`, and is not read for a command.");
-        env = secretNames(given3.env, "env", problem);
+        env = secretNames(given4.env, "env", problem);
         if (written3 !== undefined)
           runs3 = { command: written3 };
       } else if (address !== undefined) {
@@ -170006,9 +170079,9 @@ function parseMcp(file) {
         }
         if (url2 === undefined || url2.protocol !== "https:" && url2.protocol !== "http:")
           problem("`address` is a whole http or https address.");
-        if (given3.args !== undefined || given3.env !== undefined)
+        if (given4.args !== undefined || given4.env !== undefined)
           problem("`args` and `env` go with `command`, and are not read for an address.");
-        runs3 = { address, headers: secretNames(given3.headers, "headers", problem) };
+        runs3 = { address, headers: secretNames(given4.headers, "headers", problem) };
       }
     }
     for (const message of own3)
@@ -170153,16 +170226,16 @@ var snapshot = (agent, front) => ({
   agent,
   parts: front.filter(stands).map((p) => ({ part: p.part, path: p.path, level: p.level, hash: hashOf5(p.text), ...p.layered === true ? { layered: true } : {} }))
 }), changes = (opened2, now) => {
-  const given3 = now.filter(stands);
+  const given4 = now.filter(stands);
   const before2 = new Map(opened2.parts.map((p) => [partOf2(p), p]));
   const out = [];
-  for (const p of given3) {
+  for (const p of given4) {
     const was = before2.get(partOf2(p));
     if (was !== undefined && was.hash === hashOf5(p.text) && was.path === p.path)
       continue;
     out.push({ part: p.part, change: was === undefined ? "added" : "changed", path: p.path, level: p.level, text: p.text });
   }
-  const still = new Set(given3.map(partOf2));
+  const still = new Set(given4.map(partOf2));
   for (const was of opened2.parts) {
     if (still.has(partOf2(was)))
       continue;
@@ -170903,12 +170976,12 @@ ${entry}`, async () => {
       entries3.push({ part: itemKey("agents", agent), kind: "definition", where: "opening", ...where, replaces: found?.replaces ?? [], left: found === undefined ? "missing" : found.off ? "off" : "broken" });
     } else {
       const reads = [...new Set(def.reads.map((read3) => read3.replace(/\.md$/, "")))];
-      const given3 = new Set([def.source.path]);
+      const given4 = new Set([def.source.path]);
       const add4 = (list3) => {
         for (const entry of list3) {
-          if (given3.has(entry.path))
+          if (given4.has(entry.path))
             continue;
-          given3.add(entry.path);
+          given4.add(entry.path);
           entries3.push(entry);
         }
       };
@@ -171219,11 +171292,11 @@ function partsApi(env) {
     },
     async preview(scope2, kind, name, text15, fields3) {
       const found = await loadGuidance2(files, scope2).layered(KIND3[kind], name);
-      const given3 = text15 ?? found?.text ?? "";
+      const given4 = text15 ?? found?.text ?? "";
       const at3 = { path: found?.path ?? `${name}.md`, level: found?.level ?? "chat" };
-      const lines2 = given3.split(`
+      const lines2 = given4.split(`
 `).length;
-      const file = { status: "read", ...at3, kind: "yours", text: given3, start: 1, end: lines2, lines: lines2, bytes: Buffer.byteLength(given3, "utf8"), hash: textHash3(given3), modified: 0 };
+      const file = { status: "read", ...at3, kind: "yours", text: given4, start: 1, end: lines2, lines: lines2, bytes: Buffer.byteLength(given4, "utf8"), hash: textHash3(given4), modified: 0 };
       const { part, problems } = parsePart(file, name, KIND3[kind], []);
       const shown5 = problems.map((p) => ({ ...p.line !== undefined ? { line: p.line } : {}, message: p.message }));
       if (part === undefined)
@@ -246757,17 +246830,17 @@ function checked2(input, id3) {
     ...limits3 !== undefined && Object.keys(limits3).length > 0 ? { limits: limits3 } : {}
   };
 }
-function headersOf(given3, had, carried) {
-  if (given3 === null)
+function headersOf(given4, had, carried) {
+  if (given4 === null)
     return;
-  const asked4 = given3 ?? had ?? {};
+  const asked4 = given4 ?? had ?? {};
   if (!isHeaderRecord(asked4))
     throw new Error("A connection's headers are names with text values.");
   const headers = {};
   for (const [name, value] of Object.entries(asked4)) {
     if (!HEADER_NAME.test(name))
       throw new Error("A header's name is a single word, such as x-team, with no space or colon in it: give its value in its own field.");
-    if (given3 === undefined || value === null) {
+    if (given4 === undefined || value === null) {
       headers[name] = carried ? own3(had, name) ?? null : null;
       continue;
     }
@@ -246781,8 +246854,8 @@ function samePlaces(a, b) {
   const ids3 = Object.keys(a);
   return ids3.length === Object.keys(b).length && ids3.every((id3) => Object.hasOwn(b, id3) && b[id3] === a[id3]);
 }
-function valuesOf2(given3, kept5) {
-  return Object.fromEntries(Object.entries(given3).map(([name, value]) => [name, value ?? own3(kept5, name) ?? null]));
+function valuesOf2(given4, kept5) {
+  return Object.fromEntries(Object.entries(given4).map(([name, value]) => [name, value ?? own3(kept5, name) ?? null]));
 }
 function withValues(connection, kept5) {
   return connection.headers === undefined ? connection : { ...connection, headers: valuesOf2(connection.headers, kept5) };
@@ -248020,8 +248093,8 @@ async function makeCall(deps, shape3, context2, ask, terms2, signal3, out) {
       delete taken.top_p;
     }
     const { temperature, ...rest2 } = taken;
-    const given3 = answered(context2.messages, texts4.emptyAnswer, texts4.picturesAnswer);
-    const sent = (toolsText2) => inPlace(toolsText2 ? asText2(given3, texts4.toolsText) : given3, keepsSystemInPlace(model2), texts4.markNote);
+    const given4 = answered(context2.messages, texts4.emptyAnswer, texts4.picturesAnswer);
+    const sent = (toolsText2) => inPlace(toolsText2 ? asText2(given4, texts4.toolsText) : given4, keepsSystemInPlace(model2), texts4.markNote);
     const offersTools = getCurrentTools(context2.messages).length > 0;
     const refusal8 = JSON.stringify([connection.id, model2.id]);
     let toolsAsText = offersTools && (ask.toolsAs === "text" || ask.toolsAs !== "native" && deps.refusals.stands(refusal8, deps.now(), settings.toolRefusalMinutes * MINUTE_MS));
@@ -248249,8 +248322,8 @@ function askOf2(options, choice, shape3, settings) {
   };
 }
 function streamFunction(deps, choiceOf) {
-  return (model2, context2, given3 = {}) => {
-    const options = given3;
+  return (model2, context2, given4 = {}) => {
+    const options = given4;
     const out = createAssistantMessageEventStream();
     const choice = choiceOf(model2);
     (async () => {
@@ -249988,8 +250061,8 @@ function learn(prompt, written3, head) {
       slices2.push(k.slice);
   return { map: { format: 1, preset, slices: slices2 }, kept: kept5.map((k) => k.slice.marker) };
 }
-function withFinders(prompt, given3, head) {
-  const placed2 = [...given3].sort((a, b) => order2(a.spans[0], b.spans[0]));
+function withFinders(prompt, given4, head) {
+  const placed2 = [...given4].sort((a, b) => order2(a.spans[0], b.spans[0]));
   const besideHistory = (span, side) => {
     if (span === undefined)
       return false;
@@ -250902,8 +250975,8 @@ function promptTool(deps) {
       const [prompt, words14, notices] = await Promise.all([deps.prompt(ctx), promptWords(deps.guidance), noticeWords(deps.guidance)]);
       if (prompt === undefined)
         return answer2(words14("no_prompt"), true);
-      const given3 = fieldsOf7(args)["names"];
-      const names2 = [...new Set(Array.isArray(given3) ? given3.filter((name) => typeof name === "string" && name.trim() !== "") : [])];
+      const given4 = fieldsOf7(args)["names"];
+      const names2 = [...new Set(Array.isArray(given4) ? given4.filter((name) => typeof name === "string" && name.trim() !== "") : [])];
       if (names2.length === 0)
         return answer2(listing(prompt, words14, notices));
       const found = await Promise.all(names2.map(async (name) => ({ name, items: await findName(prompt, name, ctx.agent) })));
@@ -250916,8 +250989,8 @@ function promptTool(deps) {
   };
 }
 function writtenOf2(args) {
-  const given3 = fieldsOf7(args)["slices"];
-  return (Array.isArray(given3) ? given3 : []).map((item) => {
+  const given4 = fieldsOf7(args)["slices"];
+  return (Array.isArray(given4) ? given4 : []).map((item) => {
     const fields3 = fieldsOf7(item);
     const parts = fields3["parts"];
     const starts = text15(fields3, "starts");
@@ -251209,16 +251282,16 @@ async function attach(deps, reader, wanted) {
       env4.log.error("The host could not be told what an agent is given, or give its part of it.", { agent: reader.id, error: error3 instanceof Error ? error3.message : String(error3) });
     }
   }
-  const given3 = { blocks: [], missing: [] };
+  const given4 = { blocks: [], missing: [] };
   for (const [at4, item] of list3.entries()) {
     const mine = found[at4];
     const text16 = mine?.own === true ? mine.text : hosted.find((block) => block.name === item.ref)?.text;
     if (text16 === undefined)
-      given3.missing.push(item.ref);
+      given4.missing.push(item.ref);
     else
-      given3.blocks.push({ name: item.ref, text: text16 });
+      given4.blocks.push({ name: item.ref, text: text16 });
   }
-  return given3;
+  return given4;
 }
 var HISTORY3, LAST2, BETWEEN3, NAMED4;
 var init_attachments = __esm(() => {
@@ -251241,10 +251314,10 @@ function fileRead(deps) {
     description: own4?.description ?? "",
     parameters: argumentsOf({ path: { type: "string" }, start: { type: "integer", minimum: 1 }, end: { type: "integer", minimum: 1 } }, ["path"], own4),
     async run(args, ctx) {
-      const given3 = fieldsOf7(args);
-      const path7 = text15(given3, "path") ?? "";
-      const start2 = whole9(given3, "start");
-      const end2 = whole9(given3, "end");
+      const given4 = fieldsOf7(args);
+      const path7 = text15(given4, "path") ?? "";
+      const start2 = whole9(given4, "start");
+      const end2 = whole9(given4, "end");
       const range = start2 === undefined && end2 === undefined ? undefined : { start: start2 ?? 1, ...end2 !== undefined ? { end: end2 } : {} };
       const read3 = await deps.files.read(ctx.scope, path7, range);
       if (read3.status === "refused")
@@ -251275,18 +251348,18 @@ function fileFind(deps) {
       limit: { type: "integer", minimum: 1 }
     }, ["by"], own4),
     async run(args, ctx) {
-      const given3 = fieldsOf7(args);
-      const by = text15(given3, "by");
-      const path7 = text15(given3, "path");
-      const pattern = text15(given3, "pattern");
-      const asked4 = whole9(given3, "limit");
+      const given4 = fieldsOf7(args);
+      const by = text15(given4, "by");
+      const path7 = text15(given4, "path");
+      const pattern = text15(given4, "pattern");
+      const asked4 = whole9(given4, "limit");
       const limit5 = asked4 === undefined ? undefined : Math.min(asked4, deps.most ?? asked4);
       const where = { ...path7 !== undefined ? { path: path7 } : {}, ...limit5 !== undefined ? { limit: limit5 } : {} };
       if (by !== "list" && pattern === undefined)
         return answer2(deps.words("needs", { op: by ?? "", fields: ["pattern"] }), true);
-      const depth3 = whole9(given3, "depth");
-      const glob2 = text15(given3, "glob");
-      const query5 = by === "list" ? { by: "list", ...where, ...depth3 !== undefined ? { depth: depth3 } : {} } : by === "glob" ? { by: "glob", pattern: pattern ?? "", ...where } : { by: "grep", pattern: pattern ?? "", ...where, ...given3["literal"] === true ? { literal: true } : {}, ...given3["ignore_case"] === true ? { ignoreCase: true } : {}, ...glob2 !== undefined ? { glob: glob2 } : {} };
+      const depth3 = whole9(given4, "depth");
+      const glob2 = text15(given4, "glob");
+      const query5 = by === "list" ? { by: "list", ...where, ...depth3 !== undefined ? { depth: depth3 } : {} } : by === "glob" ? { by: "glob", pattern: pattern ?? "", ...where } : { by: "grep", pattern: pattern ?? "", ...where, ...given4["literal"] === true ? { literal: true } : {}, ...given4["ignore_case"] === true ? { ignoreCase: true } : {}, ...glob2 !== undefined ? { glob: glob2 } : {} };
       let found;
       try {
         found = await deps.files.find(ctx.scope, query5);
@@ -251336,12 +251409,12 @@ function fileWrite(deps) {
       all: { type: "boolean" }
     }, ["path", "op"], own4),
     async run(args, ctx) {
-      const given3 = fieldsOf7(args);
-      const path7 = text15(given3, "path") ?? "";
-      const op = text15(given3, "op");
-      const body = text15(given3, "text");
-      const old = text15(given3, "old");
-      const replacement = text15(given3, "new");
+      const given4 = fieldsOf7(args);
+      const path7 = text15(given4, "path") ?? "";
+      const op = text15(given4, "op");
+      const body = text15(given4, "text");
+      const old = text15(given4, "old");
+      const replacement = text15(given4, "new");
       let change2;
       if (op === "write" || op === "append") {
         if (body === undefined)
@@ -251350,7 +251423,7 @@ function fileWrite(deps) {
       } else if (op === "edit") {
         if (old === undefined || replacement === undefined)
           return answer2(deps.words("needs", { op, fields: [...old === undefined ? ["old"] : [], ...replacement === undefined ? ["new"] : []] }), true);
-        change2 = { op, old, new: replacement, ...given3["all"] === true ? { all: true } : {} };
+        change2 = { op, old, new: replacement, ...given4["all"] === true ? { all: true } : {} };
       } else
         change2 = { op: "delete" };
       const before2 = change2.op === "edit" ? await deps.files.read(ctx.scope, path7) : undefined;
@@ -251479,8 +251552,8 @@ function writeReply(work, own4) {
     parameters: argumentsOf({ brief: { type: "string" }, live: { type: "boolean" } }, ["brief"], own4),
     sequential: true,
     run: (args, ctx) => {
-      const given3 = fieldsOf7(args);
-      return work.write(text15(given3, "brief") ?? "", given3["live"] === true, ctx);
+      const given4 = fieldsOf7(args);
+      return work.write(text15(given4, "brief") ?? "", given4["live"] === true, ctx);
     }
   };
 }
@@ -251521,8 +251594,8 @@ function todo(deps) {
       }
     }, ["items"], deps.text),
     async run(args, ctx) {
-      const given3 = fieldsOf7(args)["items"];
-      const items = (Array.isArray(given3) ? given3 : []).flatMap((item) => {
+      const given4 = fieldsOf7(args)["items"];
+      const items = (Array.isArray(given4) ? given4 : []).flatMap((item) => {
         const fields3 = fieldsOf7(item);
         const itemText = fields3["text"];
         return typeof itemText === "string" ? [{ text: itemText, done: fields3["done"] === true }] : [];
@@ -251554,10 +251627,10 @@ function toolTextOf(part) {
   const body = template(part);
   if (body === undefined)
     return;
-  const given3 = body.header["arguments"];
+  const given4 = body.header["arguments"];
   const args = {};
-  if (typeof given3 === "object" && given3 !== null && !Array.isArray(given3)) {
-    for (const [name, text16] of Object.entries(given3))
+  if (typeof given4 === "object" && given4 !== null && !Array.isArray(given4)) {
+    for (const [name, text16] of Object.entries(given4))
       if (typeof text16 === "string")
         args[name] = text16;
   }
@@ -252761,16 +252834,16 @@ class PlaceLine {
     waits();
     const { promise, resolve: resolve9 } = Promise.withResolvers();
     const stop2 = () => {
-      const at3 = this.#line.indexOf(given3);
+      const at3 = this.#line.indexOf(given4);
       if (at3 >= 0)
         this.#line.splice(at3, 1);
       resolve9(undefined);
     };
-    const given3 = (free) => {
+    const given4 = (free) => {
       signal3?.removeEventListener("abort", stop2);
       resolve9(free);
     };
-    this.#line.push(given3);
+    this.#line.push(given4);
     signal3?.addEventListener("abort", stop2, { once: true });
     return promise;
   }
@@ -254623,10 +254696,10 @@ function suggest(deps) {
       const at3 = await inChat(deps.guidance, ctx, "suggest");
       if ("answer" in at3)
         return at3.answer;
-      const given3 = fieldsOf7(args);
-      const file = text15(given3, "file")?.trim() || undefined;
-      const lore3 = text15(given3, "lore")?.trim() || undefined;
-      const targets = [...file !== undefined ? [{ file }] : [], ...lore3 !== undefined ? [{ lore: lore3 }] : [], ...given3["new_lore"] === true ? [{ newLore: true }] : []];
+      const given4 = fieldsOf7(args);
+      const file = text15(given4, "file")?.trim() || undefined;
+      const lore3 = text15(given4, "lore")?.trim() || undefined;
+      const targets = [...file !== undefined ? [{ file }] : [], ...lore3 !== undefined ? [{ lore: lore3 }] : [], ...given4["new_lore"] === true ? [{ newLore: true }] : []];
       const words14 = await wordsOf12(deps.guidance);
       const [target] = targets;
       if (target === undefined || targets.length > 1)
@@ -254640,12 +254713,12 @@ function suggest(deps) {
           return answer2((await noticesOf2(deps.guidance))(`refused_${read3.reason}`, { path: read3.path, writable: read3.writable }), true);
         handed = { file: read3.path };
       }
-      const book = text15(given3, "book")?.trim() || undefined;
-      const title = text15(given3, "title")?.trim() || undefined;
-      const keys = textsOf2(given3["keys"]).map((key2) => key2.trim()).filter((key2) => key2 !== "");
+      const book = text15(given4, "book")?.trim() || undefined;
+      const title = text15(given4, "title")?.trim() || undefined;
+      const keys = textsOf2(given4["keys"]).map((key2) => key2.trim()).filter((key2) => key2 !== "");
       const draft2 = "newLore" in handed ? { ...book !== undefined ? { book } : {}, ...title !== undefined ? { title } : {}, ...keys.length > 0 ? { keys } : {} } : {};
-      const was = "lore" in handed ? text15(given3, "was") : undefined;
-      const filed = await deps.env.events.suggestion(at3.scope, ctx.agent, { target: handed, text: text15(given3, "text") ?? "", reason: text15(given3, "reason") ?? "", ...Object.keys(draft2).length > 0 ? { draft: draft2 } : {}, ...was !== undefined && was !== "" ? { was } : {} });
+      const was = "lore" in handed ? text15(given4, "was") : undefined;
+      const filed = await deps.env.events.suggestion(at3.scope, ctx.agent, { target: handed, text: text15(given4, "text") ?? "", reason: text15(given4, "reason") ?? "", ...Object.keys(draft2).length > 0 ? { draft: draft2 } : {}, ...was !== undefined && was !== "" ? { was } : {} });
       return filed.kept ? answer2(words14("suggested")) : answer2(words14("suggest_full", { most: filed.openMost }), true);
     }
   };
@@ -254776,10 +254849,10 @@ function guidesInMemory() {
   return {
     given: async (agent2) => byAgent2.get(agent2.id) ?? new Set,
     add: async (agent2, families) => {
-      const given3 = byAgent2.get(agent2.id) ?? new Set;
+      const given4 = byAgent2.get(agent2.id) ?? new Set;
       for (const family2 of families)
-        given3.add(family2);
-      byAgent2.set(agent2.id, given3);
+        given4.add(family2);
+      byAgent2.set(agent2.id, given4);
     }
   };
 }
@@ -254798,8 +254871,8 @@ function toolSearch(deps) {
     description: own4?.description ?? "",
     parameters: argumentsOf({ words: { type: "string" }, limit: { type: "integer", minimum: 1 } }, ["words"], own4),
     async run(args, ctx) {
-      const given3 = fieldsOf7(args);
-      const asked4 = (text15(given3, "words") ?? "").trim();
+      const given4 = fieldsOf7(args);
+      const asked4 = (text15(given4, "words") ?? "").trim();
       const [words14, reach2] = await Promise.all([wordsOf13(deps.guidance), deps.reach.of(ctx.agent)]);
       if (asked4 === "")
         return answer2(words14("no_words"), true);
@@ -254817,7 +254890,7 @@ function toolSearch(deps) {
       }
       const ranked = (deps.rank ?? plainRank)(covered, asked4);
       const found = ranked.filter((tool) => !waitingOn.has(tool));
-      const shown6 = found.slice(0, Math.min(whole9(given3, "limit") ?? deps.hits, deps.perCall));
+      const shown6 = found.slice(0, Math.min(whole9(given4, "limit") ?? deps.hits, deps.perCall));
       const waiting = new Map;
       for (const tool of ranked) {
         const thing = waitingOn.get(tool);
@@ -254865,15 +254938,15 @@ function toolUse(deps) {
     description: own4?.description ?? "",
     parameters: argumentsOf({ name: { type: "string" }, args: { type: "object" } }, ["name"], own4),
     async run(args, ctx) {
-      const given3 = fieldsOf7(args);
-      const name = (text15(given3, "name") ?? "").trim();
+      const given4 = fieldsOf7(args);
+      const name = (text15(given4, "name") ?? "").trim();
       const [words14, reach2] = await Promise.all([wordsOf13(deps.guidance), deps.reach.of(ctx.agent)]);
       const at3 = await new Reach(reach2, deps.switches, ctx.scope.user).named(name);
       if (at3.at === "unreached")
         return answer2(words14("no_tool", { tool: name }), true);
       if (at3.at === "waiting")
         return { ...answer2(words14("not_switched_on", { tool: name, name: at3.thing.name }), true), refused: { by: "switch", thing: at3.thing, state: "waiting" } };
-      const sent = given3["args"] ?? {};
+      const sent = given4["args"] ?? {};
       const checked3 = fit2(at3.tool, sent, ctx.callId);
       if ("misfits" in checked3)
         return answer2(deps.notices("invalid", invalidFields({ tool: name, arguments: JSON.stringify(sent), parameters: JSON.stringify(at3.tool.parameters), misfits: checked3.misfits }, deps.schemaShown)), true);
@@ -255074,9 +255147,9 @@ function said8(text16, extra = {}) {
   return { content: text16 === "" ? [] : [{ type: "text", text: text16 }], ...extra };
 }
 function questionFields(question) {
-  const given3 = typeof question === "object" && question !== null && !Array.isArray(question) ? question : {};
-  const text16 = given3["question"];
-  const searched = given3["searched"];
+  const given4 = typeof question === "object" && question !== null && !Array.isArray(question) ? question : {};
+  const text16 = given4["question"];
+  const searched = given4["searched"];
   return { question: typeof text16 === "string" ? text16 : "", searched: typeof searched === "string" ? searched : "" };
 }
 
@@ -255162,10 +255235,10 @@ class Team {
     const instructions = block.text;
     const wanted = [...definition.given.map((name) => ({ ref: name, from: "definition" })), ...call.attach.map((name) => ({ ref: name, from: "delegate" })), ...await pinsOf(d.guidance, definition.name, d.env.log)];
     const slice2 = d.slice?.bind(d);
-    const given3 = await attach({ env: d.env, scope: d.trace.scope, lines: loaded.lines, most: d.perCall(), moment: { task: call.brief }, ...slice2 !== undefined ? { slice: slice2 } : {} }, ref2, wanted);
-    const attachments = given3.blocks.map((block2) => ({ name: block2.name, text: block2.text }));
+    const given4 = await attach({ env: d.env, scope: d.trace.scope, lines: loaded.lines, most: d.perCall(), moment: { task: call.brief }, ...slice2 !== undefined ? { slice: slice2 } : {} }, ref2, wanted);
+    const attachments = given4.blocks.map((block2) => ({ name: block2.name, text: block2.text }));
     const frame = origin2.agent === undefined ? loaded.jobBrief : loaded.brief;
-    const brief = frame?.render({ ...fields3, task: call.brief, attachments, ...call.returns !== undefined ? { returns: call.returns } : {} }).text ?? joined5([call.brief, ...given3.blocks.map((block2) => block2.text)]);
+    const brief = frame?.render({ ...fields3, task: call.brief, attachments, ...call.returns !== undefined ? { returns: call.returns } : {} }).text ?? joined5([call.brief, ...given4.blocks.map((block2) => block2.text)]);
     const rules = d.rules();
     const keep2 = d.keep?.(ref2);
     const questions = d.questions?.();
@@ -255207,7 +255280,7 @@ class Team {
       const room = window2 - (compaction?.reserveTokens ?? 0);
       if (size > room) {
         d.env.log.info("A sub-agent was not started: what it starts with would not fit its model.", { agent: ref2.id, size, room });
-        return answer2(loaded.words("too_large", { agent: definition.name, size, room, attachments: given3.blocks.map((block2) => ({ name: block2.name, tokens: tokensOf(block2.text, ratio) })) }), true);
+        return answer2(loaded.words("too_large", { agent: definition.name, size, room, attachments: given4.blocks.map((block2) => ({ name: block2.name, tokens: tokensOf(block2.text, ratio) })) }), true);
       }
     }
     const compactor = compaction === undefined ? undefined : new Compactor({
@@ -255238,8 +255311,8 @@ class Team {
       }
     });
     const runner = new AgentRunner({ ...options, ...compactor !== undefined ? { point: compactor.point(model2.limits.contextWindow?.tokens) } : {} });
-    const again = new Map(definition.given.map((name) => [name, given3.blocks.find((block2) => block2.name === name)?.text]));
-    return { ref: ref2, runner, given: given3.blocks.map((block2) => block2.name), missing: given3.missing, limits: model2.limits, again, session, model: model2.model, ...limits3?.messages !== undefined ? { most: limits3.messages } : {} };
+    const again = new Map(definition.given.map((name) => [name, given4.blocks.find((block2) => block2.name === name)?.text]));
+    return { ref: ref2, runner, given: given4.blocks.map((block2) => block2.name), missing: given4.missing, limits: model2.limits, again, session, model: model2.model, ...limits3?.messages !== undefined ? { most: limits3.messages } : {} };
   }
   async ask(call, ctx) {
     if (!this.#members.has(ctx.agent.id))
@@ -255297,9 +255370,9 @@ class Team {
       return "";
     const d = this.#d;
     const slice2 = d.slice?.bind(d);
-    const given3 = await attach({ env: d.env, scope: d.trace.scope, lines: loaded.lines, most: d.perCall(), moment: { task: member.task, message }, ...slice2 !== undefined ? { slice: slice2 } : {} }, member.ref, [...member.again.keys()].map((ref2) => ({ ref: ref2, from: "again" })));
-    const changed2 = given3.blocks.filter((block) => member.again.get(block.name) !== block.text);
-    for (const block of given3.blocks)
+    const given4 = await attach({ env: d.env, scope: d.trace.scope, lines: loaded.lines, most: d.perCall(), moment: { task: member.task, message }, ...slice2 !== undefined ? { slice: slice2 } : {} }, member.ref, [...member.again.keys()].map((ref2) => ({ ref: ref2, from: "again" })));
+    const changed2 = given4.blocks.filter((block) => member.again.get(block.name) !== block.text);
+    for (const block of given4.blocks)
       member.again.set(block.name, block.text);
     if (changed2.length === 0)
       return "";
@@ -255354,9 +255427,9 @@ class Team {
   #load() {
     this.#loaded ??= (async () => {
       const { guidance } = this.#d;
-      const [brief, jobBrief, question, lines4, given3] = await Promise.all([guidance.part(BRIEF_PART), guidance.part(JOB_BRIEF_PART), guidance.part(QUESTION_PART), guidance.part(LINES_PART), guidance.part(GIVEN_PART2)]);
+      const [brief, jobBrief, question, lines4, given4] = await Promise.all([guidance.part(BRIEF_PART), guidance.part(JOB_BRIEF_PART), guidance.part(QUESTION_PART), guidance.part(LINES_PART), guidance.part(GIVEN_PART2)]);
       const wordLines = lines4?.format === "lines" ? lines4 : undefined;
-      return { brief: template2(brief), jobBrief: template2(jobBrief), question: template2(question), lines: wordLines, given: template2(given3), words: (name, fields3) => wordLines?.line(name, fields3) };
+      return { brief: template2(brief), jobBrief: template2(jobBrief), question: template2(question), lines: wordLines, given: template2(given4), words: (name, fields3) => wordLines?.line(name, fields3) };
     })().catch((error3) => {
       this.#loaded = undefined;
       throw error3;
@@ -255506,12 +255579,12 @@ function delegate(work, own4) {
     description: own4?.description ?? "",
     parameters: argumentsOf({ agent: { type: "string" }, brief: { type: "string" }, attach: { type: "array", items: { type: "string" } }, plays: { type: "string" }, returns: { type: "string" }, keep: { type: "boolean" } }, ["agent", "brief"], own4),
     run: (args, ctx) => {
-      const given3 = fieldsOf7(args);
-      const plays = filled2(given3, "plays");
-      const returns = filled2(given3, "returns");
-      const keep2 = yesNo(given3, "keep");
-      const attach2 = given3["attach"];
-      return work.delegate({ agent: text15(given3, "agent") ?? "", brief: text15(given3, "brief") ?? "", attach: Array.isArray(attach2) ? attach2.filter((item) => typeof item === "string") : [], ...plays !== undefined ? { plays } : {}, ...returns !== undefined ? { returns } : {}, ...keep2 !== undefined ? { keep: keep2 } : {} }, ctx);
+      const given4 = fieldsOf7(args);
+      const plays = filled2(given4, "plays");
+      const returns = filled2(given4, "returns");
+      const keep2 = yesNo(given4, "keep");
+      const attach2 = given4["attach"];
+      return work.delegate({ agent: text15(given4, "agent") ?? "", brief: text15(given4, "brief") ?? "", attach: Array.isArray(attach2) ? attach2.filter((item) => typeof item === "string") : [], ...plays !== undefined ? { plays } : {}, ...returns !== undefined ? { returns } : {}, ...keep2 !== undefined ? { keep: keep2 } : {} }, ctx);
     }
   };
 }
@@ -255523,8 +255596,8 @@ function askAuthor(work, own4) {
     description: own4?.description ?? "",
     parameters: argumentsOf({ question: { type: "string" }, searched: { type: "string" } }, ["question", "searched"], own4),
     run: (args, ctx) => {
-      const given3 = fieldsOf7(args);
-      return work.ask({ question: text15(given3, "question") ?? "", searched: text15(given3, "searched") ?? "" }, ctx);
+      const given4 = fieldsOf7(args);
+      return work.ask({ question: text15(given4, "question") ?? "", searched: text15(given4, "searched") ?? "" }, ctx);
     }
   };
 }
@@ -255541,15 +255614,15 @@ function agentMessage(work, own4) {
       keep: { type: "boolean" }
     }, ["agent", "message"], own4),
     run: (args, ctx) => {
-      const given3 = fieldsOf7(args);
-      const consent = fieldsOf7(given3["consent"] ?? null);
+      const given4 = fieldsOf7(args);
+      const consent = fieldsOf7(given4["consent"] ?? null);
       const topic = filled2(consent, "topic");
       const bounds = filled2(consent, "bounds");
       const gapCheck = filled2(consent, "gap_check");
-      const keep2 = yesNo(given3, "keep");
+      const keep2 = yesNo(given4, "keep");
       return work.message({
-        agent: text15(given3, "agent") ?? "",
-        message: text15(given3, "message") ?? "",
+        agent: text15(given4, "agent") ?? "",
+        message: text15(given4, "message") ?? "",
         ...topic !== undefined ? { consent: { topic, ...bounds !== undefined ? { bounds } : {}, ...gapCheck !== undefined ? { gapCheck } : {} } } : {},
         ...keep2 !== undefined ? { keep: keep2 } : {}
       }, ctx);
@@ -256757,16 +256830,16 @@ var init_work4 = __esm(() => {
 });
 
 // node_modules/rp-harness/src/tools/base/chat.ts
-async function askedOf(given3, length2, most, position) {
-  const last = whole9(given3, "last");
+async function askedOf(given4, length2, most, position) {
+  const last = whole9(given4, "last");
   if (last !== undefined)
     return { from: Math.max(0, length2 - Math.min(last, most)), to: length2 - 1, stop: length2 - 1, cut: Math.min(last, length2) > most };
-  const fromId = text15(given3, "from_id");
-  const toId = text15(given3, "to_id");
-  const from = fromId !== undefined ? await position(fromId) : whole9(given3, "from") ?? 0;
+  const fromId = text15(given4, "from_id");
+  const toId = text15(given4, "to_id");
+  const from = fromId !== undefined ? await position(fromId) : whole9(given4, "from") ?? 0;
   if (from === undefined)
     return { unknown: fromId ?? "" };
-  const to = toId !== undefined ? await position(toId) : whole9(given3, "to") ?? length2 - 1;
+  const to = toId !== undefined ? await position(toId) : whole9(given4, "to") ?? length2 - 1;
   if (to === undefined)
     return { unknown: toId ?? "" };
   const stop2 = Math.min(to, from + most - 1);
@@ -256807,8 +256880,8 @@ function chatRead(deps) {
       const { length: length2 } = info;
       if (length2 === 0)
         return answer2(words14("chat_empty"));
-      const given3 = fieldsOf7(args);
-      const asked4 = await askedOf(given3, length2, most, (id3) => chat2.position(scope2, id3));
+      const given4 = fieldsOf7(args);
+      const asked4 = await askedOf(given4, length2, most, (id3) => chat2.position(scope2, id3));
       if ("unknown" in asked4)
         return answer2(words14("no_message", { id: asked4.unknown }), true);
       const messages = await chat2.read(scope2, { from: asked4.from, to: asked4.stop + 1 });
@@ -256816,7 +256889,7 @@ function chatRead(deps) {
       const end2 = messages.at(-1);
       if (first === undefined || end2 === undefined)
         return answer2(words14("chat_outside", { length: length2, last: length2 - 1, from: asked4.from, to: asked4.to }), true);
-      const shown6 = given3["story"] === true ? messages.filter((message) => message.story !== false) : messages;
+      const shown6 = given4["story"] === true ? messages.filter((message) => message.story !== false) : messages;
       const leftOut2 = messages.length - shown6.length;
       return linesAnswer([words14("chat_range", { from: first.index, to: end2.index, length: length2, ...asked4.cut ? { most } : {}, ...leftOut2 > 0 ? { left_out: leftOut2 } : {} }), ...shown6.map((message) => laid2(words14, message))], `
 
@@ -256836,11 +256909,11 @@ function chatSearch(deps) {
       const at3 = await inChat(deps.guidance, ctx, "chat_search");
       if ("answer" in at3)
         return at3.answer;
-      const given3 = fieldsOf7(args);
-      const story = given3["story"] === true;
-      const limit5 = heldLimit(whole9(given3, "limit"), deps.perCall);
+      const given4 = fieldsOf7(args);
+      const story = given4["story"] === true;
+      const limit5 = heldLimit(whole9(given4, "limit"), deps.perCall);
       const asked4 = story ? deps.perCall : limit5;
-      const [words14, found] = await Promise.all([wordsOf12(deps.guidance), deps.env.chat.search(at3.scope, { text: text15(given3, "query") ?? "", ...asked4 !== undefined ? { limit: asked4 } : {} })]);
+      const [words14, found] = await Promise.all([wordsOf12(deps.guidance), deps.env.chat.search(at3.scope, { text: text15(given4, "query") ?? "", ...asked4 !== undefined ? { limit: asked4 } : {} })]);
       const hits = (story ? found.filter((hit) => hit.story !== false) : found).slice(0, limit5 ?? deps.perCall);
       if (hits.length === 0)
         return answer2(words14("none_found"));
@@ -256868,13 +256941,13 @@ function gapCheck(deps) {
       if ("answer" in at3)
         return at3.answer;
       const { scope: scope2 } = at3;
-      const given3 = fieldsOf7(args);
-      const topic = (text15(given3, "topic") ?? "").trim();
+      const given4 = fieldsOf7(args);
+      const topic = (text15(given4, "topic") ?? "").trim();
       const words14 = await wordsOf12(deps.guidance);
       if (topic === "")
         return answer2(words14("gap_no_topic"), true);
-      const terms2 = [...new Set(textsOf2(given3["terms"]).map((term) => term.trim()))].filter((term) => term !== "" && term !== topic);
-      const limit5 = Math.min(whole9(given3, "limit") ?? deps.gapHits, deps.perCall);
+      const terms2 = [...new Set(textsOf2(given4["terms"]).map((term) => term.trim()))].filter((term) => term !== "" && term !== topic);
+      const limit5 = Math.min(whole9(given4, "limit") ?? deps.gapHits, deps.perCall);
       const looked = [topic, ...terms2].join(" ");
       const searches = [
         { where: "chat", search: async () => (await env4.chat.search(scope2, { text: looked, limit: limit5 })).map((hit) => ({ ref: hit.id, title: hit.name, snippet: hit.snippet, how: hit.how })) },
@@ -256987,10 +257060,10 @@ function loreSearch2(deps) {
       const at3 = await inChat(deps.guidance, ctx, "lore_search");
       if ("answer" in at3)
         return at3.answer;
-      const given3 = fieldsOf7(args);
-      const sources = textsOf2(given3["sources"]);
-      const limit5 = heldLimit(whole9(given3, "limit"), deps.perCall);
-      const query5 = { text: text15(given3, "query") ?? "", ...sources.length > 0 ? { sources } : {}, ...limit5 !== undefined ? { limit: limit5 } : {} };
+      const given4 = fieldsOf7(args);
+      const sources = textsOf2(given4["sources"]);
+      const limit5 = heldLimit(whole9(given4, "limit"), deps.perCall);
+      const query5 = { text: text15(given4, "query") ?? "", ...sources.length > 0 ? { sources } : {}, ...limit5 !== undefined ? { limit: limit5 } : {} };
       const [words14, found] = await Promise.all([wordsOf12(deps.guidance), deps.env.lore.search(at3.scope, query5, ctx.agent)]);
       const hits = found.slice(0, limit5 ?? deps.perCall);
       if (hits.length === 0)
@@ -257140,10 +257213,10 @@ function archiveSearch(deps, stores) {
       if ("answer" in at3)
         return at3.answer;
       const { scope: scope2 } = at3;
-      const given3 = fieldsOf7(args);
+      const given4 = fieldsOf7(args);
       const words14 = await wordsOf12(deps.guidance);
       const sessions = new SessionsStore(deps.env.files, words14);
-      const ref2 = text15(given3, "ref")?.trim() || undefined;
+      const ref2 = text15(given4, "ref")?.trim() || undefined;
       if (ref2 !== undefined) {
         const item = await sessions.read(scope2, ref2) ?? await stores?.read(scope2, ref2);
         if (item === undefined)
@@ -257151,18 +257224,18 @@ function archiveSearch(deps, stores) {
         return answer2(shown5([words14("archive_item", { ref: item.ref, store: item.store, title: item.title }), item.text]).join(`
 `));
       }
-      const query5 = text15(given3, "query")?.trim() || undefined;
+      const query5 = text15(given4, "query")?.trim() || undefined;
       if (query5 === undefined)
         return answer2(words14("archive_needs"), true);
       const own5 = sessions.info();
       const theirs = stores === undefined ? [] : (await stores.list(scope2)).filter((store2) => store2.name !== own5.name);
       const kept5 = [...theirs.map((store2) => store2.name), own5.name];
-      const named4 = [...new Set(textsOf2(given3["stores"]))];
+      const named4 = [...new Set(textsOf2(given4["stores"]))];
       const unknown2 = named4.find((name) => !kept5.includes(name));
       if (unknown2 !== undefined)
         return answer2(words14("no_store", { name: unknown2, stores: kept5.join(", ") }), true);
       const asked4 = named4.length > 0 ? named4 : kept5;
-      const limit5 = heldLimit(whole9(given3, "limit"), deps.perCall) ?? deps.perCall;
+      const limit5 = heldLimit(whole9(given4, "limit"), deps.perCall) ?? deps.perCall;
       const lists = await Promise.all(asked4.map(async (name) => {
         const found = name === own5.name ? await sessions.search(scope2, query5, limit5) : await stores.search(scope2, { text: query5, stores: [name], limit: limit5 });
         return found.slice(0, limit5).map((hit) => ({ ...hit, store: name }));
@@ -257180,12 +257253,12 @@ function webSearch(deps, web) {
     description: own4?.description ?? "",
     parameters: argumentsOf({ query: { type: "string" }, limit: { type: "integer", minimum: 1 } }, ["query"], own4),
     async run(args, ctx) {
-      const given3 = fieldsOf7(args);
+      const given4 = fieldsOf7(args);
       const words14 = await wordsOf12(deps.guidance);
       if (web === undefined || !await web.enabled(ctx.scope))
         return answer2(words14("web_off"), true);
-      const limit5 = heldLimit(whole9(given3, "limit"), deps.perCall);
-      const found = await web.search(ctx.scope, { text: text15(given3, "query") ?? "", ...limit5 !== undefined ? { limit: limit5 } : {} });
+      const limit5 = heldLimit(whole9(given4, "limit"), deps.perCall);
+      const found = await web.search(ctx.scope, { text: text15(given4, "query") ?? "", ...limit5 !== undefined ? { limit: limit5 } : {} });
       return hitsAnswer(words14, "web_hit", found.slice(0, limit5 ?? deps.perCall));
     }
   };
@@ -257231,14 +257304,14 @@ function jobStart(work, own4, max) {
     description: own4?.description ?? "",
     parameters: argumentsOf({ agent: { type: "string" }, brief: { type: "string" }, attach: { type: "array", items: { type: "string" } }, plays: { type: "string" }, returns: { type: "string" }, repeats: { type: "string" } }, [], own4),
     run: (args, ctx) => {
-      const given3 = fieldsOf7(args);
-      const attach2 = given3["attach"];
-      const plays = text15(given3, "plays");
-      const returns = text15(given3, "returns");
-      const repeats = text15(given3, "repeats");
+      const given4 = fieldsOf7(args);
+      const attach2 = given4["attach"];
+      const plays = text15(given4, "plays");
+      const returns = text15(given4, "returns");
+      const repeats = text15(given4, "repeats");
       return work.startFor({
-        agent: text15(given3, "agent") ?? "",
-        brief: text15(given3, "brief") ?? "",
+        agent: text15(given4, "agent") ?? "",
+        brief: text15(given4, "brief") ?? "",
         attach: Array.isArray(attach2) ? attach2.filter((item) => typeof item === "string") : [],
         ...plays !== undefined && plays.trim() !== "" ? { plays } : {},
         ...returns !== undefined && returns.trim() !== "" ? { returns } : {},
@@ -257323,17 +257396,17 @@ async function prepareJob(core, ask) {
   });
   for (const problem of rules.problems)
     env4.log.warn("A rule cannot be used.", { path: problem.path, problem: problem.message });
-  const given3 = ask.limits ?? {};
+  const given4 = ask.limits ?? {};
   const owner2 = ask.by === undefined;
   const limit5 = (setting, asked4) => asked4 === undefined ? setting : owner2 || setting === undefined ? asked4 : Math.min(setting, asked4);
   const more = ask.goOn?.more ?? {};
   const used = ask.goOn?.used ?? emptyUsage();
   const plus = (max, extra, spent) => extra === undefined ? max : (max ?? spent) + extra;
-  const time = more.time !== undefined ? more.time * 1000 : limit5(settings.jobs.run.timeMs, given3.time === undefined ? undefined : given3.time * 1000);
-  const calls = plus(limit5(settings.jobs.run.calls, given3.calls), more.calls, used.calls);
-  const tokensIn = plus(limit5(settings.jobs.run.tokensIn, given3.tokensIn), more.tokensIn, used.input);
-  const tokensOut = plus(limit5(settings.jobs.run.tokensOut, given3.tokensOut), more.tokensOut, used.output);
-  const tokens4 = plus(given3.tokens, more.tokens, used.input + used.output);
+  const time = more.time !== undefined ? more.time * 1000 : limit5(settings.jobs.run.timeMs, given4.time === undefined ? undefined : given4.time * 1000);
+  const calls = plus(limit5(settings.jobs.run.calls, given4.calls), more.calls, used.calls);
+  const tokensIn = plus(limit5(settings.jobs.run.tokensIn, given4.tokensIn), more.tokensIn, used.input);
+  const tokensOut = plus(limit5(settings.jobs.run.tokensOut, given4.tokensOut), more.tokensOut, used.output);
+  const tokens4 = plus(given4.tokens, more.tokens, used.input + used.output);
   const everyAgent = new Budget("day", settings.day.tokens !== undefined ? { tokens: settings.day.tokens } : {}, undefined, { spent: ask.spend.all, cachedWeight: settings.cachedWeight });
   const day3 = new Budget("day", settings.jobs.tokensPerDay !== undefined ? { tokens: settings.jobs.tokensPerDay } : {}, everyAgent, { spent: ask.spend.jobs, cachedWeight: settings.cachedWeight });
   const budget = new Budget("job", { ...calls !== undefined ? { calls } : {}, ...tokensIn !== undefined ? { tokensIn } : {}, ...tokensOut !== undefined ? { tokensOut } : {}, ...tokens4 !== undefined ? { tokens: tokens4 } : {} }, ask.over ?? day3, { cachedWeight: settings.cachedWeight, ...ask.goOn !== undefined ? { used: { ...ask.goOn.used } } : {} });
@@ -260993,10 +261066,10 @@ class Turn {
     }
     const wanted = [...opening.given.filter((ref2) => !ref2.startsWith("prompt:*") && ref2 !== "session:carry" && ref2 !== "briefing").map((ref2) => ({ ref: ref2, from: "definition" })), ...await pinsOf(guidance, req.lead, env4.log)];
     if (wanted.length > 0) {
-      const given3 = await this.#given(guidance, this.#lead, wanted, slice2);
-      if (given3.text !== "")
-        messages.push(placed2(systemMessage(given3.text, at3), wanted.map((item) => item.ref).join(", ")));
-      handed.push(...given3.handed);
+      const given4 = await this.#given(guidance, this.#lead, wanted, slice2);
+      if (given4.text !== "")
+        messages.push(placed2(systemMessage(given4.text, at3), wanted.map((item) => item.ref).join(", ")));
+      handed.push(...given4.handed);
     }
     let carrying = carry2;
     const earlierPlan = () => {
@@ -261183,12 +261256,12 @@ class Turn {
   }
   async#given(guidance, reader, wanted, slice2) {
     const [layout2, delegation] = await Promise.all([guidance.part(GIVEN_PART), guidance.part(DELEGATION_PART)]);
-    const given3 = await attach({ env: this.#env, scope: this.scope, lines: lines3(delegation), most: this.#settings.perCall, moment: { task: "" }, slice: slice2 }, reader, wanted);
-    const handed = given3.blocks.map((block2) => block2.name);
+    const given4 = await attach({ env: this.#env, scope: this.scope, lines: lines3(delegation), most: this.#settings.perCall, moment: { task: "" }, slice: slice2 }, reader, wanted);
+    const handed = given4.blocks.map((block2) => block2.name);
     const part = template(layout2);
     if (part === undefined)
-      return { text: joined6(given3.blocks.map((block2) => block2.text)), handed };
-    return { text: joined6([part.render({ ...given3.blocks.length > 0 ? { attachments: given3.blocks.map((block2) => ({ name: block2.name, text: block2.text })) } : {}, ...given3.missing.length > 0 ? { missing: given3.missing } : {} }).text]), handed };
+      return { text: joined6(given4.blocks.map((block2) => block2.text)), handed };
+    return { text: joined6([part.render({ ...given4.blocks.length > 0 ? { attachments: given4.blocks.map((block2) => ({ name: block2.name, text: block2.text })) } : {}, ...given4.missing.length > 0 ? { missing: given4.missing } : {} }).text]), handed };
   }
   #connection(definition) {
     return connectionOf2(this.#c.connections, this.scope, definition, this.#c.env.log, this.#settings);
@@ -261341,20 +261414,20 @@ class Turn {
       given: async (agent2) => lead(agent2) ? leads2() : this.#guides.get(agent2.id) ?? new Set,
       add: async (agent2, families) => {
         if (!lead(agent2)) {
-          const given4 = this.#guides.get(agent2.id) ?? new Set;
+          const given5 = this.#guides.get(agent2.id) ?? new Set;
           for (const family2 of families)
-            given4.add(family2);
-          this.#guides.set(agent2.id, given4);
+            given5.add(family2);
+          this.#guides.set(agent2.id, given5);
           return;
         }
         const file = this.#file;
         const places2 = this.#places;
         if (file === undefined || places2 === undefined)
           return;
-        const given3 = await leads2();
+        const given4 = await leads2();
         for (const family2 of families)
-          given3.add(family2);
-        await keepCached(file, this.#cacheDeps(places2), this.scope.turn, GUIDES_KEY, JSON.stringify([...given3]));
+          given4.add(family2);
+        await keepCached(file, this.#cacheDeps(places2), this.scope.turn, GUIDES_KEY, JSON.stringify([...given4]));
       }
     };
   }
@@ -261483,7 +261556,7 @@ ${text16}` } : { op: "write", text: text16 };
     const at3 = env4.clock.now();
     const messages = [];
     const handed = [];
-    const givesPrompt = definition.given.some((given3) => given3.startsWith("prompt:*"));
+    const givesPrompt = definition.given.some((given4) => given4.startsWith("prompt:*"));
     if (givesPrompt) {
       const last = req.prompt.at(-1);
       const prompt = req.prefill !== undefined && last?.role === "assistant" && promptText(last) === req.prefill ? req.prompt.slice(0, -1) : req.prompt;
@@ -261491,16 +261564,16 @@ ${text16}` } : { op: "write", text: text16 };
       this.#picturesLeft(ref2, parent, converted.pictures);
       messages.push(...converted.messages.map((message) => placed2(message, "prompt")));
       if (req.prompt.length > 0)
-        handed.push(...definition.given.filter((given3) => given3.startsWith("prompt:*")));
+        handed.push(...definition.given.filter((given4) => given4.startsWith("prompt:*")));
     }
     if (block2.text !== "")
       messages.push(placed2(systemMessage(block2.text, at3), "opening"));
-    const wanted = [...definition.given.filter((given3) => !given3.startsWith("prompt:*") && given3 !== WRITER_BRIEF).map((given3) => ({ ref: given3, from: "definition" })), ...await pinsOf(guidance, writer, env4.log)];
+    const wanted = [...definition.given.filter((given4) => !given4.startsWith("prompt:*") && given4 !== WRITER_BRIEF).map((given4) => ({ ref: given4, from: "definition" })), ...await pinsOf(guidance, writer, env4.log)];
     if (wanted.length > 0) {
-      const given3 = await this.#given(guidance, ref2, wanted, promptSlice(async () => this.#prompt, guidance));
-      if (given3.text !== "")
-        messages.push(placed2(systemMessage(given3.text, at3), wanted.map((item) => item.ref).join(", ")));
-      handed.push(...given3.handed);
+      const given4 = await this.#given(guidance, ref2, wanted, promptSlice(async () => this.#prompt, guidance));
+      if (given4.text !== "")
+        messages.push(placed2(systemMessage(given4.text, at3), wanted.map((item) => item.ref).join(", ")));
+      handed.push(...given4.handed);
     }
     messages.push(placed2(userMessage(brief, at3), WRITER_BRIEF));
     if (definition.given.includes(WRITER_BRIEF))
@@ -264380,8 +264453,8 @@ ${e.text}` })))
     harness.jobs.list({ user, limit: 1 }).catch((error3) => app.log.error("the jobs a restart cut off could not be listed at RPE's start", { user, error: error3 instanceof Error ? error3.message : String(error3) }));
   }
   const secretMarks = (at3) => secretMarkLines(loadGuidance(files, chatLevels(at3)));
-  const given3 = (scope2, agent2, refs, moment) => givenViews(eventsDeps, joined7(scope2), agent2, refs, moment);
-  return { lane, store: store2, harness, env: env4, facts, files, chats, take, place: place3, prompts, runs: runs3, requests, approvals, writes: app.writes, marks, trace, lore: lore3, secretSettings: secretSettings2, secretMarks, loreIndex, notes, suggestions, projection, meaning, stateIndex, given: given3, sources, placeSources, castKnowledge };
+  const given4 = (scope2, agent2, refs, moment) => givenViews(eventsDeps, joined7(scope2), agent2, refs, moment);
+  return { lane, store: store2, harness, env: env4, facts, files, chats, take, place: place3, prompts, runs: runs3, requests, approvals, writes: app.writes, marks, trace, lore: lore3, secretSettings: secretSettings2, secretMarks, loreIndex, notes, suggestions, projection, meaning, stateIndex, given: given4, sources, placeSources, castKnowledge };
 }
 var MACHINE_CLOCK;
 var init_lane = __esm(() => {
@@ -264466,12 +264539,12 @@ function givenRoutes(turns) {
             const agent2 = { id: d.name, definition: d.name };
             const ours = d.given.filter((name) => RPH_KINDS[kindOf7(name)] !== true);
             const read3 = new Map((await turns.given(scope2, agent2, ours, { task: "" })).map((g) => [g.ref, g.text]));
-            const given3 = d.given.map((name) => {
+            const given4 = d.given.map((name) => {
               const kind = kindOf7(name);
               const rph = RPH_KINDS[kind] === true;
               return { name, kind, by: rph ? "rph" : "rpe", found: rph ? null : (read3.get(name) ?? null) !== null };
             });
-            return { name: d.name, off: d.off, given: given3, missing: given3.flatMap((g) => g.found === false ? [g.name] : []) };
+            return { name: d.name, off: d.off, given: given4, missing: given4.flatMap((g) => g.found === false ? [g.name] : []) };
           }))
         };
       }
@@ -271947,13 +272020,13 @@ function checkProposals(world, registry3, raw, mode, max, sources, drops = new M
         if (!table || def.type !== "text" || def.derived)
           continue;
         const from = def.table === "economy.catalog" ? [...THING_TABLES.flatMap((t) => hasOwn(world.tables, t) && world.tables[t] ? [world.tables[t]] : []), table] : [table];
-        const given3 = fields3[f];
-        if (typeof given3 === "string" && from.some((t) => hasOwn(t.rows, given3)))
+        const given4 = fields3[f];
+        if (typeof given4 === "string" && from.some((t) => hasOwn(t.rows, given4)))
           continue;
-        const row = matchRowIn(from, typeof given3 === "string" && given3.trim() !== "" ? given3 : name);
+        const row = matchRowIn(from, typeof given4 === "string" && given4.trim() !== "" ? given4 : name);
         if (!row) {
-          if (given3 !== undefined)
-            notes.push(say("build_f_given_matches_no_label_row", { f, given: String(given3), label: table.label }));
+          if (given4 !== undefined)
+            notes.push(say("build_f_given_matches_no_label_row", { f, given: String(given4), label: table.label }));
           continue;
         }
         fields3[f] = row;
@@ -272126,9 +272199,9 @@ function readMapRequest(world, input) {
   const prose = typeof input.prose === "string" ? input.prose.trim() : "";
   if (prose === "")
     throw new Error("describe the place first");
-  const given3 = typeof input.mapId === "string" ? input.mapId.trim() : "";
+  const given4 = typeof input.mapId === "string" ? input.mapId.trim() : "";
   const fallback = `${scope2.replace(/[^A-Za-z0-9_-]/g, "_").replace(/^[^A-Za-z0-9]+/, "")}_map`.slice(0, 64);
-  const mapId = given3 !== "" ? given3 : fallback;
+  const mapId = given4 !== "" ? given4 : fallback;
   if (!MAP_ID.test(mapId))
     throw new Error("a map id is letters, digits, _ and -, starting with a letter or digit");
   return { scope: scope2, mapId, prose };
@@ -272579,12 +272652,12 @@ function checkItem(scope2, batch, item, say2) {
     }
   } else {
     let place3 = null;
-    const given3 = str34(raw.place);
-    const resolved = given3 === "work" ? placeOf10(scope2, owner2, "employer") : given3 === "home" ? placeOf10(scope2, owner2, "home") : given3;
+    const given4 = str34(raw.place);
+    const resolved = given4 === "work" ? placeOf10(scope2, owner2, "employer") : given4 === "home" ? placeOf10(scope2, owner2, "home") : given4;
     if (resolved && scope2.places.has(resolved))
       place3 = resolved;
-    else if (given3 !== "")
-      c.problems.push(resolved && hasOwn(scope2.world.places, resolved) ? sayOr(say2, "fix_place_not_told", { place: resolved }) : sayOr(say2, "fix_place_not_in_world", { place: given3 }));
+    else if (given4 !== "")
+      c.problems.push(resolved && hasOwn(scope2.world.places, resolved) ? sayOr(say2, "fix_place_not_told", { place: resolved }) : sayOr(say2, "fix_place_not_in_world", { place: given4 }));
     else
       c.problems.push(sayOr(say2, "fix_no_place"));
     const recurrence = readRecurrence(scope2, raw.recurrence, c.fatal, say2);
@@ -273010,13 +273083,13 @@ function stringsOf(v) {
 function droppedBy(before2, after3, say2) {
   return [...after3].flatMap(([key3, d]) => d.count > (before2.get(key3)?.count ?? 0) ? [{ why: sayOr(say2, `dropped_${d.why}`, d.fields), count: d.count - (before2.get(key3)?.count ?? 0) }] : []);
 }
-function proposing(from, mode, review, given3, fields3) {
+function proposing(from, mode, review, given4, fields3) {
   const raw = [];
   let calls = 0;
   let last = null;
   const draft2 = async () => last = await from.worlds.worlds.working(from.world, from.user);
   return {
-    given: given3,
+    given: given4,
     fields: fields3,
     async propose(args, say2) {
       const doc = await draft2();
@@ -274993,8 +275066,8 @@ async function answerPaused(input) {
   try {
     const reader = today6.reader;
     const paused = await reader.pausedOn(id3, user);
-    const given3 = answersOf(db, s.id).filter((a) => a.chat === chat2);
-    const message2 = input.message ?? paused.find((m) => !given3.some((a) => a.message === m)) ?? paused[0];
+    const given4 = answersOf(db, s.id).filter((a) => a.chat === chat2);
+    const message2 = input.message ?? paused.find((m) => !given4.some((a) => a.message === m)) ?? paused[0];
     if (message2 !== undefined)
       refuseSecond(db, s.id, chat2, message2);
     if (message2 === undefined || !paused.includes(message2))
@@ -275142,7 +275215,7 @@ function migrationPage(input) {
   const taken = report2?.runtime?.taken ?? null;
   const [, ...steps] = goingBack({ identifier: input.identifier, runtime: taken === null ? null : { name: taken.name, source: taken.source }, downRun: false });
   const sources = report2?.sources ?? null;
-  const given3 = [...input.given ?? []];
+  const given4 = [...input.given ?? []];
   const out = {
     run: report2 === null ? null : summaryOf2(report2),
     rehearsal: rehearsal2,
@@ -275151,13 +275224,13 @@ function migrationPage(input) {
     notCarried: null,
     offRpe: [],
     waiting: [],
-    given: given3,
+    given: given4,
     swap: swapSteps({ identifier: input.identifier }).map((s) => s.trim()),
     goingBack: { steps: steps.map((s) => s.trim()), permissions: [...PREVIOUS_PERMISSIONS] },
     lumiverse: report2?.lumiverse ?? null
   };
   const unnamed = new Set([...report2?.notClassified ?? [], ...held5.state === "ready" ? held5.report.notClassified : []].map((i) => `${i.where}: ${i.path}`));
-  const rows2 = [...unnamed].map((path7) => ({ kind: "row", path: path7, done: given3.some((g) => g.path === path7 || path7.endsWith(`: ${g.path}`) || g.path.endsWith("/") && (path7.includes(`: ${g.path}`) || path7.startsWith(g.path))) }));
+  const rows2 = [...unnamed].map((path7) => ({ kind: "row", path: path7, done: given4.some((g) => g.path === path7 || path7.endsWith(`: ${g.path}`) || g.path.endsWith("/") && (path7.includes(`: ${g.path}`) || path7.startsWith(g.path))) }));
   if (report2 === null) {
     out.waiting.push(...rows2);
     return out;
@@ -277800,8 +277873,8 @@ function viewOrThrow(answer6, lead) {
     throw new RouteError(refusalStatus(answer6), `${lead}: ${refusalWords(answer6)}`);
   return answer6;
 }
-function statesIn(given3) {
-  const named4 = given3.split(",").map((s) => s.trim());
+function statesIn(given4) {
+  const named4 = given4.split(",").map((s) => s.trim());
   const unknown2 = named4.filter((s) => !jobState2.values.includes(s));
   if (unknown2.length > 0)
     throw new RouteError(400, `The query's state names ${unknown2.map((s) => JSON.stringify(s)).join(", ")}, which is no state a job can be in: each is one of ${jobState2.values.join(", ")}, a comma between two.`);
@@ -278957,8 +279030,8 @@ class BootstrapJobs {
     }
     if (lead === null)
       return refused5(409, await turnErrorWords(turns.files, scope2, "no_lead"));
-    const given3 = { relive: ask.relive, tokenLimit: ask.tokenLimit ?? settings.tokenLimit };
-    this.#asking.set(place3, given3);
+    const given4 = { relive: ask.relive, tokenLimit: ask.tokenLimit ?? settings.tokenLimit };
+    this.#asking.set(place3, given4);
     try {
       let view2;
       try {
@@ -278966,14 +279039,14 @@ class BootstrapJobs {
           agent: lead,
           brief: skill?.body ?? "",
           attach: [BOOTSTRAP_JOB, BOOTSTRAP_FACTS],
-          limits: { askAt: given3.tokenLimit, ...settings.runCalls === null ? {} : { calls: settings.runCalls }, ...settings.runTime === null ? {} : { time: settings.runTime } }
+          limits: { askAt: given4.tokenLimit, ...settings.runCalls === null ? {} : { calls: settings.runCalls }, ...settings.runTime === null ? {} : { time: settings.runTime } }
         });
       } catch (error4) {
         return refused5(409, error4 instanceof Error ? error4.message : String(error4));
       }
       if ("refused" in view2)
         return refused5(409, `No bootstrap job was started: ${refusalWords(view2)}`);
-      const job = { job: view2.id, ...given3 };
+      const job = { job: view2.id, ...given4 };
       await turns.env.store.update(scope2, keyOf12(chat2), (current3) => ({ jobs: [...keptOf3(current3), job] }));
       return { started: view2 };
     } finally {
@@ -280552,12 +280625,12 @@ function inClear(base2) {
   const host = url2.hostname;
   return !(host === "localhost" || host.endsWith(".localhost") || /^127(\.\d{1,3}){3}$/.test(host) || host === "[::1]");
 }
-function portOf(given3) {
-  if (given3 === undefined)
+function portOf(given4) {
+  if (given4 === undefined)
     return;
-  const port = Number(given3);
-  if (!/^\d+$/.test(given3) || port < 1 || port > 65535)
-    throw new UsageError(`--port is "${given3}": give a port number.`);
+  const port = Number(given4);
+  if (!/^\d+$/.test(given4) || port < 1 || port > 65535)
+    throw new UsageError(`--port is "${given4}": give a port number.`);
   return port;
 }
 async function upCommand(argv, io, options, serveHere) {
@@ -280767,12 +280840,12 @@ __export(exports_cli, {
   USAGE: () => USAGE2,
   runCli: () => runCli
 });
-function withinOf(given3) {
-  if (given3 === undefined)
+function withinOf(given4) {
+  if (given4 === undefined)
     return;
-  const seconds = Number(given3);
-  if (!/^\d+$/.test(given3) || seconds < 1)
-    throw new UsageError(`--within is "${given3}": give a number of seconds, at least 1.`);
+  const seconds = Number(given4);
+  if (!/^\d+$/.test(given4) || seconds < 1)
+    throw new UsageError(`--within is "${given4}": give a number of seconds, at least 1.`);
   return seconds;
 }
 async function runCli(argv, io, options) {
@@ -280933,5 +281006,5 @@ if (Bun.isMainThread) {
     stopped,
     fetch: (url2, init) => fetch(url2, init),
     invoked: invokedAs2(process.execPath, Bun.main)
-  }, { version: "e0346cb0", areas: compose2().areas, appFile: Bun.main, host: { platform: process.platform, uid: process.getuid?.() ?? null, bun: process.execPath } });
+  }, { version: "fa66b187", areas: compose2().areas, appFile: Bun.main, host: { platform: process.platform, uid: process.getuid?.() ?? null, bun: process.execPath } });
 }
