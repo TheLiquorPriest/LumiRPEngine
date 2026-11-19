@@ -5,10 +5,12 @@
 // that turn's page). The chat is the one Lumiverse has open, and the bar atop the drawer is the
 // navigation: the pages used most, and More for the rest (frame.tsx), which stays in reach when the
 // drawer scrolls. The page shown, with its own inner place, is kept in memory, so a tab switch returns
-// to it. The client reaches RPE directly when the page can, else through the extension (client.ts).
+// to it; it is drawn, and reads what it shows, only once the drawer has first been seen, so a chat opened
+// with the drawer shut reads nothing for it. The client reaches RPE directly when the page can, else
+// through the extension (client.ts).
 
 import { render } from "preact";
-import { useEffect, useRef } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { scrollParent } from "../frontend/scroll";
 import { createStore, type Readable, useSelect } from "./store";
 import { AppContext, type Route, type UiApp, useApp } from "./app";
@@ -76,19 +78,37 @@ function stickToPanel(el: HTMLElement): () => void {
   };
 }
 
-/** The drawer's bar of pages and the page they show; an entry goes to the chat Lumiverse has open, whatever the page now shows. */
+/** Whether `el` has been on screen yet: false until it first is (the drawer opened on RPE's tab), then true for good. */
+function useSeen(el: { current: HTMLElement | null }): boolean {
+  const [seen, setSeen] = useState(false);
+  useEffect(() => {
+    const target = el.current;
+    if (seen || target === null) return undefined;
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      observer.disconnect();
+      setSeen(true);
+    });
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [seen]);
+  return seen;
+}
+
+/** The drawer's bar of pages and the page they show, drawn once the drawer is first seen; an entry goes to the chat Lumiverse has open, whatever the page now shows. */
 function DrawerShell(props: { active: Readable<string | null> }) {
   const app = useApp();
   const route = useSelect(app.route, (r) => r);
   const active = useSelect(props.active, (chat) => chat);
   const root = useRef<HTMLDivElement>(null);
+  const seen = useSeen(root);
   useEffect(() => (root.current === null ? undefined : stickToPanel(root.current)), []);
   return (
     <div ref={root} class="lre rpe rpe-drawer">
       <div class="rpe-drawer-bar">
         <PagesBar place="drawer" current={route.page} disabled={() => false} go={(id) => app.go(routeFor(id, active))} />
       </div>
-      <Frame route={route} />
+      {seen ? <Frame route={route} /> : null}
     </div>
   );
 }
