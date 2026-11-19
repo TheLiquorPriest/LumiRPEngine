@@ -133,11 +133,11 @@ const Q = {
   chats: "SELECT id, user_id, character_id, name, metadata, updated_at FROM chats WHERE user_id = ? ORDER BY updated_at DESC, rowid",
   path: `SELECT ${STEP} ${OF_CHAT} ${ORDER}`,
   // What says a message's step stands as last read, without the texts a step is read from: its showing swipe's own text (`content`,
-  // which Lumiverse writes with every change of the swipe shown), the bytes of its swipes, dates and `extra`, whose JSON is not read, and
-  // its hidden value, read from `extra` only where `"hidden"` stands in it. A hide writes `extra` alone, moving no revision, and writes it
-  // again as JSON.stringify writes it: from an `extra` another tool wrote with spaces or escapes, that can keep its length exactly.
-  pathMarks: `SELECT m.id, m.index_in_chat, m.is_user, m.swipe_id, m.revision, m.content, octet_length(m.swipes) AS swipes_bytes, octet_length(m.swipe_dates) AS dates_bytes, octet_length(m.extra) AS extra_bytes,
-    CASE WHEN instr(m.extra, '"hidden"') > 0 AND json_valid(m.extra) THEN json_type(m.extra, '$.hidden') END AS hidden_type ${OF_CHAT} ${ORDER}`,
+  // which Lumiverse writes with every change of the swipe shown) and the bytes of its swipes, dates and `extra`, whose JSON is not read.
+  // A hide writes `extra` alone, moving no revision, and its bytes say so, save in one case left open on purpose: an `extra` another
+  // tool wrote with spaces or escapes, which the hide's own rewrite brings back to exactly its length. Its hidden value is not read to
+  // see that, since a long chat's `extra` runs to hundreds of megabytes and reading it at every turn costs more than this read saves.
+  pathMarks: `SELECT m.id, m.index_in_chat, m.is_user, m.swipe_id, m.revision, m.content, octet_length(m.swipes) AS swipes_bytes, octet_length(m.swipe_dates) AS dates_bytes, octet_length(m.extra) AS extra_bytes ${OF_CHAT} ${ORDER}`,
   pathOf: `SELECT ${STEP} ${OF_CHAT} AND m.id IN (SELECT value FROM json_each(?)) ${ORDER}`,
   messages: `SELECT ${MESSAGE} ${OF_CHAT} ${ORDER} LIMIT ? OFFSET ?`,
   messagesById: `SELECT ${MESSAGE} ${OF_CHAT} AND m.id IN (SELECT value FROM json_each(?)) ${ORDER}`,
@@ -382,7 +382,7 @@ export function createDbReader(deps: DbReaderDeps): DbReader {
             // Every message's marks, then the steps of those whose marks moved since the last read (all of them at a chat's first).
             const had = stepsKept.get(chat);
             const marks = db.query(Q.pathMarks).all(chat, user).map(row);
-            const keys = marks.map((m) => [m.is_user, m.swipe_id, m.revision, m.swipes_bytes, m.dates_bytes, m.extra_bytes, m.hidden_type, Bun.hash(String(m.content))].join("\u0000"));
+            const keys = marks.map((m) => [m.is_user, m.swipe_id, m.revision, m.swipes_bytes, m.dates_bytes, m.extra_bytes, Bun.hash(String(m.content))].join("\u0000"));
             const moved = had === undefined ? null : marks.flatMap((m, i) => (had.get(String(m.id))?.key === keys[i] ? [] : [String(m.id)]));
             const fresh = moved === null ? db.query(Q.path).all(chat, user) : moved.length === 0 ? [] : db.query(Q.pathOf).all(chat, user, JSON.stringify(moved));
             const read = new Map(fresh.map((r) => [String(row(r).id), stepOf(row(r))]));

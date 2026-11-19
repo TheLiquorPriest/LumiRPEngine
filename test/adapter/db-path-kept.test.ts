@@ -1,8 +1,7 @@
 // A chat's path read again by the reader of Lumiverse's database, which reads again only the messages whose marks moved since its last
 // read: after each change Lumiverse makes to a message without moving its revision (a reply's swipe edited to a text of the same length,
-// another swipe shown, a message hidden, also where the hide's rewrite of an `extra` another tool wrote keeps its length), a message deleted
-// and the rest moved up, and two messages put in each other's place, the path is the one a reader that never read the chat reads whole.
-// Every user, chat and message is invented.
+// another swipe shown, a message hidden), a message deleted and the rest moved up, and two messages put in each other's place, the path is
+// the one a reader that never read the chat reads whole. Every user, chat and message is invented.
 
 import { afterEach, expect, test } from "bun:test";
 import { createDbReader } from "../../src/adapter/lumiverse/db";
@@ -72,29 +71,4 @@ test("a path read again after an edit, a swipe, a hide, a delete and a reorder i
   // Two messages put in each other's place.
   db.run("UPDATE messages SET index_in_chat = CASE id WHEN 'm3' THEN 3 ELSE 1 END WHERE id IN ('m3', 'm5')");
   expect((await same())?.map((s) => s.id)).toEqual(["m1", "m5", "m4", "m3"]);
-});
-
-test("a hide that writes an extra another tool wrote with spaces again at the same length is seen", async () => {
-  // As Lumiverse hides a message (`bulkSetHidden`): `extra` parsed, `hidden` set, written again as JSON.stringify writes it, revision kept.
-  // The `extra` before it is as a tool that writes spaces between tokens left it, padded so that the hide keeps its bytes exactly.
-  const hiddenExtra = json({ note: "imported", hidden: true });
-  const head = '{"note": "imported"';
-  const spaced = `${head}${" ".repeat(hiddenExtra.length - head.length - 1)}}`;
-  expect({ bytes: Buffer.byteLength(spaced), parsed: JSON.parse(spaced) }).toEqual({ bytes: Buffer.byteLength(hiddenExtra), parsed: { note: "imported" } });
-  const db = new StandInDb();
-  const start = rows();
-  start.messages = start.messages.map((m) => (m.id === "m5" ? { ...m, extra: spaced } : m));
-  db.write(start);
-  closing.push(() => db.close());
-  const reader = () => {
-    const r = createDbReader({ path: db.path, user: USER, sleep: async () => undefined, log: () => undefined });
-    closing.push(() => r.close());
-    return r;
-  };
-  const kept = reader();
-  expect((await kept.path("chat-a"))?.[4]?.hidden).toBe(false);
-  db.run("UPDATE messages SET extra = ? WHERE id = 'm5'", hiddenExtra);
-  const again = await kept.path("chat-a");
-  expect(again).toEqual(await reader().path("chat-a"));
-  expect(again?.[4]?.hidden).toBe(true);
 });
