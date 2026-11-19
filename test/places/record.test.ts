@@ -58,6 +58,16 @@ describe("a place's record", () => {
     expect(sinceOf(after, INN, PLACES_DEFAULTS).items).toEqual([]);
     expect(placeLines({ at: after, place: INN, settings: PLACES_DEFAULTS, depth: 1 }).filter((l) => l.kind === "place_none").map((l) => l.fields.part)).toEqual(["since", "feature", "access"]);
   });
+
+  test("a fact his own change wrote, on the chat and at no turn, is a line with no story time, and the place's lines are read", async () => {
+    const t = await openTable({ areas: [PLACE_STORE_AREA] });
+    await t.tie(await t.begin());
+    await t.writes.run(() => t.s.addOwnerChanges(CHAT, [{ ...fact(`place:${INN}`, "sign", "repainted green", { part: "since" }), by: "player", source: "player" }]));
+    const at = placeAt(t.store, USER, CHAT, null);
+    if (at === null) throw new Error("the chat plays the invented world");
+    expect(sinceOf(at, INN, PLACES_DEFAULTS).items.map((r) => [r.key, r.turn, r.time])).toEqual([["sign", "", null]]);
+    expect(placeLines({ at, place: INN, settings: PLACES_DEFAULTS, depth: 1 }).find((l) => l.kind === "place_since")?.fields).toMatchObject({ key: "sign" });
+  });
 });
 
 describe("the fact operation's part and beat", () => {

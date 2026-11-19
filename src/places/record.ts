@@ -77,6 +77,8 @@ export function factReader(at: PlaceAt): FactReader {
   const times = new Map<string, string | null>();
   const story = new StoryRecord(storyAt(at.u, at.chat, at.turn), storySliceOf(at.state), questSliceOf(at.state));
   const timeOf = (turn: string): string | null => {
+    // A fact of his own change is written on the chat, at no turn: no turn's story time is its.
+    if (turn === "") return null;
     if (!times.has(turn)) {
       const clock = clockOfState(at.env, at.u.stateAt(turn).state);
       times.set(turn, clock === null ? null : clock.text(clock.now));
