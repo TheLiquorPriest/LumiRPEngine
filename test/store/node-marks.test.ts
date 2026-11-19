@@ -15,7 +15,8 @@ import { foldAway } from "../../src/store/away-thread";
 import { migrateStore, storedWorlds } from "../../src/store";
 import { openStore, type UserStore } from "../../src/store/store";
 import type { TurnRow } from "../../src/store/types";
-import { engine, goTo, inventedWorld, make, play, POV, registry, testStore, tick, USER } from "./fixtures";
+import { engine, goTo, hashOf, inventedWorld, make, play, POV, registry, shown, testStore, tick, USER } from "./fixtures";
+import type { SeenMessage } from "../../src/store";
 import { STORY_STORE_AREA } from "../../src/story";
 
 /** Every turn's key and state as read now, by turn. */
@@ -158,6 +159,37 @@ describe("node marks", () => {
     const next = play(again, "c", "m5", "Night.", 5, engine(tick(60)));
     expect(moved(before, readings(again, turns))).toEqual([]);
     sameAsAfresh(again, store.db, [...turns, next], (r) => worlds.get(r));
+  });
+});
+
+describe("branches that share history", () => {
+  /** A source chat of three turns and a branch of it made at the second reply, each shown as the chat application shows it. */
+  function forked() {
+    let at = 0;
+    const { s, store, revision, worlds } = testStore({ now: () => ++at });
+    s.createChat({ id: "source", revision });
+    const t1 = play(s, "source", "m1", "Into the inn.", 1, engine(tick(15)));
+    const t2 = play(s, "source", "m2", "Down the stairs.", 2, engine(goTo(POV, "cellar")));
+    const t3 = play(s, "source", "m3", "A long rest.", 3, engine(tick(120)));
+    s.sync("source", shown(["u1", "in"], ["m1", "Into the inn.", 1], ["u2", "down"], ["m2", "Down the stairs.", 2], ["u3", "rest"], ["m3", "A long rest.", 3]));
+    s.branchChat({ id: "branch", from: "source", map: { u1: "b-u1", m1: "b-m1", u2: "b-u2", m2: "b-m2" } });
+    return { s, store, worlds, t1, t2, t3 };
+  }
+
+  test("a change landed on a shared turn renews a branch's turn made after it that now stands rebased off it", () => {
+    const { s, store, worlds, t2 } = forked();
+    // The branch plays its own turn after the shared second reply, then the second reply is deleted from the branch: its turn stands rebased.
+    const u3 = play(s, "branch", "b-m3", "Up to the roof.", 4, engine(make("rope", "Rope", POV)));
+    s.sync("branch", shown(["b-u1", "in"], ["b-m1", "Into the inn.", 1], ["b-u2", "down"], ["b-m2", "Down the stairs.", 2], ["b-u3", "up"], ["b-m3", "Up to the roof.", 4]));
+    s.sync("branch", shown(["b-u1", "in"], ["b-m1", "Into the inn.", 1], ["b-u3", "up"], ["b-m3", "Up to the roof.", 4]));
+    expect(s.path("branch").some((e) => e.turn === t2.id)).toBe(false);
+    const key = s.foldKey(u3.id);
+    expect(s.stateAt(u3.id).state.world.entities.coin).toBeUndefined();
+    // A change lands on the shared second reply: the branch's turn was made on a path through it.
+    s.addEarlier(t2.id, engine(make("coin", "Coin", POV)));
+    expect(s.foldKey(u3.id)).not.toBe(key);
+    expect(s.stateAt(u3.id).state.world.entities.coin).toBeDefined();
+    sameAsAfresh(s, store.db, [u3, t2], (r) => worlds.get(r));
   });
 });
 

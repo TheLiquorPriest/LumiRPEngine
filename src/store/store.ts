@@ -911,7 +911,7 @@ export class UserStore {
 
   /**
    * The chats whose path runs through a turn: its own, and each branch of it (and of its branches) whose path holds the turn, since
-   * shared history is shared, not copied (plan §6.3 l.616). A write on the turn changes their folds, and no other chat's.
+   * shared history is shared, not copied (plan §6.3 l.616): the chats a change landed on the turn is reported to (`addEarlier`).
    */
   private throughTurn(turn: TurnRow): string[] {
     return this.db
@@ -922,6 +922,28 @@ export class UserStore {
          WHERE k.chat = ?2 OR EXISTS (SELECT 1 FROM json_each(c.path) j WHERE json_extract(j.value, '$.turn') = ?3)`,
       )
       .all(this.id, turn.chat, turn.id)
+      .map((r) => r.chat);
+  }
+
+  /**
+   * The chats whose folds a write of the turn's changes or starting state changes, the chats its write renews the marks of: each that
+   * played a turn standing at one of the turn's nodes or a node after one (`nodesThrough`), whose held states go by that chat's mark,
+   * and each whose path holds such a turn, whose own reading of its head does. A branch's turn made on a path through the turn is
+   * among them though the branch's path no longer holds the turn (a message deleted, the turn standing rebased): it was made after it.
+   */
+  private foldsThrough(turn: TurnRow): string[] {
+    return this.db
+      .query<{ chat: string }, [string, string, string]>(
+        `WITH RECURSIVE down(key) AS (
+           SELECT key FROM path_node WHERE user = ?1 AND turn = ?2
+           UNION SELECT n.key FROM path_node n JOIN down d ON n.user = ?1 AND n.prev = d.key),
+         after(turn) AS (SELECT DISTINCT n.turn FROM down d JOIN path_node n ON n.user = ?1 AND n.key = d.key),
+         played(chat) AS (SELECT ?3 UNION SELECT t.chat FROM after a JOIN turn t ON t.user = ?1 AND t.id = a.turn),
+         kin(chat) AS (SELECT chat FROM played UNION SELECT l.chat FROM message_link l JOIN kin k ON l.user = ?1 AND l.source_chat = k.chat)
+         SELECT k.chat FROM kin k JOIN chat c ON c.user = ?1 AND c.id = k.chat
+         WHERE k.chat IN (SELECT chat FROM played) OR EXISTS (SELECT 1 FROM json_each(c.path) j WHERE json_extract(j.value, '$.turn') IN (SELECT turn FROM after))`,
+      )
+      .all(this.id, turn.id, turn.chat)
       .map((r) => r.chat);
   }
 
@@ -1881,7 +1903,7 @@ export class UserStore {
     const outcomes: Outcome[] = inputs.map((_, i) => (refused?.has(i) === true ? { applied: false, reports: [refused.get(i) as Report] } : (landed.get(i) ?? { applied: false, reports: [] })));
     const now = this.store.now();
     let ord = (existing.at(-1)?.ord ?? -1) + 1;
-    const through = this.throughTurn(turn);
+    const through = this.foldsThrough(turn);
     const ids = this.write(through, () => {
       const put = this.db.query("INSERT INTO change (user, turn, ord, lane, op, value, by, handle, standing, precision, source, cite, job, applied, reports, told, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
       const made = inputs.map((c, i) => {
@@ -2023,7 +2045,7 @@ export class UserStore {
   dropStaged(turnId: string, handle?: string): number {
     const turn = this.turnToWrite(turnId);
     if (turn.status !== "open") throw new StoreInputError(`turn ${turnId} is ${turn.status}: only an open turn's staged changes can be taken back`);
-    return this.write(this.throughTurn(turn), () => {
+    return this.write(this.foldsThrough(turn), () => {
       const r = handle === undefined ? this.db.run("DELETE FROM change WHERE user = ? AND turn = ?", [this.id, turnId]) : this.db.run("DELETE FROM change WHERE user = ? AND turn = ? AND handle = ?", [this.id, turnId, handle]);
       this.dropSnapshotsThrough(turnId);
       return r.changes;
@@ -2038,7 +2060,7 @@ export class UserStore {
   takeBack(turnId: string, after: number): number {
     const turn = this.turnToWrite(turnId);
     if (turn.status === "dropped") throw new StoreInputError(`turn ${turnId} was dropped`);
-    return this.write(this.throughTurn(turn), () => {
+    return this.write(this.foldsThrough(turn), () => {
       const r = this.db.run("DELETE FROM change WHERE user = ? AND turn = ? AND ord > ? AND job IS NULL", [this.id, turnId, after]);
       this.dropSnapshotsThrough(turnId);
       return r.changes;
@@ -2063,12 +2085,13 @@ export class UserStore {
    * there and its reports.
    */
   joinTurn(held: string, into: string): ChangeRow[] {
-    const { to } = joinable(this.db, this.id, held, into);
+    const { from, to } = joinable(this.db, this.id, held, into);
     const moved = this.changes(held);
     const own = this.changes(into);
     const outcomes = this.landing(to, own, moved);
     const next = (own.at(-1)?.ord ?? -1) + 1;
-    this.write(this.throughTurn(to), () => {
+    // The changes leave the held turn's folds and join the turn's: the chats of both are renewed.
+    this.write([...new Set([...this.foldsThrough(from), ...this.foldsThrough(to)])], () => {
       const put = this.db.query("UPDATE change SET turn = ?, ord = ?, applied = ?, reports = ? WHERE user = ? AND id = ?");
       moved.forEach((c, i) => {
         const o = outcomes[i] ?? { applied: false, reports: [] };
@@ -2492,7 +2515,7 @@ export class UserStore {
     }
     const own = this.foldNode(node).folded.state;
     const doc: SnapshotDoc = { state: { ...own, world }, notApplied: [], rebased: [] };
-    this.write(this.throughTurn(turn), () => {
+    this.write(this.foldsThrough(turn), () => {
       // Every change of this user's recorded so far stands within the base or before it; ids only grow.
       const upto = this.db.query<{ n: number | null }, [string]>("SELECT max(id) AS n FROM change WHERE user = ?").get(this.id)?.n ?? 0;
       this.store.storeSnapshot(this.id, node, "base", upto, snapshotRows(doc));
