@@ -691,7 +691,7 @@ var package_default = {
     "bun-types": "^1.4.2",
     "lumiverse-spindle-types": "0.6.80",
     preact: "11.0.1",
-    "rp-harness": "git+https://github.com/TheLiquorPriest/RPHarness.git#11dd1bde5914ad30e02e27b5776c8eced4286a5c",
+    "rp-harness": "git+https://github.com/TheLiquorPriest/RPHarness.git#fb61c0fcab7e7c147414719349825915341e4812",
     typescript: "7.0.2"
   },
   exports: {
@@ -735,7 +735,7 @@ var DEFAULT_PLACE_CAPS = Object.freeze({ turn: 2, chat: 64 });
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "11026ed1";
+var BUILD = "b13442d0";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;
