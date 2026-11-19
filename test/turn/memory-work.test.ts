@@ -159,6 +159,8 @@ test("memory-owed: a run that ends with a principal it voiced holding what it pe
   const turn = await play(b, "I ask whether the boat came.");
   expect(told(b, "were on stage this turn and hold perceptions their own agent has not taken in: Wren Hale.")).toBeGreaterThan(0);
   expect(told(b, "- Wren Hale (principal): 1 waiting, the oldest of this turn.")).toBeGreaterThan(0);
+  // Every shipped rule in force passed the harness's check of what its text shows when the run began, the names an item of a list gives among them.
+  expect(b.logged.filter((l) => l.message === "A rule cannot be used.")).toEqual([]);
   expect(fired(b, turn)).toEqual(["memory-owed"]);
   expect(wrenAt(b, turn).untaken).toEqual([]);
 });
