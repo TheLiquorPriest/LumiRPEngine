@@ -208,6 +208,20 @@ async function buildParts(input: ChatViewInput, s: UserStore, folded: Folded, wo
 export async function chatView(input: ChatViewInput): Promise<StateView> {
   const { store, chat } = input;
   const s = store.user(input.user);
+  const asked = s.chat(chat);
+  if (asked === null || asked.world === null) return notWorldView(chat);
+  // A view not kept is built from two states, the one shown and the one its turn began on. Each is asked for here first, by the
+  // store's own road for a long fold (`afar`): one with no state held on its path runs on a thread and is held when it answers, so
+  // no read of a chat's state, however it came to be asked before the chat was made ready, folds the chat's whole path on RPE's
+  // thread. Everything below is then read again in one piece, as it always was.
+  if (!built.has(viewKey(s, asked, linesGiven(), input))) {
+    await store.afar(() => {
+      if (input.turn === null) s.headState(chat);
+      else s.stateAt(input.turn);
+      const at = input.turn ?? headTurn(s, chat);
+      if (at !== null) s.startOf(at);
+    });
+  }
   const row = s.chat(chat);
   if (row === null || row.world === null) return notWorldView(chat);
   const registry = store.env.registry;

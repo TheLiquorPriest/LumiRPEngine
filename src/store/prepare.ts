@@ -61,16 +61,24 @@ export class Preparer {
   private readonly waiting = new Map<string, PromiseWithResolvers<void>>();
   private stopped = false;
   private running: Promise<void> | null = null;
+  /** Whether the pass was begun: its user known and the chats that want it listed. */
+  private begun = false;
   /** How far the chat made ready now (`current`) is. */
   private progress: { done: number; of: number | null } = { done: 0, of: null };
 
   constructor(private readonly deps: PreparerDeps) {}
 
-  /** Starts the pass over every chat that wants a snapshot this build can use (`UserStore.unprepared`), and returns at once. */
+  /**
+   * Starts the pass over every chat that wants a snapshot this build can use (`UserStore.unprepared`), and returns at once. RPE calls
+   * it once it listens, and so does the first read that names a chat (`ready`, `preparing`): RPE answers requests from the moment it
+   * listens, before every area was told it started, and a read let past a pass not yet begun folds its chat's whole path in one piece
+   * on RPE's thread.
+   */
   start(): void {
-    if (this.running !== null) return;
+    if (this.begun || this.stopped) return;
     this.user = this.deps.user();
     if (this.user === "") return;
+    this.begun = true;
     this.queue = this.deps.store.user(this.user).unprepared();
     if (this.queue.length === 0) return;
     this.deps.log.info("RPE makes ready the states of chats this build cannot use yet, one chat at a time; a read of one waits for it.", { chats: this.queue.length });
@@ -79,6 +87,7 @@ export class Preparer {
 
   /** Resolves once `chat` is ready for this build: at once for one the pass does not hold; one still waiting is taken next. */
   async ready(user: string, chat: string): Promise<void> {
+    this.start();
     if (user !== this.user || (this.current !== chat && !this.queue.includes(chat))) return;
     if (this.current !== chat) this.queue = [chat, ...this.queue.filter((c) => c !== chat)];
     let waits = this.waiting.get(chat);
@@ -91,6 +100,7 @@ export class Preparer {
 
   /** How far the pass is with `chat`, from what it keeps as it goes: null where it does not hold it (ready already, or never wanting). */
   preparing(user: string, chat: string): ChatPreparing | null {
+    this.start();
     if (user !== this.user) return null;
     if (this.current === chat) return { ahead: 0, ...this.progress };
     const at = this.queue.indexOf(chat);
