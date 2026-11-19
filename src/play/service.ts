@@ -302,6 +302,25 @@ export class PlayService {
     if (turn !== null && row?.chat !== chat) throw new RouteError(404, `Chat ${chat} has no turn ${turn}.`);
     // A turn joined to another is answered as a fact, naming the turn it joined, whatever kind of chat this is.
     if (turn !== null && row?.joined != null) throw new JoinedTurnError(turn, row.joined);
+    // Asks of the same state at once share one view: the store's key for that state names it (a write between them makes another).
+    const at = turn ?? headTurn(s, chat);
+    const key = `${user}\u0000${chat}\u0000${turn ?? ""}\u0000${at === null ? "" : s.foldKey(at)}`;
+    const going = this.building.get(key);
+    if (going !== undefined) return await going;
+    const work = this.stateView(user, chat, turn);
+    this.building.set(key, work);
+    try {
+      return await work;
+    } finally {
+      this.building.delete(key);
+    }
+  }
+
+  /** The state views being made, by the state they show (`state`). */
+  private readonly building = new Map<string, Promise<StateView>>();
+
+  private async stateView(user: string, chat: string, turn: string | null): Promise<StateView> {
+    const s = this.deps.store.user(user);
     const { taps, map } = await this.deps.settings(user, chat);
     const keys = (await this.part()).keys;
     // Each turn's notes are kept while its state and these words stand, so the words name themselves by what they hold.

@@ -85,6 +85,23 @@ export function headTurn(s: UserStore, chat: string): string | null {
   return s.path(chat).findLast((e) => e.node === row.head)?.turn ?? null;
 }
 
+/** What a state view builds from the state it shows and the settings that shape it, never from the ask: kept while that state stands (`built`). */
+interface Built {
+  panels: Record<PanelId, JsonValue>;
+  hud: StateView["hud"];
+  scene: StateView["scene"];
+  palette: StateView["palette"];
+  controls: StateView["controls"];
+}
+
+/**
+ * Each state's built parts, by what else shaped them: the chat's head node (the path its quests' trails were read along), the turn shown,
+ * the time it moved the clock by and the chat's settings the parts read. A state is the store's held object, made anew by any fold that
+ * changes what it holds, so a part kept under one is true until it is let go; a second page, a second tab and every `state` event after
+ * the first read them, and build nothing. Read them, never change them.
+ */
+const built = new WeakMap<object, Map<string, Built>>();
+
 export function chatView(input: ChatViewInput): StateView {
   const { store, chat } = input;
   const s = store.user(input.user);
@@ -100,48 +117,59 @@ export function chatView(input: ChatViewInput): StateView {
   // The scene's elapsed time is what the turn shown moved the clock by.
   const at = input.turn ?? headTurn(s, chat);
   const elapsed = at === null ? 0 : state.clock - s.startOf(at).state.world.clock;
-  // Everything here only reads the state, many times over: one read pass (DESIGN §9.6).
-  return readPass((): StateView => {
-    const ctx = registry.context(world, state);
-    const panels: Record<PanelId, JsonValue> = {};
-    // The map's display is the chat's own `map.display`, in the map settings the grids are drawn at.
-    const prefs = { mapDisplay: null, mapConfig: input.map };
-    for (const view of registry.views) {
-      try {
-        panels[view.panel] = view.build(ctx, prefs);
-      } catch (error) {
-        panels[view.panel] = { error: error instanceof Error ? error.message : String(error) };
+  const key = JSON.stringify([row.head, input.turn, elapsed, input.map, input.knowledge, input.offstage]);
+  let byKey = built.get(folded.state);
+  let parts = byKey?.get(key);
+  if (parts === undefined) {
+    // Everything here only reads the state, many times over: one read pass (DESIGN §9.6).
+    parts = readPass((): Built => {
+      const ctx = registry.context(world, state);
+      const panels: Record<PanelId, JsonValue> = {};
+      // The map's display is the chat's own `map.display`, in the map settings the grids are drawn at.
+      const prefs = { mapDisplay: null, mapConfig: input.map };
+      for (const view of registry.views) {
+        try {
+          panels[view.panel] = view.build(ctx, prefs);
+        } catch (error) {
+          panels[view.panel] = { error: error instanceof Error ? error.message : String(error) };
+        }
       }
+      // The quest log lists, under each world quest it holds, the stages that quest was moved past: the pages' own reading of them (`withTrails`).
+      const log = panels["story.quests"];
+      if (log !== undefined) panels["story.quests"] = withPast(log, withTrails(questViews(world.tracks, questSliceOf(folded.state)), world.tracks, trailsOf(s, store.env, chat, input.turn, world.tracks, state.tracks)));
+      const shown = scene(world, state, elapsed, registry);
+      return { panels, hud: hud(world, state, panels, ctx), scene: shown, palette: palette(world, state, registry), controls: controls(world, state, shown.sceneType, registry, input.knowledge, input.offstage) };
+    });
+    if (byKey === undefined) {
+      byKey = new Map();
+      built.set(folded.state, byKey);
     }
-    // The quest log lists, under each world quest it holds, the stages that quest was moved past: the pages' own reading of them (`withTrails`).
-    const log = panels["story.quests"];
-    if (log !== undefined) panels["story.quests"] = withPast(log, withTrails(questViews(world.tracks, questSliceOf(folded.state)), world.tracks, trailsOf(s, store.env, chat, input.turn, world.tracks, state.tracks)));
-    const shown = scene(world, state, elapsed, registry);
-    const packs: Record<PackId, number> = {};
-    for (const pack of registry.packs) packs[pack.id] = pack.version;
-    const lag = definitionsLag(state);
-    return {
-      v: 1,
-      chatId: chat,
-      worldId: row.world,
-      revision: state.revision,
-      ...(lag !== null ? { definitionsFrom: lag } : {}),
-      status: input.turning ? "in_flight" : "idle",
-      hud: hud(world, state, panels, ctx),
-      scene: shown,
-      chips: input.chips,
-      replyClocks: replyClocks(s, chat, world, state, input.clocksMost),
-      journal: input.journal,
-      keepReport: [],
-      pending: input.pending,
-      staged: input.staged,
-      notCarried: input.notCarried,
-      panels,
-      palette: palette(world, state, registry),
-      controls: controls(world, state, shown.sceneType, registry, input.knowledge, input.offstage),
-      meter: input.meter,
-      packs,
-      currency: world.currency,
-    };
-  });
+    byKey.set(key, parts);
+  }
+  const packs: Record<PackId, number> = {};
+  for (const pack of registry.packs) packs[pack.id] = pack.version;
+  const lag = definitionsLag(state);
+  return {
+    v: 1,
+    chatId: chat,
+    worldId: row.world,
+    revision: state.revision,
+    ...(lag !== null ? { definitionsFrom: lag } : {}),
+    status: input.turning ? "in_flight" : "idle",
+    hud: parts.hud,
+    scene: parts.scene,
+    chips: input.chips,
+    replyClocks: replyClocks(s, chat, world, state, input.clocksMost),
+    journal: input.journal,
+    keepReport: [],
+    pending: input.pending,
+    staged: input.staged,
+    notCarried: input.notCarried,
+    panels: parts.panels,
+    palette: parts.palette,
+    controls: parts.controls,
+    meter: input.meter,
+    packs,
+    currency: world.currency,
+  };
 }

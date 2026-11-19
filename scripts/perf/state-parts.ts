@@ -18,7 +18,7 @@ import { controls } from "../../src/play/state/controls";
 import { hud } from "../../src/play/state/hud";
 import { palette } from "../../src/play/state/palette";
 import { scene } from "../../src/play/state/scene";
-import { headTurn } from "../../src/play/view";
+import { chatView, headTurn } from "../../src/play/view";
 import { questSliceOf, questViews } from "../../src/quests/record";
 import { trailsOf } from "../../src/quests/trail";
 import { MAP_DEFAULTS } from "../../src/shared/map-config";
@@ -92,6 +92,13 @@ for (let ask = 0; ask < 2; ask++) {
     timed("controls", () => controls(world, state, shown.sceneType, registry, { chat: {}, tracking: TAP_DEFAULTS.choices.tracking, narrator: TAP_DEFAULTS.choices.narrator }, TAP_DEFAULTS.tell));
     timed("palette", () => palette(world, state, registry));
   });
+}
+// The whole view as the state route makes it (its built parts kept while the state stands): a first ask of this state, then a second.
+for (let ask = 0; ask < 2; ask++) {
+  const journal = await journalNotes(store, user, chat, TAP_DEFAULTS.journalMost, { texts, code: (c) => c, key: "probe" });
+  timed("the whole state view", () =>
+    chatView({ store, user, chat, turn: null, turning: false, offstage: TAP_DEFAULTS.tell, map: MAP_DEFAULTS, knowledge: { chat: {}, tracking: TAP_DEFAULTS.choices.tracking, narrator: TAP_DEFAULTS.choices.narrator }, journal, chips: chipsOf(db, s, user, chat), meter: null, pending: [], clocksMost: TAP_DEFAULTS.clocksMost, staged: null, notCarried: [] }),
+  );
 }
 const rows = [...times].map(([part, t]) => ({ part, ...t })).sort((a, b) => (b.warm ?? b.cold) - (a.warm ?? a.cold));
 for (const row of rows) console.log(JSON.stringify(row));
