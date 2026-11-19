@@ -20,7 +20,7 @@ test("a fold over the bar is refused where it can be made again, answered from a
   // A thread here is the same fold run in this process on a read-only connection of its own, as RPE's worker runs it.
   const away = { path: file, run: async (brief: StoreBrief, job: FoldJob) => foldAway({ brief, job }, [STORY_STORE_AREA]) };
   const said: string[] = [];
-  const { store, s, world, revision } = testStore({ db: file, away, workerFoldAt: 5, snapshotEvery: 1000, log: (message) => said.push(message) });
+  const { store, s, world, revision } = testStore({ db: file, away, workerFoldAt: 5, snapshotEvery: 1000, turnStatesKept: 0, log: (message) => said.push(message) });
   s.putWorld(revision, world);
   s.createChat({ id: "c", revision });
   const start = s.headState("c").state.world.clock;

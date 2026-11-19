@@ -79,6 +79,8 @@ import {
 export const STORE_DEFAULTS = Object.freeze({
   /** Turns between snapshots on a path (plan §6.3). */
   snapshotEvery: 25,
+  /** States of each chat's newest turns stored when each turn ends, besides one every `snapshotEvery` turns: a restart reads them. */
+  turnStatesKept: 4,
   /** Chats whose states are held in memory, the chat read least recently let go first; null: every chat. */
   chatsHeld: null as number | null,
   /** States each chat holds (its head, an open turn's, a question's point, …), the least recently read going first. */
@@ -153,6 +155,8 @@ export interface StoreOptions {
   /** Told once a world's revision, index, draft or history note is durable (`UserWorlds`): the app passes it to the live socket for open Build pages. */
   worldChanged?: (change: WorldChange) => void;
   snapshotEvery?: number;
+  /** How many states of each chat's newest turns stay stored, besides those every `snapshotEvery` turns (`store.turnStatesKept`). */
+  turnStatesKept?: number;
   /** Identifies what folds, where a probe reads another store's states: none given (the app's store, the import's), `storeIdentity`. */
   fingerprint?: string;
   /** How many chats' states are held in memory, the chat read least recently let go first; null (the default): every chat. */
@@ -305,12 +309,21 @@ interface Cached {
   upto: number;
 }
 
-/** A snapshot a user's fold found worth storing, kept for the user's next write while the mark of the chat it was folded under holds. */
+/**
+ * A snapshot a user's fold found worth storing (or a turn's end kept, `tieTurn`), kept for the user's next write while the mark of the
+ * chat it was folded under holds: its rows, or what makes them, worked out only when it is stored (`flush`), off the turn's own write.
+ */
 interface HeldRow {
   upto: number;
-  rows: SnapshotRows;
+  rows: SnapshotRows | (() => SnapshotRows);
   chat: string;
   mark: string;
+}
+
+/** A held snapshot's rows, worked out where they were held as what makes them. */
+function rowsOf(row: HeldRow): SnapshotRows {
+  if (typeof row.rows === "function") row.rows = row.rows();
+  return row.rows;
 }
 
 /** A stored node on a path as a walk reads it (`UserStore.chainRows`): its key, turn and depth, with the turn's chat and when it began. */
@@ -476,6 +489,8 @@ export class Store {
   readonly db: Database;
   readonly env: FoldEnv;
   readonly snapshotEvery: number;
+  /** @internal How many states of a chat's newest turns stay stored, besides those every `snapshotEvery` turns. */
+  readonly turnStatesKept: number;
   readonly fingerprint: string;
   /** How many chats are held (null: every one), the states each holds, and the snapshots waiting for a user's next write. */
   private readonly chatsHeld: number | null;
@@ -565,6 +580,7 @@ export class Store {
     // An area's operation is never named as an engine event: the store opens on no such pair (`Areas`).
     this.env = { registry: options.registry, worlds: (revision) => (revision === BLANK_REVISION ? blank : options.worlds(revision)), areas: new Areas(options.areas ?? [], (type) => options.registry.get(type) !== undefined) };
     this.snapshotEvery = Math.max(1, Math.floor(options.snapshotEvery ?? STORE_DEFAULTS.snapshotEvery));
+    this.turnStatesKept = Math.max(0, Math.floor(options.turnStatesKept ?? STORE_DEFAULTS.turnStatesKept));
     const whole = (n: number | undefined, d: number, least: number): number => Math.max(least, Math.floor(n ?? d));
     this.chatsHeld = options.chatsHeld === undefined ? STORE_DEFAULTS.chatsHeld : options.chatsHeld === null ? null : Math.max(1, Math.floor(options.chatsHeld));
     this.statesPerChat = whole(options.statesPerChat, STORE_DEFAULTS.statesPerChat, 1);
@@ -837,7 +853,7 @@ export class Store {
 
   /** @internal The snapshots `user`'s folds found worth storing, as `hold` takes them back. */
   takeHeld(user: string): AwayHeld[] {
-    return [...(this.held.get(user) ?? [])].map(([node, row]): AwayHeld => [node, row.upto, row.rows, row.chat, row.mark]);
+    return [...(this.held.get(user) ?? [])].map(([node, row]): AwayHeld => [node, row.upto, rowsOf(row), row.chat, row.mark]);
   }
 
   /** Closes the database if the store opened it; one it was handed stays open, its owner's to close. */
@@ -967,8 +983,11 @@ export class Store {
     }
   }
 
-  /** @internal Holds snapshots (node, upto, the rows to store, the chat and its mark they were folded under) for the user's next write, and says so (`heldWaiting`). */
-  hold(user: string, rows: readonly [string, number, SnapshotRows, string, string][]): void {
+  /**
+   * @internal Holds snapshots (node, upto, the rows to store or what makes them, the chat and its mark they were folded under) for the
+   * user's next write, and says so (`heldWaiting`).
+   */
+  hold(user: string, rows: readonly [string, number, SnapshotRows | (() => SnapshotRows), string, string][]): void {
     if (rows.length === 0) return;
     let held = this.held.get(user);
     if (!held) {
@@ -1016,16 +1035,35 @@ export class Store {
       return row.mark === mark || row.mark === this.nodeMark(user, row.chat, node, mark);
     };
     const rows = [...held].filter(([node, row]) => holds(node, row));
-    for (const [, row] of rows) this.putParts(user, row.rows.parts);
+    for (const [, row] of rows) this.putParts(user, rowsOf(row).parts);
     const waiting = new Map<string, HeldRow>();
     const put = new Map<string, HeldRow>();
     for (const [node, row] of rows) {
-      if (this.putSnapshot(user, node, "cache", row.upto, row.rows.manifest)) put.set(node, row);
+      if (this.putSnapshot(user, node, "cache", row.upto, rowsOf(row).manifest)) put.set(node, row);
       else waiting.set(node, row);
     }
-    for (const [, row] of rows) this.dropUnheld(user, row.rows.parts);
+    for (const [, row] of rows) this.dropUnheld(user, rowsOf(row).parts);
+    // The newest turns' states beyond `turnStatesKept` of each chat stored in go, but those every `snapshotEvery` turns.
+    for (const chat of new Set([...put.values()].map((row) => row.chat))) for (const node of this.pruneTurnStates(user, chat)) put.delete(node);
     if (waiting.size > 0) this.held.set(user, waiting);
     if (put.size > 0) this.flushed.set(user, put);
+  }
+
+  /**
+   * Lets go of a chat's stored states at nodes off the every-`snapshotEvery` ones, beyond the `turnStatesKept` newest: those a turn's end
+   * stored (`tieTurn`) for a restart to read the chat's newest turns from, which serve no more once the chat has moved on. The nodes let go.
+   */
+  private pruneTurnStates(user: string, chat: string): string[] {
+    return this.db
+      .query<{ node: string }, [string, string, number, number]>(
+        `DELETE FROM snapshot WHERE user = ?1 AND kind = 'cache' AND node IN (
+           SELECT s.node FROM snapshot s JOIN path_node n ON n.user = s.user AND n.key = s.node JOIN turn t ON t.user = n.user AND t.id = n.turn
+           WHERE s.user = ?1 AND s.kind = 'cache' AND t.chat = ?2 AND (n.depth + 1) % ?3 != 0
+           ORDER BY s.created DESC, n.depth DESC LIMIT -1 OFFSET ?4)
+         RETURNING node`,
+      )
+      .all(user, chat, this.snapshotEvery, this.turnStatesKept)
+      .map((r) => r.node);
   }
 
   /** @internal The snapshots of `nodes` a write let go of (`UserStore.dropKept`) are none the last flush is to hold again. */
@@ -1616,19 +1654,20 @@ export class UserStore {
   tieTurn(id: string, input: { message: string; hash: string; date?: number | null; status?: "done" | "cut"; text?: string | null }): TurnRow {
     const t = this.turnToWrite(id);
     if (t.status === "dropped") throw new StoreInputError(`turn ${id} was dropped`);
-    // A finished turn every `snapshotEvery` along its path keeps its state, so a cold start is short: the state held in memory, for a tie
-    // folds nothing (it may stand in a write that changed the turn's changes, which a thread could not read); one not held is stored by
-    // the next fold through the node.
-    const keep = (t.depth + 1) % this.store.snapshotEvery === 0 ? this.heldAt(t.node) : null;
+    // A finished turn keeps its state, so a restart reads the chat's newest turns whole and folds nothing (`turnStatesKept` of them, and
+    // one every `snapshotEvery` turns for good). The state held in memory, for a tie folds nothing (it may stand in a write that changed
+    // the turn's changes, which a thread could not read); worked out into rows and stored after the tie, by the next write or soon after,
+    // off the turn's own write (`hold`, `flush`). One not held is stored by the next fold through the node, every `snapshotEvery` turns.
+    const keep = this.heldAt(t.node);
     this.write(false, () => {
       this.db.run("UPDATE turn SET message = ?, hash = ?, swipe_date = ?, status = ?, edited = NULL WHERE user = ? AND id = ?", [input.message, input.hash, input.date ?? null, input.status ?? "done", this.id, id]);
       if (input.text !== undefined) this.db.run("UPDATE turn SET text = ? WHERE user = ? AND id = ?", [input.text, this.id, id]);
       this.joinPath(t, { message: input.message, user: false, turn: id, node: t.node, own: true, hash: input.hash, date: input.date ?? null });
-      if (keep) {
-        const doc: SnapshotDoc = { state: keep.folded.state, notApplied: keep.folded.notApplied, rebased: keep.folded.rebased };
-        this.store.storeSnapshot(this.id, t.node, "cache", keep.upto, snapshotRows(doc));
-      }
     });
+    if (keep) {
+      const doc: SnapshotDoc = { state: keep.folded.state, notApplied: keep.folded.notApplied, rebased: keep.folded.rebased };
+      this.store.hold(this.id, [[t.node, keep.upto, () => snapshotRows(doc), t.chat, this.store.nodeMark(this.id, t.chat, t.node)]]);
+    }
     return this.turnOrThrow(id);
   }
 

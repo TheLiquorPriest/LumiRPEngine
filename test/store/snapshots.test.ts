@@ -11,10 +11,10 @@ import { carried, engine, goTo, hand, hashOf, moveStoredClock, play, POV, regist
 
 const places = ["cellar", "market_square", "far_road", "common_room"];
 
-/** `n` played turns, each passing time and moving Wren on. */
+/** `n` played turns, each passing time and moving Wren on; the snapshots every `every` turns alone (no newest turns' states kept). */
 function playMany(every: number, n: number) {
   let at = 0;
-  const ts = testStore({ snapshotEvery: every, now: () => ++at });
+  const ts = testStore({ snapshotEvery: every, turnStatesKept: 0, now: () => ++at });
   ts.s.createChat({ id: "c", revision: ts.revision });
   const turns = Array.from({ length: n }, (_, i) => play(ts.s, "c", `m${i + 1}`, `Reply ${i + 1}.`, i + 1, engine(tick(i + 1), goTo(POV, places[i % places.length] ?? "cellar"))));
   return { ...ts, turns };
@@ -100,7 +100,7 @@ describe("snapshots", () => {
     /** The 10th exchange deleted and a line sent; asked about first or not; compared. The snapshots it leaves. */
     const leftAfter = (askFirst: boolean) => {
       let at = 1_000;
-      const copy = testStore({ db: Database.deserialize(played), snapshotEvery: 25, now: () => ++at });
+      const copy = testStore({ db: Database.deserialize(played), snapshotEvery: 25, turnStatesKept: 0, now: () => ++at });
       if (askFirst) copy.s.turnStart("c", kept.map((m, index): SeenMessage => ({ id: m.id, user: m.user, index, swipe: 0, hash: m.hash })), { follows: "u121" });
       copy.s.sync("c", kept);
       return {

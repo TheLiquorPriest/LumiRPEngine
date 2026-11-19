@@ -65,13 +65,15 @@ describe("history written after it was played", () => {
   });
 
   test("a chat's snapshots dropped: every state read after is the same, and snapshots come back when due", () => {
-    const ts = testStore({ snapshotEvery: 2 });
+    const ts = testStore({ snapshotEvery: 2, turnStatesKept: 0 });
     const { s, store, revision } = ts;
     s.createChat({ id: "c", revision });
     const turns = [1, 2, 3, 4, 5, 6, 7].map((n) => play(s, "c", `m${n}`, `Reply ${n}.`, n, engine(tick(n))));
     const other = s.createChat({ id: "o", revision });
     play(s, "o", "p1", "Elsewhere.", 1, engine(tick(1)));
     play(s, "o", "p2", "Again.", 2, engine(tick(1)));
+    // What the turns' ends held is stored by a write of its own (`storeHeld`), as the app stores it soon after each turn ends.
+    s.storeHeld();
     const snapshots = (chat: string): number => store.db.query<{ n: number }, [string, string]>("SELECT count(*) AS n FROM snapshot s JOIN path_node n ON n.user = s.user AND n.key = s.node JOIN turn t ON t.user = n.user AND t.id = n.turn WHERE s.user = ? AND t.chat = ?").get(USER, chat)?.n ?? 0;
     const answers = (): string[] => [hashJson(s.headState("c").state), ...turns.map((t) => hashJson(s.stateAt(t.id).state))];
     const before = answers();

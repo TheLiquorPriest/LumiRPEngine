@@ -133,7 +133,7 @@ type Line = [string, string] | [string, string, number];
 describe("the question's call", () => {
   test("after a restart the question's call answers from RPE's own snapshot, for the head and for a swipe's point, and holds the state", () => {
     let clock = 0;
-    const ts = testStore({ snapshotEvery: 4, now: () => ++clock });
+    const ts = testStore({ snapshotEvery: 4, turnStatesKept: 0, now: () => ++clock });
     const { s, revision } = ts;
     s.createChat({ id: "c", revision });
     // Ten played turns, each passing time and moving Wren on; a snapshot is kept at every fourth along the path.
