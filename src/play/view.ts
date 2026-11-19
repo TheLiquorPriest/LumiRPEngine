@@ -2,7 +2,7 @@
 // RPE): today's `StateView`, built from RPE's store at the chat's head or at one of its turns. Every
 // pack's panel comes from the pack's own builder, and the HUD, the scene, the palette and the controls
 // from today's pure builders, which live in `state/` as today's backend built them (`buildView`). The
-// Journal's notes are read from the chat's turns (`journal.ts`); the chips under the replies, the HUD's
+// Journal's notes are no part of it: the Journal reads them on their own (`journal.ts`); the chips under the replies, the HUD's
 // meter and the pending marks from RPE's own records (`panel-reads.ts`), each newest reply's clock from
 // its turn's story time; the controls' knowledge choices from the chat's settings; and what waits for his
 // next message from a panel (`staged`) from the request the turn lane holds for it, in the words the next
@@ -21,7 +21,6 @@ import type { PackId, PanelId } from "../shared/ids";
 import type { JsonValue } from "../shared/json";
 import type { MapConfig } from "../shared/map-config";
 import type { WorldDoc } from "../shared/world";
-import type { JournalNote } from "../shared/ledger";
 import { linesGiven } from "../shared/lines";
 import type { OffstageSettings } from "../shared/offstage";
 import type { CallMeterView, Chip, PendingMark, StagedPress, StateView } from "../shared/state-view";
@@ -50,8 +49,6 @@ export interface ChatViewInput {
   map: MapConfig;
   /** The chat's own knowledge choices and tidy-up switch beside his own (`controls.knowledge`, `controls.things`). */
   knowledge: ControlsKnowledge;
-  /** The Journal's notes of the chat's newest turns (`journal.ts`). */
-  journal: JournalNote[];
   /** The decisions and records under the chat's replies (`panel-reads.ts`). */
   chips: Chip[];
   /** The HUD's meter; null before any turn spent anything. */
@@ -255,7 +252,6 @@ export async function chatView(input: ChatViewInput): Promise<StateView> {
     scene: kept.scene,
     chips: input.chips,
     replyClocks: replyClocks(s, chat, kept.world, kept.place, input.clocksMost),
-    journal: input.journal,
     keepReport: [],
     pending: input.pending,
     staged: input.staged,

@@ -742,6 +742,20 @@ The history of one value by turn: every change along the chat's path, at its hea
 | The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
+### `GET /api/v1/chats/:chat/state/journal`
+
+The Journal's notes of the chat's newest turns, oldest first, read when the Journal opens and again as the state it shows changes (the state view carries none of them): for each reply on the chat's path, what its turn recorded that the player may read, and what it recorded that took no effect, with why. Each turn's notes are kept while its state stands; the first read after RPE starts works each out from its turn's state.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat` |
+| Query | none |
+| Body | none |
+| Reply | `{ notes: JournalNote[] }` |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
+
 ### `GET /api/v1/chats/:chat/state/not-applied`
 
 What no longer applies at the chat's head on the swipes now showing: each change that stopped applying, with its turn and the codes of why, and the earlier reply whose swipe the later turns were not made on.
@@ -10672,6 +10686,12 @@ export interface WorldRevisionRow {
   chats: { chat: string; name: string }[];
 }
 ```
+
+### `JournalNote`
+
+One of the Journal's notes: what a turn recorded that the player may read (a line of what happened, as his character knows it, or a beat the story wrote), or what it recorded that took no effect, with why; under the reply its turn made.
+
+Carried as the previous build wrote it: the type `JournalNote` of `src/shared/ledger.ts`.
 
 ### `OrgView`
 

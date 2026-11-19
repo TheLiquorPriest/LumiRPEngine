@@ -4,6 +4,7 @@
 // the MCP server. Do not edit it: a route's declaration is where a type changes, and `bun run api`
 // writes this again. The reference for people is docs/api.md, written beside it.
 
+import type { JournalNote } from "../ledger";
 import type { OrgView } from "../org-view";
 import type { StateView } from "../state-view";
 
@@ -5401,6 +5402,16 @@ export interface ApiRoutes {
     paged: false;
     long: false;
     joined: true;
+  };
+  /** The Journal's notes of the chat's newest turns, oldest first, read when the Journal opens and again as the state it shows changes (the state view carries none of them): for each reply on the chat's path, what its turn recorded that the player may read, and what it recorded that took no effect, with why. Each turn's notes are kept while its state stands; the first read after RPE starts works each out from its turn's state. */
+  "GET /api/v1/chats/:chat/state/journal": {
+    params: { chat: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: { notes: JournalNote[] };
+    paged: false;
+    long: false;
+    joined: false;
   };
   /** What no longer applies at the chat's head on the swipes now showing: each change that stopped applying, with its turn and the codes of why, and the earlier reply whose swipe the later turns were not made on. */
   "GET /api/v1/chats/:chat/state/not-applied": {

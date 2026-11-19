@@ -1,10 +1,12 @@
 // The routes of a chat's play panels (plan §14): the chat's state view, at its head or at one of its
 // turns, in the shape today's pages take; one organization's page, which the view carries only a summary
-// of, read when Orgs opens it; what a turn's time brought due; a tap that manages and its
+// of, read when Orgs opens it; the Journal's notes, which the view carries none of, read when the Journal
+// opens; what a turn's time brought due; a tap that manages and its
 // Undo; the HUD's time controls; a panel's tap held for his next message, and a tap that plays now.
 // Every route is a page's: it answers only for the user this RPE belongs to.
 
 import { isRecord } from "../shared/json";
+import type { JournalNote } from "../shared/ledger";
 import type { OrgView } from "../shared/org-view";
 import { ACCESS_BASES } from "../shared/things";
 import { route, shape, stateView } from "../app";
@@ -14,6 +16,7 @@ import type { PlayService } from "./service";
 export const STATE_PATH = "/api/v1/chats/:chat/state";
 export const ORG_PAGE_PATH = "/api/v1/chats/:chat/state/orgs/:org";
 export const THING_USE_PATH = "/api/v1/chats/:chat/state/things/:thing/use";
+export const JOURNAL_PATH = "/api/v1/chats/:chat/state/journal";
 export const DUE_PATH = "/api/v1/chats/:chat/state/due";
 export const TAPS_PATH = "/api/v1/chats/:chat/taps";
 export const EDIT_UNDO_PATH = "/api/v1/chats/:chat/edits/:edit/undo";
@@ -108,6 +111,8 @@ const dueReply = shape.named(
   }),
 );
 
+const journalNote = shape.carried<JournalNote>("JournalNote", "../ledger", "One of the Journal's notes: what a turn recorded that the player may read (a line of what happened, as his character knows it, or a beat the story wrote), or what it recorded that took no effect, with why; under the reply its turn made.", "a Journal note", (value): value is JournalNote => isRecord(value));
+
 const orgPage = shape.carried<OrgView>("OrgView", "../org-view", "One organization's page as Orgs draws it: the reader's place there, who runs it, its people, positions and delegations, the organizations holding it and held by it, and the packs' sections the reader may see.", "an organization's page", (value): value is OrgView => isRecord(value));
 
 const accessChip = shape.named(
@@ -146,6 +151,15 @@ export function playRoutes(play: PlayService) {
       does: "Who may use a thing of the player's character beyond a grant, ground by ground, among the people it knows, read when its Owner & use opens (the state view carries none of it): built from the state the view is, and kept with it while that state stands. None on a thing not theirs.",
       reply: shape.object({ use: shape.list(accessChip) }),
       handle: async ({ user, params }) => ({ use: await play.thingUse(user, params.chat, params.thing) }),
+    }),
+    route({
+      method: "GET",
+      path: JOURNAL_PATH,
+      access: "page",
+      group: "state",
+      does: "The Journal's notes of the chat's newest turns, oldest first, read when the Journal opens and again as the state it shows changes (the state view carries none of them): for each reply on the chat's path, what its turn recorded that the player may read, and what it recorded that took no effect, with why. Each turn's notes are kept while its state stands; the first read after RPE starts works each out from its turn's state.",
+      reply: shape.object({ notes: shape.list(journalNote) }),
+      handle: async ({ user, params }) => ({ notes: await play.journal(user, params.chat) }),
     }),
     route({
       method: "POST",

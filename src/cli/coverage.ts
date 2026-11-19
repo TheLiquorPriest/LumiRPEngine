@@ -121,6 +121,7 @@ export const COVERAGE: Coverage = {
     travel: { excluded: "The map panel's own read when a place's sheet opens, for the ways to that place; each way is an action, which lre_action sends." },
   },
   "lre.org": { tools: ["lre_orgs"] },
+  "lre.journal": { tools: ["lre_chat_state"] },
   "lre.chat.knowledge": { tools: ["lre_chat_knowledge"] },
   "lre.job": { start: { tools: ["lre_job_start"] }, cancel: { tools: ["lre_job_cancel"] }, list: { tools: ["lre_jobs", "lre_job", "lre_job_apply"] }, dismiss: { tools: ["lre_job_dismiss"] } },
   "lre.lore": {

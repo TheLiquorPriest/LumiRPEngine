@@ -116,6 +116,7 @@ const REQUEST_TYPES: Record<keyof ResultBodies, true> = {
   "lre.ui": true,
   "lre.map": true,
   "lre.org": true,
+  "lre.journal": true,
   "lre.chat.knowledge": true,
   "lre.job": true,
   "lre.lore": true,

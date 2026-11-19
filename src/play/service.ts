@@ -45,7 +45,7 @@ import { LumiverseError } from "../adapter/lumiverse/session";
 import { hasLedger } from "../packs/economy/core/model";
 import { hashParts } from "../shared/hash";
 import { isRecord, type JsonObject, type JsonValue, safeKey } from "../shared/json";
-import type { FixOp, LedgerEvent, MarkerBody } from "../shared/ledger";
+import type { FixOp, JournalNote, LedgerEvent, MarkerBody } from "../shared/ledger";
 import { OFFSTAGE_ORIGIN, ORIGIN_FIELD, playsOffstage } from "../shared/offstage";
 import type { ErrorCode } from "../shared/protocol";
 import { ORGS_ORG_PANEL, type OrgView } from "../shared/org-view";
@@ -302,8 +302,8 @@ export class PlayService {
 
   /**
    * The chat's state view at its head, or at `turn`, one of its turns: its controls preset by the chat's out-of-play settings, its
-   * knowledge choices and tidy-up switch, its map drawn at the chat's map settings, the Journal's notes of its newest turns
-   * (`journal.ts`, a report's code in this area's words), and the chips, meter, reply clocks and pending marks (`panel-reads.ts`).
+   * knowledge choices and tidy-up switch, its map drawn at the chat's map settings, and the chips, meter, reply clocks and pending marks
+   * (`panel-reads.ts`). The Journal's notes are no part of it (`journal`).
    */
   async state(user: string, chat: string, turn: string | null): Promise<StateView> {
     const s = this.deps.store.user(user);
@@ -333,10 +333,6 @@ export class PlayService {
 
   private async stateView(user: string, chat: string, turn: string | null, { taps, map }: Pick<PlaySettings, "taps" | "map">, knowledge: ControlsKnowledge): Promise<StateView> {
     const s = this.deps.store.user(user);
-    const keys = (await this.part()).keys;
-    // Each turn's notes are kept while its state and these words stand, so the words name themselves by what they hold.
-    const texts = await historyTexts(this.deps.texts(user, chat));
-    const journal = await journalNotes(this.deps.store, user, chat, taps.journalMost, { texts, code: (code) => own(keys, code) ?? code, key: hashParts("journal-words", JSON.stringify(texts), JSON.stringify(keys)) });
     const turning = this.deps.turning(user, chat);
     const { db } = this.deps;
     // From now on, a run of the chat that ends tells the page to read it again.
@@ -350,7 +346,6 @@ export class PlayService {
       offstage: taps.tell,
       map,
       knowledge,
-      journal,
       chips: chipsOf(db, s, user, chat),
       meter: meterOf(db, user, chat, taps.meterTurns),
       pending: turning ? pendingOf(db, s, user, chat) : [],
@@ -362,6 +357,35 @@ export class PlayService {
       notCarried: turn === null ? this.deps.requests.notCarried(user, chat, pathTurns(s, chat, turning)).flatMap((r) => pressOf(r) ?? []) : [],
     });
   }
+
+  /**
+   * The Journal's notes of the chat's newest turns (`journal.ts`, a report's code in this area's words), for the Journal, which reads
+   * them when it opens and again as the state it shows changes: no part of the state view, so working out each turn's notes after a
+   * start holds no view back. Asks of the chat's state in the same words at once share one read.
+   */
+  async journal(user: string, chat: string): Promise<JournalNote[]> {
+    const s = this.deps.store.user(user);
+    // A chat RPE plays on no world has none, as its view had none.
+    if (s.chat(chat)?.world == null) return [];
+    const { taps } = await this.deps.settings(user, chat);
+    const keys = (await this.part()).keys;
+    // Each turn's notes are kept while its state and these words stand, so the words name themselves by what they hold.
+    const texts = await historyTexts(this.deps.texts(user, chat));
+    const words = { texts, code: (code: string) => own(keys, code) ?? code, key: hashParts("journal-words", JSON.stringify(texts), JSON.stringify(keys)) };
+    const key = JSON.stringify([s.stateKey(chat, null), words.key, taps.journalMost]);
+    const going = this.reading.get(key);
+    if (going !== undefined) return await going;
+    const work = journalNotes(this.deps.store, user, chat, taps.journalMost, words);
+    this.reading.set(key, work);
+    try {
+      return await work;
+    } finally {
+      this.reading.delete(key);
+    }
+  }
+
+  /** The Journal's notes being read, by the chat's state and the words (`journal`). */
+  private readonly reading = new Map<string, Promise<JournalNote[]>>();
 
   /**
    * One organization's page at the chat's head as the player character may see it, for Orgs' page of it, its tabs and editors (the view

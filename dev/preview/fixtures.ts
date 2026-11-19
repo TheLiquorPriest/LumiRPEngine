@@ -22,6 +22,7 @@ import type { Holding, KnowledgeFact, MindCommitment, MindNote, MindPlan, MindsG
 import { calendarOf, formatClock } from "../../src/engine/calendar";
 import { faded, salienceNow } from "../../src/packs/minds/core/state";
 import type { FieldFixTarget, GmEntity, GmField, GmView, StateView } from "../../src/shared/state-view";
+import type { JournalNote } from "../../src/shared/ledger";
 import type { MapDisplay, WorldDoc, WorldIndex } from "../../src/shared/world";
 import { compileMaps } from "../../src/shared/maps";
 import { presetAdjudication } from "../../src/shared/adjudication";
@@ -49,6 +50,15 @@ const interrupts = Object.fromEntries(INTERRUPT_CLASSES.map((cls) => [cls, ["inv
 
 /** The purchase the story put on the Visa past its limit at Rosie's (`c-overdrawn`), which Pay another way moves to savings. */
 export const OVERDRAWN_PURCHASE = { name: "Catering order", cents: 85000 };
+
+/** The Journal's notes of the chat the preview plays (`lre.journal`): no part of its view, as RPE's view carries none. */
+export function journalFixture(): JournalNote[] {
+  return [
+    { kind: "note", messageId: "m2", ref: null, text: "Montage (Mon 22:00 → Tue 07:00): slept 8 h; payroll $612.40 to Checking; rent autopay $850.00." },
+    { kind: "dropped", messageId: "m3", ref: { in: "post", seq: 14, index: 0 }, text: "Paid Mara $15 — dropped: you no longer had the cash on this branch." },
+    { kind: "inert", messageId: "m3", ref: { marker: 9 }, text: "Realism change made on another branch (Money → Detailed)." },
+  ];
+}
 
 export function stateFixture(chatId: string): StateView {
   return {
@@ -97,11 +107,6 @@ export function stateFixture(chatId: string): StateView {
       // The intent gate (DESIGN §5.1): the read in words; Edit opens the palette at Persuade with Dev picked.
       { id: "c-intent-gate", kind: "intent_gate", messageId: "m3", label: "Play Persuade?", detail: "Dev Patel", actions: [{ id: "play", label: "Play", style: "primary" }, { id: "edit", label: "Edit", input: { type: "action", label: "Change Persuade", action: "sheets.persuade", params: { target: "npc_dev" } } }, { id: "cancel", label: "Cancel" }], expires: "next_send" },
       { id: "c-overdue", kind: "overdue", messageId: "m4", label: "Dev still has your drill", detail: "due yesterday 18:00", actions: [{ id: "retrieve", label: "Ask for it" }], expires: "never" },
-    ],
-    journal: [
-      { kind: "note", messageId: "m2", ref: null, text: "Montage (Mon 22:00 → Tue 07:00): slept 8 h; payroll $612.40 to Checking; rent autopay $850.00." },
-      { kind: "dropped", messageId: "m3", ref: { in: "post", seq: 14, index: 0 }, text: "Paid Mara $15 — dropped: you no longer had the cash on this branch." },
-      { kind: "inert", messageId: "m3", ref: { marker: 9 }, text: "Realism change made on another branch (Money → Detailed)." },
     ],
     keepReport: [],
     pending: [{ panel: "castlife.cast", entity: "npc_mara" }],
@@ -1169,7 +1174,6 @@ export function starterMap(template: string, display: MapDisplay | null = null):
 export function freshFixture(chatId: string): StateView {
   const view = stateFixture(chatId);
   view.chips = [];
-  view.journal = [];
   view.pending = [];
   if (view.hud) {
     view.hud.cash = { cents: 8500 };

@@ -22,7 +22,7 @@ function holdsToType(view: StateView): void {
   expect(typeof read.chatId).toBe("string");
   for (const key of ["worldId", "revision"]) expect(read[key] === null || typeof read[key] === "string").toBe(true);
   expect(typeof read.status === "string" && ["not_world", "idle", "in_flight", "paused"].includes(read.status)).toBe(true);
-  for (const key of ["chips", "journal", "keepReport", "pending"]) expect(Array.isArray(read[key])).toBe(true);
+  for (const key of ["chips", "keepReport", "pending"]) expect(Array.isArray(read[key])).toBe(true);
   for (const key of ["replyClocks", "panels", "packs"]) expect(isObject(read[key])).toBe(true);
   for (const n of Object.values(read.packs as object)) expect(typeof n).toBe("number");
   expect(read.meter).toBeNull();
@@ -53,7 +53,9 @@ describe("the panels of a chat", () => {
     expect(Object.entries(view.panels).filter(([, p]) => isObject(p) && "error" in p)).toEqual([]);
     expect(view.packs).toEqual(Object.fromEntries(registry().packs.map((p) => [p.id, p.version])));
     // What only today's ledger held is present and empty.
-    expect({ chips: view.chips, replyClocks: view.replyClocks, journal: view.journal, keepReport: view.keepReport, pending: view.pending }).toEqual({ chips: [], replyClocks: {}, journal: [], keepReport: [], pending: [] });
+    expect({ chips: view.chips, replyClocks: view.replyClocks, keepReport: view.keepReport, pending: view.pending }).toEqual({ chips: [], replyClocks: {}, keepReport: [], pending: [] });
+    // The Journal's notes are no part of the view: the Journal reads them apart.
+    expect("journal" in view).toBe(false);
     // The HUD, the scene, the palette and the controls are read from the chat's state.
     const state = bed.store.user(USER).headState(CHAT).state.world;
     expect(view.hud?.clock.minutes).toBe(state.clock);

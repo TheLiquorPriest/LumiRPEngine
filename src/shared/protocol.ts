@@ -18,7 +18,7 @@ import type { AccessChip, GmThingsRead, PersonThings, ThingPage, ThingPicks, Thi
 import type { UpgradePreview } from "./upgrade";
 import type { GmThingExtras, GmThingsList, KeepResult, MadeInPlay, TidyRun } from "./thing-gm";
 import type { ActionId, BoundMode, ChatId, ChipId, DomainId, EntityId, FieldId, Level, MessageId, PanelId, PlaceId, RevisionId, SlotId, TableId, WorldId } from "./ids";
-import type { EventRef, PathHash, ResolveScope, TimeControl, TimeScope, UpgradePicks } from "./ledger";
+import type { EventRef, JournalNote, PathHash, ResolveScope, TimeControl, TimeScope, UpgradePicks } from "./ledger";
 import type { BuiltLoreIndex, LoreBookEntryView, LoreBookView, LoreIndexView, LoreMarkChange, LorePinsView, SecrecyBookPlan, SecrecyBookView } from "./lore-views";
 import type { Activity } from "./turn-activity";
 import type { GenerateAs, GmView, SheetSectionView, StateView } from "./state-view";
@@ -370,6 +370,11 @@ export type MapRequest = Request<"lre.map"> & { chatId: ChatId } & ({ op?: "disp
 export interface OrgPageRequest extends Request<"lre.org"> {
   chatId: ChatId;
   org: EntityId;
+}
+
+/** The Journal's notes of the chat's newest turns, read when the Journal opens and again as the state it shows changes: the state view carries none of them. */
+export interface JournalRequest extends Request<"lre.journal"> {
+  chatId: ChatId;
 }
 
 /**
@@ -852,6 +857,7 @@ export type FrontendToBackend =
   | UiRequest
   | MapRequest
   | OrgPageRequest
+  | JournalRequest
   | JobRequest
   | LoreRequest
   | SecrecyRequest
@@ -938,6 +944,8 @@ export interface ResultBodies {
   "lre.map": { display?: MapDisplay; walk?: { minutes: number; disabled?: string }; ways?: QuickestWay[]; travel?: TravelWay[] };
   /** The page; null where the player character knows of no such organization. */
   "lre.org": { page: OrgView | null };
+  /** The notes, oldest first. */
+  "lre.journal": { notes: JournalNote[] };
   /** The chat's own knowledge choices after the request, null where it follows; `tidy`, its own Tidy up switch (absent: the world's). `engine` and `harnessBlocked` are retired: nothing sets them, for RPE plays every chat itself. */
   "lre.chat.knowledge": { knowledge: boolean | null; narrator: NarratorView | null; engine?: "agents" | "harness"; tidy?: boolean; harnessBlocked?: string };
   /** `start`, `cancel` and `dismiss` name the job; `list` returns the world's kept jobs. */

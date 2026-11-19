@@ -2,7 +2,8 @@
 // by what applied and what didn't. Notes explain what the fold didn't apply and why (dropped, made on
 // another branch, not carried over by a swipe or a Re-read, discarded). "Save to lore…" (DESIGN §4.2)
 // opens a small form that keeps the latest reply, or an excerpt of the chat, as a lore entry in the
-// world's draft and opens the entry's form in Build.
+// world's draft and opens the entry's form in Build. The notes are no part of the state view: the Journal reads them when it opens
+// and again when the state it shows changes (`useReadApart`), and shows what it read last until the next read is in.
 
 import { useEffect, useId, useRef, useState } from "preact/hooks";
 import type { NoteKind } from "../../shared/ledger";
@@ -11,6 +12,7 @@ import { loadDraft } from "../build/draft";
 import { Badge, Button, Empty, IconButton, Seg, useBusy } from "../components";
 import type { IconName } from "../../ui/icons";
 import { Icon } from "../../ui/icons";
+import { useReadApart } from "../read-apart";
 import type { PanelProps } from "../registry";
 
 const KIND: Record<NoteKind, { label: string; tone: "neutral" | "accent" | "warn" | "neg"; icon: IconName }> = {
@@ -91,8 +93,11 @@ export function JournalPanel(props: PanelProps) {
   const [saving, setSaving] = useState(false);
   const formId = useId();
   const toggle = useRef<HTMLButtonElement>(null);
-  const journal = props.state.journal;
-  const notes = [...journal].reverse().filter((note) => {
+  // A chat on no world has no notes, and nothing to read them from.
+  const world = Boolean(props.state.worldId);
+  const read = useReadApart(world ? { type: "lre.journal", chatId: props.chatId } : null, props.state);
+  const journal = !world ? [] : read.status === "read" ? read.value.notes : null;
+  const notes = [...(journal ?? [])].reverse().filter((note) => {
     // Applied lines (turns, montages, corrections) apart from what didn't apply.
     const applied = note.kind === "note" || note.kind === "fix";
     return filter === "all" || (filter === "notes") === applied;
@@ -108,7 +113,7 @@ export function JournalPanel(props: PanelProps) {
         label="Filter"
         value={filter}
         options={[
-          { value: "all", label: `All (${journal.length})` },
+          { value: "all", label: journal === null ? "All" : `All (${journal.length})` },
           { value: "notes", label: "Notes & montages" },
           { value: "issues", label: "Not applied" },
         ]}
@@ -124,7 +129,9 @@ export function JournalPanel(props: PanelProps) {
         </div>
       ) : null}
       {saving && props.state.worldId ? <SaveToLore chatId={props.chatId} id={formId} onClose={close} /> : null}
-      {notes.length === 0 ? (
+      {journal === null ? (
+        <Empty icon={read.status === "failed" ? "scroll" : "hourglass"} title={read.status === "failed" ? "The journal could not be read." : "Reading the journal…"} />
+      ) : notes.length === 0 ? (
         journal.length === 0 ? (
           <Empty icon="scroll" title="Nothing in the journal yet">
             Each turn's notes, montages and anything that didn't apply show here.

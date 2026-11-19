@@ -26,18 +26,13 @@ import { loadGuidance } from "../../src/app/guidance";
 import { CAST_VIEWS, castPresentViews, castViews, type CastViewName, MemorySearch } from "../../src/cast";
 import { charactersOf } from "../../src/cast/record";
 import { ROW_PARTS } from "../../src/cast/fold";
-import { historyTexts, mapView, mapWording } from "../../src/iface";
+import { mapView, mapWording } from "../../src/iface";
 import { placeLinesAt } from "../../src/places";
 import { tidyHolds } from "../../src/play/path-events";
-import { journalNotes } from "../../src/play/journal";
-import { playAnswers } from "../../src/play/service";
-import { hashParts } from "../../src/shared/hash";
 import type { JsonObject, JsonValue } from "../../src/shared/json";
 import { trailsOf } from "../../src/quests/trail";
-import { own } from "../../src/engine/pack-kit";
 import { type ChangeInput, timeDue, WORLD_STATE_SECTIONS, worldState, worldStateFolds } from "../../src/store";
 import { storyBrief } from "../../src/story";
-import { RPE_GUIDANCE } from "../../src/tree";
 import { maskWorldInfoScanExclusions, SCAN_SETTING, scannedSteps, scanSettingsOf } from "../../src/turn/scan";
 import { turnSettings } from "../../src/turn/settings";
 import { stageAt, stageCues } from "../../src/turn/stage";
@@ -211,11 +206,6 @@ async function route(path: string, params: Record<string, string>, query: Record
 }
 const size = (out: unknown): number => JSON.stringify(out ?? null).length;
 
-// The words the Journal's notes are worked out in, as the state route works them out (`PlayService.stateView`).
-const texts = await historyTexts(guidanceTexts(turns.files, scope, turns.env.log));
-const keys = (await playAnswers(RPE_GUIDANCE)).keys;
-const words = { texts, code: (code: string) => own(keys, code) ?? code, key: hashParts("journal-words", JSON.stringify(texts), JSON.stringify(keys)) };
-
 await timed("before the turn: the head's state", () => s.headState(chat));
 
 // ---------------------------------------------------------------- what a briefing is built from, each on its own
@@ -316,8 +306,10 @@ const newestReplies = (): string[] =>
     .filter((e) => !e.user && e.turn !== null)
     .slice(-20)
     .map((e) => e.message);
-await timed("before the turn: the Journal's notes", () => journalNotes(turns.store, owner, chat, settings.taps.journalMost, words), size);
 await timed("before the turn: /state", () => route("/api/v1/chats/:chat/state", { chat }), size);
+// The Journal's notes, no part of the state: read apart as the Journal reads them when it opens, then again, as it finds them kept.
+await timed("before the turn: the Journal's notes read apart, the first read", () => route("/api/v1/chats/:chat/state/journal", { chat }), size);
+await timed("before the turn: the Journal's notes read apart, again", () => route("/api/v1/chats/:chat/state/journal", { chat }), size);
 await timed("before the turn: the reply lines of the newest 20 replies", () => route("/api/v1/chats/:chat/replies", { chat }, { ids: newestReplies().join(",") }), size);
 
 // ---------------------------------------------------------------- the intake, to the model's first call
@@ -416,9 +408,10 @@ async function afterReads(after: string): Promise<void> {
     },
     size,
   );
-  // The Journal's notes, as the first state asked works them out; the state asked after them finds them kept.
-  await timed(`${after}: the Journal's notes`, () => journalNotes(turns.store, owner, chat, settings.taps.journalMost, words), size);
-  await timed(`${after}: /state, the first ask (its notes worked out the row before)`, () => route("/api/v1/chats/:chat/state", { chat }), size);
+  // The state as the page asks for it first, then the Journal's notes as the open Journal reads them again on the new state: only the
+  // turns whose state the write changed are worked out again.
+  await timed(`${after}: /state, the first ask`, () => route("/api/v1/chats/:chat/state", { chat }), size);
+  await timed(`${after}: the Journal's notes read apart`, () => route("/api/v1/chats/:chat/state/journal", { chat }), size);
   await timed(`${after}: the reply lines of the newest 20 replies`, () => route("/api/v1/chats/:chat/replies", { chat }, { ids: newestReplies().join(",") }), size);
   await timed(`${after}: the head's state`, () => s.headState(chat));
   await timed(`${after}: /state, a second ask`, () => route("/api/v1/chats/:chat/state", { chat }), size);

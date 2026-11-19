@@ -29,6 +29,7 @@ import { renderIndex } from "../../src/backend/lore-routing";
 import { agentSettingsOf, type AcceptanceState } from "../../src/shared/agent-settings";
 import { blobHash, isFilePath, isKeptPath, isLearnedPath } from "../../src/shared/stores";
 import type { Chip, GmView, StateView } from "../../src/shared/state-view";
+import type { JournalNote } from "../../src/shared/ledger";
 import type { ThingType } from "../../src/shared/thing-view";
 import { setIdOf, SET_KINDS } from "../../src/shared/things";
 import type { VehicleClassChoice } from "../../src/shared/vehicles";
@@ -39,7 +40,7 @@ import { decodeMapView } from "../../src/packs/space/ui/view";
 import { decodeFinanceView } from "../../src/packs/economy/ui/decode";
 import { MarkChangeError, markedContent } from "../../src/backend/book-lore";
 import { mapProposal, readMapAnswer, readMapRequest } from "../../src/backend/map-job";
-import { assistantFileChanges, assistantFixture, extractionView, freshFixture, gmFixture, OVERDRAWN_PURCHASE, pausedFixture, portAlderMoney, previewOpKey, settingsFixture, starterMap, stateFixture, UPGRADE_PREVIEW, workspaceFixture, WORLDS, worldFixture, type PreviewFileChange, type PreviewWorkspace } from "./fixtures";
+import { assistantFileChanges, assistantFixture, extractionView, freshFixture, gmFixture, journalFixture, OVERDRAWN_PURCHASE, pausedFixture, portAlderMoney, previewOpKey, settingsFixture, starterMap, stateFixture, UPGRADE_PREVIEW, workspaceFixture, WORLDS, worldFixture, type PreviewFileChange, type PreviewWorkspace } from "./fixtures";
 import { combatFixture } from "./combat-fixture";
 import { applyRoutineOp, chatRolesFixture, previewRoutines, routineChangedFixture, routineGmFixture, type PreviewRoutines } from "./routines-fixture";
 import { ROUTINE_PROPOSALS, routinePlayerFixture } from "./routines-player-fixture";
@@ -220,6 +221,8 @@ export class MockBackend {
     e2: "The harbor opens at dawn and closes at dusk. {{// Secret (known to npc_dev): Dev keeps a spare key to the bait shop under the third crate.}}",
   };
   private view: StateView | null = null;
+  /** The Journal's notes (`lre.journal`), no part of the view. */
+  private notes: JournalNote[] = [];
   private rev = 0;
   /** The engine that plays the chat, its chips as the scenario made them (the harness shows its own of them), and its review cards (`lre.review`). `played`: the chat has replies behind it, so the harness's chips (a flagged reply, a review card) have somewhere to sit. */
   private engine: "classic" | "agents" | "harness" = "classic";
@@ -522,7 +525,7 @@ export class MockBackend {
     this.mutate((view) => {
       view.chips.push({ id: chip, kind: "fix", messageId: "m4", label: "GM edit", detail: lines.join(" · "), actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send" });
       also?.(view);
-      view.journal.push({ kind: "fix", messageId: "m4", ref: { in: "post", seq, index: 0 }, text: lines.join(" · ") });
+      this.notes.push({ kind: "fix", messageId: "m4", ref: { in: "post", seq, index: 0 }, text: lines.join(" · ") });
     }, 40);
     return chip;
   }
@@ -539,6 +542,7 @@ export class MockBackend {
         // A chat attached here is new to its world: it opens as a new chat does, on the harness where the harness can play it.
         const fresh = this.options.scenario === "fresh" || (this.options.scenario === "not_world" && this.attached);
         this.view = this.options.scenario === "paused" ? pausedFixture(message.chatId) : fresh ? freshFixture(message.chatId) : stateFixture(message.chatId);
+        this.notes = fresh ? [] : journalFixture();
         if (this.options.scenario === "not_world" && !this.attached) this.view = { ...stateFixture(message.chatId), status: "not_world", hud: null, scene: null, chips: [], panels: {}, palette: null, controls: null };
         else if (this.options.map) this.view.panels["space.map"] = starterMap(this.options.map);
         if (this.view.status !== "not_world") {
@@ -588,12 +592,12 @@ export class MockBackend {
           view.chips = view.chips.filter((c) => c.id !== message.chip);
           const gear = view.panels["gear.gear"];
           if (sets !== undefined && isRecord(gear)) gear.sets = sets as JsonValue;
-          if (chip.kind === "fix") view.journal = view.journal.filter((n) => !(n.kind === "fix" && n.text === chip.detail));
-          if (chip.kind === "confirm" && message.choice === "confirm") view.journal.push({ kind: "note", messageId: chip.messageId, ref: null, text: `Confirmed: ${chip.label}` });
+          if (chip.kind === "fix") this.notes = this.notes.filter((n) => !(n.kind === "fix" && n.text === chip.detail));
+          if (chip.kind === "confirm" && message.choice === "confirm") this.notes.push({ kind: "note", messageId: chip.messageId, ref: null, text: `Confirmed: ${chip.label}` });
           if (chip.kind === "keep_report" && (message.choice === "keep" || message.choice === "discard")) {
             view.status = "idle";
             view.keepReport = [];
-            view.journal.push({ kind: message.choice === "discard" ? "tombstoned" : "note", messageId: chip.messageId, ref: null, text: message.choice === "discard" ? "Discarded the turns after your edit." : "Kept the turns after your edit." });
+            this.notes.push({ kind: message.choice === "discard" ? "tombstoned" : "note", messageId: chip.messageId, ref: null, text: message.choice === "discard" ? "Discarded the turns after your edit." : "Kept the turns after your edit." });
           }
         }, 60);
         return;
@@ -608,7 +612,7 @@ export class MockBackend {
           view.status = "idle";
           view.chips = view.chips.filter((c) => c.kind !== "keep_report");
           view.keepReport = [];
-          view.journal.push({ kind: message.choice === "discard" ? "tombstoned" : "note", messageId: message.messageId, ref: null, text: message.choice === "discard" ? "Discarded the turns after your edit." : "Kept the turns after your edit." });
+          this.notes.push({ kind: message.choice === "discard" ? "tombstoned" : "note", messageId: message.messageId, ref: null, text: message.choice === "discard" ? "Discarded the turns after your edit." : "Kept the turns after your edit." });
         }, 60);
         return;
       case "lre.action": {
@@ -641,7 +645,7 @@ export class MockBackend {
             view.hud.clock.minutes += 5;
             view.hud.clock.label = "Tue 07:47";
           }
-          view.journal.push({ kind: "note", messageId: "m5", ref: null, text: `Action: ${message.action} ${JSON.stringify(message.params)}` });
+          this.notes.push({ kind: "note", messageId: "m5", ref: null, text: `Action: ${message.action} ${JSON.stringify(message.params)}` });
         }, 900);
         return;
       }
@@ -843,6 +847,9 @@ export class MockBackend {
           if (message.kind === "infer" && view.controls) view.controls.inferred = structuredClone(message.to);
           if (message.kind === "claims" && view.controls) view.controls.realism.claims = { ...message.to };
         }, 40);
+        return;
+      case "lre.journal":
+        this.result(reqId, "lre.journal", { notes: structuredClone(this.notes) });
         return;
       case "lre.view.open":
         // Opening a pack panel materializes the POV's detail there; for money that posts the opening

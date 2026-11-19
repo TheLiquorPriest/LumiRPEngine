@@ -28,7 +28,7 @@ import type {
 } from "./ids";
 import type { FinanceView } from "./finance";
 import type { GmPlaceEntry, OrgGmView } from "./org-view";
-import type { JournalNote, KeepLine, TimelapseTarget } from "./ledger";
+import type { KeepLine, TimelapseTarget } from "./ledger";
 import type { RoutineRole } from "./routines";
 import type { AdjudicationDef, FacetDef, FacetId, FacetValueId, FieldType, SectionFeed, StepPurpose, WorldCurrency } from "./world";
 import type { NarratorView } from "./narrator-view";
@@ -445,7 +445,6 @@ export interface StateView {
   chips: Chip[];
   /** Under each reply the engine ran, the world's date and time once its turn ended, for the swipe shown, local to where the POV is (as the HUD reads it): `formatClock`'s "Tue 15 Sep 2026, 12:25 PM". */
   replyClocks: Record<MessageId, string>;
-  journal: JournalNote[];
   keepReport: KeepLine[];
   pending: PendingMark[];
   /** Pack panel views keyed by `<packId>.<panel>`; each pack's `core/view.ts` owns the shape. */

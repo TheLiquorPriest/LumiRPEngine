@@ -13,12 +13,13 @@ import { GmParts, gmReload, type GmDuringTurn, type GmNeed, type GmWant } from "
 
 /**
  * What the GM view is loaded again on when the chat has no GM key (`StateView.gmKey`): the chat
- * moving on (a turn, an edit, an undo), as the player's state shows it. Chips count by id, not by
+ * moving on (a turn, an edit, an undo), as the player's state shows it: its status, the replies'
+ * clocks (a reply that came or went, a clock that moved) and its chips. Chips count by id, not by
  * number: an answer that swaps one chip for another (a routine's Yes leaves its Undo) changes the
  * chat while their count stays.
  */
-export function gmReloadKey(state: Pick<StateView, "status" | "chips" | "journal">): string {
-  return `${state.status}\u0000${state.journal.length}\u0000${state.chips.map((c) => c.id).join("\u0000")}`;
+export function gmReloadKey(state: Pick<StateView, "status" | "chips" | "replyClocks">): string {
+  return `${state.status}\u0000${JSON.stringify(state.replyClocks)}\u0000${state.chips.map((c) => c.id).join("\u0000")}`;
 }
 
 /** The GM page's view, as `useGmParts` keeps it. */

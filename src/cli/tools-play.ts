@@ -142,7 +142,10 @@ const stateOf = async (ctx: ToolContext, chatId: string): Promise<ResultBodies["
 async function chatState(args: Args, ctx: ToolContext): Promise<ToolResult> {
   const chatId = chatIdOf(args);
   const { view, activity } = await stateOf(ctx, chatId);
-  return readOut({ ...view, activity }, `the state view of chat ${chatId} (world ${view.worldId ?? "none"}, revision ${view.revision ?? "none"}, ${view.status})`, args);
+  // The Journal's notes are no part of the view: read on their own where the pointer reads them.
+  const pointer = textArg(args, "pointer") ?? "";
+  const journal = pointer === "/journal" || pointer.startsWith("/journal/") ? { journal: (await ask(ctx, chatId, "lre.journal", { chatId })).notes } : {};
+  return readOut({ ...view, ...journal, activity }, `the state view of chat ${chatId} (world ${view.worldId ?? "none"}, revision ${view.revision ?? "none"}, ${view.status})`, args);
 }
 
 async function chips(args: Args, ctx: ToolContext): Promise<ToolResult> {
@@ -683,7 +686,7 @@ export const PLAY_TOOLS: readonly ToolModule[] = [
   {
     name: "lre_chat_state",
     description:
-      "Read a chat's state view at a JSON Pointer: what the player sees in Play, the same view the chat's page is sent. /hud (clock, place, weather, cash, and its ✎ fixes at /hud/fixes), /scene (who is present), /chips, /journal, /keepReport (when status is paused), /palette (the actions at /palette/entries, the timelapse at /palette/timelapse), /controls (realism, time controls, player claims and the checks policy the chat plays by), /panels (each pack's panel, the inspector at /panels/core.context), /currency, and activity: what the engine is doing for the chat now (null when idle). Only what the player can know: lre_gm has the rest. A large part comes back as an outline to read deeper from.",
+      "Read a chat's state view at a JSON Pointer: what the player sees in Play, the same view the chat's page is sent. /hud (clock, place, weather, cash, and its ✎ fixes at /hud/fixes), /scene (who is present), /chips, /journal (the Journal's notes, no part of the view: read only at that pointer, and the first read after the engine starts may take a while), /keepReport (when status is paused), /palette (the actions at /palette/entries, the timelapse at /palette/timelapse), /controls (realism, time controls, player claims and the checks policy the chat plays by), /panels (each pack's panel, the inspector at /panels/core.context), /currency, and activity: what the engine is doing for the chat now (null when idle). Only what the player can know: lre_gm has the rest. A large part comes back as an outline to read deeper from.",
     inputSchema: object({ chatId: CHAT_ID, pointer: POINTER, offset: OFFSET, from: FROM, limit: LIMIT }, ["chatId"]),
     write: false,
     run: chatState,

@@ -1,7 +1,9 @@
 // The Journal's notes from the chat's own turns (plan §14, PlanChatUI-P1 item 6): for each reply on the chat's path with a turn
 // tied to it, what the turn recorded and the player may read (the engine's lines as his character knows them, and each beat the
 // story wrote), and what it recorded that took no effect, with why. Newest turns last, as the Journal lists them; a long chat
-// gives the newest `most` turns at a time. A read only, from the store's own changes and tree.
+// gives the newest `most` turns at a time. A read only, from the store's own changes and tree. No part of the state view: the Journal
+// reads them on their own route (`GET /api/v1/chats/:chat/state/journal`) when it opens and again as the state it shows changes, so
+// no view waits for them.
 //
 // A turn's notes are worked out from the state at its end, once for as long as that state stands: they are kept under the store's own
 // key for it (`UserStore.foldKey`, which every change to what that fold reads renews) and the words they were worded in, and no state
