@@ -12,10 +12,14 @@ import type { Store } from "./store";
 /** How long a reading over many turns works before it lets the thread go (`inStretches`). */
 export const STRETCH_MS = 50;
 
-/** Lets RPE's thread go: whatever waits to run runs before the work that awaits this goes on. */
+/**
+ * Lets RPE's thread go: whatever waits to run runs before the work that awaits this goes on. By a timer and not `setImmediate`: an
+ * immediate runs ahead of the disk's answers, so a request that reads the disk several times while stretches run would wait one whole
+ * stretch for each read.
+ */
 export function letGo(): Promise<void> {
   const { promise, resolve } = Promise.withResolvers<void>();
-  setImmediate(resolve);
+  setTimeout(resolve, 0);
   return promise;
 }
 
