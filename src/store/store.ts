@@ -2245,7 +2245,7 @@ export class UserStore {
     const prev = this.db.query<{ prev: string | null }, [string, string]>("SELECT prev FROM path_node WHERE user = ? AND key = ?").get(this.id, t.node)?.prev ?? null;
     const before = prev === null ? this.initial(this.chatOrThrow(t.chat).revision) : this.foldNode(prev).folded;
     // What was placed just before it (jobs' changes, his own) is where it started.
-    const { jobs, owner } = this.placedBefore(t);
+    const { jobs, owner } = this.placedAt([t]).get(t.id) ?? { jobs: [], owner: [] };
     if (jobs.length === 0 && owner.length === 0) return before;
     const state = draft(before.state);
     const done = foldSteps(this.store.envOf(this.id), { state, upto: 0 }, [{ node: t.node, turn: t.id, n: t.depth + 1, own: true, changes: [], jobs, owner }]);
@@ -2409,31 +2409,44 @@ export class UserStore {
    * first node is where a fold starts: what stands before it is in its state already.
    */
   private placeOwner(run: readonly { key: string; chat: string; created: number; depth: number }[], skipFirst: boolean, reader: string | null): { before: Map<string, OwnerChange[]>; after: OwnerChange[] } {
-    const before = new Map<string, OwnerChange[]>();
-    const after: OwnerChange[] = [];
-    const chats = new Set(run.map((s) => s.chat));
-    if (reader !== null) chats.add(reader);
+    return this.ownerPlacer([...run.map((s) => s.chat), ...(reader === null ? [] : [reader])])(run, skipFirst, reader);
+  }
+
+  /**
+   * Places his own changes along runs of paths as `placeOwner` does, each run in memory: his changes, and each chat's line, are read
+   * once for all of them. Every chat of a run, and its reader, is one of `chats`.
+   */
+  private ownerPlacer(chats: Iterable<string>): (run: readonly { key: string; chat: string; created: number; depth: number }[], skipFirst: boolean, reader: string | null) => { before: Map<string, OwnerChange[]>; after: OwnerChange[] } {
     // Each chat with when it was made and the chats it was branched from.
     const line = new Map<string, { created: number; sources: Set<string> }>();
     for (const chat of chats) {
+      if (line.has(chat)) continue;
       const sources = new Set<string>();
       const made = this.chatDb(chat)?.created ?? 0;
       for (let up = this.chatDb(chat)?.source_chat ?? null; up !== null && !sources.has(up); up = this.chatDb(up)?.source_chat ?? null) sources.add(up);
       line.set(chat, { created: made, sources });
     }
-    const all = new Set([...chats, ...[...line.values()].flatMap((l) => [...l.sources])]);
-    const fits = (c: OwnerChange, chat: string): boolean => c.chat === chat || ((line.get(chat)?.sources.has(c.chat) ?? false) && c.at <= (line.get(chat)?.created ?? 0));
-    for (const c of this.ownerOf([...all])) {
-      const i = c.placed !== null ? run.findIndex((s) => s.chat === c.chat && s.depth >= (c.placed ?? 0)) : run.findIndex((s) => s.created > c.at && fits(c, s.chat));
-      if (i < 0) {
-        if (reader !== null && fits(c, reader)) after.push(c);
-        continue;
+    const mine = this.ownerOf([...new Set([...line.keys(), ...[...line.values()].flatMap((l) => [...l.sources])])]);
+    return (run, skipFirst, reader) => {
+      const before = new Map<string, OwnerChange[]>();
+      const after: OwnerChange[] = [];
+      const chats = new Set(run.map((s) => s.chat));
+      if (reader !== null) chats.add(reader);
+      const all = new Set([...chats, ...[...chats].flatMap((c) => [...(line.get(c)?.sources ?? [])])]);
+      const fits = (c: OwnerChange, chat: string): boolean => c.chat === chat || ((line.get(chat)?.sources.has(c.chat) ?? false) && c.at <= (line.get(chat)?.created ?? 0));
+      for (const c of mine) {
+        if (!all.has(c.chat)) continue;
+        const i = c.placed !== null ? run.findIndex((s) => s.chat === c.chat && s.depth >= (c.placed ?? 0)) : run.findIndex((s) => s.created > c.at && fits(c, s.chat));
+        if (i < 0) {
+          if (reader !== null && fits(c, reader)) after.push(c);
+          continue;
+        }
+        if (skipFirst && i === 0) continue;
+        const key = run[i]?.key ?? "";
+        before.set(key, [...(before.get(key) ?? []), c]);
       }
-      if (skipFirst && i === 0) continue;
-      const key = run[i]?.key ?? "";
-      before.set(key, [...(before.get(key) ?? []), c]);
-    }
-    return { before, after };
+      return { before, after };
+    };
   }
 
   /**
@@ -2874,17 +2887,74 @@ export class UserStore {
     return this.changesBefore(turnId).filter((c) => c.change.chat === null);
   }
 
-  /** What stands just before a turn on the path it was made on: jobs' changes placed there, and his own (plan §10.9, §6.3 l.632). */
-  private placedBefore(t: TurnRow): { jobs: JobChange[]; owner: OwnerChange[] } {
-    const jobs = this.jobsPlaced(t.node).get(t.node) ?? [];
-    if (!this.ownerIn(t.chat)) return { jobs, owner: [] };
-    const rows = this.db
-      .query<{ key: string; chat: string; created: number; depth: number }, [string, string]>(
-        "SELECT n.key, t.chat, t.created, n.depth FROM path_node n JOIN turn t ON t.user = n.user AND t.id = n.turn WHERE n.user = ?1 AND n.key IN (?2, (SELECT prev FROM path_node WHERE user = ?1 AND key = ?2)) ORDER BY n.depth",
-      )
-      .all(this.id, t.node);
-    const owner = this.placeOwner(rows, rows.length > 1, null).before.get(t.node) ?? [];
-    return { jobs, owner };
+  /**
+   * What stands just before each of `turns` on the path it was made on: jobs' changes placed there, and his own (plan §10.9, §6.3
+   * l.632). The paths are read once for all of them, a stretch two of them share once, and each path's jobs are placed in one pass
+   * (`jobsAlong`), where a node on it gets the placing the path that ends at it would give it.
+   */
+  private placedAt(turns: readonly TurnRow[]): Map<string, { jobs: JobChange[]; owner: OwnerChange[] }> {
+    const out = new Map<string, { jobs: JobChange[]; owner: OwnerChange[] }>();
+    if (turns.length === 0) return out;
+    const ends = [...new Set(turns.map((t) => t.node))];
+    // Every stored node on those paths, with its turn's chat and start (both null for a node whose turn is not kept).
+    const nodes = new Map(
+      this.db
+        .query<{ key: string; prev: string | null; depth: number; turn: string; chat: string | null; created: number | null }, [string, string]>(
+          `WITH RECURSIVE up(key, prev, depth, turn) AS (
+             SELECT n.key, n.prev, n.depth, n.turn FROM json_each(?2) j CROSS JOIN path_node n ON n.user = ?1 AND n.key = j.value
+             UNION SELECT n.key, n.prev, n.depth, n.turn FROM up CROSS JOIN path_node n ON n.user = ?1 AND n.key = up.prev)
+           SELECT up.key, up.prev, up.depth, up.turn, t.chat, t.created FROM up LEFT JOIN turn t ON t.user = ?1 AND t.id = up.turn`,
+        )
+        .all(this.id, JSON.stringify(ends))
+        .map((n) => [n.key, n]),
+    );
+    type Kept = { key: string; turn: string; depth: number; chat: string; created: number };
+    const kept = (key: string | null | undefined): Kept[] => {
+      const n = key == null ? undefined : nodes.get(key);
+      return n === undefined || n.chat === null || n.created === null ? [] : [{ key: n.key, turn: n.turn, depth: n.depth, chat: n.chat, created: n.created }];
+    };
+    // From the deepest end: a shorter path that is the start of one placed already has its placing from it.
+    const jobs = new Map<string, JobChange[]>();
+    for (const end of ends.sort((a, b) => (nodes.get(b)?.depth ?? -1) - (nodes.get(a)?.depth ?? -1))) {
+      if (jobs.has(end)) continue;
+      const chain: Kept[] = [];
+      const seen = new Set<string>();
+      for (let at = nodes.get(end); at !== undefined && !seen.has(at.key); at = at.prev === null ? undefined : nodes.get(at.prev)) {
+        seen.add(at.key);
+        chain.push(...kept(at.key));
+      }
+      chain.sort((a, b) => a.depth - b.depth);
+      const placed = this.jobsAlong(chain).placed;
+      jobs.set(end, placed.get(end) ?? []);
+      for (const c of chain) if (!jobs.has(c.key)) jobs.set(c.key, placed.get(c.key) ?? []);
+    }
+    // His own: each turn's node and the one before it, as a run whose first node is where a fold starts.
+    const owns = new Map<string, boolean>();
+    const runs = turns.flatMap((t) => {
+      let own = owns.get(t.chat);
+      if (own === undefined) {
+        own = this.ownerIn(t.chat);
+        owns.set(t.chat, own);
+      }
+      return own ? [{ t, run: [...kept(nodes.get(t.node)?.prev), ...kept(t.node)].sort((a, b) => a.depth - b.depth) }] : [];
+    });
+    const place = runs.length === 0 ? null : this.ownerPlacer(runs.flatMap(({ run }) => run.map((s) => s.chat)));
+    for (const t of turns) out.set(t.id, { jobs: jobs.get(t.node) ?? [], owner: [] });
+    for (const { t, run } of runs) out.set(t.id, { jobs: jobs.get(t.node) ?? [], owner: place?.(run, run.length > 1, null).before.get(t.node) ?? [] });
+    return out;
+  }
+
+  /**
+   * What `changesBefore` lists before each of `turns` (each a turn there is, none joined), as rows, for all of them in a few reads where
+   * asking each reads its whole path again: the jobs' changes placed there, then his own. Whether one took effect there is the state's
+   * at that turn to say (`stateAt`, its `notApplied`), for a caller that needs it. A joined turn is refused, as every reading of one is.
+   */
+  placedAlong(turns: readonly string[]): Map<string, ChangeRow[]> {
+    const rows = [...new Set(turns)].map((id) => this.turnToWrite(id));
+    const placed = this.placedAt(rows);
+    const ids = [...placed.values()].flatMap((p) => [...p.jobs, ...p.owner].map((c) => c.id));
+    const byId = new Map(ids.length === 0 ? [] : this.db.query<ChangeDb, [string, string]>("SELECT * FROM change WHERE user = ?1 AND id IN (SELECT value FROM json_each(?2))").all(this.id, JSON.stringify(ids)).map((r) => [r.id, changeOf(r)] as const));
+    return new Map(rows.map((t) => [t.id, [...(placed.get(t.id)?.jobs ?? []), ...(placed.get(t.id)?.owner ?? [])].map((c) => byId.get(c.id) ?? this.changeOrThrow(c.id))]));
   }
 
   /**
@@ -2894,7 +2964,7 @@ export class UserStore {
    */
   changesBefore(turnId: string): { change: ChangeRow; about: string[]; applied: boolean; reports: Report[] }[] {
     const t = this.turnToWrite(turnId);
-    const { jobs, owner } = this.placedBefore(t);
+    const { jobs, owner } = this.placedAt([t]).get(t.id) ?? { jobs: [], owner: [] };
     const placed = [...jobs, ...owner];
     if (placed.length === 0) return [];
     const missed = new Map(this.stateAt(t.id).notApplied.map((n) => [n.change, n.reports]));

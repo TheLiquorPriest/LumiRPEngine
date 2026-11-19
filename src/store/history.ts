@@ -100,30 +100,45 @@ export function valueHistories(store: UserStore, env: Pick<FoldEnv, "registry" |
   const end = turn === undefined ? path.length : open !== undefined ? (parent === null ? 0 : path.includes(parent) ? path.indexOf(parent) + 1 : path.length) : path.indexOf(turn) + 1;
   const at = new Map(asked.map((a, i) => [`${a.ref}\u0000${a.part}`, i]));
   const seen = new Set<number>();
-  const take = (c: ChangeRow, t: string | null, n: number, applied: boolean): void => {
+  const take = (c: ChangeRow, t: string | null, n: number, applied: (c: ChangeRow) => boolean): void => {
     seen.add(c.id);
     for (const w of writesOf(env, c.op, c.value)) {
       const i = at.get(`${w.ref}\u0000${w.part}`);
-      if (i !== undefined) outs[i]?.push({ change: c, turn: t, n, applied, value: w.value, kind: w.fact ? "fact" : "value", settledBy: null });
+      if (i !== undefined) outs[i]?.push({ change: c, turn: t, n, applied: applied(c), value: w.value, kind: w.fact ? "fact" : "value", settledBy: null });
     }
   };
+  const recorded = (c: ChangeRow): boolean => c.applied;
   const names = asked.map((a) => namedBy(a.ref));
   const naming = names.every((n) => n !== null) ? [...new Set(names as string[])] : null;
   const walked = path.slice(0, Math.max(end, 0));
-  const placed = store.anyPlaced(chat);
+  const opened = open !== undefined && turn !== undefined ? turn : null;
+  // What stands placed before each turn, read for all of them at once; whether one took effect there is read from that turn's state
+  // (`changesBefore` reads it so), only where it wrote what is asked.
+  const placed = store.anyPlaced(chat) ? store.placedAlong(opened === null ? walked : [...walked, opened]) : null;
+  const missed = new Map<string, Set<number>>();
+  const tookEffect =
+    (t: string) =>
+    (c: ChangeRow): boolean => {
+      let m = missed.get(t);
+      if (m === undefined) {
+        m = new Set(store.stateAt(t).notApplied.map((x) => x.change));
+        missed.set(t, m);
+      }
+      return !m.has(c.id);
+    };
   const own = store.ownChanges(walked, naming);
   for (const [i, t] of walked.entries()) {
-    if (placed) for (const p of store.changesBefore(t)) take(p.change, t, i + 1, p.applied);
+    for (const c of placed?.get(t) ?? []) take(c, t, i + 1, tookEffect(t));
     // A job's write on a turn counts where it takes effect, among what is placed before a later turn.
-    for (const c of own.get(t) ?? []) take(c, t, i + 1, c.applied);
+    for (const c of own.get(t) ?? []) take(c, t, i + 1, recorded);
   }
   // A turn begun and not yet tied to its reply stands after the turn it follows: what was placed before it and its own changes count there.
-  if (open !== undefined && turn !== undefined) {
-    if (placed) for (const p of store.changesBefore(turn)) take(p.change, turn, end + 1, p.applied);
-    for (const c of store.ownChanges([turn], naming).get(turn) ?? []) take(c, turn, end + 1, c.applied);
+  if (opened !== null) {
+    for (const c of placed?.get(opened) ?? []) take(c, opened, end + 1, tookEffect(opened));
+    for (const c of store.ownChanges([opened], naming).get(opened) ?? []) take(c, opened, end + 1, recorded);
   }
   // At the head, his own edits after the path's last turn.
-  if (turn === undefined) for (const c of store.ownerChanges(chat)) if (!seen.has(c.id) && c.job === null) take(c, null, path.length + 1, c.applied);
+  if (turn === undefined) for (const c of store.ownerChanges(chat)) if (!seen.has(c.id) && c.job === null) take(c, null, path.length + 1, recorded);
   // A fact is settled by the first later exact record of its key's value (R-62).
   for (const out of outs) {
     for (const [i, w] of out.entries()) {

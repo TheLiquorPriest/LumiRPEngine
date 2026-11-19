@@ -31,6 +31,7 @@ import { journalNotes } from "../../src/play/journal";
 import { playAnswers } from "../../src/play/service";
 import { hashParts } from "../../src/shared/hash";
 import type { JsonObject, JsonValue } from "../../src/shared/json";
+import { trailsOf } from "../../src/quests/trail";
 import { own } from "../../src/engine/pack-kit";
 import { type ChangeInput, timeDue, WORLD_STATE_SECTIONS, worldState, worldStateFolds } from "../../src/store";
 import { storyBrief } from "../../src/story";
@@ -367,6 +368,19 @@ await timed("the commit: the turn tied to its reply", () => app.writes.run(() =>
 // ---------------------------------------------------------------- what a page reads after it
 
 async function afterReads(after: string): Promise<void> {
+  // The chat's own reading of its head alone (`headState`: the head turn's state with his changes that stand after it), as the first
+  // read after a write folds it: the rows after it find it held.
+  await timed(`${after}: the head's reading, alone`, () => s.headState(chat));
+  // The quests' trails alone, as the view reads them at the head: one walk of the path, asking what stands placed before each turn
+  // where his own change or an ended job's is anywhere (`valueHistories`).
+  await timed(
+    `${after}: the quests' trails, alone`,
+    () => {
+      const { world } = s.headState(chat).state;
+      return trailsOf(s, turns.store.env, chat, null, turns.store.env.worlds(world.revision)?.tracks ?? {}, world.tracks);
+    },
+    size,
+  );
   // The Journal's notes, as the first state asked works them out; the state asked after them finds them kept.
   await timed(`${after}: the Journal's notes`, () => journalNotes(turns.store, owner, chat, settings.taps.journalMost, words), size);
   await timed(`${after}: /state, the first ask (its notes worked out the row before)`, () => route("/api/v1/chats/:chat/state", { chat }), size);
