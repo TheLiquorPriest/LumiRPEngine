@@ -15,6 +15,7 @@ import { GONE_FIELD } from "../../../engine/scope";
 import { labelOf, numOf, objOf, optionalService, own, strOf } from "../../../engine/pack-kit";
 import type { EffectContext, ReadContext, Rejection } from "../../../engine/registry";
 import { kindIs, placeOfEntity } from "../../../engine/scope";
+import { passMemo } from "../../../engine/read-pass";
 import { membersOf } from "../../../engine/selector";
 import { decide, type Decision } from "./credit";
 import type { OpenAccount } from "./module";
@@ -284,9 +285,12 @@ export function mayPayFrom(ctx: ReadContext, who: EntityId, from: string): boole
   return from === who || (isParty(ctx, from) && managesParty(ctx.state, from, who)) || managesAccount(ctx, from, who);
 }
 
-/** The holders of an entity whose role counts its worth: an account's, a business's owners, a trust's beneficiaries. */
+/**
+ * The holders of an entity whose role counts its worth: an account's, a business's owners, a trust's beneficiaries. Kept for a read
+ * pass: a money view asks it of every account and party again and again, through whom money is for and whose interests reach where.
+ */
 function worthHolders(ctx: ReadContext, id: string): EntityId[] {
-  return holdersOf(ctx.state, id).filter((h) => rightsOf(ctx.state, id, h)?.worth === true);
+  return passMemo([ctx.state, ctx.state.entities], `economy.worth_holders\u0000${id}`, () => holdersOf(ctx.state, id).filter((h) => rightsOf(ctx.state, id, h)?.worth === true));
 }
 
 /** How many holders deep money is followed, both to whom it is for (`whoseMoney`) and to what a party's own interests reach (`interestsOf`). */
@@ -296,42 +300,48 @@ const WORTH_DEPTH = 4;
  * Whom `who`'s own interests are (DESIGN §25.1): them, their household and its members, each party
  * any of those counts the worth of (a business they own, and so may draw from; a trust they benefit
  * from), and in turn each party those count the worth of (a business their business owns), as deep
- * as `whoseMoney` follows money. Money a manager only manages reaches none of them.
+ * as `whoseMoney` follows money. Money a manager only manages reaches none of them. Kept for a read
+ * pass, since it walks every party of the chat.
  */
-export function interestsOf(ctx: ReadContext, who: EntityId): Set<EntityId> {
-  const household = householdOf(ctx, who);
-  const kin = household === null ? [who] : [who, household, ...membersOf(ctx.registry, ctx.world, ctx.state, household)];
-  const out = new Set<EntityId>(kin);
-  const parties = Object.keys(ctx.state.entities).filter((id) => !out.has(id) && isParty(ctx, id));
-  let reached: ReadonlySet<EntityId> = out;
-  for (let depth = 0; depth < WORTH_DEPTH && reached.size > 0; depth++) {
-    const next = new Set(parties.filter((id) => !out.has(id) && worthHolders(ctx, id).some((h) => reached.has(h))));
-    for (const id of next) out.add(id);
-    reached = next;
-  }
-  return out;
+export function interestsOf(ctx: ReadContext, who: EntityId): ReadonlySet<EntityId> {
+  return passMemo([ctx.state, ctx.state.entities, ctx.world], `economy.interests\u0000${who}`, () => {
+    const household = householdOf(ctx, who);
+    const kin = household === null ? [who] : [who, household, ...membersOf(ctx.registry, ctx.world, ctx.state, household)];
+    const out = new Set<EntityId>(kin);
+    const parties = Object.keys(ctx.state.entities).filter((id) => !out.has(id) && isParty(ctx, id));
+    let reached: ReadonlySet<EntityId> = out;
+    for (let depth = 0; depth < WORTH_DEPTH && reached.size > 0; depth++) {
+      const next = new Set(parties.filter((id) => !out.has(id) && worthHolders(ctx, id).some((h) => reached.has(h))));
+      for (const id of next) out.add(id);
+      reached = next;
+    }
+    return out;
+  });
 }
 
 /**
  * Whom the money `side` is for (`all`): a party paying for itself, or the holders an account counts
  * the worth of, and in turn whom those are for (a business's owners, a trust's beneficiaries),
- * `WORTH_DEPTH` holders deep; and whom it ends with (`last`), who hold it for no one further.
+ * `WORTH_DEPTH` holders deep; and whom it ends with (`last`), who hold it for no one further. Kept
+ * for a read pass: a money view asks it of every account it may pay from, for every payee.
  */
-function whoseMoney(ctx: ReadContext, side: string): { all: Set<EntityId>; last: Set<EntityId> } {
-  const all = new Set<EntityId>();
-  const last = new Set<EntityId>();
-  let next = isParty(ctx, side) ? [side] : worthHolders(ctx, side);
-  for (let depth = 0; depth < WORTH_DEPTH && next.length > 0; depth++) {
-    const deeper: EntityId[] = [];
-    for (const p of next.filter((q) => !all.has(q))) {
-      all.add(p);
-      const holders = worthHolders(ctx, p);
-      if (holders.length === 0 || depth === WORTH_DEPTH - 1) last.add(p);
-      else deeper.push(...holders);
+function whoseMoney(ctx: ReadContext, side: string): { all: ReadonlySet<EntityId>; last: ReadonlySet<EntityId> } {
+  return passMemo([ctx.state, ctx.state.entities, ctx.world], `economy.whose_money\u0000${side}`, () => {
+    const all = new Set<EntityId>();
+    const last = new Set<EntityId>();
+    let next = isParty(ctx, side) ? [side] : worthHolders(ctx, side);
+    for (let depth = 0; depth < WORTH_DEPTH && next.length > 0; depth++) {
+      const deeper: EntityId[] = [];
+      for (const p of next.filter((q) => !all.has(q))) {
+        all.add(p);
+        const holders = worthHolders(ctx, p);
+        if (holders.length === 0 || depth === WORTH_DEPTH - 1) last.add(p);
+        else deeper.push(...holders);
+      }
+      next = deeper;
     }
-    next = deeper;
-  }
-  return { all, last };
+    return { all, last };
+  });
 }
 
 /** Whether a party is someone's own self or family, a person or a household, rather than something they own. */
@@ -340,14 +350,16 @@ function personal(ctx: ReadContext, id: string): boolean {
   return kind !== "" && (kindIs(ctx.registry, ctx.world, kind, "person") || kindIs(ctx.registry, ctx.world, kind, "household"));
 }
 
-/** What money from `from` is to `who`, for the fiduciary rule: whom it is for besides them (`forHolder`), whom it ends with besides them (`people`), and whether it's wholly theirs. */
-function moneyOf(ctx: ReadContext, who: EntityId, from: string): { forHolder: Set<EntityId>; people: Set<EntityId>; wholly: boolean } {
-  const { all, last } = whoseMoney(ctx, from);
-  return {
-    forHolder: new Set([...all].filter((p) => p !== who)),
-    people: new Set([...last].filter((p) => p !== who)),
-    wholly: last.size > 0 && [...last].every((p) => p === who),
-  };
+/** What money from `from` is to `who`, for the fiduciary rule: whom it is for besides them (`forHolder`), whom it ends with besides them (`people`), and whether it's wholly theirs. Kept for a read pass, as `whoseMoney` is. */
+function moneyOf(ctx: ReadContext, who: EntityId, from: string): { forHolder: ReadonlySet<EntityId>; people: ReadonlySet<EntityId>; wholly: boolean } {
+  return passMemo([ctx.state, ctx.state.entities, ctx.world], `economy.money_of\u0000${who}\u0000${from}`, () => {
+    const { all, last } = whoseMoney(ctx, from);
+    return {
+      forHolder: new Set([...all].filter((p) => p !== who)),
+      people: new Set([...last].filter((p) => p !== who)),
+      wholly: last.size > 0 && [...last].every((p) => p === who),
+    };
+  });
 }
 
 /**
