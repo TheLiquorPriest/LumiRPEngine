@@ -2011,6 +2011,11 @@ export class UserStore {
     const items: Item[] = inputs.map((c) => ({ op: c.op, value: structuredClone(c.value), turn: "", n, by: c.by ?? null, cite: c.cite ?? null, precision: c.precision ?? null, standing: c.standing ?? null, source: c.source ?? null }));
     const outcomes = applyChecked(env, state, items, new Set());
     const now = this.store.now();
+    // His change stands before the first turn on a path begun after it (`placeOwner`): one made now, after every turn begun, stands in
+    // no turn's fold, only in the chat's own reading of its head, which the chat's mark names; so the write names no node. Where a turn
+    // was begun at this moment or later (a clock set back), the change could stand before it: every node is renewed, as for any write.
+    const latest = this.db.query<{ at: number | null }, [string]>("SELECT max(created) AS at FROM turn WHERE user = ?").get(this.id)?.at ?? null;
+    const nodes = latest !== null && latest >= now ? undefined : new Set<string>();
     const ids = this.write([chat], () => {
       let ord = (this.db.query<{ ord: number | null }, [string, string]>("SELECT max(ord) AS ord FROM change WHERE user = ? AND chat = ?").get(this.id, chat)?.ord ?? -1) + 1;
       const put = this.db.query("INSERT INTO change (user, turn, chat, ord, lane, op, value, by, handle, standing, precision, source, cite, job, applied, reports, told, created) VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
@@ -2019,7 +2024,7 @@ export class UserStore {
         const cite = c.cite === undefined || c.cite === null ? null : JSON.stringify(c.cite);
         return Number(put.run(this.id, chat, ord++, c.lane, c.op, JSON.stringify(c.value), c.by ?? null, c.handle ?? null, c.standing ?? null, c.precision ?? null, c.source ?? null, cite, job, o.applied ? 1 : 0, o.reports.length > 0 ? JSON.stringify(o.reports) : null, toldOf(c), now).lastInsertRowid);
       });
-    });
+    }, nodes);
     const rows = this.db.query<ChangeDb, [string, string]>("SELECT * FROM change WHERE user = ?1 AND id IN (SELECT value FROM json_each(?2)) ORDER BY ord").all(this.id, JSON.stringify(ids)).map(changeOf);
     return { changes: rows, state };
   }

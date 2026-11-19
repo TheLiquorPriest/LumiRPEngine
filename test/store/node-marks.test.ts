@@ -35,6 +35,12 @@ function sameAsAfresh(s: UserStore, db: Parameters<typeof openStore>[0]["db"], t
   for (const t of turns) expect(JSON.parse(JSON.stringify(s.stateAt(t.id).state))).toEqual(JSON.parse(JSON.stringify(fresh.stateAt(t.id).state)));
 }
 
+/** The chat's own reading of its head, as a store with nothing held reads it: the same as `s` gives it. */
+function headAsAfresh(s: UserStore, db: Parameters<typeof openStore>[0]["db"], worlds: (r: string) => unknown): void {
+  const fresh = openStore({ areas: [STORY_STORE_AREA], db, registry: registry(), worlds: worlds as never }).user(USER);
+  expect(JSON.parse(JSON.stringify(s.headState("c").state))).toEqual(JSON.parse(JSON.stringify(fresh.headState("c").state)));
+}
+
 function fourTurns(): { s: UserStore; store: ReturnType<typeof testStore>["store"]; turns: TurnRow[]; worlds: ReturnType<typeof testStore>["worlds"] } {
   let at = 0;
   const { s, store, revision, worlds } = testStore({ now: () => ++at });
@@ -106,26 +112,69 @@ describe("node marks", () => {
     expect(s.stateAt(open.id).state.world.entities.rope).toBeUndefined();
   });
 
-  test("a change of his own, an undo and a job's end renew every turn's key", () => {
+  test("a change of his own and an Undo renew no turn's key: the head's own reading has them, and every turn begun after them", () => {
     const { s, store, turns, worlds } = fourTurns();
-    const ids = turns.map((t) => t.id);
     let before = readings(s, turns);
     s.addOwnerChanges("c", engine(goTo(POV, "market")));
     let after = readings(s, turns);
-    expect(moved(before, after)).toEqual(ids);
+    expect(moved(before, after)).toEqual([]);
+    expect(s.headState("c").state.world.entities[POV]?.fields.place).toBe("market");
     before = after;
     const lamp = s.changes((turns[2] as TurnRow).id)[0]!.id;
     s.undo(lamp);
     after = readings(s, turns);
-    expect(moved(before, after)).toEqual(ids);
+    expect(moved(before, after)).toEqual([]);
     expect(s.headState("c").state.world.entities.lamp?.fields.gone).toBe(true);
-    before = after;
-    s.addChanges((turns[3] as TurnRow).id, engine(make("note", "Note", POV)).map((c) => ({ ...c, job: "job-1" })));
-    before = readings(s, turns);
-    s.endJob("job-1");
-    after = readings(s, turns);
-    expect(moved(before, after)).toEqual(ids);
+    const next = play(s, "c", "m5", "Night.", 5, engine(tick(60)));
+    expect(s.stateAt(next.id).state.world.entities[POV]?.fields.place).toBe("market");
+    sameAsAfresh(s, store.db, [...turns, next], (r) => worlds.get(r));
+    headAsAfresh(s, store.db, (r) => worlds.get(r));
+  });
+
+  test("a change of his own where a turn was begun at its moment or after (a clock set back) renews every turn's key", () => {
+    let at = 1000;
+    const { s, store, revision, worlds } = testStore({ now: () => at++ });
+    s.createChat({ id: "c", revision });
+    const turns = [play(s, "c", "m1", "Morning.", 1, engine(tick(10))), play(s, "c", "m2", "To the cellar.", 2, engine(goTo(POV, "cellar")))];
+    const before = readings(s, turns);
+    // The clock is set back past the turns' beginnings: his change now stands before them on the path.
+    at = 10;
+    s.addOwnerChanges("c", engine(goTo(POV, "market")));
+    // Each turn's state holds it as a fresh store's does, and each turn's key moved with it.
     sameAsAfresh(s, store.db, turns, (r) => worlds.get(r));
+    headAsAfresh(s, store.db, (r) => worlds.get(r));
+    expect(moved(before, readings(s, turns))).toEqual(turns.map((t) => t.id));
+  });
+
+  test("a job's end renews every turn's key", () => {
+    const { s, store, turns, worlds } = fourTurns();
+    s.addChanges((turns[3] as TurnRow).id, engine(make("note", "Note", POV)).map((c) => ({ ...c, job: "job-1" })));
+    const before = readings(s, turns);
+    s.endJob("job-1");
+    expect(moved(before, readings(s, turns))).toEqual(turns.map((t) => t.id));
+    sameAsAfresh(s, store.db, turns, (r) => worlds.get(r));
+  });
+
+  test("a job's changes placed before a later turn, and his own changes placed among them: each turn's state and the head's are a fresh store's", () => {
+    const { s, store, turns, worlds } = fourTurns();
+    s.addChanges((turns[3] as TurnRow).id, engine(make("note", "Note", POV)).map((c) => ({ ...c, job: "job-1" })));
+    s.endJob("job-1");
+    s.addOwnerChanges("c", engine(goTo(POV, "market")));
+    const t5 = play(s, "c", "m5", "Night.", 5, engine(tick(60)));
+    s.addOwnerChanges("c", engine(make("map", "Folded map", POV)));
+    const t6 = play(s, "c", "m6", "Dawn.", 6, engine(tick(30)));
+    const all = [...turns, t5, t6];
+    const before = readings(s, all);
+    s.addOwnerChanges("c", engine(goTo(POV, "cellar")));
+    expect(moved(before, readings(s, all))).toEqual([]);
+    // The job's change and his first stand before the fifth turn, his second before the sixth, his third at the head.
+    expect(s.stateAt(t5.id).state.world.entities.note).toBeDefined();
+    expect(s.stateAt(t5.id).state.world.entities[POV]?.fields.place).toBe("market");
+    expect(s.stateAt(t5.id).state.world.entities.map).toBeUndefined();
+    expect(s.stateAt(t6.id).state.world.entities.map).toBeDefined();
+    expect(s.headState("c").state.world.entities[POV]?.fields.place).toBe("cellar");
+    sameAsAfresh(s, store.db, all, (r) => worlds.get(r));
+    headAsAfresh(s, store.db, (r) => worlds.get(r));
   });
 
   test("a write the database takes back leaves no key or held state naming what it wrote", () => {
