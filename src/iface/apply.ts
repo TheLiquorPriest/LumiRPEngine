@@ -80,7 +80,8 @@ export const OPERATION_PROPERTIES: Record<string, JsonObject> = {
   reveal: YES_NO,
   axis: TEXT,
   change: NUMBER,
-  list: TEXTS,
+  // The horizon's entries: a name or words, or one with how deep the world state shows it (a whole number from 0, or "full").
+  list: { type: "array", items: { anyOf: [TEXT, { type: "object", required: ["at"], properties: { at: TEXT, depth: { anyOf: [WHOLE, { const: "full" }] } } }] } },
   name: TEXT,
   kind: TEXT,
   tier: TEXT,

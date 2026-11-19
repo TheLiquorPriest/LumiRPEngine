@@ -552,7 +552,7 @@ Lane: story. Needs: `list`.
 
 | Argument | Shape | What it is |
 |---|---|---|
-| `list` | list of text | horizon: the list the next turn needs: places, people and things by name, or place:<id> / entity:<id>; else your own words. An entry may be {at, depth}: how many levels of it the world state prints, a whole number or full. The scene is always printed in full. |
+| `list` | list of text, or object: at, depth | horizon: the list the next turn needs: places, people and things by name, or place:<id> / entity:<id>; else your own words. An entry may be {at, depth}: how many levels of it the world state prints, a whole number or full. The scene is always printed in full. |
 
 Reports its code (`src/iface/ops-values.ts`) can give: `fact_lane_default`, `goods_words`, `level_offers`, `money_untracked`, `not_applied`, `not_holding`, `off_path`, `off_the_sheet`, `paid_past_held`, `paid_past_owed`, `quest_world_part`, `terms_added`, `way_not_held`.
 

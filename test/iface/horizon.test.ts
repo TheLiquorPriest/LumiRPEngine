@@ -40,6 +40,21 @@ describe("the horizon", () => {
     expect(Object.values(state.world.entities).filter((e) => e.kind === "person")).toHaveLength(2);
   });
 
+  test("an entry with its depth, as the operation's example gives one, passes the tool's check and is kept that deep", async () => {
+    const t = await rig({}, "blank");
+    const tool = t.tools.get("world_apply") as HostTool;
+    const list: JsonObject["list"] = ["Ada Lorne", { at: "Gull Skerry", depth: 1 }, { at: "Keeper's kitchen" }];
+    const call = { operations: [...SCENE, { op: "horizon", list, source: { from: "author" } }] };
+    const r = await t.call("world_apply", asHarnessPasses(tool, call));
+    expect(r.error).toBeUndefined();
+    const horizon = horizonOf(t.deps.env, t.s.stateAt(t.turn.id).state);
+    expect(horizon.map((h) => [h.at.split(":")[0], h.depth])).toEqual([
+      ["entity", "full"],
+      ["place", 1],
+      ["place", "full"],
+    ]);
+  });
+
   test("a name that fits more than one is still asked for by its id, and nothing is recorded", async () => {
     const t = await rig({}, "blank");
     const r = await t.call("world_apply", {
