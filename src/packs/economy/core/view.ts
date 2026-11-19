@@ -409,7 +409,7 @@ function flowTouches(ctx: ReadContext, viewer: Viewer, f: Flow, party: EntityId)
 function nextOf(ctx: ReadContext, f: Flow, horizon: number): number | null {
   const from = ctx.state.clock;
   const retry = flowRunOf(ctx.state, f.id).retry;
-  const first = occurrences(chatWorld(ctx), f.schedule, from, from + horizon, f.start, f.end)[0];
+  const first = occurrences(chatWorld(ctx), f.schedule, from, from + horizon, f.start, f.end, 1)[0];
   const candidates = [first?.at, retry?.at].filter((x): x is number => typeof x === "number" && x > from);
   return candidates.length > 0 ? Math.min(...candidates) : null;
 }

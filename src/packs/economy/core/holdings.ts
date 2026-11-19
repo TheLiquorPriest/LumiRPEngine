@@ -16,6 +16,7 @@ import { hashParts } from "../../../shared/hash";
 import { formatMoney } from "../../../shared/world";
 import { labelOf, numOf, objOf, own, strOf } from "../../../engine/pack-kit";
 import type { EffectContext, EventTypeDef, ReadContext, Rejection } from "../../../engine/registry";
+import { passMemo } from "../../../engine/read-pass";
 import { isGone } from "../../../engine/scope";
 import type { WorldState } from "../../../engine/state";
 import type { FinanceApi, FinanceRegistry } from "./module";
@@ -44,11 +45,16 @@ export function holdingOwners(api: Pick<FinanceApi, "ownersOf">, state: Readonly
   return api.ownersOf(state, account ?? holding);
 }
 
-/** Every holding entity there is, by id: one an Undo took back is gone, and a purchase after it makes a holding of its own. */
+/**
+ * Every holding entity there is, by id: one an Undo took back is gone, and a purchase after it makes a holding of its own. Kept for a
+ * read pass, since every party's net worth walks them.
+ */
 export function holdingIds(state: Readonly<WorldState>): EntityId[] {
-  return Object.keys(state.entities)
-    .filter((id) => own(state.entities, id)?.kind === "holding" && !isGone(state, id))
-    .sort();
+  return passMemo([state, state.entities], "economy.holding_ids", () =>
+    Object.keys(state.entities)
+      .filter((id) => own(state.entities, id)?.kind === "holding" && !isGone(state, id))
+      .sort(),
+  );
 }
 
 /**

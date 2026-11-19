@@ -208,8 +208,8 @@ export interface FinanceApi {
   money(ctx: ReadContext, cents: number): string;
   /** Splits an amount: fixed amounts first, then percentages of the rest; what's left to `rest`. */
   split(cents: number, splits: readonly FlowSplit[], rest: string): { to: string; cents: number }[];
-  /** The clock instants a schedule falls due in `(from, to]`, counting intervals from `start`. */
-  occurrences(ctx: ReadContext, schedule: FlowSchedule, from: number, to: number, start?: string): number[];
+  /** The clock instants a schedule falls due in `(from, to]`, counting intervals from `start`; with `most`, only the soonest that many, walked no further than needed. */
+  occurrences(ctx: ReadContext, schedule: FlowSchedule, from: number, to: number, start?: string, most?: number): number[];
   /** The business day a day rolls to (`before` or `after` a weekend or day-off holiday). */
   businessDay(ctx: ReadContext, day: number, roll: "before" | "after"): number;
   /** Every flow in force: flow entities and every module's derived flows. */

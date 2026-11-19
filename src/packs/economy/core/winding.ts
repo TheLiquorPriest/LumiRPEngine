@@ -358,7 +358,7 @@ function paychecksDue(api: FinanceApi, ctx: ReadContext, business: EntityId, run
         return [];
       }
     } else if (!running) return [];
-    const at = api.occurrences(ctx, flow.schedule, ctx.state.clock - 1, until, flow.start)[0];
+    const at = api.occurrences(ctx, flow.schedule, ctx.state.clock - 1, until, flow.start, 1)[0];
     if (at === undefined) return [];
     const posting = payrollPosting(ctx, api, flow, at);
     return posting === null || isRejection(posting) ? [] : [{ worker: job.worker, payer: payerOf(ctx, api, job), posting }];

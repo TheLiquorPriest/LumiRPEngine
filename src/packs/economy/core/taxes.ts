@@ -1042,11 +1042,11 @@ function owesEstimates(api: FinanceApi, ctx: ReadContext, person: EntityId, path
     if (Number.isFinite(stopped) && (until === null || stopped > until)) until = stopped;
   }
   if (until === null) return false;
-  const due = api.occurrences(ctx, ESTIMATE_SCHEDULE, until - 1, until + 40 * MINUTES_PER_DAY)[0];
+  const due = api.occurrences(ctx, ESTIMATE_SCHEDULE, until - 1, until + 40 * MINUTES_PER_DAY, undefined, 1)[0];
   if (due === undefined || now <= due) return true;
   const d = dateAt(calendarOf(ctx.world), due);
   const last = estimatePeriod(d.year, d.month);
-  const next = api.occurrences(ctx, ESTIMATE_SCHEDULE, now, now + 400 * MINUTES_PER_DAY)[0];
+  const next = api.occurrences(ctx, ESTIMATE_SCHEDULE, now, now + 400 * MINUTES_PER_DAY, undefined, 1)[0];
   if (last === null || next === undefined) return false;
   const n = dateAt(calendarOf(ctx.world), next);
   const settles = periodsBack(n.year, n.month).some((p) => p.key === last.key);
@@ -1193,7 +1193,7 @@ export function taxesView(api: FinanceApi, ctx: ReadContext, org: EntityId, view
   for (const flow of api.flows(ctx)) {
     const mine = [`salestax:${org}`, `esttax:${org}`, `futa:${org}`, `suta:${org}`].includes(flow.id) || (flow.id.startsWith("property_tax:") && flow.link !== undefined && api.shareOf(ctx.state, flow.link, org) > 0);
     if (!mine || flow.status !== "active") continue;
-    const at = api.occurrences(ctx, flow.schedule, now, now + 400 * MINUTES_PER_DAY, flow.start)[0];
+    const at = api.occurrences(ctx, flow.schedule, now, now + 400 * MINUTES_PER_DAY, flow.start, 1)[0];
     if (at === undefined) continue;
     const cents = flow.id === `salestax:${org}` ? Math.max(0, payablesOf(ctx.state, org).sales_tax) : flow.id === `esttax:${org}` ? estimatedDue(api, ctx, org, true, at).reduce((a, p) => a + p.cents, 0) : flow.id === `futa:${org}` ? unemploymentDueAt(ctx, org, "futa", at) : flow.id === `suta:${org}` ? unemploymentDueAt(ctx, org, "suta", at) : null;
     // A member's own corporate tax is its parent's return's to pay.

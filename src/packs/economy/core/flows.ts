@@ -12,7 +12,7 @@ import { FINANCE_EVENTS, FLOW_KINDS, FLOW_SHORTFALLS, featureOn, type Flow, type
 import { formatMoney, type WorldDoc } from "../../../shared/world";
 import { OFFSTAGE_ORIGIN, ORIGIN_FIELD } from "../../../shared/offstage";
 import { REVENUE_PROVIDER, revenueOf } from "../../../shared/revenue";
-import { calendarOf, clockAt, clockOfLocal, dateAt, dayIndexOfText, holidaysOn, parseHHMM, type Calendar } from "../../../engine/calendar";
+import { calendarOf, clockAt, clockOfLocal, dateAt, dayIndexOfText, holidaysOn, parseHHMM, type CalDate, type Calendar } from "../../../engine/calendar";
 import { EXTERNAL_ACCOUNT_PREFIX } from "../../../engine/events";
 import { evalNumber } from "../../../engine/expr";
 import { labelOf, numOf, objOf, optionalQuery, own, strOf } from "../../../engine/pack-kit";
@@ -39,10 +39,13 @@ export function isBusinessDay(cal: Calendar, day: number): boolean {
   return !holidaysOn(cal, day).some((h) => h.dayOff);
 }
 
+/** The most days a day rolls to reach a business day (`businessDay`). */
+const ROLL_MOST = 14;
+
 /** The business day a day rolls to, `before` or `after` it (itself when it is one). */
 export function businessDay(cal: Calendar, day: number, roll: "before" | "after"): number {
   let d = day;
-  for (let guard = 0; guard < 14 && !isBusinessDay(cal, d); guard++) d += roll === "before" ? -1 : 1;
+  for (let guard = 0; guard < ROLL_MOST && !isBusinessDay(cal, d); guard++) d += roll === "before" ? -1 : 1;
   return d;
 }
 
@@ -55,17 +58,14 @@ function safeDay(cal: Calendar, text: string | undefined): number | null {
   }
 }
 
-function dayMatches(cal: Calendar, days: readonly number[], d: number): boolean {
-  const date = dateAt(cal, clockAt(cal, d, 0));
+function dayMatches(cal: Calendar, days: readonly number[], date: CalDate): boolean {
   const len = cal.system.monthLength(date.year, date.month);
   return days.some((n) => (n > 0 ? Math.min(n, len) === date.day : n < 0 && len + n + 1 === date.day));
 }
 
-/** Whether a nominal day is one a schedule falls on, counting its intervals from `anchor`. */
-function falls(cal: Calendar, s: FlowSchedule, d: number, anchor: number): boolean {
+/** Whether a nominal day (`d`, whose date is `date`) is one a schedule falls on, counting its intervals from `anchor` (whose date is `start`). */
+function falls(cal: Calendar, s: FlowSchedule, d: number, date: CalDate, anchor: number, start: CalDate): boolean {
   const interval = Math.max(1, Math.round(s.interval ?? 1));
-  const date = dateAt(cal, clockAt(cal, d, 0));
-  const start = dateAt(cal, clockAt(cal, anchor, 0));
   switch (s.every) {
     case "day":
       return d >= anchor && (d - anchor) % interval === 0;
@@ -76,13 +76,13 @@ function falls(cal: Calendar, s: FlowSchedule, d: number, anchor: number): boole
       return d >= weekStart && Math.floor((d - weekStart) / 7) % interval === 0;
     }
     case "month": {
-      if (!dayMatches(cal, s.days && s.days.length > 0 ? s.days : [start.day], d)) return false;
+      if (!dayMatches(cal, s.days && s.days.length > 0 ? s.days : [start.day], date)) return false;
       const months = date.year * 12 + date.month - (start.year * 12 + start.month);
       return months >= 0 && months % interval === 0;
     }
     case "year": {
       const months = s.months && s.months.length > 0 ? s.months : [start.month];
-      if (!months.includes(date.month) || !dayMatches(cal, s.days && s.days.length > 0 ? s.days : [start.day], d)) return false;
+      if (!months.includes(date.month) || !dayMatches(cal, s.days && s.days.length > 0 ? s.days : [start.day], date)) return false;
       const years = date.year - start.year;
       return years >= 0 && years % interval === 0;
     }
@@ -101,8 +101,10 @@ export interface Occurrence {
  * The instants a schedule falls due in `(from, to]`: the nominal days it falls on between `start`
  * and `end`, holidays it skips left out, each rolled off a weekend or holiday when it says so, at its
  * time of day. Intervals count from `start` (the calendar's epoch without one). The world is the chat's (`chatWorld`), so the holidays are the ones the story left.
+ * With `most`, only the soonest that many: the days are walked no further than one could still fall sooner (a day rolled back to a
+ * business day before it), so asking for the next one walks to it, not to `to`.
  */
-export function occurrences(world: WorldDoc, s: FlowSchedule, from: number, to: number, start?: string, end?: string): Occurrence[] {
+export function occurrences(world: WorldDoc, s: FlowSchedule, from: number, to: number, start?: string, end?: string, most = Number.POSITIVE_INFINITY): Occurrence[] {
   if (to <= from) return [];
   const cal = calendarOf(world);
   if (s.once !== undefined && s.once !== "") {
@@ -131,15 +133,24 @@ export function occurrences(world: WorldDoc, s: FlowSchedule, from: number, to: 
   const anchor = startDay ?? 0;
   const roll = s.roll === "before" || s.roll === "after" ? s.roll : null;
   const margin = roll ? 10 : 1;
+  const startDate = dateAt(cal, clockAt(cal, anchor, 0));
+  const last = dateAt(cal, to).dayIndex + margin;
+  // A day rolled to a business day moves at most ROLL_MOST days either way, so past the day the `most`th was found and twice that
+  // again, none can fall sooner; a day not rolled falls later than every day before it.
+  const reach = roll ? 2 * ROLL_MOST + 1 : 0;
+  let stop = last;
   const out: Occurrence[] = [];
-  for (let d = dateAt(cal, from).dayIndex - margin; d <= dateAt(cal, to).dayIndex + margin; d++) {
+  for (let d = dateAt(cal, from).dayIndex - margin; d <= stop; d++) {
     if ((startDay !== null && d < startDay) || (endDay !== null && d > endDay)) continue;
-    if (!falls(cal, s, d, anchor)) continue;
+    if (!falls(cal, s, d, dateAt(cal, clockAt(cal, d, 0)), anchor, startDate)) continue;
     if (s.except && s.except.length > 0 && holidaysOn(cal, d).some((h) => s.except?.includes(h.id))) continue;
     const at = clockAt(cal, roll ? businessDay(cal, d, roll) : d, minute);
-    if (at > from && at <= to) out.push({ at, day: d });
+    if (at <= from || at > to) continue;
+    out.push({ at, day: d });
+    if (out.length >= most) stop = Math.min(stop, d + reach);
   }
-  return out.sort((a, b) => a.at - b.at || a.day - b.day);
+  out.sort((a, b) => a.at - b.at || a.day - b.day);
+  return out.length > most ? out.slice(0, most) : out;
 }
 
 // ---------------------------------------------------------------- reading flows

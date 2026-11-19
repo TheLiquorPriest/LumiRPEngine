@@ -414,7 +414,7 @@ function inForce(state: Readonly<WorldState>, stream: EntityId, at: number): Adj
 function periodAmount(api: FinanceApi, ctx: ReadContext, stream: Stream): number {
   const earner = earnerOf(api, ctx, stream.flow);
   if (!earner) return 0;
-  const next = occurrences(chatWorld(ctx), stream.flow.schedule, ctx.state.clock, ctx.state.clock + 62 * 1440, stream.flow.start, stream.flow.end)[0];
+  const next = occurrences(chatWorld(ctx), stream.flow.schedule, ctx.state.clock, ctx.state.clock + 62 * 1440, stream.flow.start, stream.flow.end, 1)[0];
   return next ? (earnedAt(engineReader(ctx, earner), stream.flow, stream.model, next.at)?.cents ?? 0) : 0;
 }
 

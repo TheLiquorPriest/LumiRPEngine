@@ -461,7 +461,7 @@ function makeApi(hooks: FinanceHooks): FinanceApi {
     note: (ctx, who, cls, line, fields) => notice(cls, line, fields, who, ctx.state.clock),
     money: (ctx, cents) => formatMoney(cents, ctx.world.currency),
     split: (cents, splits, rest) => splitAmount(cents, splits, rest),
-    occurrences: (ctx, schedule, from, to, start) => occurrences(chatWorld(ctx), schedule, from, to, start).map((o) => o.at),
+    occurrences: (ctx, schedule, from, to, start, most) => occurrences(chatWorld(ctx), schedule, from, to, start, undefined, most).map((o) => o.at),
     businessDay: (ctx, day, roll) => businessDay(calendarIn(ctx), day, roll),
     flows: (ctx) => allFlows(hooks, ctx),
     openAccount: (ctx, spec) => openAccount(ctx, spec),

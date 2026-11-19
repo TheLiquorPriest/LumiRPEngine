@@ -46,7 +46,7 @@ import { calendarOf, dateAt } from "../../../engine/calendar";
 import type { WorldState } from "../../../engine/state";
 import { kindIs, placeOfEntity } from "../../../engine/scope";
 import { COMPANY_KIND, GROUP_KIND, MEMBER_OF, membersOf, TRUST_KIND } from "../../../engine/selector";
-import { mayAct } from "../../../engine/org";
+import { isRuled, mayAct } from "../../../engine/org";
 import { canSeeEntity, canSeePlace } from "../../../engine/visibility";
 import { wordTable } from "../../../shared/lines";
 
@@ -415,11 +415,14 @@ export function managesParty(state: Readonly<WorldState>, party: EntityId, who: 
  * managing role (a position, a delegation in force within its accounts, a household's Head).
  * Managing is setting up and changing what the account pays (its standing payments, its autopay) and
  * its cards; it isn't spending, which only a role on the account gives, and an employee, holding no
- * role on the business, manages none of it.
+ * role on the business, manages none of it. Kept for a read pass (a money view asks it of the account
+ * each of the chat's flows is paid from), apart for a ruled read, which lets the GM do anything.
  */
 export function managesAccount(ctx: ReadContext, account: EntityId, who: EntityId): boolean {
   if (!classOf(ctx, account)) return false;
-  return ownersOf(ctx.state, account).some((o) => ROLE_RIGHTS[o.role].manage && (o.party === who || managesParty(ctx.state, o.party, who) || mayAct(ctx, who, o.party, "money.manage", { account }).ok));
+  return passMemo([ctx.state, ctx.state.entities, ctx.world], `economy.manages\u0000${isRuled(ctx) ? "ruled" : ""}\u0000${account}\u0000${who}`, () =>
+    ownersOf(ctx.state, account).some((o) => ROLE_RIGHTS[o.role].manage && (o.party === who || managesParty(ctx.state, o.party, who) || mayAct(ctx, who, o.party, "money.manage", { account }).ok)),
+  );
 }
 
 /**

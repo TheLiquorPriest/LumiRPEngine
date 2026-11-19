@@ -815,16 +815,19 @@ export const vehiclesPack: PackDef = {
     r.query("vehicles.priced", (ctx, words, _place, cls, fresh) => pricedVehicle(ctx, words, cls, fresh));
     r.query("vehicles.named", (ctx, noun) => matchVehicleClass(noun, ctx.tables.get("vehicles.classes")));
     r.service("vehicles.spawn", spawnVehicle);
-    r.query("vehicles.values", (ctx) => {
-      const out: { vehicle: EntityId; cents: number }[] = [];
-      for (const v of Object.keys(ctx.state.entities).sort()) {
-        const e = own(ctx.state.entities, v);
-        if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "vehicle")) continue;
-        const cents = Math.round(typeof e.fields.value === "number" && Number.isFinite(e.fields.value) ? e.fields.value : numOf(objOf(classRow(ctx, v)?.price_used_cents).typical));
-        if (cents > 0) out.push({ vehicle: v, cents });
-      }
-      return out;
-    });
+    // Kept for a read pass: every party's net worth asks it whole, and a money view values every organization.
+    r.query("vehicles.values", (ctx) =>
+      passMemo([ctx.state, ctx.state.entities, ctx.world], "vehicles.values", () => {
+        const out: { vehicle: EntityId; cents: number }[] = [];
+        for (const v of Object.keys(ctx.state.entities).sort()) {
+          const e = own(ctx.state.entities, v);
+          if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "vehicle")) continue;
+          const cents = Math.round(typeof e.fields.value === "number" && Number.isFinite(e.fields.value) ? e.fields.value : numOf(objOf(classRow(ctx, v)?.price_used_cents).typical));
+          if (cents > 0) out.push({ vehicle: v, cents });
+        }
+        return out;
+      }),
+    );
 
     r.materializer({
       domain: "vehicles",

@@ -25,6 +25,7 @@ import type { Registry } from "./registry-impl";
 import { createRng, type Rng } from "./rng";
 import { acts } from "./life";
 import { optionalQuery, own } from "./pack-kit";
+import { passMemo } from "./read-pass";
 import { fieldDef, isGone, kindIs, placeOfEntity } from "./scope";
 import { relocate } from "./relocate";
 import { COMPANY_KIND, GROUP_KIND, membersOf, selectEntities, TRUST_KIND } from "./selector";
@@ -57,11 +58,14 @@ export function allSchedules(reg: Registry, world: WorldDoc): ScheduleDef[] {
 
 /**
  * The schedules in force in a chat: the world's (`allSchedules`), and the chat's own versions of them
- * for one person each (DESIGN §8: the GM's or the story's `schedule_override`, from Cast life).
+ * for one person each (DESIGN §8: the GM's or the story's `schedule_override`, from Cast life). Kept
+ * for a read pass, so the chat's own are the same objects to every reader of it (`scheduleOwners`).
  */
 export function chatSchedulesIn(ctx: ReadContext): ScheduleDef[] {
-  const mine = optionalQuery(ctx, "castlife.chat_schedules")?.(ctx) ?? [];
-  return mine.length === 0 ? allSchedules(ctx.registry, ctx.world) : [...allSchedules(ctx.registry, ctx.world), ...mine];
+  return passMemo([ctx.state, ctx.world, ctx.registry], "schedules.in_chat", () => {
+    const mine = optionalQuery(ctx, "castlife.chat_schedules")?.(ctx) ?? [];
+    return mine.length === 0 ? allSchedules(ctx.registry, ctx.world) : [...allSchedules(ctx.registry, ctx.world), ...mine];
+  });
 }
 
 function slotSpan(slot: ScheduleSlot): { start: number; length: number } {
@@ -390,21 +394,25 @@ export function appliedInPlay(schedule: ScheduleDef): boolean {
  * a body stays where it lies.
  */
 export function scheduleOwners(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, schedule: ScheduleDef | RoutineDef): EntityId[] {
-  const owner = schedule.owner;
-  const acting = (ids: EntityId[]): EntityId[] => ids.filter((id) => acts(world, state, id));
-  if (isRecord(owner)) return acting(selectEntities(reg, world, state, owner));
-  if (typeof owner !== "string" || owner === "") return [];
-  const e = own(state.entities, owner);
-  if (e) {
-    if (isGone(state, owner)) return [];
-    return acting(ownsAsGroup(reg, world, e.kind) ? membersOf(reg, world, state, owner) : [owner]);
-  }
-  return Object.keys(state.entities)
-    .sort()
-    .filter((id) => {
-      const x = own(state.entities, id);
-      return !!x && kindIs(reg, world, x.kind, owner) && !isGone(state, id) && acts(world, state, id);
-    });
+  // Asked of every schedule each time someone's day is read (their commitments, where they are by the hour): kept for a read pass,
+  // under the schedule itself.
+  return passMemo([state, state.entities, world, reg, schedule], "schedules.owners", () => {
+    const owner = schedule.owner;
+    const acting = (ids: EntityId[]): EntityId[] => ids.filter((id) => acts(world, state, id));
+    if (isRecord(owner)) return acting(selectEntities(reg, world, state, owner));
+    if (typeof owner !== "string" || owner === "") return [];
+    const e = own(state.entities, owner);
+    if (e) {
+      if (isGone(state, owner)) return [];
+      return acting(ownsAsGroup(reg, world, e.kind) ? membersOf(reg, world, state, owner) : [owner]);
+    }
+    return Object.keys(state.entities)
+      .sort()
+      .filter((id) => {
+        const x = own(state.entities, id);
+        return !!x && kindIs(reg, world, x.kind, owner) && !isGone(state, id) && acts(world, state, id);
+      });
+  });
 }
 
 function keyOf(v: JsonValue | undefined): string {

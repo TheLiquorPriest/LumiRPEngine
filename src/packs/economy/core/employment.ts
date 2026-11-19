@@ -403,7 +403,7 @@ function flowStart(cal: Calendar, job: Job): string | undefined {
 function firstPeriodDay(ctx: ReadContext, api: FinanceApi, job: Job): number | null {
   const cal = calendarOf(ctx.world);
   const begun = chatStart(ctx.world);
-  const at = api.occurrences(ctx, payFlowSchedule(ctx, job), begun, begun + 400 * MINUTES_PER_DAY, flowStart(cal, job))[0];
+  const at = api.occurrences(ctx, payFlowSchedule(ctx, job), begun, begun + 400 * MINUTES_PER_DAY, flowStart(cal, job), 1)[0];
   if (at === undefined) return null;
   const day = dateAt(cal, at).dayIndex;
   return job.every === "per_job" ? day : (scheduledPaydays(ctx, api, job, day, day)[0] ?? null);
@@ -1120,7 +1120,7 @@ export function jobView(ctx: ReadContext, api: FinanceApi, job: Job, viewer: Ent
   const cal = calendarOf(ctx.world);
   const now = ctx.state.clock;
   const flow = api.flows(ctx).find((f) => f.source === "job" && f.link === job.id);
-  const next = flow && job.status !== "ended" ? (api.occurrences(ctx, flow.schedule, now, now + 62 * MINUTES_PER_DAY, flow.start)[0] ?? null) : null;
+  const next = flow && job.status !== "ended" ? (api.occurrences(ctx, flow.schedule, now, now + 62 * MINUTES_PER_DAY, flow.start, 1)[0] ?? null) : null;
   const record = payRecord(ctx.state, job.id);
   const last = objOf(record.last);
   const sheet = objOf(record.sheet);

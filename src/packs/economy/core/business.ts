@@ -634,7 +634,7 @@ function selfDealing(ctx: ReadContext, api: FinanceApi, viewer: EntityId | null,
 /** The next time a flow of this business falls due, as the dashboards print it. */
 function nextDue(ctx: ReadContext, api: FinanceApi, flowId: string): string | null {
   const flow = api.flows(ctx).find((f) => f.id === flowId);
-  const next = flow ? api.occurrences(ctx, flow.schedule, ctx.state.clock, ctx.state.clock + 400 * MINUTES_PER_DAY, flow.start)[0] : undefined;
+  const next = flow ? api.occurrences(ctx, flow.schedule, ctx.state.clock, ctx.state.clock + 400 * MINUTES_PER_DAY, flow.start, 1)[0] : undefined;
   return next === undefined ? null : formatClock(calendarOf(ctx.world), next);
 }
 

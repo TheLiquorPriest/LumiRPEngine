@@ -26,6 +26,7 @@ import { formatMoney } from "../../../shared/world";
 import { calendarOf, clockAt, dateAt, dayIndexOf } from "../../../engine/calendar";
 import { labelOf, numOf, objOf, own, strOf } from "../../../engine/pack-kit";
 import type { EffectContext, ReadContext, Rejection, SlotInfo } from "../../../engine/registry";
+import { passMemo } from "../../../engine/read-pass";
 import type { Rng } from "../../../engine/rng";
 import type { WorldState } from "../../../engine/state";
 import { Working } from "../../../engine/working";
@@ -95,11 +96,13 @@ function fieldsOf(state: Readonly<WorldState>, id: EntityId): JsonObject {
   return own(state.entities, id)?.fields ?? {};
 }
 
-/** Every property entity, by id. */
+/** Every property entity, by id. Kept for a read pass, since every party's net worth walks them. */
 export function propertyIds(state: Readonly<WorldState>): EntityId[] {
-  return Object.keys(state.entities)
-    .filter((id) => own(state.entities, id)?.kind === "property")
-    .sort();
+  return passMemo([state, state.entities], "economy.property_ids", () =>
+    Object.keys(state.entities)
+      .filter((id) => own(state.entities, id)?.kind === "property")
+      .sort(),
+  );
 }
 
 /** A property's value now, minor units. */
