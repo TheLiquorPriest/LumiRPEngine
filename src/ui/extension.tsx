@@ -15,7 +15,8 @@ import { scrollParent } from "../frontend/scroll";
 import { createStore, type Readable, useSelect } from "./store";
 import { AppContext, type Route, type UiApp, useApp } from "./app";
 import { createClient, extensionConnector } from "./client";
-import { chatFrame, type SurfaceList } from "./chat";
+import { chatFrame, type FrameEnv, type SurfaceList } from "./chat";
+import { chatPlay } from "./chat/chat-play";
 import { CHAT_FRAME_CSS } from "./chat/styles";
 import type { KeptChunk } from "./kept/chunk-api";
 import { importHostFile, once } from "./kept/host-file";
@@ -141,16 +142,24 @@ export function mount(shell: ShellMount, deps: RoadDeps = browserDeps()): Mounte
   const offs: (() => void)[] = [remember];
   if (ctx.state !== undefined) offs.push(ctx.state.subscribe<{ chatId?: string | null } | null>("chat.active", (value) => place(value?.chatId ?? null)));
   else for (const event of ["CHAT_CHANGED", "CHAT_SWITCHED"]) offs.push(ctx.events.on(event, () => place(ctx.getActiveChat().chatId)));
+  const go = (next: Route): void => route.set(next);
+  const keptHost = (): LumiverseHost => lumiverseHost(ctx, { revokeMs: () => settings.values.get().downloadRevokeMs, closeDrawer: () => shell.road.closeDrawer() });
+  // The kept views are the extension's second file, which Lumiverse serves beside the first, fetched when one is first shown.
+  const keptChunk = once(() => importHostFile(ctx, "frontend/widget", process.env.LRE_BUILD_ID ?? "dev") as Promise<KeptChunk>);
+  // The chat's own surfaces, drawn in Lumiverse's chat (the web shell has no chat to adorn and makes none). They share one bridge to Lumiverse.
+  const chatHost = keptHost();
+  const env: FrameEnv = { client, chat: active, open: go, settings, timers: deps.timers, host: chatHost, kept: keptChunk };
   const app: UiApp = {
     shell: "drawer",
     client,
     gate,
     route,
     timers: deps.timers,
-    keptHost: () => lumiverseHost(ctx, { revokeMs: () => settings.values.get().downloadRevokeMs, closeDrawer: () => shell.road.closeDrawer() }),
-    // The kept views are the extension's second file, which Lumiverse serves beside the first, fetched when one is first shown.
-    kept: once(() => importHostFile(ctx, "frontend/widget", process.env.LRE_BUILD_ID ?? "dev") as Promise<KeptChunk>),
-    go: (next) => route.set(next),
+    keptHost,
+    kept: keptChunk,
+    // The open chat's sheets are the ones its composer's entries open, so a page's Act or Full screen opens those, not a second set.
+    chatSheets: (chat) => (chat === active.get() ? (chatPlay(env)?.app.overlays ?? null) : null),
+    go,
   };
   render(
     <UiSettingsContext.Provider value={settings}>
@@ -160,9 +169,7 @@ export function mount(shell: ShellMount, deps: RoadDeps = browserDeps()): Mounte
     </UiSettingsContext.Provider>,
     root,
   );
-  // The chat's own surfaces, drawn in Lumiverse's chat (the web shell has no chat to adorn and makes none). They share one bridge to Lumiverse.
-  const chatHost = app.keptHost() as LumiverseHost;
-  const frame = chatFrame({ client, chat: active, open: app.go, settings, timers: deps.timers, host: chatHost, kept: app.kept });
+  const frame = chatFrame(env);
   const removeChatStyle = ctx.dom.addStyle(CHAT_FRAME_CSS);
   return {
     unmount() {

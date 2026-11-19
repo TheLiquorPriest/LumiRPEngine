@@ -1,5 +1,5 @@
 // What a kept page says once, above the view: RPE's own words for a request it does not serve yet that
-// the page asked for, an Undo's sentence, and what an overlay's button does not open (app.ts, `said`).
+// the page asked for, and an Undo's sentence (app.ts, `said`).
 
 import { Banner } from "../../frontend/components";
 import { type Readable, useSelect } from "../store";

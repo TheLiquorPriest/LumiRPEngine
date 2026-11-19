@@ -1,20 +1,26 @@
 // What the kept views (Build, Play, the chat's surfaces) are given of the page they run in
 // (`HostBridge`, `frontend/app.ts`), in each shell. In Lumiverse's drawer it is Lumiverse's own
 // context, made into the bridge as today (`frontend/host.ts`, `lumiverseHost`, which the extension
-// shell's mount calls: no file here takes Spindle's types). In the web shell it is the page's own: a
-// confirm, a download, the window's size, and the four controls the kept views mount through the
-// bridge (a switch, a select, a slider and a model picker), drawn by the page itself. There, Lumiverse
-// has no books and no connections to list, and no chat in which to regenerate or show a reply: each
-// answers as the bridge says it does when the host has none.
+// shell's mount calls: no file here takes Spindle's context). In the web shell it is the page's own: a
+// confirm, a download, the window's size, the four controls the kept views mount through the bridge
+// (a switch, a select, a slider and a model picker), drawn by the page itself, and the floats the chat's
+// sheets open in, fixed over the page. There, Lumiverse has no books and no connections to list, and no
+// chat in which to regenerate or show a reply: each answers as the bridge says it does when the host has
+// none.
 
 import type { ControlTarget, HostBridge, HostControls, ModelPickerOptions, SelectOptions, SliderOptions, SwitchOptions } from "../../frontend/app";
 import type { Viewport } from "../../frontend/layout";
+import type { SheetHost } from "../../frontend/overlays";
+import type { FloatWidgetOptions } from "../../spindle-augment";
+import type { SpindleFloatWidgetHandle } from "lumiverse-spindle-types";
 import { createStore } from "../store";
 
 /** The bridge, with what the kept views need of the page besides. */
 export interface KeptHost extends HostBridge {
   /** Puts a stylesheet in the page; the returned function takes it out. */
   addStyle(css: string): () => void;
+  /** Where the chat's sheets (the map, the actions sheet, the World sheet) open over the page: Lumiverse's float widgets in the drawer, the page's own floats in the web shell. */
+  ui: SheetHost["ui"];
   /** Stops following the page (its size, the drawer). */
   dispose(): void;
 }
@@ -172,7 +178,57 @@ function windowViewport(): Viewport {
   return { width: Math.round(window.innerWidth), height: Math.round(window.innerHeight), coarse: window.matchMedia?.("(pointer: coarse)").matches === true };
 }
 
-/** In the web shell: the page's own confirm, download, size and controls. The page is the surface the kept views are shown on, so it is always open. */
+let floats = 0;
+
+/**
+ * One of the page's own floats, as a float widget of Lumiverse is one over its chat: a box fixed over the page at the place and size
+ * asked, hidden until shown, filling the window while full screen, and gone once destroyed. The sheet drawn in it brings its own frame
+ * and its own Close, so the box has none.
+ */
+function pageFloat(options: FloatWidgetOptions = {}): SpindleFloatWidgetHandle {
+  floats += 1;
+  const box = document.createElement("div");
+  box.className = "rpe-float";
+  const root = document.createElement("div");
+  box.append(root);
+  let at = { x: options.initialPosition?.x ?? 0, y: options.initialPosition?.y ?? 0 };
+  let size = { width: options.width ?? 320, height: options.height ?? 240 };
+  let full = false;
+  let shown = false;
+  const lay = (): void => {
+    Object.assign(box.style, { position: "fixed", zIndex: "1000", display: shown ? "block" : "none" }, full ? { left: "0px", top: "0px", width: "100vw", height: "100dvh" } : { left: `${at.x}px`, top: `${at.y}px`, width: `${size.width}px`, height: `${size.height}px` });
+  };
+  lay();
+  document.body.append(box);
+  return {
+    root,
+    widgetId: `rpe-float-${floats}`,
+    moveTo(x, y) {
+      at = { x, y };
+      lay();
+    },
+    getPosition: () => ({ ...at }),
+    setSize(width, height) {
+      size = { width, height };
+      lay();
+    },
+    setVisible(visible) {
+      shown = visible;
+      lay();
+    },
+    isVisible: () => shown,
+    setFullscreen(next) {
+      full = next;
+      lay();
+    },
+    isFullscreen: () => full,
+    setTouchScrollMode: () => undefined,
+    destroy: () => box.remove(),
+    onDragEnd: () => () => undefined,
+  };
+}
+
+/** In the web shell: the page's own confirm, download, size, controls and floats. The page is the surface the kept views are shown on, so it is always open; and nothing of it covers its floats, so there is never a drawer to close for one. */
 export function webHost(options: WebHostOptions): KeptHost {
   const viewport = createStore<Viewport>(windowViewport());
   const resized = (): void => {
@@ -200,7 +256,7 @@ export function webHost(options: WebHostOptions): KeptHost {
     },
     activeChat: () => null,
     generate: async () => false,
-    closeDrawer: async () => false,
+    closeDrawer: async () => true,
     revealMessage: async () => false,
     addStyle(css) {
       const style = document.createElement("style");
@@ -208,6 +264,7 @@ export function webHost(options: WebHostOptions): KeptHost {
       document.head.append(style);
       return () => style.remove();
     },
+    ui: { createFloatWidget: pageFloat },
     dispose() {
       window.removeEventListener("resize", resized);
     },

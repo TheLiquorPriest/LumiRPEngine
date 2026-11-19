@@ -12,7 +12,7 @@
 // transport knows which), not by what its words are. Nothing is remembered: the same request asked again
 // is asked again. A road failure is not a refusal and toasts as the road's.
 
-import { type App, type Draft, initialUi, type Overlays, playAt, type Toast, type UiState } from "../../frontend/app";
+import { type App, type Draft, initialUi, type Overlays, type Toast, type UiState } from "../../frontend/app";
 import { ProtocolClient } from "../../frontend/protocol-client";
 import type { RequestBody, Send } from "../../frontend/registry";
 import { buildCatalog, type UiCatalog } from "../../frontend/ui-registry";
@@ -36,15 +36,6 @@ export interface ToastSettings {
   readonly toastMs: number;
 }
 
-/** What the page says of an overlay this build has nowhere to open, when one of today's buttons asks for it. */
-export const NOT_HERE = {
-  /** Act, Actions and Timelapse open today's actions sheet; a fight's moves are on the fight's page. */
-  palette: "The actions sheet (Act, Actions, Timelapse) does not open in this build of RPE.",
-  /** The map's Full screen, asked on Places, where the map already shows. */
-  map: "The map does not open full screen in this build of RPE; Places shows it here.",
-  world: "The World sheet does not open in this build of RPE.",
-} as const;
-
 /** What the page says once Attach gave the chat a world, named as the worlds' list named it. */
 export function attachedWords(world: string): string {
   return `${world} is attached to this chat.`;
@@ -53,8 +44,8 @@ export function attachedWords(world: string): string {
 /** What a change made at once says where RPE gives no words of it. */
 export const CHANGE_MADE = "Done: your change is made, as your own edit.";
 
-/** Only Play's map, place sheet, calendar and combat panels open an overlay; Build opens none, and this build has none to open. */
-export const NO_OVERLAYS: Overlays = {
+/** The sheets of an App whose views open none (Build, the things browser): only Play's views open one, and each gives its own (`play/mount.tsx`, `../chat/chat-play.ts`). */
+const NO_OVERLAYS: Overlays = {
   openMap: () => Promise.resolve(),
   closeMap: () => undefined,
   openPalette: () => Promise.resolve(),
@@ -80,7 +71,7 @@ export interface KeptDeps {
   openBuild?(): void;
   /** Shows one of RPE's pages where the shell shows its pages (the Live page, a turn's page). */
   open?(route: { page: string; chat?: string | null; at?: readonly string[] }): void;
-  /** The overlays the shell opens (the map, the actions sheet, the World sheet); Play's own stand-ins where the shell gives none. */
+  /** The sheets the App's views open (the map, the actions sheet, the World sheet): the Play view's and the chat's surfaces' give theirs; an App whose views open none has none. */
   overlays?: Overlays;
   /** The call files; the folder's list unless a test gives its own. */
   calls?: readonly CallFile[];
@@ -92,7 +83,7 @@ export interface KeptDeps {
 
 export interface Kept {
   app: App;
-  /** What the page says once, in the order said: RPE's own words for a request it does not serve yet that the page asked, an Undo's sentence, and what an overlay's button does not open. */
+  /** What the page says once, in the order said: RPE's own words for a request it does not serve yet that the page asked, and an Undo's sentence. */
   said: Readable<readonly string[]>;
   /** Takes everything back: the client's hearing, the chat's state, the draft's tracking, the toasts' timers. */
   stop(): void;
@@ -165,22 +156,6 @@ class KeptClient extends ProtocolClient {
   override resync(): void {
     this.chatView.read();
   }
-}
-
-/** The overlays as Play has them for now: the map is Play's Places; the rest say, once, that they do not open. */
-function playOverlays(ui: Store<UiState>, say: (text: string) => void): Overlays {
-  return {
-    openMap: async () => {
-      const at = ui.get();
-      if (at.mode === "play" && at.play.dest === "places" && at.play.stack.length === 0) say(NOT_HERE.map);
-      else ui.update((state) => playAt(state, "places"));
-    },
-    closeMap: () => undefined,
-    openPalette: async () => say(NOT_HERE.palette),
-    closePalette: () => undefined,
-    openWorld: async () => say(NOT_HERE.world),
-    closeWorld: () => undefined,
-  };
 }
 
 /** The live channel of what concerns the user and no one chat (`LIVE_USER` of RPE's app, which the page may not import). */
@@ -307,7 +282,7 @@ export function keptApp(deps: KeptDeps): Kept {
     ui,
     toasts,
     host: deps.host,
-    overlays: deps.overlays ?? (deps.mode === "play" ? playOverlays(ui, say) : NO_OVERLAYS),
+    overlays: deps.overlays ?? NO_OVERLAYS,
     drafts: createStore<Draft | null>(null),
     toast,
     request,

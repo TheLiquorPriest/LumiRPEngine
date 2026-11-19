@@ -10,6 +10,7 @@ import { AppContext, playAt, useApp, useView } from "./app";
 import { watchChatHeads } from "./chat-heads";
 import { Empty, IconButton, Toasts } from "./components";
 import type { Host } from "./host";
+import type { HostUi } from "../spindle-augment";
 import { WorldSheet } from "./hud";
 import { Icon } from "../ui/icons";
 import type { Rect } from "./layout";
@@ -135,7 +136,10 @@ export interface OverlaySet {
   destroy(): void;
 }
 
-export function createOverlays(app: App, host: Host): OverlaySet {
+/** What the sheets open over: the floats the page's host makes (Lumiverse's float widgets, or the web page's own), its geometry where it has one, the window's size, and the drawer that may cover them. */
+export type SheetHost = Pick<Host, "viewport" | "drawer" | "closeDrawer"> & { ui: Pick<HostUi, "createFloatWidget"> & { geometry?: HostUi["geometry"] } };
+
+export function createOverlays(app: App, host: SheetHost): OverlaySet {
   let paletteTab: PaletteTab = "actions";
   // An intent gate's Edit the palette is open for, until it opens plainly again.
   let paletteEdit: PaletteEdit | undefined;

@@ -1,13 +1,13 @@
 // The Play page on RPE's own handlers (served.ts): Build's route and the play routes over one store,
 // and the application's live hub. A chat with no world is given one from the page, with today's own
 // picker; a turn whose run ends before it joins the chat shows once it joins; and the buttons of
-// today's overlays, which this build does not have, each do what the page can or say so once.
+// today's sheets open them, over the page where the shell has none of its own.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { act } from "preact/test-utils";
 import type { StateView } from "../../../../src/shared/state-view";
 import { replyOf } from "../../../../src/ui/client";
-import { attachedWords, NOT_HERE } from "../../../../src/ui/kept/app";
+import { attachedWords } from "../../../../src/ui/kept/app";
 import { handTimers } from "../bed";
 import { openPage, type Page, PageElement } from "../dom";
 import { button, leave, openPlay, said, until, words } from "./mount";
@@ -127,34 +127,49 @@ describe("the Play page on RPE's own routes", () => {
     await leave(root);
   });
 
-  test("Act, Timelapse and the HUD's Actions say once that the actions sheet does not open here; the HUD's Map goes to Places, where the map's Full screen says it shows already", async () => {
+  test("Act, the HUD's Actions and Timelapse open the actions sheet, Timelapse on its tab; the HUD's Map and the map's Full screen on Places open the map; the page says nothing of them", async () => {
     const rpe = await playing(PLAYED);
     const { root } = await openPlay(page.document, rpe.client, handTimers(), PLAYED);
     await until("Now", () => root.querySelector('.lre-play-main[data-lre-dest="now"] .lre-play-quick') !== null);
-    const before = rpe.asked.length;
+    // The sheet of `kind`, while it shows: the web shell has no sheets of its own, so the page opens its own, fixed over it.
+    const sheet = (kind: string): PageElement | null => {
+      const found = page.document.querySelector(`[data-lre-overlay="${kind}"]`);
+      return found?.closest(".rpe-float")?.style.display === "block" ? found : null;
+    };
+    const tab = (): string => words(sheet("palette")?.querySelector('[role="tab"][aria-selected="true"]') ?? null);
+    const close = async (kind: string, label: string): Promise<void> => {
+      await act(() => (sheet(kind)?.querySelectorAll("button").find((b) => b.getAttribute("aria-label") === label) as PageElement).click());
+      await until(`the ${kind} closed`, () => sheet(kind) === null);
+    };
 
     await act(() => button(root, "Act").click());
-    await until("the sentence", () => said(root).includes(NOT_HERE.palette));
-    if (root.querySelectorAll("button").some((b) => words(b) === "Timelapse")) await act(() => button(root, "Timelapse").click());
+    await until("the actions sheet", () => sheet("palette")?.querySelector('[role="dialog"][aria-label="Actions"]') != null);
+    if (root.querySelectorAll("button").some((b) => words(b) === "Timelapse")) {
+      await act(() => button(root, "Timelapse").click());
+      await until("the Timelapse tab", () => tab() === "Timelapse");
+    }
+    await close("palette", "Close actions");
 
-    // The HUD's details: Map, then Actions.
+    // The HUD's details: Actions, then Map.
     await act(() => (root.querySelector(".rpe-play-hud .lre-hud button") as PageElement).click());
     await until("the HUD's details", () => root.querySelectorAll("button").some((b) => words(b) === "Actions"));
     await act(() => button(root, "Actions").click());
-    expect(said(root).filter((sentence) => sentence === NOT_HERE.palette)).toHaveLength(1);
+    await until("the actions sheet", () => sheet("palette") !== null);
+    await close("palette", "Close actions");
     await act(() => (root.querySelector(".rpe-play-hud .lre-hud button") as PageElement).click());
     await until("the HUD's details", () => root.querySelectorAll("button").some((b) => words(b) === "Map" && b.closest(".lre-chat-worldactions") !== null));
     await act(() => (root.querySelectorAll(".lre-chat-worldactions button").find((b) => words(b) === "Map") as PageElement).click());
-    await until("Places", () => root.querySelector('.lre-play-main[data-lre-dest="places"]') !== null);
+    await until("the map", () => sheet("map") !== null);
+    await close("map", "Close map");
 
+    await act(() => button(root, "Map").click());
+    await until("Places", () => root.querySelector('.lre-play-main[data-lre-dest="places"]') !== null);
     const full = (): PageElement | null => root.querySelectorAll("button").find((b) => b.getAttribute("aria-label") === "Full screen") ?? null;
     await until("the map's Full screen", () => full() !== null);
     await act(() => (full() as PageElement).click());
-    await until("the map's sentence", () => said(root).includes(NOT_HERE.map));
-    expect(said(root)).toEqual([NOT_HERE.palette, NOT_HERE.map]);
-    // None of them asked RPE anything; going to Places shows its panels, which the page observes (`lre.view.open`) and reads.
-    const since = rpe.asked.slice(before).filter((call) => call.key !== "GET /api/v1/chats/:chat/state");
-    expect(since.map((call) => (call.body as { type: string }).type).filter((type) => type !== "lre.view.open")).toEqual([]);
+    await until("the map", () => sheet("map") !== null);
+    expect(said(root)).toEqual([]);
     await leave(root);
+    expect(page.document.querySelector('[data-lre-overlay="map"]')).toBeNull();
   });
 });

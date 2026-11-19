@@ -9,6 +9,6 @@ import { KeptSlot } from "../slot";
 export function PlayPage(props: { chat: string }) {
   const app = useApp();
   const settings = useUiSettings();
-  // Build opens on the chat the page is for, so it marks the world this chat plays and offers Attach to it.
-  return <KeptSlot class="rpe-play" keys={[props.chat]} mount={(kept, root) => kept.mountPlay(root, { client: app.client, chat: props.chat, host: app.keptHost(), timers: app.timers, settings: () => settings.values.get(), openBuild: () => app.go({ page: "build", chat: props.chat }), open: app.go })} />;
+  // Build opens on the chat the page is for, so it marks the world this chat plays and offers Attach to it. The sheets are the chat's own where the shell has them for it.
+  return <KeptSlot class="rpe-play" keys={[props.chat]} mount={(kept, root) => kept.mountPlay(root, { client: app.client, chat: props.chat, host: app.keptHost(), timers: app.timers, settings: () => settings.values.get(), openBuild: () => app.go({ page: "build", chat: props.chat }), open: app.go, sheets: () => app.chatSheets?.(props.chat) ?? null })} />;
 }

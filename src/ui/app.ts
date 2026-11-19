@@ -7,6 +7,7 @@ import { useContext, useEffect, useState } from "preact/hooks";
 import { type Readable, useSelect } from "./store";
 import type { RpeClient } from "./client";
 import type { Gate } from "./gate";
+import type { Overlays } from "../frontend/app";
 import type { KeptChunk } from "./kept/chunk-api";
 import type { KeptHost } from "./kept/host";
 import type { Timers } from "./roads";
@@ -37,6 +38,8 @@ export interface UiApp {
   keptHost(): KeptHost;
   /** Loads the kept views (Build, Play, the things browser, the chat's sheets) when one is first shown, and hands them over (kept/chunk-api.ts): the web shell splits them off its script, the drawer fetches the extension's second file. */
   kept(): Promise<KeptChunk>;
+  /** The sheets (the map, the actions sheet, the World sheet) the chat's own surfaces open for `chat`, asked at each opening: in the drawer, the ones the composer's entries open, while `chat` is the one Lumiverse has open; null where the shell has none for it (the web shell has no chat to adorn), and a view opens its own. */
+  chatSheets?(chat: string): Overlays | null;
   go(route: Route): void;
 }
 
