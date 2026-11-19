@@ -97,12 +97,13 @@ export function messageIdFromScope(scope: string): MessageId | null {
   return match?.[1] ?? null;
 }
 
-export function MessageChips(props: { messageId: MessageId }) {
+/** A reply's chips; with `clock`, the world's time after its turn first (the line under the reply says it wherever that line is given). */
+export function MessageChips(props: { messageId: MessageId; clock: boolean }) {
   const app = useApp();
   const view = useView();
   if (!view || view.status === "not_world") return null;
   const chips = view.chips.filter((chip) => chip.messageId === props.messageId);
-  const when = view.replyClocks[props.messageId];
+  const when = props.clock ? view.replyClocks[props.messageId] : undefined;
   if (chips.length === 0 && when === undefined) return null;
   // A pack's rendering for a kind replaces the default wherever that chip shows.
   const show = (chip: Chip, fallback: ComponentType<ChipProps>) => {

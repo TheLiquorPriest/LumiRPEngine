@@ -20,7 +20,8 @@ import { messageOfScope } from "./working";
 
 const LANE_NAME: Record<LaneShown["lane"], string> = { story: "Story", engine: "Engine" };
 
-function useReplies(env: FrameEnv, message: string): { line: ReplyLine | undefined; failed: string | null } {
+/** A reply's line as the page holds it, whether its lines' read failed, and whether this page reads lines at all (it does once a chat is open). */
+function useReplies(env: FrameEnv, message: string): { line: ReplyLine | undefined; failed: string | null; read: boolean } {
   const replies = repliesOf(env);
   const [state, setState] = useState<RepliesState | null>(replies?.get() ?? null);
   useEffect(() => {
@@ -33,7 +34,7 @@ function useReplies(env: FrameEnv, message: string): { line: ReplyLine | undefin
       unsubscribe();
     };
   }, [replies, message]);
-  return { line: state?.lines.get(message), failed: state?.failed ?? null };
+  return { line: state?.lines.get(message), failed: state?.failed ?? null, read: replies !== null };
 }
 
 function Lane(props: { lane: LaneShown }) {
@@ -124,8 +125,8 @@ function Unfinished(props: { env: FrameEnv; chat: string; why: string; settle: b
   );
 }
 
-function Line(props: { env: FrameEnv; message: string }) {
-  const { line } = useReplies(props.env, props.message);
+function Line(props: { env: FrameEnv; message: string; line: ReplyLine | undefined }) {
+  const { line } = props;
   const chat = props.env.chat.get();
   if (line === undefined) return null;
   if (line.empty) {
@@ -174,30 +175,36 @@ function claim(message: string, root: HTMLElement): boolean {
   return true;
 }
 
-/** The chips of a reply (a review card, a carried chip, an Undo): today's own, over the kept App for the open chat. */
-function Chips(props: { env: FrameEnv; message: string }) {
+/** The chips of a reply (a review card, a carried chip, an Undo): today's own, over the kept App for the open chat; with `clock`, the world's time after its turn too. */
+function Chips(props: { env: FrameEnv; message: string; clock: boolean }) {
   const play = chatPlay(props.env);
   if (play === null) return null;
   return (
     <AppContext.Provider value={play.app}>
       <div class="lre">
-        <MessageChips messageId={props.message} />
+        <MessageChips messageId={props.message} clock={props.clock} />
       </div>
     </AppContext.Provider>
   );
 }
 
+/**
+ * A reply's line and its chips. The world's time after the turn is said once: by the line, which says it for every reply RPE played; the
+ * kept state's clock says it only where no line can be given, the page's read of the lines having failed.
+ */
+function Reply(props: { env: FrameEnv; message: string }) {
+  const { line, failed, read } = useReplies(props.env, props.message);
+  return (
+    <>
+      <Line env={props.env} message={props.message} line={line} />
+      <Chips env={props.env} message={props.message} clock={line === undefined && (failed !== null || !read)} />
+    </>
+  );
+}
+
 function draw(env: FrameEnv, root: HTMLElement, scope: string): void {
   const message = messageOfScope(scope);
-  render(
-    message === null || !claim(message, root) ? null : (
-      <>
-        <Line env={env} message={message} />
-        <Chips env={env} message={message} />
-      </>
-    ),
-    root,
-  );
+  render(message === null || !claim(message, root) ? null : <Reply env={env} message={message} />, root);
 }
 
 export const surface: SurfaceDef = {
