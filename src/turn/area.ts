@@ -16,7 +16,7 @@ import { mapRoutes } from "../iface/map/routes";
 import { harnessSettings } from "../app/setting-list";
 import type { LoreBooks, LoreProposals, ProjectionBooks } from "../lore";
 import { MEANING_TABLE } from "../search/meaning";
-import type { Store } from "../store";
+import { Preparer, type Store } from "../store";
 import { storyCoverage } from "../story";
 import { historyWindow } from "../story/window";
 import { buildTurns, MACHINE_CLOCK, openAppStore, type Turns, type TurnsOptions } from "./lane";
@@ -63,6 +63,8 @@ export function turnArea(takes: TurnTakes): TurnArea {
   const clock = takes.clock ?? MACHINE_CLOCK;
   let app: App | null = null;
   let turns: Turns | null = null;
+  /** The pass over the chats whose states this build cannot use yet, once mounted (`src/store/prepare.ts`). */
+  let preparer: Preparer | null = null;
   const made = (): Turns => {
     if (turns === null) throw new Error("RPE's turn lane is not mounted yet.");
     return turns;
@@ -116,6 +118,10 @@ export function turnArea(takes: TurnTakes): TurnArea {
       // row and its folders, by what Lumiverse says of it.
       chatNamed: async (user, chat) => {
         await made().take(user, chat);
+      },
+      // A chat a route names waits while RPE makes its states ready for this build, and is taken next.
+      chatReady: async (user, chat) => {
+        await preparer?.ready(user, chat);
       },
       door: {
         turns: { play: (turn, out, signal) => made().lane.play(turn, out, signal) },
@@ -227,8 +233,14 @@ export function turnArea(takes: TurnTakes): TurnArea {
       at.routes.add("web", webRoutes(at.secrets));
       at.routes.add("maps", mapRoutes({ store: turns.store, writes: at.writes, live: at.live, config: async (chat) => (await chatSettings(chat)).map }));
       await lane.preload();
+      preparer = new Preparer({ store, user: owner, write: (write, label) => at.writes.run(() => write(), label), log: at.log });
     },
-    stopping: () => turns?.harness.close(),
+    // Once RPE listens, the chats this build cannot fold from a snapshot yet are made ready, a stretch at a time.
+    started: () => preparer?.start(),
+    stopping: async () => {
+      await preparer?.stop();
+      await turns?.harness.close();
+    },
   };
   return { area, turns: () => turns };
 }

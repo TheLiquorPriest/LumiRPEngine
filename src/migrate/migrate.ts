@@ -19,13 +19,14 @@ import { openDatabase } from "../app/database";
 import { migrate as migrateTables, Migrations } from "../app/migrations";
 import { diskTexts, readConfig } from "../app/config-read";
 import { BUILD_MIGRATIONS } from "../build/schema";
-import { CAST_MIGRATIONS, CAST_STORE_AREA } from "../cast";
+import { CAST_MIGRATIONS } from "../cast";
 import { createRegistry } from "../engine/registry-impl";
 import { LORE_MIGRATIONS } from "../lore";
 import { ALL_PACKS } from "../packs/index";
 import type { WorldDoc } from "../shared/world";
 import { openStore, STORE_MIGRATIONS } from "../store";
-import { STORY_MIGRATIONS, STORY_STORE_AREA } from "../story";
+import { STORY_MIGRATIONS } from "../story";
+import { STORE_AREAS } from "../turn/store-areas";
 import { chatCarried } from "./briefing";
 import { carry, placesOf } from "./carry";
 import { checkConnectionsSteady } from "./connections";
@@ -201,7 +202,8 @@ export async function migrate(sources: Sources, options: MigrateOptions): Promis
           if (doc) worlds.set(r, doc);
         }
       }
-      const store = openStore({ db, registry, worlds: (r) => worlds.get(r), areas: [CAST_STORE_AREA, STORY_STORE_AREA] });
+      // Folded as the RPE of this build folds (its fingerprint, its areas), so the snapshots the import stores serve it from its first read.
+      const store = openStore({ db, registry, worlds: (r) => worlds.get(r), areas: STORE_AREAS, fingerprint: options.version ?? "dev" });
       step = "importing the chats";
       const s = store.user(sources.userId);
       const run = crypto.randomUUID();

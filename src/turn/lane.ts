@@ -29,7 +29,7 @@ import type { Hints } from "../adapter/lumiverse/hint";
 import type { IndexFeed } from "../adapter/lumiverse/index-feed";
 import type { LumiverseReads } from "../adapter/lumiverse/reads";
 import type { Stores } from "../adapter/lumiverse/stores";
-import { type App, LIVE_JOBS, RouteError } from "../app";
+import { type App, LIVE_JOBS, RouteError, WritesClosed } from "../app";
 import { portTexts, readConfig } from "../app/config-read";
 import { type BookReader, CAST_PLAYER_MIND, castFacts, CastRecord, castTools, chatLine, findCharacter, MemorySearch, playerMindOf, type SourceReader } from "../cast";
 import { castAt } from "../cast/path";
@@ -250,7 +250,7 @@ export const MACHINE_CLOCK: Clock = {
  * or not a run goes on there; the change's report, all a model is shown, says only that it failed. Its
  * limits are the global level's settings, read once: the store is made once for every chat.
  */
-export function openAppStore(app: Pick<App, "db" | "version" | "log" | "live" | "paths" | "workers">): Store {
+export function openAppStore(app: Pick<App, "db" | "version" | "log" | "live" | "paths" | "workers" | "writes">): Store {
   const handlerFailed = (failure: StoreFailure): void => {
     const { op, chat, turn, change, user } = failure;
     const error = failure.error instanceof Error ? failure.error.message : String(failure.error);
@@ -262,7 +262,20 @@ export function openAppStore(app: Pick<App, "db" | "version" | "log" | "live" | 
   // A walk the store's settings cut short (`engine.maxKindChain`, `maxHolderDepth`, `places.maxVisitDepth`) is logged, once for each chain.
   // A fold over more changes than `store.workerFoldAt` runs on a worker thread, which reads the same file and folds with the same areas (`workers/tasks.ts`).
   const away = { path: app.paths.database, run: (brief: StoreBrief, job: FoldJob) => app.workers.run("fold", { brief, job }) };
-  return openStore({ db: app.db, registry: createRegistry(ALL_PACKS), worlds, fingerprint: app.version, handlerFailed, log: (message, data) => app.log.warn(message, data as Record<string, JsonValue>), areas: STORE_AREAS, away, ...global.numbers(STORE_SETTING_DEFS) });
+  // What a read folds is stored soon after, in one write for whatever is held by then, so a restart keeps it though nothing is played.
+  const storing = new Set<string>();
+  const heldWaiting = (user: string): void => {
+    if (storing.has(user)) return;
+    storing.add(user);
+    setImmediate(() => {
+      storing.delete(user);
+      app.writes.run(() => store.user(user).storeHeld(), "snapshots a read folded").catch((error: unknown) => {
+        if (!(error instanceof WritesClosed)) app.log.warn("The snapshots a read folded could not be stored; the next write stores them.", { error: error instanceof Error ? error.message : String(error) });
+      });
+    });
+  };
+  const store = openStore({ db: app.db, registry: createRegistry(ALL_PACKS), worlds, fingerprint: app.version, handlerFailed, log: (message, data) => app.log.warn(message, data as Record<string, JsonValue>), areas: STORE_AREAS, away, heldWaiting, ...global.numbers(STORE_SETTING_DEFS) });
+  return store;
 }
 
 export interface TurnsOptions {

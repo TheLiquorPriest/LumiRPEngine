@@ -96,6 +96,9 @@ export const STORE_DEFAULTS = Object.freeze({
 /** Bumped whenever this fold's output for the same changes would differ: snapshots made before are not used. */
 const FOLD_VERSION = 8;
 
+/** A fold that holds the thread this long or longer says so in the log, once (`saidLong`). */
+const LONG_FOLD_MS = 1000;
+
 export interface StoreOptions {
   /**
    * A database file's path or `:memory:`: the store opens it, brings its tables up and closes it.
@@ -143,6 +146,11 @@ export interface StoreOptions {
   workerFoldAt?: number;
   /** Where a long fold runs, with the database file it reads there; none: every fold runs where it is asked (`afar` just reads). */
   away?: StoreAway;
+  /**
+   * Told when a read holds snapshots for the user's next write (`hold`): its owner stores them soon after (`UserStore.storeHeld`), so
+   * what reads fold outlives a restart even where nothing is written for a long while. Unset: they wait for the user's next write.
+   */
+  heldWaiting?: (user: string) => void;
 }
 
 /** A handler's failure, as the store tells it (`StoreOptions.handlerFailed`). */
@@ -400,6 +408,7 @@ export class Store {
   readonly viewOptions: { ownOnly: readonly string[]; notable: number; placeDepth: number };
   readonly now: () => number;
   private readonly worldTold: ((change: WorldChange) => void) | undefined;
+  private readonly heldWaiting: ((user: string) => void) | undefined;
   /** The log, for what the store says for people (a walk cut short); null when none was given. */
   readonly log: ((message: string, data: Record<string, unknown>) => void) | null;
   /** Whether the store opened the database itself: then it brought the tables up, and it closes it. */
@@ -472,6 +481,7 @@ export class Store {
     this.viewOptions = { ownOnly: options.ownOnly ?? STORE_DEFAULTS.ownOnly, notable: Math.max(0, Math.floor(options.notable ?? STORE_DEFAULTS.notable)), placeDepth: whole(options.placeDepth, STORE_DEFAULTS.placeDepth, 1) };
     this.now = options.now ?? Date.now;
     this.worldTold = options.worldChanged;
+    this.heldWaiting = options.heldWaiting;
   }
 
   /**
@@ -672,7 +682,7 @@ export class Store {
     }
   }
 
-  /** @internal Holds snapshots (node, upto, the rows to store, the chat and its mark they were folded under) for the user's next write. */
+  /** @internal Holds snapshots (node, upto, the rows to store, the chat and its mark they were folded under) for the user's next write, and says so (`heldWaiting`). */
   hold(user: string, rows: readonly [string, number, SnapshotRows, string, string][]): void {
     if (rows.length === 0) return;
     let held = this.held.get(user);
@@ -688,6 +698,7 @@ export class Store {
       if (held.size <= this.snapshotsHeld) break;
       held.delete(oldest);
     }
+    this.heldWaiting?.(user);
   }
 
   /**
@@ -2038,6 +2049,16 @@ export class UserStore {
   }
 
   /**
+   * What names the state at a turn as it is folded now (`stateAt`): the node it was made on and the fold mark of the chat it was played
+   * in, the key the store's own held states go by. Another key once anything that fold reads changes; a reader that keeps something
+   * worked out from that state keeps it under this key, and holds no state for it. A joined turn is refused, as every reading of one is.
+   */
+  foldKey(turnId: string): string {
+    const t = this.turnToWrite(turnId);
+    return `${this.id}\u0000${t.node}\u0000${this.store.markOf(this.id, t.chat)}`;
+  }
+
+  /**
    * State as one reading sees it at a turn (plan §10.9): a job's (`job`) has the job's own changes so
    * far on top of the turn's state (`stateAt`), in the order it recorded them, each that applied when
    * recorded checked again there; nobody else sees them until the job ends on the path (`jobsPlaced`).
@@ -2264,6 +2285,75 @@ export class UserStore {
   }
 
   /**
+   * Stores the snapshots this user's reads found worth storing, now rather than at the user's next write (`StoreOptions.heldWaiting`):
+   * a write of derived rows alone, kept true by the fold marks they were folded under (`Store.flush`), which changes no fold and so
+   * tells no listener of the store's writes. Inside the owner's write, as every write.
+   */
+  storeHeld(): void {
+    this.db.transaction(() => this.store.flush(this.id))();
+  }
+
+  /**
+   * The chats whose path wants a snapshot this build can use where none is stored (`prepareNext`), the chat played most recently
+   * first: those a fold would otherwise fold from their start, after an update or an import under another build.
+   */
+  unprepared(): string[] {
+    return this.db
+      .query<{ id: string }, [string]>("SELECT c.id FROM chat c WHERE c.user = ?1 AND c.deleted IS NULL AND c.head IS NOT NULL ORDER BY (SELECT max(t.created) FROM turn t WHERE t.user = c.user AND t.chat = c.id) DESC, c.created DESC")
+      .all(this.id)
+      .map((c) => c.id)
+      .filter((chat) => this.wanting(chat).missing > 0);
+  }
+
+  /**
+   * A chat's path from its start to its head, each node with its turn's changes (its jobs' aside) and whether a snapshot this build can
+   * use is stored there; and how many of the nodes where a fold stores one (every `snapshotEvery` turns, an open turn's aside) have none.
+   */
+  private wanting(chat: string): { rows: { key: string; depth: number; changes: number; due: boolean; usable: boolean }[]; missing: number } {
+    const head = this.chatDb(chat)?.head ?? null;
+    if (head === null) return { rows: [], missing: 0 };
+    const every = this.store.snapshotEvery;
+    const rows = this.db
+      .query<{ key: string; depth: number; open: number; changes: number; usable: number }, [string, string, string]>(
+        `WITH RECURSIVE up(key, prev, turn, depth) AS (
+           SELECT key, prev, turn, depth FROM path_node WHERE user = ?1 AND key = ?2
+           UNION ALL SELECT n.key, n.prev, n.turn, n.depth FROM path_node n JOIN up ON n.user = ?1 AND n.key = up.prev)
+         SELECT up.key, up.depth, t.status = 'open' AS open,
+           (SELECT count(*) FROM change c WHERE c.user = ?1 AND c.turn = up.turn AND c.job IS NULL) AS changes,
+           EXISTS(SELECT 1 FROM snapshot s WHERE s.user = ?1 AND s.node = up.key AND (s.kind = 'base' OR s.fingerprint = ?3)) AS usable
+         FROM up JOIN turn t ON t.user = ?1 AND t.id = up.turn ORDER BY up.depth`,
+      )
+      .all(this.id, head, this.store.fingerprint)
+      .map((r) => ({ key: r.key, depth: r.depth, changes: r.changes, due: (r.depth + 1) % every === 0 && r.open !== 1, usable: r.usable === 1 }));
+    return { rows, missing: rows.filter((r) => r.due && !r.usable).length };
+  }
+
+  /**
+   * Folds the next stretch of a chat's path that wants a snapshot (`unprepared`): from the state the stretch before it ended on (`after`,
+   * held in memory) or the deepest snapshot stored before it, turn after turn, each from the state the one before it left, for as long
+   * as `forMs` allows (one turn at least), up to the first node where a snapshot is due and none is stored at most. The snapshots it finds
+   * wait to be stored (`storeHeld`). What it folded: the node it ended on, the changes of its turns, and how many such nodes are left.
+   */
+  prepareNext(chat: string, after: string | null, forMs: number): { at: string | null; changes: number; left: number } {
+    const began = performance.now();
+    const { rows, missing } = this.wanting(chat);
+    const end = rows.findIndex((r) => r.due && !r.usable);
+    if (end < 0) return { at: null, changes: 0, left: 0 };
+    let to = end;
+    while (to > 0 && !rows[to - 1]?.usable && rows[to - 1]?.key !== after) to--;
+    let changes = 0;
+    let at: string | null = null;
+    for (; to <= end && (at === null || performance.now() - began < forMs); to++) {
+      const row = rows[to];
+      if (row === undefined) break;
+      this.foldNode(row.key);
+      at = row.key;
+      changes += row.changes;
+    }
+    return { at, changes, left: at === rows[end]?.key ? missing - 1 : missing };
+  }
+
+  /**
    * A starting state that stands for the engine's state after a turn on a path (a migrated chat's, where today's fold and this one
    * differ, plan §15.3 item 7): folds start from it, whatever the turns before it hold, and a change recorded on the turn afterwards
    * (a correction) is folded on top of it. What the store keeps beside the engine's state (agents' lines, what changed last, the areas'
@@ -2418,6 +2508,7 @@ export class UserStore {
     if (late.length > 0) steps.unshift(stepOf(first, late));
     const every = this.store.snapshotEvery;
     const snaps: [string, number, SnapshotRows, string, string][] = [];
+    const began = performance.now();
     const result = foldSteps(this.store.envOf(this.id), start, steps, (step, state, upto, notApplied, rebased) => {
       // Every `snapshotEvery` turns along a path, once its turn is no longer open, where none is stored.
       if (step.n % every !== 0 || turns.get(step.turn)?.status === "open" || (stored !== null && step.node === first.key)) return;
@@ -2425,6 +2516,7 @@ export class UserStore {
       const of = at.get(step.node) ?? { chat: own.chat, mark };
       snaps.push([step.node, upto, snapshotRows(doc), of.chat, of.mark]);
     });
+    this.saidLong(began, own.chat, node, steps.length);
     this.store.hold(this.id, snaps);
     // A turn that adds nothing (one just begun) holds the same state as the one before it: the same object, so the tree held over it
     // answers the world state at the turn's start from memory, with no tree built at the compile (PlanStore-S2 item 4).
@@ -2489,6 +2581,7 @@ export class UserStore {
     });
     const every = this.store.snapshotEvery;
     const snaps: [string, number, SnapshotRows, string, string][] = [];
+    const began = performance.now();
     const result = foldSteps(this.store.envOf(this.id), { state: draft(base.folded.state), upto: base.upto }, steps, (step, state, upto, notApplied, rebased) => {
       // Every `snapshotEvery` turns along the path, once its turn is no longer open, as `foldNode` keeps them.
       if (step.n % every !== 0 || turns.get(step.turn)?.status === "open") return;
@@ -2496,10 +2589,17 @@ export class UserStore {
       const of = turns.get(step.turn)?.chat ?? chat;
       snaps.push([step.node, upto, snapshotRows(doc), of, markFor(of)]);
     });
+    this.saidLong(began, chat, end, steps.length);
     this.store.hold(this.id, snaps);
     const folded: Folded = { node: end, state: result.state, notApplied: [...base.folded.notApplied, ...result.notApplied], rebased: [...base.folded.rebased, ...result.rebased] };
     this.store.keep(this.cacheKey(end), folded, result.upto, this.id, chat, mark);
     return folded;
+  }
+
+  /** One line in the log for a fold that held the thread `LONG_FOLD_MS` or more: its chat, the node it ended at, how many turns it folded and how long it took. */
+  private saidLong(began: number, chat: string, node: string, turns: number): void {
+    const ms = Math.round(performance.now() - began);
+    if (ms >= LONG_FOLD_MS) this.store.log?.("A fold held the thread long.", { chat, node, turns, ms });
   }
 
   /** Throws `FoldAway` for a fold about to run over the turns `ids` when `afar` waits for a thread and they hold more changes than `workerFoldAt`. */

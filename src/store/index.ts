@@ -1,6 +1,7 @@
 // The store's public face: what other build lanes call.
 
 export { joinable, openStore, refuseJoined, Store, UserStore, STORE_DEFAULTS, type StoreFailure, type StoreOptions, type SessionRow } from "./store";
+export { inStretches, letGo, Preparer, STRETCH_MS, type PreparerDeps } from "./prepare";
 export { Areas, type AreaChange, type AreaOp, type AreaOutcome, type AreaPart, type StoreArea } from "./areas";
 export { STATE_SEARCH_SETTING_DEFS, STORE_SETTING_DEFS, STORE_SETTINGS, WORLD_DOCS_SETTING_DEFS, WORLD_STATE_SETTING_DEFS } from "./settings";
 export { HORIZON, horizonOf, TreeView, type From, type HorizonEntry, type NodeKind, type NodeView, type Reflection, type ValueLine, type ValuesShown, type ViewOptions, type ViewReading } from "./view";

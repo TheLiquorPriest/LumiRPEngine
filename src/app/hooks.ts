@@ -29,6 +29,9 @@ export type ListFilesHook = () => Promise<NamedNow | null>;
 /** Takes on the chat a route names in its path (`/api/v1/chats/:chat/…`) before a route that keeps or changes something of it answers (`takesChat`): a chat Lumiverse does not have is refused in words. */
 export type ChatNamedHook = (user: string, chat: string) => Promise<void>;
 
+/** Waits, before any route that names a chat in its path answers, until that chat is ready to be read: while RPE makes a chat's states ready for the build that runs (`src/store/prepare.ts`), a read of it waits, and it is taken next. */
+export type ChatReadyHook = (user: string, chat: string) => Promise<void>;
+
 /** What one area adds to the hooks of the others. */
 export interface Fills {
   /** A view given to an agent by name, which the turn lane's `views` hook asks of every area in turn. */
@@ -39,6 +42,8 @@ export interface Fills {
   readonly listFiles?: ListFilesHook;
   /** Takes on a chat a route names, which the server asks before every such route answers. One area fills it. */
   readonly chatNamed?: ChatNamedHook;
+  /** Waits until a chat a route names is ready to be read, which the server asks before every such route answers. One area fills it. */
+  readonly chatReady?: ChatReadyHook;
   /** The door's lanes this area fills. */
   readonly door?: DoorFills;
 }
@@ -53,6 +58,8 @@ export interface Hooks {
   readonly listFiles: ListFilesHook;
   /** The one area's taking on of a chat a route names; absent where no area fills it, and nothing is done first. */
   readonly chatNamed?: ChatNamedHook;
+  /** The one area's wait for a chat a route names to be ready; absent where no area fills it, and nothing waits. */
+  readonly chatReady?: ChatReadyHook;
   /** The door's lanes, each as the one area that fills it gave it; a lane no area fills is absent. */
   readonly door: Readonly<DoorFills>;
 }
@@ -72,6 +79,7 @@ export function gatherHooks(areas: readonly Giving[]): Hooks {
   const door: Record<string, unknown> = {};
   const filledBy = new Map<string, string>();
   let chatNamed: { by: string; hook: ChatNamedHook } | null = null;
+  let chatReady: { by: string; hook: ChatReadyHook } | null = null;
   for (const area of areas) {
     if (area.fills?.views !== undefined) views.push(area.fills.views);
     if (area.fills?.jobTools !== undefined) tools.push(area.fills.jobTools);
@@ -79,6 +87,10 @@ export function gatherHooks(areas: readonly Giving[]): Hooks {
     if (area.fills?.chatNamed !== undefined) {
       if (chatNamed !== null) throw new Error(`A chat a route names is taken on by two areas, ${chatNamed.by} and ${area.name}: one area takes it on.`);
       chatNamed = { by: area.name, hook: area.fills.chatNamed };
+    }
+    if (area.fills?.chatReady !== undefined) {
+      if (chatReady !== null) throw new Error(`Whether a chat a route names is ready is waited for by two areas, ${chatReady.by} and ${area.name}: one area waits for it.`);
+      chatReady = { by: area.name, hook: area.fills.chatReady };
     }
     for (const [lane, fill] of Object.entries(area.fills?.door ?? {})) {
       if (fill === undefined) continue;
@@ -105,6 +117,7 @@ export function gatherHooks(areas: readonly Giving[]): Hooks {
       return { user: first.user, names: new Set(found.flatMap((n) => (n === null ? [] : [...n.names]))) };
     },
     ...(chatNamed === null ? {} : { chatNamed: chatNamed.hook }),
+    ...(chatReady === null ? {} : { chatReady: chatReady.hook }),
     door: door as DoorFills,
   };
 }
