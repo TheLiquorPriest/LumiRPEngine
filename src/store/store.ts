@@ -2507,9 +2507,10 @@ export class UserStore {
       .get(this.id, node);
     if (own === null) return [];
     const before = own.prev === null ? [] : this.store.chainHeld(this.id, own.prev);
-    const chain =
+    // Frozen where made, as every reader is handed the held chain itself: its rows are the chain before it's, frozen already.
+    const chain = Object.freeze(
       before !== undefined
-        ? [...before, ...(own.chat === null || own.created === null ? [] : [{ key: node, turn: own.turn, depth: own.depth, chat: own.chat, created: own.created }])]
+        ? [...before, ...(own.chat === null || own.created === null ? [] : [Object.freeze({ key: node, turn: own.turn, depth: own.depth, chat: own.chat, created: own.created })])]
         : this.db
             .query<ChainRow, [string, string]>(
               `WITH RECURSIVE up(key, prev, turn, depth) AS (
@@ -2517,7 +2518,9 @@ export class UserStore {
                  UNION ALL SELECT n.key, n.prev, n.turn, n.depth FROM path_node n JOIN up ON n.user = ?1 AND n.key = up.prev)
                SELECT up.key, up.turn, up.depth, t.chat, t.created FROM up JOIN turn t ON t.user = ?1 AND t.id = up.turn ORDER BY up.depth`,
             )
-            .all(this.id, node);
+            .all(this.id, node)
+            .map((r) => Object.freeze(r)),
+    );
     this.store.holdChain(this.id, node, chain);
     return chain;
   }

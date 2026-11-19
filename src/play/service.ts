@@ -71,7 +71,7 @@ import { playerReason } from "./state/requirement-words";
 import { unfitRef } from "./state/unfit-ref";
 import { unfitWords } from "./unfit";
 import { missingWords } from "../engine/param-words";
-import { chatView, chatViewItem, headTurn, pressedLine, pressOf, stagedOf } from "./view";
+import { chatView, chatViewItem, chatViewKey, headTurn, pressedLine, pressOf, stagedOf } from "./view";
 import type { ControlsKnowledge } from "./state/controls";
 
 /** The prompt part this area's words are in, under the guidance folder's `.prompts/`. */
@@ -311,13 +311,15 @@ export class PlayService {
     if (turn !== null && row?.chat !== chat) throw new RouteError(404, `Chat ${chat} has no turn ${turn}.`);
     // A turn joined to another is answered as a fact, naming the turn it joined, whatever kind of chat this is.
     if (turn !== null && row?.joined != null) throw new JoinedTurnError(turn, row.joined);
-    // Asks of the same state at once share one view: the store's key for that state names it (a write between them makes another), with
-    // the chat's head and revision as the kept views name them (`view.ts`), since a comparison that moves the head names no new state.
-    const chatRow = s.chat(chat);
-    const key = `${s.stateKey(chat, turn)}\u0000${chatRow?.head ?? ""}\u0000${chatRow?.revision ?? ""}`;
+    // Asks of the same state at once share one view: the key its parts are kept under names it (`chatViewKey`: the store's key for the
+    // state, the chat's head and revision, the lines in force and the chat's settings the parts read), so an ask after any of them moved
+    // builds its own.
+    const { taps, map } = await this.deps.settings(user, chat);
+    const knowledge = knowledgeOf(taps);
+    const key = chatViewKey({ store: this.deps.store, user, chat, turn, map, knowledge, offstage: taps.tell });
     const going = this.building.get(key);
     if (going !== undefined) return await going;
-    const work = this.stateView(user, chat, turn);
+    const work = this.stateView(user, chat, turn, { taps, map }, knowledge);
     this.building.set(key, work);
     try {
       return await work;
@@ -326,19 +328,17 @@ export class PlayService {
     }
   }
 
-  /** The state views being made, by the state they show (`state`). */
+  /** The state views being made, by the key their parts are kept under (`state`). */
   private readonly building = new Map<string, Promise<StateView>>();
 
-  private async stateView(user: string, chat: string, turn: string | null): Promise<StateView> {
+  private async stateView(user: string, chat: string, turn: string | null, { taps, map }: Pick<PlaySettings, "taps" | "map">, knowledge: ControlsKnowledge): Promise<StateView> {
     const s = this.deps.store.user(user);
-    const { taps, map } = await this.deps.settings(user, chat);
     const keys = (await this.part()).keys;
     // Each turn's notes are kept while its state and these words stand, so the words name themselves by what they hold.
     const texts = await historyTexts(this.deps.texts(user, chat));
     const journal = await journalNotes(this.deps.store, user, chat, taps.journalMost, { texts, code: (code) => own(keys, code) ?? code, key: hashParts("journal-words", JSON.stringify(texts), JSON.stringify(keys)) });
     const turning = this.deps.turning(user, chat);
     const { db } = this.deps;
-    const knowledge = knowledgeOf(taps);
     // From now on, a run of the chat that ends tells the page to read it again.
     this.runEnds.follow(chat);
     return chatView({

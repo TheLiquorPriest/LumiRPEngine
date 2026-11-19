@@ -277,6 +277,13 @@ function viewKey(s: UserStore, row: { head: string | null; revision: string | nu
   return JSON.stringify([s.stateKey(input.chat, input.turn), row.head, row.revision, lines, input.map, input.knowledge, input.offstage]);
 }
 
+/** The key the chat's view of `input` is kept under now (`built`): what names a view being built, for a caller that shares one. */
+export function chatViewKey(input: ViewKeyInput): string {
+  const s = input.store.user(input.user);
+  const row = s.chat(input.chat);
+  return viewKey(s, { head: row?.head ?? null, revision: row?.revision ?? null }, linesGiven(), input);
+}
+
 /**
  * The items of the panels no view carries, read one at a time as pages open them (`chatViewItem`), by the key the view of the same
  * state is kept under, then by panel and item: the newest asked keys, `VIEWS_KEPT` of them, as the views are kept.
