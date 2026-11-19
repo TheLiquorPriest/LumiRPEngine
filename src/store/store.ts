@@ -31,7 +31,7 @@ import { chainOf, comparePaths, keptOf, matchTurn, mergeKept, nodeKey, toldWith,
 import { BLANK_REVISION, blankWorld } from "./blank";
 import { UserWorlds, type WorldChange, type WorldRevisionRow } from "./worlds";
 import { KEPT_BY_NODE, migrateStore, missingStoreTables } from "./schema";
-import { FoldAway, type AwayFold, type AwayHeld, type FoldJob, type StoreAway, type StoreBrief } from "./away";
+import { AwayAsked, FoldAway, type AwayFold, type AwayHeld, type FoldJob, type StoreAway, type StoreBrief } from "./away";
 import { TreeView } from "./view";
 import { letGo, STRETCH_MS } from "./prepare";
 import {
@@ -102,9 +102,6 @@ const FOLD_VERSION = 8;
 
 /** A fold that holds the thread this long or longer says so in the log, once (`saidLong`). */
 const LONG_FOLD_MS = 1000;
-
-/** How many times a read or a write refused for a long fold is made again after a thread folded it (`offThread`). */
-const AWAY_TRIES = 4;
 
 /** How many writes back a chat's marks are followed (`MarksSince.steps`), so a rollback of that many leaves its held states named. */
 const MARK_STEPS = 16;
@@ -518,8 +515,9 @@ export class Store {
   readonly thread: "rpe" | "worker" | null;
   /** @internal Whether a fold with no state held on its path throws `FoldAway` too: set by `afar` for the one synchronous read it makes. */
   guarding = false;
-  /** @internal Whether the preparing pass folds (`UserStore.prepareNext`): its own stretches from a held state run here whatever they hold. */
-  passing = false;
+  /** By user and node, the folds a thread runs now, which a second asker of the same waits for (`foldAway`); and the last one asked, after which the next runs. */
+  private readonly goingAway = new Map<string, Promise<void>>();
+  private lastAway: Promise<unknown> = Promise.resolve();
 
   constructor(options: StoreOptions) {
     if (typeof options.db === "string") {
@@ -704,13 +702,13 @@ export class Store {
   async afar<T>(read: () => T): Promise<T> {
     const away = this.away;
     if (away === null) return read();
-    for (let tries = 0; tries < 4; tries++) {
+    for (const asked = new AwayAsked(); ; ) {
       let job: FoldJob;
       this.guarding = true;
       try {
         return read();
       } catch (error) {
-        if (!(error instanceof FoldAway)) throw error;
+        if (!(error instanceof FoldAway) || !asked.again(error.job)) throw error;
         job = error.job;
       } finally {
         this.guarding = false;
@@ -722,7 +720,6 @@ export class Store {
         return read();
       }
     }
-    return read();
   }
 
   /**
@@ -738,24 +735,25 @@ export class Store {
 
   /**
    * Runs `read`, a call that only reads and may be made again, holding RPE's thread for no long fold: one the store refuses to run here
-   * runs on a thread (`awayFor`) and the read is made again, `AWAY_TRIES` times at most. A fold that is merely cold (a stored snapshot
-   * read, the chat's start made) runs here, unlike `afar`. Where no thread is given, `read` is made once.
+   * runs on a thread (`awayFor`) and the read is made again, for as long as each time it asks for another fold (a walk over many turns
+   * goes on from where it was refused, the states before held). A fold that is merely cold (a stored snapshot read, the chat's start
+   * made) runs here, unlike `afar`. Where no thread is given, `read` is made once.
    */
   async offThread<T>(read: () => T): Promise<T> {
-    for (let tries = 1; ; tries++) {
+    for (const asked = new AwayAsked(); ; ) {
       try {
         return read();
       } catch (error) {
-        const away = tries < AWAY_TRIES ? this.awayFor(error) : null;
+        const away = error instanceof FoldAway && asked.again(error.job) ? this.awayFor(error) : null;
         if (away === null) throw error;
         await away;
       }
     }
   }
 
-  /** @internal Whether a fold over `workerFoldAt` changes is refused here: wherever a thread is given, but for the preparing pass's own stretches from a held state (`passing`). */
-  refusesLong(cold: boolean): boolean {
-    return this.away !== null && (!this.passing || cold);
+  /** @internal Whether a fold over `workerFoldAt` changes is refused here: wherever a thread is given, the preparing pass's own included. */
+  refusesLong(): boolean {
+    return this.away !== null;
   }
 
   /**
@@ -765,7 +763,20 @@ export class Store {
    * node's mark as this store's writes give it, as is a state the thread folded along a path given whole (a write's own, refused) at a
    * node this database holds. A node only that write held keeps the chat's mark, and goes with the chat's next write.
    */
-  private async foldAway(away: StoreAway, job: FoldJob): Promise<void> {
+  private foldAway(away: StoreAway, job: FoldJob): Promise<void> {
+    // One fold on a thread at a time, so what threads hold is one fold's; a second asker of the same fold waits for the first's.
+    const key = `${job.user}\u0000${"node" in job ? job.node : job.end}`;
+    const going = this.goingAway.get(key);
+    if (going !== undefined) return going;
+    const run = this.lastAway.then(() => this.foldAwayNow(away, job));
+    this.lastAway = run.catch(() => undefined);
+    this.goingAway.set(key, run);
+    void run.catch(() => undefined).finally(() => this.goingAway.delete(key));
+    return run;
+  }
+
+  /** Runs `job` on a thread and holds what it gave (`foldAway`). */
+  private async foldAwayNow(away: StoreAway, job: FoldJob): Promise<void> {
     const before = new Map(this.db.query<{ chat: string; mark: string }, [string]>("SELECT chat, mark FROM fold_mark WHERE user = ?").all(job.user).map((r) => [r.chat, r.mark]));
     const done = await away.run({ path: away.path, ...this.forThreads }, job);
     // What the thread folded came across as objects all new here: frozen a stretch at a time, so holding them (`keep`) walks none.
@@ -795,10 +806,13 @@ export class Store {
     for (const f of done.failures) this.handlerFailed({ op: f.op, error: new Error(f.message), user: f.user, ...(f.chat === undefined ? {} : { chat: f.chat }), turn: f.turn, change: f.change });
   }
 
-  /** @internal What `user`'s folds hold in memory, for a thread to hand back. */
-  takeFolds(user: string): AwayFold[] {
-    const prefix = `${user}\u0000`;
-    return [...this.folds].filter(([key]) => key.startsWith(prefix)).map(([key, c]) => ({ key, chat: c.chat, mark: c.mark, folded: c.folded, upto: c.upto }));
+  /** @internal The states `user`'s folds hold of `nodes`, for a thread to hand back: only those its job asked for, never the chat's start it made on the way. */
+  takeFolds(user: string, nodes: readonly string[]): AwayFold[] {
+    return nodes.flatMap((node) => {
+      const key = `${user}\u0000${node}`;
+      const c = this.folds.get(key);
+      return c === undefined ? [] : [{ key, chat: c.chat, mark: c.mark, folded: c.folded, upto: c.upto }];
+    });
   }
 
   /** @internal The snapshots `user`'s folds found worth storing, as `hold` takes them back. */
@@ -1582,8 +1596,10 @@ export class UserStore {
   tieTurn(id: string, input: { message: string; hash: string; date?: number | null; status?: "done" | "cut"; text?: string | null }): TurnRow {
     const t = this.turnToWrite(id);
     if (t.status === "dropped") throw new StoreInputError(`turn ${id} was dropped`);
-    // A finished turn every `snapshotEvery` along its path keeps its state, so a cold start is short.
-    const keep = (t.depth + 1) % this.store.snapshotEvery === 0 ? this.foldNode(t.node) : null;
+    // A finished turn every `snapshotEvery` along its path keeps its state, so a cold start is short: the state held in memory, for a tie
+    // folds nothing (it may stand in a write that changed the turn's changes, which a thread could not read); one not held is stored by
+    // the next fold through the node.
+    const keep = (t.depth + 1) % this.store.snapshotEvery === 0 ? this.heldAt(t.node) : null;
     this.write(false, () => {
       this.db.run("UPDATE turn SET message = ?, hash = ?, swipe_date = ?, status = ?, edited = NULL WHERE user = ? AND id = ?", [input.message, input.hash, input.date ?? null, input.status ?? "done", this.id, id]);
       if (input.text !== undefined) this.db.run("UPDATE turn SET text = ? WHERE user = ? AND id = ?", [input.text, this.id, id]);
@@ -2778,19 +2794,14 @@ export class UserStore {
     while (to > 0 && !rows[to - 1]?.usable && rows[to - 1]?.key !== after) to--;
     let changes = 0;
     let at: string | null = null;
-    // The pass's own stretches run here, each turn from the state the turn before it left, however much it holds; a stretch that starts
-    // where no state is held and folds more than `workerFoldAt` changes (a chat's heavy first turn) runs on a thread (`FoldAway`).
-    this.store.passing = true;
-    try {
-      for (; to <= end && (at === null || performance.now() - began < forMs); to++) {
-        const row = rows[to];
-        if (row === undefined) break;
-        this.foldNode(row.key);
-        at = row.key;
-        changes += row.changes;
-      }
-    } finally {
-      this.store.passing = false;
+    // The pass's own stretches, each turn from the state the turn before it left; a step over `workerFoldAt` changes (a chat's heavy
+    // first turn, a heavy turn of an import) is refused here, as every fold is, and the pass has it folded on a thread (`Preparer`).
+    for (; to <= end && (at === null || performance.now() - began < forMs); to++) {
+      const row = rows[to];
+      if (row === undefined) break;
+      this.foldNode(row.key);
+      at = row.key;
+      changes += row.changes;
     }
     return { at, changes, left: at === rows[end]?.key ? missing - 1 : missing, wanted: missing };
   }
@@ -2910,11 +2921,21 @@ export class UserStore {
     // No state held on its path: the fold reads a stored snapshot whole, or makes the chat's start, which on a chat with a large world
     // holds the thread however few turns follow. A caller that can wait for a thread has it folded there (`Store.afar`).
     const job = (): FoldJob => this.awayJob(node);
-    if (!start && this.store.guarding) throw new FoldAway(job(), null);
+    if (!start && this.store.guarding) throw new FoldAway(job(), null, this.store);
     const first = chain[0];
     if (!first) throw new StoreInputError(`no path node ${node}`);
-    // Refused, where it is too long for RPE's thread, before the snapshot is read: the turns after the state it starts from.
-    this.guardLong(chain.slice(start ? from + 1 : first.snap === 1 ? 1 : 0).map((c) => c.turn), start === null, job);
+    // Where it starts (a held state, else the stored snapshot, else the chat's start), and what is placed along the steps after it: jobs'
+    // changes, and his own, of which those placed at or before the start are in it already.
+    const startsAt = start ? from : first.snap === 1 ? 0 : -1;
+    const placed = this.jobsPlaced(node);
+    const owner = this.ownerIn(own.chat) ? this.placeOwner(startsAt >= 0 ? chain.slice(startsAt) : chain, startsAt >= 0, null).before : new Map<string, OwnerChange[]>();
+    // Refused, where it is too long for RPE's thread, before the snapshot is read: the turns after where it starts, and what is placed along them.
+    const ahead = chain.slice(startsAt + 1);
+    this.guardLong(
+      ahead.map((c) => c.turn),
+      ahead.reduce((n, c) => n + (placed.get(c.key)?.length ?? 0) + (owner.get(c.key)?.length ?? 0), 0),
+      job,
+    );
     // The newest change id in the stored snapshot the fold starts from; null when it starts elsewhere.
     let stored: number | null = null;
     if (!start && first.snap === 1) {
@@ -2948,9 +2969,6 @@ export class UserStore {
       const away = own ? undefined : this.awayOf(c.turn, made, c.prev === null ? new Set() : this.turnsTo(c.prev));
       return { node: c.key, turn: c.turn, n: c.depth + 1, own, changes, ...(away === undefined ? {} : { away }) };
     };
-    const placed = this.jobsPlaced(node);
-    // His own changes, placed along the steps folded here; those placed at or before the start are in it already.
-    const owner = this.ownerIn(own.chat) ? this.placeOwner(from >= 0 ? chain.slice(from) : rest, from >= 0, null).before : new Map<string, OwnerChange[]>();
     const steps = rest.map((c): FoldStep => ({ ...stepOf(c, byTurn.get(c.turn) ?? []), jobs: placed.get(c.key) ?? [], owner: owner.get(c.key) ?? [] }));
     // Changes the snapshot's own turn took after it was stored (a correction after a starting state was set) go on top of it.
     const late = (byTurn.get(first.turn) ?? []).filter((c) => c.id > (stored ?? Number.POSITIVE_INFINITY));
@@ -3006,7 +3024,15 @@ export class UserStore {
         .all(this.id, JSON.stringify(nodes.map(([, , turn]) => turn)))
         .map((t) => [t.id, t]),
     );
-    this.guardLong(nodes.slice(deepest + 1).map(([, , t]) => t), true, () => ({ user: this.id, end, turn, nodes }));
+    const rest = nodes.slice(deepest + 1);
+    const placed = this.jobsAlong(nodes.map(([key, , turn, depth]) => ({ key, turn, depth, created: turns.get(turn)?.created ?? 0 }))).placed;
+    const run = nodes.map(([key, , turn, depth]) => ({ key, chat: turns.get(turn)?.chat ?? chat, created: turns.get(turn)?.created ?? 0, depth }));
+    const owner = this.ownerIn(chat) ? this.placeOwner(deepest >= 0 ? run.slice(deepest) : run, deepest >= 0, null).before : new Map<string, OwnerChange[]>();
+    this.guardLong(
+      rest.map(([, , t]) => t),
+      rest.reduce((n, [key]) => n + (placed.get(key)?.length ?? 0) + (owner.get(key)?.length ?? 0), 0),
+      () => ({ user: this.id, end, turn, nodes }),
+    );
     const marks = new Map<string, string>();
     const markFor = (c: string): string => {
       const m = marks.get(c) ?? this.store.markOf(this.id, c);
@@ -3014,11 +3040,7 @@ export class UserStore {
       return m;
     };
     const base = deepest >= 0 ? this.foldNode(nodes[deepest]?.[0] ?? "") : { folded: this.chatStartOf(nodes[0]?.[2] ?? ""), upto: 0 };
-    const rest = nodes.slice(deepest + 1);
     const byTurn = this.changesOf(rest.map(([, , turn]) => turn));
-    const placed = this.jobsAlong(nodes.map(([key, , turn, depth]) => ({ key, turn, depth, created: turns.get(turn)?.created ?? 0 }))).placed;
-    const run = nodes.map(([key, , turn, depth]) => ({ key, chat: turns.get(turn)?.chat ?? chat, created: turns.get(turn)?.created ?? 0, depth }));
-    const owner = this.ownerIn(chat) ? this.placeOwner(deepest >= 0 ? run.slice(deepest) : run, deepest >= 0, null).before : new Map<string, OwnerChange[]>();
     // The turns before each step on this path, which may not all be stored yet: the chain's own, grown as the steps go.
     const before = new Set(nodes.slice(0, deepest + 1).map(([, , t]) => t));
     const steps = rest.map(([key, , turn, depth]): FoldStep => {
@@ -3057,14 +3079,27 @@ export class UserStore {
   }
 
   /**
-   * Throws `FoldAway` for a fold about to run over the turns `turns` (`cold`: from no state held) where they hold more changes than
-   * `workerFoldAt` and the store refuses such a fold on RPE's thread (`Store.refusesLong`): before it reads a snapshot or changes
-   * anything, so whoever asked may make the call again once a thread has folded it.
+   * Throws `FoldAway` for a fold about to run over the turns `turns`, and `placed` changes placed along them (jobs', his own), where
+   * those and the turns' own changes are more than `workerFoldAt` and the store refuses such a fold on RPE's thread
+   * (`Store.refusesLong`): before it reads a snapshot or changes anything, so whoever asked may make the call again once a thread has
+   * folded it.
    */
-  private guardLong(turns: readonly string[], cold: boolean, job: () => FoldJob): void {
-    if (!this.store.refusesLong(cold)) return;
-    const n = this.db.query<{ n: number }, [string, string]>("SELECT COUNT(*) AS n FROM change WHERE user = ?1 AND turn IN (SELECT value FROM json_each(?2)) AND job IS NULL").get(this.id, JSON.stringify(turns))?.n ?? 0;
-    if (n > this.store.workerFoldAt) throw new FoldAway(job(), n);
+  private guardLong(turns: readonly string[], placed: number, job: () => FoldJob): void {
+    if (!this.store.refusesLong()) return;
+    const n = placed + (this.db.query<{ n: number }, [string, string]>("SELECT COUNT(*) AS n FROM change WHERE user = ?1 AND turn IN (SELECT value FROM json_each(?2)) AND job IS NULL").get(this.id, JSON.stringify(turns))?.n ?? 0);
+    if (n > this.store.workerFoldAt) throw new FoldAway(job(), n, this.store);
+  }
+
+  /** The state at a stored node held in memory under its node's mark (or its chat's), folding nothing; null where none is held. */
+  private heldAt(node: string): { folded: Folded; upto: number } | null {
+    const own = this.db
+      .query<{ chat: string; mark: string | null }, [string, string]>(
+        "SELECT t.chat, m.mark FROM path_node n JOIN turn t ON t.user = n.user AND t.id = n.turn LEFT JOIN fold_mark m ON m.user = t.user AND m.chat = t.chat WHERE n.user = ?1 AND n.key = ?2",
+      )
+      .get(this.id, node);
+    if (!own) return null;
+    const hit = this.store.cached(this.cacheKey(node), this.store.nodeMark(this.id, own.chat, node, own.mark ?? ""), own.mark ?? "");
+    return hit ? { folded: hit.folded, upto: hit.upto } : null;
   }
 
   /**
@@ -3087,16 +3122,21 @@ export class UserStore {
   }
 
   /**
-   * @internal Folds what a thread was asked to (`FoldJob`), the states left held for `Store.takeFolds`: the state at the node before its
-   * end first, where that node is stored, and the end from it. A write refused for the fold and made again may change the end's own turn
-   * before it folds there (a continue joined to it, a change landed on it), which this thread cannot read; it then folds that one turn
-   * from the state held before it, a step RPE's thread runs.
+   * @internal Folds what a thread was asked to (`FoldJob`), the states left held for `Store.takeFolds`, and the nodes they are of: the
+   * end, and for a write's job (a path given whole) the node before it first, where that node is stored, the end from it. A write
+   * refused for the fold and made again may change the end's own turn before it folds there, which this thread cannot read; it then
+   * folds that one turn from the state held before it.
    */
-  foldJob(job: FoldJob): void {
-    const before = "node" in job ? (this.db.query<{ prev: string | null }, [string, string]>("SELECT prev FROM path_node WHERE user = ? AND key = ?").get(this.id, job.node)?.prev ?? null) : (job.nodes.at(-2)?.[0] ?? null);
-    if (before !== null && this.db.query<{ key: string }, [string, string]>("SELECT key FROM path_node WHERE user = ? AND key = ?").get(this.id, before) !== null) this.foldNode(before);
-    if ("node" in job) this.foldNode(job.node);
-    else this.foldPath(job.end, job.turn, () => job.nodes);
+  foldJob(job: FoldJob): string[] {
+    if ("node" in job) {
+      this.foldNode(job.node);
+      return [job.node];
+    }
+    const before = job.nodes.at(-2)?.[0] ?? null;
+    const stored = before !== null && this.db.query<{ key: string }, [string, string]>("SELECT key FROM path_node WHERE user = ? AND key = ?").get(this.id, before) !== null;
+    if (stored) this.foldNode(before);
+    this.foldPath(job.end, job.turn, () => job.nodes);
+    return stored ? [before, job.end] : [job.end];
   }
 
   /** The state the chat a turn was made in starts from (`initial`). */

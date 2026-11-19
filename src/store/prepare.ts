@@ -8,6 +8,7 @@
 
 import type { JsonValue } from "../shared/json";
 import type { ChatPreparing } from "../shared/preparing";
+import { AwayAsked, FoldAway } from "./away";
 import type { Store } from "./store";
 
 /** How long a reading over many turns works before it lets the thread go (`inStretches`). */
@@ -26,17 +27,27 @@ export function letGo(): Promise<void> {
 
 /**
  * `work` over each of `items` in order, letting the thread go every `STRETCH_MS` (`letGo`); `around` runs each stretch inside it (the
- * chat's lines a stretch is worded in, which hold only while synchronous work runs). What each item gave, in order.
+ * chat's lines a stretch is worded in, which hold only while synchronous work runs). An item whose fold is too long for RPE's thread
+ * (`FoldAway`) has it folded on a thread, and the walk goes on from that item, the states before it held. What each item gave, in order.
  */
 export async function inStretches<I, T>(items: readonly I[], work: (item: I) => T, around: (stretch: () => void) => void = (stretch) => stretch()): Promise<T[]> {
   const out: T[] = [];
+  const asked = new AwayAsked();
   let at = 0;
   while (at < items.length) {
     const began = performance.now();
+    const refused: { by: FoldAway | null } = { by: null };
     around(() => {
-      for (; at < items.length && (at === 0 || performance.now() - began < STRETCH_MS); at++) out.push(work(items[at] as I));
+      try {
+        for (; at < items.length && (at === 0 || performance.now() - began < STRETCH_MS); at++) out.push(work(items[at] as I));
+      } catch (error) {
+        if (!(error instanceof FoldAway) || !asked.again(error.job)) throw error;
+        refused.by = error;
+      }
     });
-    if (at < items.length) await letGo();
+    const away = refused.by?.away() ?? null;
+    if (away !== null) await away;
+    else if (at < items.length) await letGo();
   }
   return out;
 }

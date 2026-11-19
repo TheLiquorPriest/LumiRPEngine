@@ -65,16 +65,22 @@ export interface StoreAway {
   run(brief: StoreBrief, job: FoldJob): Promise<FoldDone>;
 }
 
+/** What can run a refused fold on a thread: the store that refused it (`Store.awayFor`). */
+export interface FoldsAway {
+  awayFor(error: unknown): Promise<void> | null;
+}
+
 /**
- * Thrown where a fold is longer than the store runs on RPE's thread (`Store.awayFor` runs it on a thread), before the fold changes
- * anything, so what threw may be made again once the thread has folded it. Its words, for the log of one nothing could wait for, say
- * how long it was and the calls that asked for it, innermost first.
+ * Thrown where a fold is longer than the store runs on RPE's thread, before the fold changes anything, so what threw may be made again
+ * once the thread has folded it (`away`: the store that refused it runs it there). Its words, for the log of one nothing could wait for,
+ * say how long it was and the calls that asked for it, innermost first.
  */
 export class FoldAway extends Error {
   constructor(
     readonly job: FoldJob,
     /** The changes it would run over; null for a fold `afar` hands over for having no state held on its path. */
     changes: number | null,
+    private readonly by: FoldsAway,
   ) {
     super(changes === null ? "A fold with no state held on its path was asked for where it runs on a worker thread." : `A fold over ${changes} changes was asked for on RPE's thread, which runs none that long; it runs on a worker thread for whoever waits for it.`);
     this.name = "FoldAway";
@@ -82,5 +88,41 @@ export class FoldAway extends Error {
     // The calls by name, which a bundled build keeps where it keeps no file of its own for each.
     const calls = (this.stack ?? "").split("\n").flatMap((line) => /^\s*at (?:async )?([\w$.#<>]+) \(/.exec(line)?.[1] ?? []);
     this.message += ` Asked for by ${calls.slice(0, 10).join(" ← ")}.`;
+  }
+
+  /** The fold run on a thread by the store that refused it, its states held there once it is done. */
+  away(): Promise<void> | null {
+    return this.by.awayFor(this);
+  }
+}
+
+/** Where `error` is a refused fold (`FoldAway`), its fold run on a thread; null for any other error: what the write queue and every asker is given. */
+export function awayOf(error: unknown): Promise<void> | null {
+  return error instanceof FoldAway ? error.away() : null;
+}
+
+/** How many times running one asker may be refused the same fold, its thread's fold not serving it, before it gives up (`AwayAsked`). */
+const AWAY_REPEATS = 2;
+
+/** How many folds one asker may have run on a thread before it gives up, whatever they were (`AwayAsked`). */
+const AWAY_MOST = 64;
+
+/**
+ * One asker's refused folds (`Store.afar`, `Store.offThread`, a walk): it asks again while each refusal names another fold (a walk goes
+ * on from where it was refused, the states before held), and gives up once the same fold is refused `AWAY_REPEATS` times running (what
+ * the thread held did not serve it) or `AWAY_MOST` were run.
+ */
+export class AwayAsked {
+  private last = "";
+  private same = 0;
+  private all = 0;
+
+  /** Whether to have `job` run on a thread and ask again. */
+  again(job: FoldJob): boolean {
+    const key = "node" in job ? job.node : job.end;
+    this.same = key === this.last ? this.same + 1 : 0;
+    this.last = key;
+    this.all++;
+    return this.same < AWAY_REPEATS && this.all <= AWAY_MOST;
   }
 }

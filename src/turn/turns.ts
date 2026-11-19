@@ -41,7 +41,8 @@ import { tidyHolds } from "../play/path-events";
 import type { ActivatedRead } from "../lore/indexing";
 import { isRecord, type JsonValue } from "../shared/json";
 import { playAnswers } from "../play/service";
-import { type ChangeRow, clockRecorded, type DueSource, type MapText, type PathReport, type Report, type ShownMessage, type Store, type TreeView, type TurnRow, type UserStore, worldState, worldStateFolds } from "../store";
+import { awayOf, type ChangeRow, clockRecorded, type DueSource, type MapText, type PathReport, type Report, type ShownMessage, type Store, type TreeView, type TurnRow, type UserStore, worldState, worldStateFolds } from "../store";
+import { againAfterAway } from "../app/database";
 import { aboutOf } from "../store/fold";
 import { type SceneSession, sceneSession, storyBrief, storyCoverage, storyRecordParts } from "../story";
 import { storyAt } from "../story/path";
@@ -764,7 +765,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         const writes = tag.target.message !== null && (tag.kind === "new" || tag.kind === "swipe" || tag.kind === "regenerate");
         const at: BriefingFor = { kind: tag.kind, speaker: tag.speaker.name, message: target, writing: writes ? tag.target.message : null, keep: tagged.cut.keep?.id ?? null, limits, notGiven: left, cut: tagged.cut };
         // A continue whose tag names a turn's message is told what is new since that turn's runs were told, as a continue of it.
-        const [{ blocks: briefing, loreMap, activated, storyTime, notGiven }, { items: since, told }] = await Promise.all([this.#briefing(reads, guidance, scope, at, steps, settings), this.#since(reads, user, named ?? begun, found)]);
+        // Each made again where a state it reads is no longer held and too long to fold on RPE's thread, folded on a worker thread meanwhile.
+        const [{ blocks: briefing, loreMap, activated, storyTime, notGiven }, { items: since, told }] = await Promise.all([againAfterAway(awayOf, () => this.#briefing(reads, guidance, scope, at, steps, settings)), againAfterAway(awayOf, () => this.#since(reads, user, named ?? begun, found))]);
         run.notGiven = notGiven;
         // What he asked for beside his words (`requests.ts`): a turn that answers a new message is told what waits; a swipe or a regenerate,
         // what the earlier attempts at its message were told and the swipe's mode that waits; a continue is told nothing again. Each is one
@@ -1228,7 +1230,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         const found = { steps, notices: lines(notices), guidance, last, again: true, replaced: null, hiddenReadable: settings.hiddenReadable, editedBudget: settings.editedBudget, deleted: { budget: settings.deletedBudget, words: settings.deletedWords }, notAppliedBudget: settings.notAppliedBudget, jobBudget: settings.jobBudget, jobReport: settings.jobReport, tokens: tokenCount(settings.charsPerToken), tell: settings.taps.tell };
         const limits = (): Promise<ModelLimits | null> => this.#leadLimits(scope, settings.lead);
         const at: BriefingFor = { kind: run.kind, speaker: null, message: null, writing: null, keep: this.#d.prompts.keptFrom(user, turn.id), limits, notGiven: [], cut: { notices: [], clipped: null } };
-        const [{ blocks: briefing, notGiven }, { items, told }] = await Promise.all([this.#briefing(reads, guidance, scope, at, steps, settings), this.#since(reads, user, turn, found)]);
+        const [{ blocks: briefing, notGiven }, { items, told }] = await Promise.all([againAfterAway(awayOf, () => this.#briefing(reads, guidance, scope, at, steps, settings)), againAfterAway(awayOf, () => this.#since(reads, user, turn, found))]);
         run.notGiven = notGiven;
         const asked = lines(notices)?.line("settle_asked");
         request = {
@@ -1644,7 +1646,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         const holds = tidyHolds(this.#d.store, scope.user, scope.turn, settings.taps.tidy);
         // The values the layout was rendered with are kept as the part's last fields (the Prompts preview reads them there).
         const rendered = (fields: JsonObject): void => void this.#d.harness().parts.keep(scope, "prompt", PARTS.worldState, fields).catch((error: unknown) => this.#d.log.warn("The world state's rendered values could not be kept.", { turn: scope.turn, error: words(error) }));
-        const state = worldState(u, { chat: scope.chat, turn: scope.turn, layout: layout.text, map: maps, drawnGiven, placeLines, holds, due: this.#d.due, settings: settings.worldState, charsPerToken: settings.charsPerToken, rendered });
+        const state = await this.#d.store.offThread(() => worldState(u, { chat: scope.chat, turn: scope.turn, layout: layout.text, map: maps, drawnGiven, placeLines, holds, due: this.#d.due, settings: settings.worldState, charsPerToken: settings.charsPerToken, rendered }));
         this.#drawnAfter.set(`${scope.user}\n${scope.turn}`, { ...drawnGiven, ...state.drawnShown });
         if (state.text.trim() !== "") blocks.push({ name: BLOCKS.worldState, text: state.text.trimEnd() });
       } catch (error) {

@@ -11,8 +11,8 @@
 // for `server.idleSeconds` is closed: a reply's stream and the live socket stay open by what they send, and a
 // reply asked for whole lifts the bound from itself. A route marked long is answered at once over TCP with an
 // id, and its answer read when ready (`answers.ts`), so nothing a page asks through the relay fails for time.
-// A route's handler that needed a fold too long for RPE's thread (`awayFor`) has it made on a worker thread
-// and, where it only reads, is asked again; any other is answered in words, which say to send it again.
+// A route's handler that needed a fold too long for RPE's thread (`awayFor`) has it made on a worker thread and is asked again,
+// unless a write of its was committed first, which a second asking would write twice (`againAfterAway`).
 //
 // Two kinds of listener. TCP, where pages, Lumiverse and the extension reach RPE, serves every route but
 // the command line's. The command socket, a Unix socket in the data folder that only the owner's account
@@ -37,12 +37,9 @@ import { bodyProblem, JOINED_STATUS, problemsOf, readQuery, RouteError, shape, s
 import { RefusedSignIns } from "./refusals";
 import { LUMIVERSE_SIGNIN_PATH } from "./signin-routes";
 import type { Workers } from "./workers/pool";
-import type { AwayFor } from "./database";
+import { againAfterAway, type AwayFor } from "./database";
 import type { ChatNamedHook, ChatPreparingHook, ChatReadyHook } from "./hooks";
 import type { PreparingShown } from "../shared/preparing";
-
-/** How many times a route that only reads is asked again after work off RPE's thread it needed (`ServerParts.awayFor`). */
-const ROUTE_AWAY_TRIES = 3;
 
 /** The address a request came from, as the socket says it; words for where none can be read. */
 function addressOf(server: Server<LiveSocketData> | null, request: Request): string {
@@ -335,19 +332,11 @@ async function answerDeclared(route: DeclaredRoute<any, any, any, any, any, any>
     const answered = route.paged !== undefined && isRecord(reply) && typeof reply.next === "string" ? { ...reply, next: cursorOf(cursorKey, at, asked.params, reply.next) } : reply;
     return Response.json(answered, { headers: { "cache-control": "no-store" } });
   };
-  // A handler that needed a fold too long for RPE's thread has it made on a worker thread (`away`); a read is then asked again, a few times
-  // at most, and any other is answered in words, since what it did before the fold was refused may stand.
+  // A handler that needed a fold too long for RPE's thread has it made on a worker thread (`away`) and is asked again, whatever its method,
+  // unless a write of its was committed before (`againAfterAway`).
   const handled = async (signal: AbortSignal): Promise<unknown> => {
-    for (let tries = 1; ; tries++) {
-      try {
-        return await route.handle({ params: asked.params, query, body, user: asked.user, auth: asked.auth, signal });
-      } catch (error) {
-        const away = tries <= ROUTE_AWAY_TRIES ? (asked.away?.(error) ?? null) : null;
-        if (away === null) throw error;
-        await away;
-        if (route.method !== "GET") throw new RouteError(503, "RPE first had to work out a long stretch of this chat's past, which it did on another thread: send this again.");
-      }
-    }
+    const handle = (): Promise<unknown> => Promise.resolve(route.handle({ params: asked.params, query, body, user: asked.user, auth: asked.auth, signal }));
+    return asked.away === null ? await handle() : await againAfterAway(asked.away, handle);
   };
   // A long route's work outlives the request it was asked by: it is never aborted with it.
   if (route.long === true && asked.later !== null) return asked.later(run);

@@ -51,15 +51,18 @@ function storeFor(brief: StoreBrief, areas: readonly StoreArea[]): Open {
   return open;
 }
 
-/** Runs one long fold on this thread: the states it held, the snapshots it found worth storing, and what it said. */
+/**
+ * Runs one long fold on this thread: the states it asked for (never the chat's start or another made on the way), the snapshots it found
+ * worth storing, and what it said. After it, this thread's store holds nothing but its world documents (`storedWorlds`, `store.worldsKept`).
+ */
 export function foldAway(input: { brief: StoreBrief; job: FoldJob }, areas: readonly StoreArea[]): FoldDone {
   const { db, store, failures, logs } = storeFor(input.brief, areas);
   failures.length = 0;
   logs.length = 0;
   db.run("BEGIN");
   try {
-    store.user(input.job.user).foldJob(input.job);
-    return { folds: store.takeFolds(input.job.user), held: store.takeHeld(input.job.user), failures: [...failures], logs: [...logs] };
+    const nodes = store.user(input.job.user).foldJob(input.job);
+    return { folds: store.takeFolds(input.job.user, nodes), held: store.takeHeld(input.job.user), failures: [...failures], logs: [...logs] };
   } finally {
     db.run("COMMIT");
     // What this thread held is the sender's now; a state kept here would outlive the rows it was folded from.

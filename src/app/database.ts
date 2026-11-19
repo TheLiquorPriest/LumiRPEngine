@@ -8,6 +8,7 @@
 // made around the queue fails where it is made rather than colliding with one made through it.
 
 import { Database } from "bun:sqlite";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { chmodSync } from "node:fs";
 import { OWNER_ONLY_FILE } from "./disk";
 
@@ -47,6 +48,36 @@ export class WriteAway extends Error {
 /** How many times a write is run again after the work off the thread it needed (`AwayFor`). */
 const WRITE_TRIES = 3;
 
+/** How many times a call is made again after the work off RPE's thread it needed (`againAfterAway`). */
+const CALL_TRIES = 16;
+
+/** A call made through `againAfterAway` (a route's handler, an agent's tool): whether a write of it, or of a call inside it, was committed. */
+interface Call {
+  wrote: boolean;
+  up: Call | undefined;
+}
+
+/** The call each write is asked within, followed through every wait of its work. */
+const calls = new AsyncLocalStorage<Call>();
+
+/**
+ * Makes `work` (a route's handler, an agent's tool) and, where it throws an error that asks for work off RPE's thread (`awayFor`: a fold
+ * too long for it) before any write of its own was committed, has that work done and makes it again, `CALL_TRIES` times at most. A call
+ * that committed a write first is not made again, since what it wrote would be written twice: it throws what it threw, in its words.
+ */
+export async function againAfterAway<T>(awayFor: AwayFor, work: () => Promise<T>): Promise<T> {
+  for (let tries = 1; ; tries++) {
+    const call: Call = { wrote: false, up: calls.getStore() };
+    try {
+      return await calls.run(call, work);
+    } catch (error) {
+      const away = call.wrote || tries >= CALL_TRIES ? null : awayFor(error);
+      if (away === null) throw error;
+      await away;
+    }
+  }
+}
+
 interface Job {
   write: (db: Database) => unknown;
   label: string;
@@ -54,6 +85,8 @@ interface Job {
   reject: (error: unknown) => void;
   /** How many times it was run again after work off the thread it needed. */
   tries: number;
+  /** The call it was asked within, told once it is committed. */
+  call: Call | undefined;
 }
 
 /**
@@ -92,7 +125,7 @@ export class WriteQueue {
   run<T>(write: (db: Database) => T, label = "a write"): Promise<T> {
     if (this.closed) return Promise.reject(new WritesClosed(`RPE is stopping, so ${label} was not made.`));
     const done = Promise.withResolvers<T>();
-    this.jobs.push({ write, label, resolve: done.resolve as (value: unknown) => void, reject: done.reject, tries: 0 });
+    this.jobs.push({ write, label, resolve: done.resolve as (value: unknown) => void, reject: done.reject, tries: 0, call: calls.getStore() });
     if (!this.draining) {
       this.draining = true;
       queueMicrotask(() => this.drain());
@@ -161,6 +194,8 @@ export class WriteQueue {
     } finally {
       this.db.run("PRAGMA query_only = ON");
     }
+    // The calls it was asked within wrote something: none of them is made again after work off the thread (`againAfterAway`).
+    for (let call = job.call; call !== undefined; call = call.up) call.wrote = true;
     job.resolve(result);
   }
 

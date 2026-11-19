@@ -28,12 +28,13 @@
 // holds it.
 
 import type { Database } from "bun:sqlite";
+import { againAfterAway } from "../app/database";
 import { type Fields, type Guidance, loadGuidance, type TemplatePart } from "../app/guidance";
 import type { AgentRef, AttachMoment, ConsentGrant, ContextBlock, FilesPort, GapCheck, JobView, Log, RuleFiring, RunScope, Scope, TurnEvents } from "rp-harness/contract";
 import { castViews, type MemorySearch, type SourceReader } from "../cast";
 import { mapView, mapWording, noMapWords, rulesetData } from "../iface";
 import { LORE_BATCH, LORE_KNOWN, type LoreIndex, type LoreProposals, loreBatchBlock, loreKnownBlock, loreLines } from "../lore";
-import { type DueSource, type Lane, type Part, readPart, type Store, type ViewLine, wordLine, worldState, type WorldStateBlock, worldStateFolds } from "../store";
+import { awayOf, type DueSource, type Lane, type Part, readPart, type Store, type ViewLine, wordLine, worldState, type WorldStateBlock, worldStateFolds } from "../store";
 import { storyBrief } from "../story";
 import { storyAt } from "../story/path";
 import { StoryRecord } from "../story/record";
@@ -124,7 +125,8 @@ async function compiledWorld(deps: EventsDeps, scope: Scope, guidance: Guidance,
   const map = maps ? mapView(await mapWording(guidanceTexts(deps.files, scope, deps.log)), settings.map) : undefined;
   // The states it reads are folded first where a long fold of one runs on a worker thread, so the world state finds them held.
   await deps.store.afar(() => worldStateFolds(store, turn));
-  return { part, ahead: settings.worldState.dueAhead, state: worldState(store, { chat: scope.chat, turn, layout: part, ...(map !== undefined ? { map } : {}), due: deps.due, settings: settings.worldState, charsPerToken: settings.charsPerToken }) };
+  const state = await deps.store.offThread(() => worldState(store, { chat: scope.chat, turn, layout: part, ...(map !== undefined ? { map } : {}), due: deps.due, settings: settings.worldState, charsPerToken: settings.charsPerToken }));
+  return { part, ahead: settings.worldState.dueAhead, state };
 }
 
 /**
@@ -314,8 +316,12 @@ export async function givenViews(deps: EventsDeps, scope: Scope, agent: AgentRef
   const out: { ref: string; text: string | null }[] = [];
   for (const ref of refs) {
     try {
-      const mine = ref === LORE_BATCH ? await loreBatchBlock(deps.loreIndex, scope, inForce(), agent) : ref === LORE_KNOWN ? await knownView(deps, scope, agent, inForce()) : await turnView(reading, ref);
-      out.push({ ref, text: mine !== undefined ? mine : ((await deps.views?.(scope, agent, ref)) ?? (await castNamed(deps, scope, agent, ref, moment))) });
+      // A view whose state is no longer held and too long to fold on RPE's thread has it folded on a worker thread, and is read again.
+      const text = await againAfterAway(awayOf, async () => {
+        const mine = ref === LORE_BATCH ? await loreBatchBlock(deps.loreIndex, scope, inForce(), agent) : ref === LORE_KNOWN ? await knownView(deps, scope, agent, inForce()) : await turnView(reading, ref);
+        return mine !== undefined ? mine : ((await deps.views?.(scope, agent, ref)) ?? (await castNamed(deps, scope, agent, ref, moment)));
+      });
+      out.push({ ref, text });
     } catch (error) {
       deps.log.warn("What an agent was to be given by name could not be read.", { agent: agent.id, ref, error: error instanceof Error ? error.message : String(error) });
       out.push({ ref, text: null });
