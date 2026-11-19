@@ -7,6 +7,7 @@
 
 import type { AgentRef, HostTool, RunScope, UserSessionScope } from "rp-harness/contract";
 import type { ChatPreparing } from "../shared/preparing";
+import type { AwayFor } from "./database";
 import type { Setting } from "./setting-list";
 import type { NamedNow } from "./switches";
 
@@ -50,6 +51,8 @@ export interface Fills {
   readonly chatReady?: ChatReadyHook;
   /** How far a chat a route names is from ready, which the server tells a page whose read of it waits. The area that fills `chatReady` fills it. */
   readonly chatPreparing?: ChatPreparingHook;
+  /** Where an error asks for work off RPE's thread before what threw is made again (a fold too long for it), that work; which the write queue and the server's routes ask. One area fills it. */
+  readonly awayFor?: AwayFor;
   /** The door's lanes this area fills. */
   readonly door?: DoorFills;
 }
@@ -68,6 +71,8 @@ export interface Hooks {
   readonly chatReady?: ChatReadyHook;
   /** The same area's word of how far a chat is from ready; absent where no area fills it. */
   readonly chatPreparing?: ChatPreparingHook;
+  /** The one area's work off RPE's thread for an error that asks for it; absent where no area fills it, and every such error is what it is. */
+  readonly awayFor?: AwayFor;
   /** The door's lanes, each as the one area that fills it gave it; a lane no area fills is absent. */
   readonly door: Readonly<DoorFills>;
 }
@@ -89,6 +94,7 @@ export function gatherHooks(areas: readonly Giving[]): Hooks {
   let chatNamed: { by: string; hook: ChatNamedHook } | null = null;
   let chatReady: { by: string; hook: ChatReadyHook } | null = null;
   let chatPreparing: { by: string; hook: ChatPreparingHook } | null = null;
+  let awayFor: { by: string; hook: AwayFor } | null = null;
   for (const area of areas) {
     if (area.fills?.views !== undefined) views.push(area.fills.views);
     if (area.fills?.jobTools !== undefined) tools.push(area.fills.jobTools);
@@ -104,6 +110,10 @@ export function gatherHooks(areas: readonly Giving[]): Hooks {
     if (area.fills?.chatPreparing !== undefined) {
       if (chatPreparing !== null) throw new Error(`How far a chat is from ready is told by two areas, ${chatPreparing.by} and ${area.name}: one area tells it.`);
       chatPreparing = { by: area.name, hook: area.fills.chatPreparing };
+    }
+    if (area.fills?.awayFor !== undefined) {
+      if (awayFor !== null) throw new Error(`Work off RPE's thread is given by two areas, ${awayFor.by} and ${area.name}: one area gives it.`);
+      awayFor = { by: area.name, hook: area.fills.awayFor };
     }
     for (const [lane, fill] of Object.entries(area.fills?.door ?? {})) {
       if (fill === undefined) continue;
@@ -132,6 +142,7 @@ export function gatherHooks(areas: readonly Giving[]): Hooks {
     ...(chatNamed === null ? {} : { chatNamed: chatNamed.hook }),
     ...(chatReady === null ? {} : { chatReady: chatReady.hook }),
     ...(chatPreparing === null ? {} : { chatPreparing: chatPreparing.hook }),
+    ...(awayFor === null ? {} : { awayFor: awayFor.hook }),
     door: door as DoorFills,
   };
 }

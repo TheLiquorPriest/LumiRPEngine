@@ -90,7 +90,10 @@ export const STORE_DEFAULTS = Object.freeze({
   kindChain: WALK_DEFAULTS.kindChain,
   holderDepth: WALK_DEFAULTS.holderDepth,
   visitDepth: WALK_DEFAULTS.visitDepth,
-  /** Changes a fold may run over here: past it, a caller that can wait (`Store.afar`) has the fold run on a worker thread (plan §4.1 l.199). */
+  /**
+   * Changes a fold may run over on RPE's thread: past it, wherever a thread is given (`StoreOptions.away`), the fold runs on a worker
+   * thread, whoever asked for it (plan §4.1 l.199). About where folding it here and taking a thread's states back hold RPE alike.
+   */
   workerFoldAt: 500,
 });
 
@@ -99,6 +102,23 @@ const FOLD_VERSION = 8;
 
 /** A fold that holds the thread this long or longer says so in the log, once (`saidLong`). */
 const LONG_FOLD_MS = 1000;
+
+/** How many times a read or a write refused for a long fold is made again after a thread folded it (`offThread`). */
+const AWAY_TRIES = 4;
+
+/** How many writes back a chat's marks are followed (`MarksSince.steps`), so a rollback of that many leaves its held states named. */
+const MARK_STEPS = 16;
+
+/** What a write's new mark changed of a chat's `marksSince`: the nodes it named, with the marks they had; or the whole it replaced. */
+type MarkStep = { mark: string; was: string; named: [node: string, had: string | undefined][] } | { mark: string; whole: MarksSince | undefined };
+
+/** What this store's writes said of a chat's nodes (`Store.marksSince`), and the steps back to the marks before (`Store.sinceOf`). */
+interface MarksSince {
+  newest: string;
+  base: string;
+  named: Map<string, string>;
+  steps: MarkStep[];
+}
 
 /** What a node's mark starts with (`nodeMark`), so a state held under one is never taken for one held under a chat's mark. */
 const NODE_MARK = "node:";
@@ -149,10 +169,15 @@ export interface StoreOptions {
   log?: (message: string, data: Record<string, unknown>) => void;
   /** The areas whose operations (`<area>.<op>`) fold beside the engine's: the story, the cast, lore overlays (`StoreArea`). */
   areas?: readonly StoreArea[];
-  /** The most changes a fold runs over before `afar` hands it to a thread (`store.workerFoldAt`, 500 by default). */
+  /** The most changes a fold runs over on RPE's thread where a thread is given (`store.workerFoldAt`, 500 by default). */
   workerFoldAt?: number;
-  /** Where a long fold runs, with the database file it reads there; none: every fold runs where it is asked (`afar` just reads). */
+  /**
+   * Where a long fold runs, with the database file it reads there: RPE's own store, whose thread runs no fold over `workerFoldAt` changes
+   * (`FoldAway`). None (a thread's store, the tools, the import): every fold runs where it is asked.
+   */
   away?: StoreAway;
+  /** This store folds on a worker thread for RPE's (`away-thread.ts`): what it says of a long fold says that RPE's thread was not held. */
+  onWorker?: boolean;
   /**
    * Told when a read holds snapshots for the user's next write (`hold`): its owner stores them soon after (`UserStore.storeHeld`), so
    * what reads fold outlives a restart even where nothing is written for a long while. Unset: they wait for the user's next write.
@@ -459,9 +484,15 @@ export class Store {
    * By user and chat (`user\0chat`), what this store's own writes said of the chat's nodes since it first wrote to the chat, or since a
    * write that named no nodes: the mark the newest left (`newest`), the mark every node no write since named holds under (`base`), and
    * each node named since with the mark of the newest write that named it (`named`). What a node's state is held and named under
-   * (`nodeMark`); only while `newest` is the chat's mark in the database, which a rollback or any other writer moves.
+   * (`nodeMark`); only while `newest` is the chat's mark in the database, which any other writer moves, and a rollback moves back to a
+   * mark these writes left, which `sinceOf` follows back (`steps`).
    */
-  private readonly marksSince = new Map<string, { newest: string; base: string; named: Map<string, string> }>();
+  private readonly marksSince = new Map<string, MarksSince>();
+  /**
+   * By user, the snapshots the last flush stored, until a later one finds them stored: a rollback of the write that stored them (one
+   * refused for a long fold, to be made again) took them away, and they are held again (`flush`).
+   */
+  private readonly flushed = new Map<string, Map<string, HeldRow>>();
   private readonly compared = new Map<string, ComparedPath>();
   /**
    * By user and turn (`user\0turn`), the chats under whose marks a question's fold through the turn is held (`UserStore.turnStart`), on
@@ -483,8 +514,12 @@ export class Store {
   private readonly away: StoreAway | null;
   /** @internal */ readonly workerFoldAt: number;
   private readonly forThreads: Omit<StoreBrief, "path">;
-  /** @internal Whether a fold longer than `workerFoldAt` throws `FoldAway`: set by `afar` for the one synchronous read it makes. */
+  /** @internal Whose thread this store folds on, for what the log says of a long fold: RPE's own, a worker's, or one not known (a tool's). */
+  readonly thread: "rpe" | "worker" | null;
+  /** @internal Whether a fold with no state held on its path throws `FoldAway` too: set by `afar` for the one synchronous read it makes. */
   guarding = false;
+  /** @internal Whether the preparing pass folds (`UserStore.prepareNext`): its own stretches from a held state run here whatever they hold. */
+  passing = false;
 
   constructor(options: StoreOptions) {
     if (typeof options.db === "string") {
@@ -523,6 +558,7 @@ export class Store {
     this.log = options.log ?? null;
     this.workerFoldAt = whole(options.workerFoldAt, STORE_DEFAULTS.workerFoldAt, 1);
     this.away = options.away ?? null;
+    this.thread = this.away !== null ? "rpe" : options.onWorker === true ? "worker" : null;
     this.forThreads = { fingerprint: options.fingerprint, snapshotEvery: this.snapshotEvery, statesPerChat: this.statesPerChat, snapshotsHeld: this.snapshotsHeld, kindChain: options.kindChain, holderDepth: options.holderDepth, visitDepth: options.visitDepth };
     // The engine's walks, read once for every fold: a store opened without them (a script's, the migration's) keeps the process's. A
     // walk one cuts short goes to the log, once for each chain.
@@ -660,10 +696,10 @@ export class Store {
 
   /**
    * Runs `read`, a call that only reads and may be made again, where a long fold runs on a worker thread and not here: one over more
-   * than `workerFoldAt` changes, and one with no state held on its path (a stored snapshot read whole, or the chat's start made). The
-   * fold is handed over, the states the thread held are held here when it answers, and the read is made again, now answered from
-   * memory. A read with nothing long in it is made once, as it always was; so is every read where no thread is given, and where a
-   * thread's fold fails (the failure is logged).
+   * than `workerFoldAt` changes, which no caller's fold runs here, and one with no state held on its path (a stored snapshot read whole,
+   * or the chat's start made). The fold is handed over, the states the thread held are held here when it answers, and the read is made
+   * again, now answered from memory. A read with nothing long in it is made once, as it always was; so is every read where no thread is
+   * given, and where a thread's fold fails (the failure is logged; a fold over `workerFoldAt` is still refused here).
    */
   async afar<T>(read: () => T): Promise<T> {
     const away = this.away;
@@ -690,23 +726,59 @@ export class Store {
   }
 
   /**
+   * Where `error` is a fold this store refused to run on RPE's thread (`FoldAway`), runs it on a thread and holds what it gave, so what
+   * threw finds it held when it is made again: the promise of that, which rejects where the thread could not fold it. Null for any other
+   * error. What threw must have changed nothing outside the database, and its writes must be rolled back before this runs, with no write
+   * made until it is done: the thread reads the database as it stands, and what it folded is held only while the marks it read hold.
+   */
+  awayFor(error: unknown): Promise<void> | null {
+    if (!(error instanceof FoldAway) || this.away === null) return null;
+    return this.foldAway(this.away, error.job);
+  }
+
+  /**
+   * Runs `read`, a call that only reads and may be made again, holding RPE's thread for no long fold: one the store refuses to run here
+   * runs on a thread (`awayFor`) and the read is made again, `AWAY_TRIES` times at most. A fold that is merely cold (a stored snapshot
+   * read, the chat's start made) runs here, unlike `afar`. Where no thread is given, `read` is made once.
+   */
+  async offThread<T>(read: () => T): Promise<T> {
+    for (let tries = 1; ; tries++) {
+      try {
+        return read();
+      } catch (error) {
+        const away = tries < AWAY_TRIES ? this.awayFor(error) : null;
+        if (away === null) throw error;
+        await away;
+      }
+    }
+  }
+
+  /** @internal Whether a fold over `workerFoldAt` changes is refused here: wherever a thread is given, but for the preparing pass's own stretches from a held state (`passing`). */
+  refusesLong(cold: boolean): boolean {
+    return this.away !== null && (!this.passing || cold);
+  }
+
+  /**
    * Hands `job` to a thread and takes what it held: a state folded under a mark that moved since is not held, and a snapshot waits for the
    * user's next write as any found by a fold here does. The thread's store wrote nothing, so it holds a node's state under the chat's
    * mark as it read it (`nodeMark`); while that is the chat's mark still, the state is the node's as it stands, held here under the
-   * node's mark as this store's writes give it.
+   * node's mark as this store's writes give it, as is a state the thread folded along a path given whole (a write's own, refused) at a
+   * node this database holds. A node only that write held keeps the chat's mark, and goes with the chat's next write.
    */
   private async foldAway(away: StoreAway, job: FoldJob): Promise<void> {
     const before = new Map(this.db.query<{ chat: string; mark: string }, [string]>("SELECT chat, mark FROM fold_mark WHERE user = ?").all(job.user).map((r) => [r.chat, r.mark]));
     const done = await away.run({ path: away.path, ...this.forThreads }, job);
     // What the thread folded came across as objects all new here: frozen a stretch at a time, so holding them (`keep`) walks none.
     await freezeInStretches(done.folds.map((f) => f.folded));
+    const prefix = `${job.user}\u0000`;
+    const nodes = [...done.folds.map((f) => f.key.slice(prefix.length)), ...done.held.map(([node]) => node)];
+    const stored = new Set(this.db.query<{ key: string }, [string, string]>("SELECT key FROM path_node WHERE user = ?1 AND key IN (SELECT value FROM json_each(?2))").all(job.user, JSON.stringify(nodes)).map((r) => r.key));
     const here = (chat: string, node: string, mark: string): string | null => {
       const read = mark.startsWith(NODE_MARK) ? mark.slice(NODE_MARK.length) : mark;
       const now = this.markOf(job.user, chat);
       if (read !== (before.get(chat) ?? "") || read !== now) return null;
-      return mark.startsWith(NODE_MARK) ? this.nodeMark(job.user, chat, node, now) : mark;
+      return mark.startsWith(NODE_MARK) || stored.has(node) ? this.nodeMark(job.user, chat, node, now) : mark;
     };
-    const prefix = `${job.user}\u0000`;
     for (const f of done.folds) {
       const mark = f.chat === null || f.mark === null ? f.mark : here(f.chat, f.key.slice(prefix.length), f.mark);
       if (f.chat !== null && mark === null) continue;
@@ -756,18 +828,49 @@ export class Store {
       const before = this.markOf(user, chat);
       const mark = crypto.randomUUID();
       put.run(user, chat, mark);
-      const was = this.marksSince.get(group);
+      const was = this.sinceOf(group, before);
       // A write that names no nodes, or one after marks this store did not leave, starts again: every node holds under the new mark.
-      if (nodes === undefined || (was !== undefined && was.newest !== before) || (was?.named.size ?? 0) + nodes.size > NODES_NAMED_MOST) {
-        this.marksSince.set(group, { newest: mark, base: mark, named: new Map() });
+      if (nodes === undefined || was === null || (was?.named.size ?? 0) + nodes.size > NODES_NAMED_MOST) {
+        this.marksSince.set(group, { newest: mark, base: mark, named: new Map(), steps: [{ mark, whole: was === null || was === undefined ? undefined : { ...was, steps: [] } }] });
         continue;
       }
       // The first write this store makes to the chat: every node's state as it stands now holds under the mark the chat had.
-      const since = was ?? { newest: before, base: before, named: new Map<string, string>() };
+      const since = was ?? { newest: before, base: before, named: new Map<string, string>(), steps: [] };
+      since.steps.push({ mark, was: since.newest, named: [...nodes].map((node) => [node, since.named.get(node)]) });
+      if (since.steps.length > MARK_STEPS) since.steps.shift();
       since.newest = mark;
       for (const node of nodes) since.named.set(node, mark);
       this.marksSince.set(group, since);
     }
+  }
+
+  /**
+   * What this store's writes said of a chat's nodes as of `current`, the chat's mark the caller read in the database: where a rollback
+   * took the chat's mark back (a write refused for a long fold, to be made again), the writes it undid are undone here too, step by step,
+   * so every node holds under the mark it had. Undefined where this store has not written to the chat; null where its marks are not
+   * this store's (another writer's, or more writes undone than it follows), and every node holds under the chat's mark.
+   */
+  private sinceOf(group: string, current: string): MarksSince | undefined | null {
+    let since = this.marksSince.get(group);
+    while (since !== undefined && since.newest !== current) {
+      const step = since.steps.pop();
+      if (step === undefined || step.mark !== since.newest) {
+        this.marksSince.delete(group);
+        return null;
+      }
+      if ("whole" in step) {
+        since = step.whole;
+        if (since === undefined) this.marksSince.delete(group);
+        else this.marksSince.set(group, since);
+        continue;
+      }
+      since.newest = step.was;
+      for (const [node, had] of step.named.reverse()) {
+        if (had === undefined) since.named.delete(node);
+        else since.named.set(node, had);
+      }
+    }
+    return since;
   }
 
   /**
@@ -776,8 +879,8 @@ export class Store {
    * Tagged, so a node's mark is never read as a chat's. `current`: the chat's mark, where the caller has read it.
    */
   nodeMark(user: string, chat: string, node: string, current = this.markOf(user, chat)): string {
-    const since = this.marksSince.get(`${user}\u0000${chat}`);
-    return `${NODE_MARK}${since === undefined || since.newest !== current ? current : (since.named.get(node) ?? since.base)}`;
+    const since = this.sinceOf(`${user}\u0000${chat}`, current);
+    return `${NODE_MARK}${since === undefined || since === null ? current : (since.named.get(node) ?? since.base)}`;
   }
 
   /** @internal A state held in memory: one folded under one of `marks`, or one that holds under any. Reading it makes it, and its chat, the most recently read. */
@@ -854,6 +957,18 @@ export class Store {
    * a node not stored yet (a question's fold of a path no comparison has stored) waits, under its mark, for the write that stores the node.
    */
   flush(user: string): void {
+    // Those the last flush stored that are not stored now went with a write rolled back after it: held again, as they were.
+    const last = this.flushed.get(user);
+    this.flushed.delete(user);
+    if (last !== undefined) {
+      const there = new Set(this.db.query<{ node: string }, [string, string]>("SELECT node FROM snapshot WHERE user = ?1 AND kind = 'cache' AND node IN (SELECT value FROM json_each(?2))").all(user, JSON.stringify([...last.keys()])).map((r) => r.node));
+      const back = [...last].filter(([node]) => !there.has(node));
+      if (back.length > 0) {
+        const into = this.held.get(user) ?? new Map<string, HeldRow>();
+        for (const [node, row] of back) if (!into.has(node)) into.set(node, row);
+        this.held.set(user, into);
+      }
+    }
     const held = this.held.get(user);
     if (!held) return;
     this.held.delete(user);
@@ -869,9 +984,20 @@ export class Store {
     const rows = [...held].filter(([node, row]) => holds(node, row));
     for (const [, row] of rows) this.putParts(user, row.rows.parts);
     const waiting = new Map<string, HeldRow>();
-    for (const [node, row] of rows) if (!this.putSnapshot(user, node, "cache", row.upto, row.rows.manifest)) waiting.set(node, row);
+    const put = new Map<string, HeldRow>();
+    for (const [node, row] of rows) {
+      if (this.putSnapshot(user, node, "cache", row.upto, row.rows.manifest)) put.set(node, row);
+      else waiting.set(node, row);
+    }
     for (const [, row] of rows) this.dropUnheld(user, row.rows.parts);
     if (waiting.size > 0) this.held.set(user, waiting);
+    if (put.size > 0) this.flushed.set(user, put);
+  }
+
+  /** @internal The snapshots of `nodes` a write let go of (`UserStore.dropKept`) are none the last flush is to hold again. */
+  dropped(user: string, nodes: readonly string[]): void {
+    const last = this.flushed.get(user);
+    if (last !== undefined) for (const node of nodes) last.delete(node);
   }
 
   /** @internal Stores a snapshot at `node` (`kind` cache or base), its parts first; inside a write. */
@@ -2240,6 +2366,7 @@ export class UserStore {
     const list = JSON.stringify(nodes);
     const gone = this.db.run(`DELETE FROM snapshot WHERE user = ?1 ${kinds === "cache" ? "AND kind = 'cache' " : ""}AND node IN (SELECT value FROM json_each(?2))`, [this.id, list]).changes;
     for (const table of KEPT_BY_NODE) this.db.run(`DELETE FROM ${table} WHERE user = ?1 AND node IN (SELECT value FROM json_each(?2))`, [this.id, list]);
+    this.store.dropped(this.id, nodes);
     return gone;
   }
 
@@ -2651,12 +2778,19 @@ export class UserStore {
     while (to > 0 && !rows[to - 1]?.usable && rows[to - 1]?.key !== after) to--;
     let changes = 0;
     let at: string | null = null;
-    for (; to <= end && (at === null || performance.now() - began < forMs); to++) {
-      const row = rows[to];
-      if (row === undefined) break;
-      this.foldNode(row.key);
-      at = row.key;
-      changes += row.changes;
+    // The pass's own stretches run here, each turn from the state the turn before it left, however much it holds; a stretch that starts
+    // where no state is held and folds more than `workerFoldAt` changes (a chat's heavy first turn) runs on a thread (`FoldAway`).
+    this.store.passing = true;
+    try {
+      for (; to <= end && (at === null || performance.now() - began < forMs); to++) {
+        const row = rows[to];
+        if (row === undefined) break;
+        this.foldNode(row.key);
+        at = row.key;
+        changes += row.changes;
+      }
+    } finally {
+      this.store.passing = false;
     }
     return { at, changes, left: at === rows[end]?.key ? missing - 1 : missing, wanted: missing };
   }
@@ -2775,9 +2909,12 @@ export class UserStore {
     }
     // No state held on its path: the fold reads a stored snapshot whole, or makes the chat's start, which on a chat with a large world
     // holds the thread however few turns follow. A caller that can wait for a thread has it folded there (`Store.afar`).
-    if (!start && this.store.guarding) throw new FoldAway({ user: this.id, node });
+    const job = (): FoldJob => this.awayJob(node);
+    if (!start && this.store.guarding) throw new FoldAway(job(), null);
     const first = chain[0];
     if (!first) throw new StoreInputError(`no path node ${node}`);
+    // Refused, where it is too long for RPE's thread, before the snapshot is read: the turns after the state it starts from.
+    this.guardLong(chain.slice(start ? from + 1 : first.snap === 1 ? 1 : 0).map((c) => c.turn), start === null, job);
     // The newest change id in the stored snapshot the fold starts from; null when it starts elsewhere.
     let stored: number | null = null;
     if (!start && first.snap === 1) {
@@ -2798,7 +2935,6 @@ export class UserStore {
     }
     const rest = chain.slice(from + 1);
     const ids = (stored === null ? rest : [first, ...rest]).map((c) => c.turn);
-    this.guardLong(ids, () => ({ user: this.id, node }));
     const turns = new Map(
       this.db
         .query<{ id: string; node: string; status: string }, [string, string]>("SELECT t.id, t.node, t.status FROM json_each(?2) j CROSS JOIN turn t ON t.user = ?1 AND t.id = j.value")
@@ -2870,7 +3006,7 @@ export class UserStore {
         .all(this.id, JSON.stringify(nodes.map(([, , turn]) => turn)))
         .map((t) => [t.id, t]),
     );
-    this.guardLong(nodes.slice(deepest + 1).map(([, , t]) => t), () => ({ user: this.id, end, turn, nodes }));
+    this.guardLong(nodes.slice(deepest + 1).map(([, , t]) => t), true, () => ({ user: this.id, end, turn, nodes }));
     const marks = new Map<string, string>();
     const markFor = (c: string): string => {
       const m = marks.get(c) ?? this.store.markOf(this.id, c);
@@ -2909,21 +3045,56 @@ export class UserStore {
     return folded;
   }
 
-  /** One line in the log for a fold that held the thread `LONG_FOLD_MS` or more: its chat, the node it ended at, how many turns it folded and how long it took. */
+  /**
+   * One line in the log for a fold that held its thread `LONG_FOLD_MS` or more: its chat, the node it ended at, how many turns it folded
+   * and how long it took. Its words say whose thread it held (RPE's own, or a worker's), so one that held no page is not read as if it had.
+   */
   private saidLong(began: number, chat: string, node: string, turns: number): void {
     const ms = Math.round(performance.now() - began);
-    if (ms >= LONG_FOLD_MS) this.store.log?.("A fold held the thread long.", { chat, node, turns, ms });
+    if (ms < LONG_FOLD_MS) return;
+    const thread = this.store.thread;
+    this.store.log?.(thread === "rpe" ? "A fold held RPE's thread long." : thread === "worker" ? "A fold ran long on a worker thread, not on RPE's own." : "A fold held the thread long.", { chat, node, turns, ms });
   }
 
-  /** Throws `FoldAway` for a fold about to run over the turns `ids` when `afar` waits for a thread and they hold more changes than `workerFoldAt`. */
-  private guardLong(ids: readonly string[], job: () => FoldJob): void {
-    if (!this.store.guarding) return;
-    const n = this.db.query<{ n: number }, [string, string]>("SELECT COUNT(*) AS n FROM change WHERE user = ?1 AND turn IN (SELECT value FROM json_each(?2)) AND job IS NULL").get(this.id, JSON.stringify(ids))?.n ?? 0;
-    if (n > this.store.workerFoldAt) throw new FoldAway(job());
+  /**
+   * Throws `FoldAway` for a fold about to run over the turns `turns` (`cold`: from no state held) where they hold more changes than
+   * `workerFoldAt` and the store refuses such a fold on RPE's thread (`Store.refusesLong`): before it reads a snapshot or changes
+   * anything, so whoever asked may make the call again once a thread has folded it.
+   */
+  private guardLong(turns: readonly string[], cold: boolean, job: () => FoldJob): void {
+    if (!this.store.refusesLong(cold)) return;
+    const n = this.db.query<{ n: number }, [string, string]>("SELECT COUNT(*) AS n FROM change WHERE user = ?1 AND turn IN (SELECT value FROM json_each(?2)) AND job IS NULL").get(this.id, JSON.stringify(turns))?.n ?? 0;
+    if (n > this.store.workerFoldAt) throw new FoldAway(job(), n);
   }
 
-  /** @internal Folds what a thread was asked to (`FoldJob`), the states left held for `Store.takeFolds`. */
+  /**
+   * The job that folds the state at `node` on a thread: the node itself where nothing is being written; inside a write, its path from
+   * the chat's start as this write sees it, since the thread reads only what is committed and the write may have made the path's last
+   * nodes, which the thread then folds in memory as it folds a question's path (`foldPath`).
+   */
+  private awayJob(node: string): FoldJob {
+    if (!this.db.inTransaction) return { user: this.id, node };
+    const nodes = this.db
+      .query<{ key: string; prev: string | null; turn: string; depth: number }, [string, string]>(
+        `WITH RECURSIVE up(key, prev, turn, depth) AS (
+           SELECT key, prev, turn, depth FROM path_node WHERE user = ?1 AND key = ?2
+           UNION ALL SELECT n.key, n.prev, n.turn, n.depth FROM path_node n JOIN up ON n.user = ?1 AND n.key = up.prev)
+         SELECT key, prev, turn, depth FROM up ORDER BY depth`,
+      )
+      .all(this.id, node)
+      .map((r) => [r.key, r.prev, r.turn, r.depth] as const);
+    return { user: this.id, end: node, turn: nodes.at(-1)?.[2] ?? "", nodes };
+  }
+
+  /**
+   * @internal Folds what a thread was asked to (`FoldJob`), the states left held for `Store.takeFolds`: the state at the node before its
+   * end first, where that node is stored, and the end from it. A write refused for the fold and made again may change the end's own turn
+   * before it folds there (a continue joined to it, a change landed on it), which this thread cannot read; it then folds that one turn
+   * from the state held before it, a step RPE's thread runs.
+   */
   foldJob(job: FoldJob): void {
+    const before = "node" in job ? (this.db.query<{ prev: string | null }, [string, string]>("SELECT prev FROM path_node WHERE user = ? AND key = ?").get(this.id, job.node)?.prev ?? null) : (job.nodes.at(-2)?.[0] ?? null);
+    if (before !== null && this.db.query<{ key: string }, [string, string]>("SELECT key FROM path_node WHERE user = ? AND key = ?").get(this.id, before) !== null) this.foldNode(before);
     if ("node" in job) this.foldNode(job.node);
     else this.foldPath(job.end, job.turn, () => job.nodes);
   }

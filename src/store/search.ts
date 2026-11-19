@@ -200,10 +200,11 @@ export interface StateIndexPort {
 /** What the index keeps of each chat's things, by doc id and revision: all of it that is known, so a chat is followed by its difference and dropped whole. */
 export const STATE_SEEN = { name: "state_seen", columns: {} } as const;
 
-/** What the search needs of the store: a user's head state of a chat, and what folds it. */
+/** What the search needs of the store: a user's head state of a chat, what folds it, and where a fold too long for RPE's thread runs. */
 export interface StateIndexStore {
   user(id: string): { headState(chat: string): { state: StoreState } };
   readonly env: FoldEnv;
+  offThread<T>(read: () => T): Promise<T>;
 }
 
 export interface StateIndexOptions {
@@ -353,7 +354,7 @@ export class StateIndex {
     await Promise.all(
       waiting.map(async ({ user, chat }) => {
         try {
-          await this.follow(user, chat, this.#store.user(user).headState(chat).state);
+          await this.follow(user, chat, (await this.#store.offThread(() => this.#store.user(user).headState(chat))).state);
         } catch (error) {
           // A chat that is gone is let go of; anything else is told, and the chat is followed by its next search.
           const gone = error instanceof Error && /no chat/i.test(error.message);

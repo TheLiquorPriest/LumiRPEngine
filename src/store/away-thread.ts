@@ -39,6 +39,7 @@ function storeFor(brief: StoreBrief, areas: readonly StoreArea[]): Open {
     snapshotEvery: brief.snapshotEvery,
     statesPerChat: brief.statesPerChat,
     snapshotsHeld: brief.snapshotsHeld,
+    onWorker: true,
     ...(brief.fingerprint === undefined ? {} : { fingerprint: brief.fingerprint }),
     ...(brief.kindChain === undefined ? {} : { kindChain: brief.kindChain }),
     ...(brief.holderDepth === undefined ? {} : { holderDepth: brief.holderDepth }),

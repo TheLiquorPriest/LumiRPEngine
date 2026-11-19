@@ -654,7 +654,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       if (stopped.length > 0) this.#stoppedAt.set(`${user}\n${begun.id}`, stopped.length);
       // The knowledge switch and threshold in force are recorded at the turn's start where the state there differs, so every reader
       // judges a secret by what held at its point of the path.
-      const startWorld = store.stateFor(begun.id, null).state.world;
+      const startWorld = (await this.#d.store.offThread(() => store.stateFor(begun.id, null))).state.world;
       const knowledge = knowledgeChange(startWorld, await this.#d.secretSettings({ user, chat, world: this.#d.store.env.worlds(startWorld.revision) ?? null }));
       if (knowledge.length > 0) await this.#d.writes.run(() => store.record(store.writeTarget({ chat, turn: begun.id }), knowledge), "recording the knowledge settings");
       // The session the turn plays in (plan §11): the one in force at it (`#sessionAt`), or one opened now for the scene the story record
@@ -1599,7 +1599,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const blocks: ContextBlock[] = [];
     const failed: NotGiven[] = [];
     const [factsPart, mapPart] = await Promise.all([guidance.part(PARTS.turnFacts), guidance.part(PARTS.loreMap)]);
-    const time = this.#storyTime(scope.user, scope.chat, scope.turn);
+    const time = await this.#storyTime(scope.user, scope.chat, scope.turn);
     if (factsPart?.format === "template") {
       const facts = factsPart.render({ kind: at.kind, ...(at.kind === "settle" ? { settle: true } : {}), ...(at.speaker !== null ? { speaker: at.speaker } : {}), ...(at.message !== null ? { message: at.message } : {}), ...(time !== null ? { story_time: time.text } : {}) }).text;
       if (facts.trim() !== "") blocks.push({ name: BLOCKS.turnFacts, text: facts.trimEnd() });
@@ -1713,7 +1713,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     if (left !== undefined && parent !== null && this.#d.runs.ofTurn(scope.user, parent).some((r) => r.session === scope.session)) return left;
     // The lead's opening (`opening:` in its definition, R-163) lists each item as a `given` part of its stack.
     const stack = lead === null ? [] : await this.#d.harness().definitions.stack(scope, lead);
-    const opening = stack.some((p) => p.kind === "given" && p.part === DRAWN_MAP && p.left === undefined) ? drawnLayer(this.#d.store, scope, map) : null;
+    // A fold too long for RPE's thread (the head's, after a change of the past) is made on a worker thread first (`offThread`).
+    const opening = stack.some((p) => p.kind === "given" && p.part === DRAWN_MAP && p.left === undefined) ? await this.#d.store.offThread(() => drawnLayer(this.#d.store, scope, map)) : null;
     return opening === null ? {} : { [opening.grid]: opening.drawn };
   }
 
@@ -1763,10 +1764,10 @@ export class TurnLane implements TurnPlayer, ChatChanges {
    * the path it was made on, as the world state beside it is, so a swipe shows its own start and not the attempt it replaces. A chat
    * that names no world plays on the blank one, whose clock nobody set until play sets it: a time nobody set is shown to nobody.
    */
-  #storyTime(user: string, chat: string, turn: string): { clock: number; text: string } | null {
+  async #storyTime(user: string, chat: string, turn: string): Promise<{ clock: number; text: string } | null> {
     const store = this.#d.store.user(user);
     if (store.chat(chat) === null) return null;
-    const { state } = store.stateAt(turn);
+    const { state } = await this.#d.store.offThread(() => store.stateAt(turn));
     const world = clockRecorded(state) ? this.#d.store.env.worlds(state.world.revision) : undefined;
     return world === undefined ? null : { clock: state.world.clock, text: formatClock(calendarOf(world), state.world.clock) };
   }
@@ -1848,7 +1849,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const flipped = of("flipped");
     const ended = again ? [] : jobsEndedBetween(this.#d.store.db, user, chat, (turn.parent === null ? null : store.turn(turn.parent))?.created ?? Number.MIN_SAFE_INTEGER, turn.created);
     const answers = flipped.length > 0 || ended.length > 0 ? await playAnswers(RPE_GUIDANCE) : null;
-    const head = answers === null ? null : store.headState(chat).state.world;
+    // The head's state, folded on a worker thread where it is too long for RPE's (after a change of the past), and held for `namesOf` below.
+    const head = answers === null ? null : (await this.#d.store.offThread(() => store.headState(chat))).state.world;
     const headDoc = head === null ? undefined : this.#d.store.env.worlds(head.revision);
     const wordsOf = (change: { op: string; value: JsonValue }): string | undefined => (answers === null || head === null ? undefined : changeSaid(answers, this.#d.store.env.registry, headDoc, head, change));
     for (const f of flipped) {

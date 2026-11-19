@@ -10,6 +10,7 @@
 import type { Clock, CreateHarnessOptions } from "rp-harness";
 import { loadGuidance } from "../app/guidance";
 import { loreBooks } from "../adapter/lumiverse/books";
+import type { ChatChange } from "../adapter/lumiverse/events";
 import { connectionRoutes, type App, type Area } from "../app";
 import type { CarriedPort, EngineDeps } from "../iface/kit";
 import { mapRoutes } from "../iface/map/routes";
@@ -70,6 +71,25 @@ export function turnArea(takes: TurnTakes): TurnArea {
     return turns;
   };
   const owner = (): string => app?.config.lumiverse.user ?? "";
+  /**
+   * By chat, the changes Lumiverse told of it that wait while RPE makes the chat ready for this build (`Preparer.ready`): each is
+   * handed to the lane after the one before it, in the order told, so none is folded on RPE's thread meanwhile and none overtakes another.
+   */
+  const told = new Map<string, Promise<void>>();
+  const changed = (change: ChatChange): void => {
+    const before = told.get(change.chat);
+    if (before === undefined && (preparer?.preparing(owner(), change.chat) ?? null) === null) {
+      made().lane.changed(change);
+      return;
+    }
+    const next = (before ?? preparer?.ready(owner(), change.chat) ?? Promise.resolve())
+      .then(() => made().lane.changed(change))
+      .catch((error: unknown) => app?.log.error("A change Lumiverse told of could not be handed on once its chat was ready.", { chat: change.chat, change: change.kind, error: error instanceof Error ? error.message : String(error) }));
+    told.set(change.chat, next);
+    void next.finally(() => {
+      if (told.get(change.chat) === next) told.delete(change.chat);
+    });
+  };
   /** A chat's settings as its levels' config files set them, read outside any session. */
   const chatSettings = (chat: string) => turnSettings(made().files, { user: owner(), chat, session: NO_SESSION }, made().env.log);
   /**
@@ -125,9 +145,17 @@ export function turnArea(takes: TurnTakes): TurnArea {
       },
       // How far it is, which a page whose read waits is told.
       chatPreparing: (user, chat) => preparer?.preparing(user, chat) ?? null,
+      // A fold too long for RPE's thread that a write or a route's handler asked for, made on a worker thread (`Store.awayFor`).
+      awayFor: (error) => turns?.store.awayFor(error) ?? null,
       door: {
-        turns: { play: (turn, out, signal) => made().lane.play(turn, out, signal) },
-        changes: { changed: (change) => made().lane.changed(change), reopened: () => made().lane.reopened() },
+        // A generation in a chat RPE is making ready for this build waits for it, as a page's read does, and plays from what it stored.
+        turns: {
+          play: async (turn, out, signal) => {
+            await preparer?.ready(owner(), turn.tag.chat);
+            await made().lane.play(turn, out, signal);
+          },
+        },
+        changes: { changed, reopened: () => made().lane.reopened() },
         // The history window on the chat's settings: the first history message the prompt keeps; with the window off the chat's path is
         // never read, nor where the prompt's history spans no more than the window (on receipt), which it keeps whole. Its hold reads the
         // record the coming turn starts from: the turn it follows.

@@ -1,9 +1,10 @@
-// A long fold, handed to a worker thread (plan §4.1 l.199: "so one turn never stalls another"). A fold over more changes than
-// `store.workerFoldAt`, or one with no state held on its path (a stored snapshot read whole, or the chat's start made), is not run
-// where the caller stands when the caller can wait for a thread (`Store.afar`): the store throws
-// `FoldAway` naming the fold, a thread opens the database to read, folds as the store does with the same packs and areas, and gives
-// back the states it held and the snapshots it found worth storing, which the store takes as its own and then answers the read from
-// memory. The store knows nothing of threads: the application gives it a `StoreAway` that runs a job somewhere.
+// A long fold, handed to a worker thread (plan §4.1 l.199: "so one turn never stalls another"). Wherever the application gives the store
+// a thread (`StoreAway`: RPE's own store), a fold over more changes than `store.workerFoldAt` is never run on RPE's thread, whoever asks
+// for it: the store throws `FoldAway` naming the fold before it changes anything, a thread opens the database to read, folds as the
+// store does with the same packs and areas, and gives back the states it held and the snapshots it found worth storing, which the store
+// takes as its own (`Store.awayFor`); what threw is then made again and finds the state held. Whoever may wait for it does so
+// (`Store.afar`, `Store.offThread`, the write queue, the server's routes); `afar` also hands over a fold with no state held on its path.
+// The store knows nothing of threads: the application gives it a `StoreAway` that runs a job somewhere.
 
 import type { SnapshotRows } from "./snapshot";
 import type { Folded } from "./types";
@@ -64,10 +65,22 @@ export interface StoreAway {
   run(brief: StoreBrief, job: FoldJob): Promise<FoldDone>;
 }
 
-/** Thrown inside `Store.afar` where a fold is longer than the store runs inline: `afar` runs it away and asks again. */
+/**
+ * Thrown where a fold is longer than the store runs on RPE's thread (`Store.awayFor` runs it on a thread), before the fold changes
+ * anything, so what threw may be made again once the thread has folded it. Its words, for the log of one nothing could wait for, say
+ * how long it was and the calls that asked for it, innermost first.
+ */
 export class FoldAway extends Error {
-  constructor(readonly job: FoldJob) {
-    super("a fold longer than the store runs here");
+  constructor(
+    readonly job: FoldJob,
+    /** The changes it would run over; null for a fold `afar` hands over for having no state held on its path. */
+    changes: number | null,
+  ) {
+    super(changes === null ? "A fold with no state held on its path was asked for where it runs on a worker thread." : `A fold over ${changes} changes was asked for on RPE's thread, which runs none that long; it runs on a worker thread for whoever waits for it.`);
     this.name = "FoldAway";
+    if (changes === null) return;
+    // The calls by name, which a bundled build keeps where it keeps no file of its own for each.
+    const calls = (this.stack ?? "").split("\n").flatMap((line) => /^\s*at (?:async )?([\w$.#<>]+) \(/.exec(line)?.[1] ?? []);
+    this.message += ` Asked for by ${calls.slice(0, 10).join(" ← ")}.`;
   }
 }

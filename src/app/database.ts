@@ -33,11 +33,27 @@ export class WritesClosed extends Error {
   override name = "WritesClosed";
 }
 
+/**
+ * Where a write threw because something it needs must be done off RPE's thread first (a fold too long for it: `Store.awayFor`): the
+ * promise of that work, after which the write runs again; null for any other error.
+ */
+export type AwayFor = (error: unknown) => Promise<void> | null;
+
+/** A write that needed work off RPE's thread that failed (a long fold a worker thread could not make): nothing of it was written. */
+export class WriteAway extends Error {
+  override name = "WriteAway";
+}
+
+/** How many times a write is run again after the work off the thread it needed (`AwayFor`). */
+const WRITE_TRIES = 3;
+
 interface Job {
   write: (db: Database) => unknown;
   label: string;
   resolve: (value: unknown) => void;
   reject: (error: unknown) => void;
+  /** How many times it was run again after work off the thread it needed. */
+  tries: number;
 }
 
 /**
@@ -45,7 +61,11 @@ interface Job {
  * before it, alone, inside its own transaction, and resolves with what it returned once committed.
  * A write must not wait for anything: one that returns a promise is rolled back and refused. A write
  * that throws is rolled back and rejects; the writes around it are not touched. Writes run back to
- * back for at most `sliceMs` before other work is let in.
+ * back for at most `sliceMs` before other work is let in. A write that threw because it needs work
+ * done off RPE's thread first (`awayFor`: a long fold the store refuses here) is rolled back whole;
+ * the queue waits, every write after it waiting too, while that work is done, and then runs it again,
+ * `WRITE_TRIES` times at most before it rejects in words. So a write that can throw so must change
+ * nothing outside the database before it throws, or put right what it changed.
  */
 export class WriteQueue {
   private jobs: (Job | undefined)[] = [];
@@ -53,10 +73,13 @@ export class WriteQueue {
   private draining = false;
   private closed = false;
   private idle: PromiseWithResolvers<void> | null = null;
+  /** Whether the queue waits for work off the thread that the write at its head needs (`hold`). */
+  private holding = false;
 
   constructor(
     private readonly db: Database,
     private readonly sliceMs: number,
+    private readonly awayFor: AwayFor | null = null,
   ) {
     db.run("PRAGMA query_only = ON");
   }
@@ -69,7 +92,7 @@ export class WriteQueue {
   run<T>(write: (db: Database) => T, label = "a write"): Promise<T> {
     if (this.closed) return Promise.reject(new WritesClosed(`RPE is stopping, so ${label} was not made.`));
     const done = Promise.withResolvers<T>();
-    this.jobs.push({ write, label, resolve: done.resolve as (value: unknown) => void, reject: done.reject });
+    this.jobs.push({ write, label, resolve: done.resolve as (value: unknown) => void, reject: done.reject, tries: 0 });
     if (!this.draining) {
       this.draining = true;
       queueMicrotask(() => this.drain());
@@ -97,6 +120,8 @@ export class WriteQueue {
       this.jobs[this.head] = undefined;
       this.head++;
       if (job !== undefined) this.one(job);
+      // The write at the head waits for work off the thread (`hold`), and the queue drains again once it is done.
+      if (this.holding) return;
       if (this.head < this.jobs.length && performance.now() - started >= this.sliceMs) {
         setImmediate(() => this.drain());
         return;
@@ -128,11 +153,36 @@ export class WriteQueue {
         throw error;
       }
     } catch (error) {
-      job.reject(error);
+      // Run again after the work off the thread it needs, `WRITE_TRIES` times at most; then it rejects with what it threw, in its words.
+      const away = job.tries < WRITE_TRIES ? (this.awayFor?.(error) ?? null) : null;
+      if (away === null) job.reject(error);
+      else this.hold(job, away);
       return;
     } finally {
       this.db.run("PRAGMA query_only = ON");
     }
     job.resolve(result);
+  }
+
+  /**
+   * Runs `job` again, before every write queued after it, once the work off the thread it needs (`away`) is done; until then no write
+   * runs, so the database the work reads is the one the write runs on again. Where that work fails, `job` rejects in words and the
+   * queue goes on.
+   */
+  private hold(job: Job, away: Promise<void>): void {
+    job.tries++;
+    this.head--;
+    this.jobs[this.head] = job;
+    this.holding = true;
+    away
+      .catch((cause: unknown) => {
+        this.jobs[this.head] = undefined;
+        this.head++;
+        job.reject(new WriteAway(`${job.label} needed a long fold of a chat's past, which could not be made on a worker thread, so nothing of it was written: ${cause instanceof Error ? cause.message : String(cause)}`));
+      })
+      .finally(() => {
+        this.holding = false;
+        this.drain();
+      });
   }
 }

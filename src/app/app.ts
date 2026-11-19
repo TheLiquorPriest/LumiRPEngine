@@ -264,7 +264,8 @@ export async function openApp(options: OpenAppOptions): Promise<App> {
   }
   if (migrated.backup !== null) log.info("the database was copied before this version's first migration", { copy: migrated.backup });
   for (const step of migrated.applied) log.info("migrated", { area: step.area, version: step.version });
-  const writes = new WriteQueue(db, config.database.sliceMs);
+  // A write refused for work off RPE's thread (a long fold) waits for it, with the queue, and runs again (`hooks.awayFor`).
+  const writes = new WriteQueue(db, config.database.sliceMs, hooks.awayFor ?? null);
   const workers = new Workers({ threads: config.workers.threads ?? defaultThreads(), name: "RPE's worker threads", log, idleMs: config.workers.idleSeconds === null ? null : config.workers.idleSeconds * 1000 });
   let index: IndexFile;
   try {
@@ -338,7 +339,7 @@ export async function openApp(options: OpenAppOptions): Promise<App> {
       if (starting !== null) throw new Error("RPE's server is already started.");
       const run = (async () => {
         // A chat a route names is waited for while it is prepared (a page told how far it is), and taken on, by the one area that fills each hook, before the route answers.
-        const server = startServer({ config, routes, auth, live, log, now, workers, answers, commandSocket: commandSocketPath(paths.root), ...(hooks.chatNamed === undefined ? {} : { chatNamed: hooks.chatNamed }), ...(hooks.chatReady === undefined ? {} : { chatReady: hooks.chatReady }), ...(hooks.chatPreparing === undefined ? {} : { chatPreparing: hooks.chatPreparing }) });
+        const server = startServer({ config, routes, auth, live, log, now, workers, answers, commandSocket: commandSocketPath(paths.root), ...(hooks.chatNamed === undefined ? {} : { chatNamed: hooks.chatNamed }), ...(hooks.chatReady === undefined ? {} : { chatReady: hooks.chatReady }), ...(hooks.chatPreparing === undefined ? {} : { chatPreparing: hooks.chatPreparing }), ...(hooks.awayFor === undefined ? {} : { awayFor: hooks.awayFor }) });
         running = server;
         for (const area of mounted) await hook(area, "started");
         // This version has started: the copies taken before migrations are kept to the setting, the oldest let go.

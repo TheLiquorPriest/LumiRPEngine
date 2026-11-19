@@ -140,10 +140,23 @@ export class Preparer {
     let longest = 0;
     let after: string | null = null;
     let left = Number.POSITIVE_INFINITY;
+    let refused = 0;
     this.progress = { done: 0, of: null };
     while (!this.stopped) {
       const at = performance.now();
-      const step = s.prepareNext(chat, after, STRETCH_MS);
+      let step;
+      try {
+        step = s.prepareNext(chat, after, STRETCH_MS);
+      } catch (error) {
+        // A stretch that starts where no state is held and folds more changes than RPE's thread runs (a chat's heavy first turn) is
+        // folded on a thread, and the stretch is asked for again, now from the state the thread held.
+        const away = refused < 3 ? this.deps.store.awayFor(error) : null;
+        if (away === null) throw error;
+        refused++;
+        await away;
+        continue;
+      }
+      refused = 0;
       longest = Math.max(longest, performance.now() - at);
       if (step.at === null) break;
       // A stretch that ends where the one before it ended, with as many snapshots wanting, made none: its snapshot could not be stored.
