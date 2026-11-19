@@ -191,6 +191,24 @@ describe("branches that share history", () => {
     expect(s.stateAt(u3.id).state.world.entities.coin).toBeDefined();
     sameAsAfresh(s, store.db, [u3, t2], (r) => worlds.get(r));
   });
+
+  test("a job of a shared turn that ends renews the branch's own reading, which holds a change of his", () => {
+    const { s, store, worlds, t2 } = forked();
+    s.addChanges(t2.id, engine(make("note", "Note", POV)).map((c) => ({ ...c, job: "job-1" })));
+    s.addOwnerChanges("branch", engine(goTo(POV, "market")));
+    // The branch's path as the chat application gives a prompt it (`SeenMessage`): its reply's swipe, no dates.
+    const lines: SeenMessage[] = [["b-u1", "in"], ["b-m1", "Into the inn."], ["b-u2", "down"], ["b-m2", "Down the stairs."]].map(([id, text], index) => ({ id: id as string, user: index % 2 === 0, index, swipe: 0, hash: hashOf(text as string) }));
+    // The branch's next question, answered before the job of the shared second turn ends and after: after, it has what the job changed.
+    const ask = () => s.turnStart("branch", lines, { follows: "b-m2" });
+    const before = ask();
+    expect(before.state.world.entities.note).toBeUndefined();
+    s.endJob("job-1");
+    const after = ask();
+    expect(after.state.world.entities.note).toBeDefined();
+    const fresh = openStore({ areas: [STORY_STORE_AREA], db: store.db, registry: registry(), worlds: (r) => worlds.get(r) }).user(USER);
+    const afresh = fresh.turnStart("branch", lines, { follows: "b-m2" });
+    expect(JSON.parse(JSON.stringify(after.state))).toEqual(JSON.parse(JSON.stringify(afresh.state)));
+  });
 });
 
 describe("a thread's fold", () => {

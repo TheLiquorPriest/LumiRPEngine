@@ -2832,14 +2832,18 @@ export class UserStore {
   /**
    * Notes that a job has ended (plan §10.9): its changes, recorded with the turn that started it (or with his own, for a job of his),
    * take effect just before the first turn that begins from now on, so no turn begun already has its state changed; his own job's are
-   * at the chat's head at once. A job ends once; one that has ended records nothing more.
+   * at the chat's head at once. A job ends once; one that has ended records nothing more. Every chat whose folds read the job's changes
+   * is renewed: for a job of a turn, each whose folds a write of that turn changes (`foldsThrough`), a branch sharing the turn among
+   * them; for a job of his own, his chat and each branch of it.
    */
   endJob(job: string): void {
-    const chats = this.db
-      .query<{ chat: string }, [string, string]>("SELECT DISTINCT COALESCE(c.chat, t.chat) AS chat FROM change c LEFT JOIN turn t ON t.user = c.user AND t.id = c.turn WHERE c.user = ?1 AND c.job = ?2")
-      .all(this.id, job)
-      .flatMap((r) => (r.chat === null ? [] : [r.chat]));
-    this.write(chats, () => this.db.run("INSERT INTO job (user, id, ended) VALUES (?, ?, ?) ON CONFLICT (user, id) DO UPDATE SET ended = COALESCE(job.ended, excluded.ended)", [this.id, job, this.store.now()]));
+    const rows = this.db.query<{ chat: string | null; turn: string }, [string, string]>("SELECT DISTINCT chat, turn FROM change WHERE user = ?1 AND job = ?2").all(this.id, job);
+    const chats = new Set<string>();
+    for (const r of rows) {
+      const turn = r.chat === null ? this.turn(r.turn) : null;
+      for (const chat of r.chat !== null ? this.withBranches(r.chat) : turn === null ? [] : this.foldsThrough(turn)) chats.add(chat);
+    }
+    this.write([...chats], () => this.db.run("INSERT INTO job (user, id, ended) VALUES (?, ?, ?) ON CONFLICT (user, id) DO UPDATE SET ended = COALESCE(job.ended, excluded.ended)", [this.id, job, this.store.now()]));
   }
 
   /**
