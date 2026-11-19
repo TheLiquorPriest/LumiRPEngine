@@ -1735,6 +1735,38 @@ export class UserStore {
   }
 
   /**
+   * The changes `turns` recorded themselves (not their jobs'), in one read, each turn's in order; with `naming`, only those whose value
+   * names one of those words (as its JSON text has it), so a reader after the few changes that can concern something reads no others.
+   */
+  ownChanges(turns: readonly string[], naming: readonly string[] | null = null): Map<string, ChangeRow[]> {
+    const words = naming?.map((w) => JSON.stringify(w).slice(1, -1));
+    const out = new Map<string, ChangeRow[]>();
+    if (turns.length === 0 || words?.length === 0) return out;
+    const rows = this.db
+      .query<ChangeDb, [string, string, string]>(
+        `SELECT c.* FROM change c WHERE c.user = ?1 AND c.turn IN (SELECT value FROM json_each(?2)) AND c.job IS NULL
+           AND (?3 = 'null' OR EXISTS (SELECT 1 FROM json_each(?3) w WHERE instr(c.value, w.value) > 0)) ORDER BY c.turn, c.ord`,
+      )
+      .all(this.id, JSON.stringify(turns), JSON.stringify(words ?? null));
+    for (const row of rows) {
+      const c = changeOf(row);
+      const list = out.get(row.turn);
+      if (list === undefined) out.set(row.turn, [c]);
+      else list.push(c);
+    }
+    return out;
+  }
+
+  /**
+   * Whether anything may stand placed before a turn of `chat` (`changesBefore`): a change of his own on the chat's line, or any ended
+   * job's change of this user's. Where neither is, every turn has nothing placed before it, and a reader of many turns asks none of them.
+   */
+  anyPlaced(chat: string): boolean {
+    if (this.ownerIn(chat)) return true;
+    return this.db.query<{ any: number }, [string]>("SELECT EXISTS(SELECT 1 FROM change c JOIN job e ON e.user = c.user AND e.id = c.job AND e.ended IS NOT NULL WHERE c.user = ?1 AND c.job IS NOT NULL) AS any").get(this.id)?.any === 1;
+  }
+
+  /**
    * Of `turns`, given oldest first, the newest that recorded an applied change of `lane` on itself, in one read; null when none did.
    * Only a turn's own changes count (a job's writes recorded on the turn among them); his own changes, of no turn, never do.
    */

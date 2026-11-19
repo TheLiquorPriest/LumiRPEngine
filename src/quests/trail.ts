@@ -1,6 +1,6 @@
 // How the world's own quests were moved (plan §8.3: a stage's state "recorded with its reason"): each move of a track along the chat's path
 // is a `stage` change in the ledger, with the reason the Author gave it, and `/state/history` reads it there. A page of the quests reads
-// the same changes, through the same reader (`valueHistory`), so a stage the quest has been moved past shows how it ended and why, and a
+// the same changes, through the same reader (`valueHistories`, one walk for every quest), so a stage the quest has been moved past shows how it ended and why, and a
 // quest standing on an end stage shows how it ended, with no second record kept beside the ledger. What the story itself called on a stage
 // (`quests.call`) stands over what a move gives it. The play view's quest log lists the same stages under each quest it holds.
 
@@ -9,7 +9,7 @@ import { isRecord, type JsonObject, type JsonValue } from "../shared/json";
 import type { TrackDef } from "../shared/world";
 import type { UserStore } from "../store";
 import type { FoldEnv } from "../store/fold";
-import { valueHistory } from "../store/history";
+import { valueHistories } from "../store/history";
 import { isTerminal } from "../engine/tracks";
 import { type QuestCallDoc, type QuestClosedDoc, type QuestView } from "./record";
 
@@ -34,12 +34,16 @@ export type QuestTrails = Readonly<Record<string, readonly QuestMove[]>>;
  */
 export function trailsOf(store: UserStore, env: Pick<FoldEnv, "registry" | "areas">, chat: string, turn: string | null, tracks: Readonly<Record<string, TrackDef>>, now: Readonly<Record<string, TrackState>>): QuestTrails {
   const out: Record<string, QuestMove[]> = {};
-  for (const [id, def] of Object.entries(tracks)) {
+  // The quests that were moved at all, read in one walk of the path.
+  const moved = Object.entries(tracks).filter(([id, def]) => {
     const at = Object.hasOwn(now, id) ? now[id] : undefined;
-    if (at === undefined || (at.stage === def.start && at.since === 0)) continue;
+    return at !== undefined && !(at.stage === def.start && at.since === 0);
+  });
+  const histories = valueHistories(store, env, chat, moved.map(([id]) => ({ ref: `track:${id}`, part: "stage" })), turn ?? undefined);
+  for (const [k, [id, def]] of moved.entries()) {
     const moves: QuestMove[] = [];
     let standing = def.start;
-    for (const w of valueHistory(store, env, chat, `track:${id}`, "stage", turn ?? undefined)) {
+    for (const w of histories[k] ?? []) {
       const v = w.change.value;
       if (!w.applied || !isRecord(v) || typeof v.to !== "string") continue;
       const from = typeof v.from === "string" ? v.from : standing;

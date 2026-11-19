@@ -8,7 +8,7 @@ import { route, RouteError, shape } from "../app";
 import { isRecord, type JsonValue } from "../shared/json";
 import { ENGINE_VERSION } from "../shared/world";
 import { JoinedTurnError, type UserStore } from "../store";
-import { valueHistory } from "../store/history";
+import { valueHistories } from "../store/history";
 import type { Turns } from "./lane";
 
 const T = shape.text();
@@ -100,7 +100,7 @@ export function stateRoutes(turns: Turns) {
       handle: async ({ user, params, query }) => {
         const s = held(user, params.chat, query.turn);
         const env = turns.store.env;
-        const all = valueHistory(s, env, params.chat, query.at, query.part, query.turn).reverse();
+        const all = (valueHistories(s, env, params.chat, [{ ref: query.at, part: query.part }], query.turn)[0] ?? []).reverse();
         const from = query.cursor === undefined ? 0 : all.findIndex((w) => String(w.change.id) === query.cursor) + 1;
         const items = (query.limit === undefined ? all.slice(from) : all.slice(from, from + query.limit)).map((w) => {
           const c = w.change;
