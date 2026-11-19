@@ -59,7 +59,7 @@ import { type DueRead, type Say, turnDue } from "./due";
 import { RunEnds, stateChanged } from "./live";
 import type { PanelAsk, RequestRecord, Requests, TapFrom } from "../turn/requests";
 import { editId, type Head, headOf, PLAYER, recordOwnerEdit, Refused, type Resolved } from "./owner-edits";
-import { type GuidanceFiles, withHistoryLines } from "../iface";
+import { type GuidanceFiles, historyTexts } from "../iface";
 import { journalNotes } from "./journal";
 import { chipsOf, meterOf, pendingOf } from "./panel-reads";
 import type { TapSettings } from "./settings";
@@ -304,7 +304,9 @@ export class PlayService {
     if (turn !== null && row?.joined != null) throw new JoinedTurnError(turn, row.joined);
     const { taps, map } = await this.deps.settings(user, chat);
     const keys = (await this.part()).keys;
-    const journal = await withHistoryLines(this.deps.texts(user, chat), () => journalNotes(this.deps.store, user, chat, taps.journalMost, (code) => own(keys, code) ?? code));
+    // Each turn's notes are kept while its state and these words stand, so the words name themselves by what they hold.
+    const texts = await historyTexts(this.deps.texts(user, chat));
+    const journal = await journalNotes(this.deps.store, user, chat, taps.journalMost, { texts, code: (code) => own(keys, code) ?? code, key: hashParts("journal-words", JSON.stringify(texts), JSON.stringify(keys)) });
     const turning = this.deps.turning(user, chat);
     const { db } = this.deps;
     const knowledge = { ...taps.choices, chat: { ...taps.choices.chat, ...(taps.tidy.on === null ? {} : { tidy: taps.tidy.on }) } };

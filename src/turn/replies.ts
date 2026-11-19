@@ -15,11 +15,13 @@ import { type Infer, route, shape } from "../app";
 import { type LinesPart, loadGuidance } from "../app/guidance";
 import { playerLines } from "../engine/player-events";
 import type { Registry } from "../engine/registry-impl";
+import { historyTexts, linesOf as wordsOf, type HistoryTexts } from "../iface";
+import { hashParts } from "../shared/hash";
 import { isRecord } from "../shared/json";
-import { JoinedTurnError, ownerPlaceOf, timeOf, type UserStore } from "../store";
+import { withLines } from "../shared/lines";
+import { inStretches, JoinedTurnError, ownerPlaceOf, timeOf, type UserStore } from "../store";
 import { eventOf } from "../store/fold";
 import { STORY_OPS } from "../story/fold";
-import { withHistoryLines } from "../iface";
 import type { Turns } from "./lane";
 import { guidanceTexts } from "./texts";
 import { NO_SESSION, PARTS, replyErrorWords } from "./turns";
@@ -55,8 +57,34 @@ const repliesReply = shape.named("RepliesReply", "The line under each reply aske
 type Line = Infer<typeof replyLine>;
 type Lanes = Pick<Line, "time" | "place" | "lanes">;
 
+/**
+ * Each turn's line as last worked out from the state at its end, by the store's key for that state (`UserStore.foldKey`, which every
+ * change to what that fold reads renews) and the words it was worded in: worked out once for as long as both stand, and no state is held
+ * for it. The least recently read go first past `KEPT`.
+ */
+const kept = new Map<string, Lanes>();
+const KEPT = 4096;
+
+/** A turn's line, kept while its state and the words stand (`kept`). Throws the store's `JoinedTurnError` for a joined turn. */
+function keptLanes(store: UserStore, registry: Registry, turn: string, words: string): Lanes {
+  const key = `${store.foldKey(turn)}\u0000${words}`;
+  const hit = kept.get(key);
+  if (hit !== undefined) {
+    kept.delete(key);
+    kept.set(key, hit);
+    return hit;
+  }
+  const lanes = lanesAt(store, registry, turn);
+  kept.set(key, lanes);
+  for (const oldest of kept.keys()) {
+    if (kept.size <= KEPT) break;
+    kept.delete(oldest);
+  }
+  return lanes;
+}
+
 /** A turn's line: the time and place at its end, and what each lane did. Throws the store's `JoinedTurnError` for a joined turn. */
-function linesOf(store: UserStore, registry: Registry, turn: string): Lanes {
+function lanesAt(store: UserStore, registry: Registry, turn: string): Lanes {
   const view = store.viewAt(turn);
   const place = ownerPlaceOf(view);
   const changes = store.changes(turn).filter((c) => c.applied);
@@ -91,37 +119,45 @@ function unfinishedWhy(turns: Pick<Turns, "runs">, user: string, turn: string, e
   return replyErrorWords(e, errors, true) || `${e.code}${e.detail !== undefined ? `: ${e.detail}` : ""}`;
 }
 
-/** The line under each reply of the chat that `ids` names, in the order asked; `errors` words a turn whose record was not finished. */
-export function replyLines(turns: Pick<Turns, "store" | "marks" | "runs">, user: string, chat: string, ids: readonly string[], errors: LinesPart | undefined): Line[] {
+/** The words a line is worded in: the chat's history lines (the engine's lines), and what names them. */
+export interface ReplyWords {
+  texts: HistoryTexts;
+  /** Names these words: lines kept under other words are worked out again. */
+  key: string;
+}
+
+/**
+ * The line under each reply of the chat that `ids` names, in the order asked; `errors` words a turn whose record was not finished. The
+ * lines are worked out in the order of the chat's path, whatever the order asked, so each turn's state folds on from the one before it,
+ * and in stretches that let RPE's thread go (`inStretches`).
+ */
+export async function replyLines(turns: Pick<Turns, "store" | "marks" | "runs">, user: string, chat: string, ids: readonly string[], errors: LinesPart | undefined, words: ReplyWords): Promise<Line[]> {
   const store = turns.store.user(user);
   const row = store.chat(chat);
   if (row === null) return [];
   const steps = store.path(chat);
-  const path = new Map(steps.map((entry) => [entry.message, entry]));
+  const path = new Map(steps.map((entry, at) => [entry.message, { entry, at }]));
   // Settle now settles the newest turn of the chat's own on its path, while no run of the chat goes on.
   const settles = turns.runs.ofChat(user, chat).length > 0 ? null : (steps.findLast((e) => e.turn !== null && store.turn(e.turn)?.chat === chat)?.turn ?? null);
-  const out: Line[] = [];
-  for (const message of ids) {
-    const entry = path.get(message);
-    if (entry === undefined || entry.user) continue;
-    if (entry.turn === null) {
-      out.push({ message, played: false, empty: entry.hash === textHash(""), engine: null, turn: null, joined: null, time: null, place: null, lanes: [], marks: [], unfinished: null });
-      continue;
+  const lineOf = (message: string): Line => {
+    const entry = path.get(message)?.entry;
+    if (entry === undefined || entry.turn === null) {
+      return { message, played: false, empty: entry?.hash === textHash(""), engine: null, turn: null, joined: null, time: null, place: null, lanes: [], marks: [], unfinished: null };
     }
     let turn = entry.turn;
     let joined: Line["joined"] = null;
     let lines: Lanes;
     try {
-      lines = linesOf(store, turns.store.env.registry, turn);
+      lines = keptLanes(store, turns.store.env.registry, turn, words.key);
     } catch (error) {
       if (!(error instanceof JoinedTurnError)) throw error;
       joined = { turn: error.turn, joined: error.joined };
       turn = error.joined;
-      lines = linesOf(store, turns.store.env.registry, turn);
+      lines = keptLanes(store, turns.store.env.registry, turn, words.key);
     }
     const imported = store.turn(turn)?.imported === true;
     const why = unfinishedWhy(turns, user, turn, errors);
-    out.push({
+    return {
       message,
       played: true,
       empty: false,
@@ -131,9 +167,13 @@ export function replyLines(turns: Pick<Turns, "store" | "marks" | "runs">, user:
       ...lines,
       marks: turns.marks.ofTurn(user, turn).map((m) => ({ kind: m.kind })),
       unfinished: why === null ? null : { why, settle: settles === turn },
-    });
-  }
-  return out;
+    };
+  };
+  // His own messages, and ids the chat's path does not hold, are left out; each reply once, in the path's order.
+  const replies = [...new Set(ids)].filter((id) => path.get(id)?.entry.user === false).sort((a, b) => (path.get(a)?.at ?? 0) - (path.get(b)?.at ?? 0));
+  const lines = wordsOf(words.texts);
+  const made = new Map(await inStretches(replies, (message) => [message, lineOf(message)] as const, (stretch) => withLines(lines, stretch)));
+  return ids.flatMap((id) => made.get(id) ?? []);
 }
 
 export function replyRoutes(turns: Pick<Turns, "store" | "marks" | "runs" | "files" | "env">) {
@@ -151,9 +191,8 @@ export function replyRoutes(turns: Pick<Turns, "store" | "marks" | "runs" | "fil
         const scope = { user, chat: params.chat, session: NO_SESSION };
         const part = await loadGuidance(turns.files, scope).part(PARTS.errors);
         const errors = part?.format === "lines" ? part : undefined;
-        return await withHistoryLines(guidanceTexts(turns.files, scope, turns.env.log), () => ({
-          replies: replyLines(turns, user, params.chat, query.ids.split(",").filter((id) => id !== ""), errors),
-        }));
+        const texts = await historyTexts(guidanceTexts(turns.files, scope, turns.env.log));
+        return { replies: await replyLines(turns, user, params.chat, query.ids.split(",").filter((id) => id !== ""), errors, { texts, key: hashParts("reply-words", JSON.stringify(texts)) }) };
       },
     }),
   ] as const;
