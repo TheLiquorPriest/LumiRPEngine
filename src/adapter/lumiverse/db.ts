@@ -132,6 +132,10 @@ const Q = {
   chat: "SELECT id, user_id, character_id, name, metadata, updated_at FROM chats WHERE id = ? AND user_id = ?",
   chats: "SELECT id, user_id, character_id, name, metadata, updated_at FROM chats WHERE user_id = ? ORDER BY updated_at DESC, rowid",
   path: `SELECT ${STEP} ${OF_CHAT} ${ORDER}`,
+  // What says a message's step stands as last read, without the texts a step is read from: its showing swipe's own text (`content`,
+  // which Lumiverse writes with every change of the swipe shown) and the bytes of its swipes, dates and `extra`, whose JSON is not read.
+  pathMarks: `SELECT m.id, m.index_in_chat, m.is_user, m.swipe_id, m.revision, m.content, octet_length(m.swipes) AS swipes_bytes, octet_length(m.swipe_dates) AS dates_bytes, octet_length(m.extra) AS extra_bytes ${OF_CHAT} ${ORDER}`,
+  pathOf: `SELECT ${STEP} ${OF_CHAT} AND m.id IN (SELECT value FROM json_each(?)) ${ORDER}`,
   messages: `SELECT ${MESSAGE} ${OF_CHAT} ${ORDER} LIMIT ? OFFSET ?`,
   messagesById: `SELECT ${MESSAGE} ${OF_CHAT} AND m.id IN (SELECT value FROM json_each(?)) ${ORDER}`,
   book: "SELECT id, name, description, metadata, created_at, updated_at FROM world_books WHERE id = ? AND user_id = ?",
@@ -248,6 +252,7 @@ export function createDbReader(deps: DbReaderDeps): DbReader {
     open = null;
     // A file opened again counts its versions from the start: nothing read before it is known to be as the file stands.
     memo.clear();
+    stepsKept.clear();
   };
 
   const refuse = (why: string): SourceOff => {
@@ -338,6 +343,22 @@ export function createDbReader(deps: DbReaderDeps): DbReader {
   const version = (): Promise<string> => step("the file's version", (db) => String(row(db.query(Q.version).get()).data_version));
   /** What is read of a chat, held while the file stands as it did at the read. */
   const ofChat = async <T>(chat: string, part: string, fill: () => Promise<T>): Promise<T> => memo.get(KEEP.chat(chat), await version(), Infinity, part, fill);
+  /**
+   * Each chat's steps as last read, by message id, with what says each still stands (`Q.pathMarks`): a message that moved only its place
+   * keeps its step; any other is read again. The chats read most recently are kept, as many as the memo keeps.
+   */
+  const stepsKept = new Map<string, Map<string, { key: string; step: LvStep }>>();
+  const stepOf = (s: Record<string, unknown>): LvStep => ({
+    id: String(s.id),
+    chat: String(s.chat_id),
+    index: Number(s.index_in_chat),
+    role: s.is_user ? "user" : s.system ? "system" : "assistant",
+    swipe: Number(s.swipe_id),
+    swipes: Number(s.swipe_count),
+    hidden: s.hidden === 1,
+    revision: Number(s.revision),
+    shown: { hash: textHash(String(s.shown_text)), date: typeof s.shown_date === "number" ? s.shown_date : null },
+  });
 
   const reader: DbReader = {
     kind: "database",
@@ -355,20 +376,29 @@ export function createDbReader(deps: DbReaderDeps): DbReader {
           // One read transaction: the chat and its messages as one moment of the file.
           return db.transaction(() => {
             if (db.query(Q.chat).get(chat, user) === null) return null;
-            return db.query(Q.path).all(chat, user).map((r): LvStep => {
-              const s = row(r);
-              return {
-                id: String(s.id),
-                chat: String(s.chat_id),
-                index: Number(s.index_in_chat),
-                role: s.is_user ? "user" : s.system ? "system" : "assistant",
-                swipe: Number(s.swipe_id),
-                swipes: Number(s.swipe_count),
-                hidden: s.hidden === 1,
-                revision: Number(s.revision),
-                shown: { hash: textHash(String(s.shown_text)), date: typeof s.shown_date === "number" ? s.shown_date : null },
-              };
+            // Every message's marks, then the steps of those whose marks moved since the last read (all of them at a chat's first).
+            const had = stepsKept.get(chat);
+            const marks = db.query(Q.pathMarks).all(chat, user).map(row);
+            const keys = marks.map((m) => [m.is_user, m.swipe_id, m.revision, m.swipes_bytes, m.dates_bytes, m.extra_bytes, Bun.hash(String(m.content))].join("\u0000"));
+            const moved = had === undefined ? null : marks.flatMap((m, i) => (had.get(String(m.id))?.key === keys[i] ? [] : [String(m.id)]));
+            const fresh = moved === null ? db.query(Q.path).all(chat, user) : moved.length === 0 ? [] : db.query(Q.pathOf).all(chat, user, JSON.stringify(moved));
+            const read = new Map(fresh.map((r) => [String(row(r).id), stepOf(row(r))]));
+            const now = new Map<string, { key: string; step: LvStep }>();
+            const out = marks.flatMap((m, i): LvStep[] => {
+              const id = String(m.id);
+              const kept = had?.get(id)?.step;
+              const s = read.get(id) ?? (kept === undefined ? undefined : { ...kept, index: Number(m.index_in_chat) });
+              if (s === undefined) return [];
+              now.set(id, { key: keys[i] as string, step: s });
+              return [s];
             });
+            stepsKept.delete(chat);
+            stepsKept.set(chat, now);
+            for (const oldest of stepsKept.keys()) {
+              if (stepsKept.size <= Math.max(1, deps.settings?.().kept ?? KEPT)) break;
+              stepsKept.delete(oldest);
+            }
+            return out;
           })();
         }),
       );
@@ -457,7 +487,10 @@ export function createDbReader(deps: DbReaderDeps): DbReader {
         return null;
       }
     },
-    dropChat: (chat) => memo.drop(KEEP.chat(chat)),
+    dropChat: (chat) => {
+      memo.drop(KEEP.chat(chat));
+      stepsKept.delete(chat);
+    },
     // The file says itself when its rows change (its version, a book's signature, a preset's stamp): no event is needed.
     heard: () => undefined,
     state: () => ({ path: deps.path, off, checked }),
