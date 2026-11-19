@@ -42,3 +42,17 @@ test("the next turn is told each edit of the player's by what was pressed and wh
   // No line shows a change as it is written, nor leaves a blank where its words go.
   for (const line of told) expect(line).not.toMatch(/[{}]|engine\.|: \.|: $/);
 });
+
+test("the clock's Pause and Resume are told by what was pressed and where the clock stands, never as \"a pause of the clock\" both ways", async () => {
+  const r = await rig();
+  const all = { all: true };
+  for (const to of [true, false]) expect((await r.time({ control: "pause", scope: all, to })).applied).toBe(true);
+  setSystemTime(new Date(Date.now() + 1000));
+  const next = await r.writes.run(() => r.s.beginTurn({ chat: CHAT, kind: "normal" }), "the next turn").finally(() => setSystemTime());
+  const told = (await ownerEditsBefore(r.s, CHAT, next.id, TAP_DEFAULTS.tell, r.doc, registry())).map((e) => notices.line("player_edit", e.fields));
+  expect(told).toEqual([
+    "Before this turn, the player used the clock's controls (Pause clock: the clock is paused for this scene, and the world state says so while it is).",
+    "Before this turn, the player used the clock's controls (Resume clock: the clock is running, and the world state says it is paused only while it is).",
+  ]);
+  for (const line of told) expect(line).not.toMatch(/a pause of the clock|Recorded/i);
+});

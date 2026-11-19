@@ -64,6 +64,16 @@ function pressedOf(request: JsonValue | undefined, registry: Registry, world: Wo
   return isRecord(request.fix) && typeof request.fix.label === "string" && request.fix.label !== "" ? request.fix.label : null;
 }
 
+/**
+ * Which way the HUD's pause control went, as the notice's `clock` fields say it: `pause` where he paused the clock, `resume` where he let it
+ * run again; null for any other control, and for anything that is no time control.
+ */
+function clockPressed(request: JsonValue | undefined): JsonObject | null {
+  if (!isRecord(request) || request.kind !== "time" || request.control !== "pause") return null;
+  if (request.to === true) return { pause: true };
+  return request.to === false ? { resume: true } : null;
+}
+
 /** Words as a sentence of a line: its end a stop. */
 const sentence = (words: string): string => (/[.!?…]$/.test(words) ? words : `${words}.`);
 
@@ -125,15 +135,19 @@ export async function ownerEditsBefore(store: UserStore, chat: string, turn: str
     // What an Undo took back: what that edit of his had recorded, or the change of a turn.
     const undone = e.of !== null ? said(changesOf(e.of).filter((c) => c.applied)).words : e.undid !== null ? said([e.undid]).words : [];
     const unworded = recorded.unworded + refused.unworded;
+    // The clock's own Pause and Resume are told by what was pressed (the notice's `clock`), not by the records of the press: its marker and its
+    // pin or unpin of the pause are bookkeeping that read the same, "a pause of the clock", whichever way the press went.
+    const clock = clockPressed(request);
     return {
       edit,
       fields: {
         is: { [kindOf(request)]: true },
         ...(what !== null ? { what } : {}),
-        changes: recorded.words,
+        ...(clock !== null ? { clock } : {}),
+        changes: clock === null ? recorded.words : [],
         not_applied: refused.words,
-        ...(unworded > 0 ? { unworded } : {}),
-        ...(undo ? { undo: true, of: undone, ...(e.of === null ? { by_turn: true } : {}) } : {}),
+        ...(unworded > 0 && clock === null ? { unworded } : {}),
+        ...(undo ? { undo: true, of: clock === null ? undone : [], ...(e.of === null ? { by_turn: true } : {}) } : {}),
       },
     };
   });

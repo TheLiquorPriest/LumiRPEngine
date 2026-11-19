@@ -33,6 +33,8 @@ export interface Rig {
   /** The engine's state of the world at the chat's head. */
   world(): WorldState;
   tap(ask: TapAsk): Promise<TapAnswer>;
+  /** One of the HUD's time controls (Pause clock, Resume clock, ...), as his own edit. */
+  time(ask: { control: string; scope: JsonValue; to: JsonValue }): Promise<TapAnswer>;
   undo(id: string | null): Promise<TapAnswer>;
   /** A turn of events a reply tells of, applied as the engine's own: each one's change, whether it applied or not. */
   record(events: readonly LedgerEvent[]): Promise<ChangeRow[]>;
@@ -77,6 +79,7 @@ export async function rig(pov?: string, template = "modern_slice_of_life"): Prom
     world: () => s.headState(CHAT).state.world,
     view: () => service.state(USER, CHAT, null),
     tap: (ask) => service.tap(USER, CHAT, ask),
+    time: (ask) => service.time(USER, CHAT, ask),
     undo: async (id) => {
       if (id === null) throw new Error("the tap gave no Undo");
       return await service.undoEdit(USER, CHAT, id);
