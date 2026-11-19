@@ -99,6 +99,12 @@ const FOLD_VERSION = 8;
 /** A fold that holds the thread this long or longer says so in the log, once (`saidLong`). */
 const LONG_FOLD_MS = 1000;
 
+/** What a node's mark starts with (`nodeMark`), so a state held under one is never taken for one held under a chat's mark. */
+const NODE_MARK = "node:";
+
+/** How many nodes of a chat the writes since may name before the store forgets them and holds every node under the newest mark (`newMarks`). */
+const NODES_NAMED_MOST = 8192;
+
 export interface StoreOptions {
   /**
    * A database file's path or `:memory:`: the store opens it, brings its tables up and closes it.
@@ -417,6 +423,13 @@ export class Store {
   /** The keys of the states held, by user and chat (a world's starts under `~`): the chats in the order read, least recent first. */
   private readonly byChat = new Map<string, Set<string>>();
   private readonly held = new Map<string, Map<string, HeldRow>>();
+  /**
+   * By user and chat (`user\0chat`), what this store's own writes said of the chat's nodes since it first wrote to the chat, or since a
+   * write that named no nodes: the mark the newest left (`newest`), the mark every node no write since named holds under (`base`), and
+   * each node named since with the mark of the newest write that named it (`named`). What a node's state is held and named under
+   * (`nodeMark`); only while `newest` is the chat's mark in the database, which a rollback or any other writer moves.
+   */
+  private readonly marksSince = new Map<string, { newest: string; base: string; named: Map<string, string> }>();
   private readonly compared = new Map<string, ComparedPath>();
   private readonly views = new WeakMap<StoreState, TreeView>();
   private readonly envs = new Map<string, FoldEnv>();
@@ -592,15 +605,34 @@ export class Store {
     return read();
   }
 
-  /** Hands `job` to a thread and takes what it held: a state folded under a mark that moved since is not held, and a snapshot waits for the user's next write as any found by a fold here does. */
+  /**
+   * Hands `job` to a thread and takes what it held: a state folded under a mark that moved since is not held, and a snapshot waits for the
+   * user's next write as any found by a fold here does. The thread's store wrote nothing, so it holds a node's state under the chat's
+   * mark as it read it (`nodeMark`); while that is the chat's mark still, the state is the node's as it stands, held here under the
+   * node's mark as this store's writes give it.
+   */
   private async foldAway(away: StoreAway, job: FoldJob): Promise<void> {
     const before = new Map(this.db.query<{ chat: string; mark: string }, [string]>("SELECT chat, mark FROM fold_mark WHERE user = ?").all(job.user).map((r) => [r.chat, r.mark]));
     const done = await away.run({ path: away.path, ...this.forThreads }, job);
+    const here = (chat: string, node: string, mark: string): string | null => {
+      const read = mark.startsWith(NODE_MARK) ? mark.slice(NODE_MARK.length) : mark;
+      const now = this.markOf(job.user, chat);
+      if (read !== (before.get(chat) ?? "") || read !== now) return null;
+      return mark.startsWith(NODE_MARK) ? this.nodeMark(job.user, chat, node, now) : mark;
+    };
+    const prefix = `${job.user}\u0000`;
     for (const f of done.folds) {
-      if (f.chat !== null && (f.mark !== (before.get(f.chat) ?? "") || f.mark !== this.markOf(job.user, f.chat))) continue;
-      this.keep(f.key, f.folded, f.upto, job.user, f.chat, f.mark);
+      const mark = f.chat === null || f.mark === null ? f.mark : here(f.chat, f.key.slice(prefix.length), f.mark);
+      if (f.chat !== null && mark === null) continue;
+      this.keep(f.key, f.folded, f.upto, job.user, f.chat, mark);
     }
-    this.hold(job.user, done.held);
+    this.hold(
+      job.user,
+      done.held.flatMap(([node, upto, rows, chat, mark]) => {
+        const ours = here(chat, node, mark);
+        return ours === null ? [] : [[node, upto, rows, chat, ours] as const];
+      }),
+    );
     for (const said of done.logs) this.log?.(said.message, said.data);
     for (const f of done.failures) this.handlerFailed({ op: f.op, error: new Error(f.message), user: f.user, ...(f.chat === undefined ? {} : { chat: f.chat }), turn: f.turn, change: f.change });
   }
@@ -626,16 +658,46 @@ export class Store {
     return this.db.query<{ mark: string }, [string, string]>("SELECT mark FROM fold_mark WHERE user = ? AND chat = ?").get(user, chat)?.mark ?? "";
   }
 
-  /** @internal Gives each of the chats a fold mark never used before; inside a write. */
-  newMarks(user: string, chats: readonly string[]): void {
+  /**
+   * @internal Gives each of the chats a fold mark never used before; inside a write. `nodes`: the only nodes whose folds the write
+   * changes (a turn's changes written: the turn's nodes and every node after them, `nodesThrough`), so that every other node of the
+   * chats keeps the mark its state is held and named under (`nodeMark`); left out, the write may change any fold of the chats.
+   */
+  newMarks(user: string, chats: readonly string[], nodes?: ReadonlySet<string>): void {
     const put = this.db.query("INSERT INTO fold_mark (user, chat, mark) VALUES (?, ?, ?) ON CONFLICT (user, chat) DO UPDATE SET mark = excluded.mark");
-    for (const chat of chats) put.run(user, chat, crypto.randomUUID());
+    for (const chat of chats) {
+      const group = `${user}\u0000${chat}`;
+      const before = this.markOf(user, chat);
+      const mark = crypto.randomUUID();
+      put.run(user, chat, mark);
+      const was = this.marksSince.get(group);
+      // A write that names no nodes, or one after marks this store did not leave, starts again: every node holds under the new mark.
+      if (nodes === undefined || (was !== undefined && was.newest !== before) || (was?.named.size ?? 0) + nodes.size > NODES_NAMED_MOST) {
+        this.marksSince.set(group, { newest: mark, base: mark, named: new Map() });
+        continue;
+      }
+      // The first write this store makes to the chat: every node's state as it stands now holds under the mark the chat had.
+      const since = was ?? { newest: before, base: before, named: new Map<string, string>() };
+      since.newest = mark;
+      for (const node of nodes) since.named.set(node, mark);
+      this.marksSince.set(group, since);
+    }
   }
 
-  /** @internal A state held in memory: one folded under `mark`, or one that holds under any. Reading it makes it, and its chat, the most recently read. */
-  cached(key: string, mark?: string): Cached | null {
+  /**
+   * @internal The mark the state at `node` (stored, of a turn played in `chat`) is held and named under: the newest mark a write left that
+   * named it, else the mark from which no write named it (`newMarks`); the chat's own mark where this store's writes do not account for it.
+   * Tagged, so a node's mark is never read as a chat's. `current`: the chat's mark, where the caller has read it.
+   */
+  nodeMark(user: string, chat: string, node: string, current = this.markOf(user, chat)): string {
+    const since = this.marksSince.get(`${user}\u0000${chat}`);
+    return `${NODE_MARK}${since === undefined || since.newest !== current ? current : (since.named.get(node) ?? since.base)}`;
+  }
+
+  /** @internal A state held in memory: one folded under one of `marks`, or one that holds under any. Reading it makes it, and its chat, the most recently read. */
+  cached(key: string, ...marks: string[]): Cached | null {
     const hit = this.folds.get(key);
-    if (!hit || (hit.mark !== null && hit.mark !== mark)) return null;
+    if (!hit || (hit.mark !== null && !marks.includes(hit.mark))) return null;
     const group = key.slice(0, key.indexOf("\u0000") + 1) + (hit.chat ?? "~");
     const keys = this.byChat.get(group);
     if (keys) {
@@ -702,23 +764,23 @@ export class Store {
   }
 
   /**
-   * @internal Stores the user's held snapshots whose chats' marks still hold; inside a write. One of a node not stored yet (a question's
-   * fold of a path no comparison has stored) waits, under its mark, for the write that stores the node.
+   * @internal Stores the user's held snapshots whose marks still hold (their chat's, or their node's: `nodeMark`); inside a write. One of
+   * a node not stored yet (a question's fold of a path no comparison has stored) waits, under its mark, for the write that stores the node.
    */
   flush(user: string): void {
     const held = this.held.get(user);
     if (!held) return;
     this.held.delete(user);
     const marks = new Map<string, string>();
-    const holds = (row: HeldRow): boolean => {
+    const holds = (node: string, row: HeldRow): boolean => {
       let mark = marks.get(row.chat);
       if (mark === undefined) {
         mark = this.markOf(user, row.chat);
         marks.set(row.chat, mark);
       }
-      return mark === row.mark;
+      return row.mark === mark || row.mark === this.nodeMark(user, row.chat, node, mark);
     };
-    const rows = [...held].filter(([, row]) => holds(row));
+    const rows = [...held].filter(([node, row]) => holds(node, row));
     for (const [, row] of rows) this.putParts(user, row.rows.parts);
     const waiting = new Map<string, HeldRow>();
     for (const [node, row] of rows) if (!this.putSnapshot(user, node, "cache", row.upto, row.rows.manifest)) waiting.set(node, row);
@@ -831,14 +893,16 @@ export class UserStore {
    * removed) names the chats whose folds it changes (`chats`: those whose path runs through what it
    * writes; false for a write that changes no fold), and gives each a new fold mark before and after
    * it, so no state of theirs folded before it, or during it, is used once it is done, or once it is
-   * undone. Every other chat keeps what it holds.
+   * undone. Every other chat keeps what it holds. A write of one turn's changes or starting state
+   * names the nodes it changes the folds of too (`nodes`, `nodesThrough`): the states held, and the
+   * keys given (`foldKey`), for the chats' other nodes, the turns before it, stand (`Store.nodeMark`).
    */
-  private write<T>(chats: readonly string[] | false, fn: () => T): T {
+  private write<T>(chats: readonly string[] | false, fn: () => T, nodes?: ReadonlySet<string>): T {
     return this.db.transaction(() => {
       this.store.flush(this.id);
-      if (chats !== false) this.store.newMarks(this.id, chats);
+      if (chats !== false) this.store.newMarks(this.id, chats, nodes);
       const out = fn();
-      if (chats !== false) this.store.newMarks(this.id, chats);
+      if (chats !== false) this.store.newMarks(this.id, chats, nodes);
       else this.store.flush(this.id);
       this.store.wrote(this.id, chats === false ? null : chats);
       return out;
@@ -1827,9 +1891,9 @@ export class UserStore {
       });
       this.dropSnapshotsThrough(turnId);
       return made;
-    });
-    // The state inside the turn now, held under the mark the write left: it stands only if the write does. A job's changes are not the turn's.
-    if (jobs.length === 0) this.store.keep(this.cacheKey(turn.node), { ...inside.folded, state }, Math.max(inside.upto, ...ids), this.id, turn.chat, this.store.markOf(this.id, turn.chat));
+    }, this.nodesThrough(turnId));
+    // The state inside the turn now, held under the mark the write left its node: it stands only if the write does. A job's changes are not the turn's.
+    if (jobs.length === 0) this.store.keep(this.cacheKey(turn.node), { ...inside.folded, state }, Math.max(inside.upto, ...ids), this.id, turn.chat, this.store.nodeMark(this.id, turn.chat, turn.node));
     const rows = this.db.query<ChangeDb, [string, string]>("SELECT * FROM change WHERE user = ?1 AND id IN (SELECT value FROM json_each(?2)) ORDER BY ord").all(this.id, JSON.stringify(ids)).map(changeOf);
     return { changes: rows, state };
   }
@@ -1871,14 +1935,8 @@ export class UserStore {
       if (at !== undefined) refused.set(i, typeof at === "number" ? { code: "later_value", values: { turn: at } } : at);
     });
     // The write drops every state held from the turn on, in each chat through it; those held for the turns before it change in nothing
-    // and stay held (PlanStore-S2 item 3), under the marks the write leaves.
-    const prev = this.db.query<{ prev: string | null }, [string, string]>("SELECT prev FROM path_node WHERE user = ? AND key = ?").get(this.id, turn.node)?.prev ?? null;
-    const kept = (prev === null ? [] : this.chainRows(prev)).flatMap((r) => {
-      const held = this.store.cached(this.cacheKey(r.key), this.store.markOf(this.id, r.chat));
-      return held === null ? [] : [{ key: r.key, chat: r.chat, held }];
-    });
+    // and stay held (PlanStore-S2 item 3): it names only the nodes from the turn on (`nodesThrough`), and theirs keep their marks.
     const added = this.addChanges(turnId, inputs, refused);
-    for (const k of kept) this.store.keep(this.cacheKey(k.key), k.held.folded, k.held.upto, this.id, k.chat, this.store.markOf(this.id, k.chat));
     const landed: EarlierLanded[] = [];
     for (const [chat, after] of stretches) {
       const notApplied = this.headState(chat).notApplied.filter((n) => !(had.get(chat)?.has(n.change) ?? false));
@@ -1969,7 +2027,7 @@ export class UserStore {
       const r = handle === undefined ? this.db.run("DELETE FROM change WHERE user = ? AND turn = ?", [this.id, turnId]) : this.db.run("DELETE FROM change WHERE user = ? AND turn = ? AND handle = ?", [this.id, turnId, handle]);
       this.dropSnapshotsThrough(turnId);
       return r.changes;
-    });
+    }, this.nodesThrough(turnId));
   }
 
   /**
@@ -1984,7 +2042,7 @@ export class UserStore {
       const r = this.db.run("DELETE FROM change WHERE user = ? AND turn = ? AND ord > ? AND job IS NULL", [this.id, turnId, after]);
       this.dropSnapshotsThrough(turnId);
       return r.changes;
-    });
+    }, this.nodesThrough(turnId));
   }
 
   /**
@@ -2070,6 +2128,24 @@ export class UserStore {
     );
   }
 
+  /**
+   * The nodes whose folds a write of the turn's changes or starting state changes: every node the turn stands at (its own and each it
+   * stands rebased at), and every node after one of them. No other node's path holds the turn, so no other fold reads what it wrote.
+   */
+  private nodesThrough(turn: string): Set<string> {
+    return new Set(
+      this.db
+        .query<{ key: string }, [string, string]>(
+          `WITH RECURSIVE down(key) AS (
+             SELECT key FROM path_node WHERE user = ?1 AND turn = ?2
+             UNION SELECT n.key FROM path_node n JOIN down d ON n.user = ?1 AND n.prev = d.key)
+           SELECT key FROM down`,
+        )
+        .all(this.id, turn)
+        .map((r) => r.key),
+    );
+  }
+
   // ------------------------------------------------------------ state
 
   /**
@@ -2081,13 +2157,14 @@ export class UserStore {
   }
 
   /**
-   * What names the state at a turn as it is folded now (`stateAt`): the node it was made on and the fold mark of the chat it was played
-   * in, the key the store's own held states go by. Another key once anything that fold reads changes; a reader that keeps something
-   * worked out from that state keeps it under this key, and holds no state for it. A joined turn is refused, as every reading of one is.
+   * What names the state at a turn as it is folded now (`stateAt`): the node it was made on and that node's mark (`Store.nodeMark`, of
+   * the chat it was played in), the key the store's own held states go by. Another key once anything that fold reads changes, and the
+   * same while only what comes after the turn does (a later turn's changes); a reader that keeps something worked out from that state
+   * keeps it under this key, and holds no state for it. A joined turn is refused, as every reading of one is.
    */
   foldKey(turnId: string): string {
     const t = this.turnToWrite(turnId);
-    return `${this.id}\u0000${t.node}\u0000${this.store.markOf(this.id, t.chat)}`;
+    return `${this.id}\u0000${t.node}\u0000${this.store.nodeMark(this.id, t.chat, t.node)}`;
   }
 
   /**
@@ -2420,7 +2497,7 @@ export class UserStore {
       const upto = this.db.query<{ n: number | null }, [string]>("SELECT max(id) AS n FROM change WHERE user = ?").get(this.id)?.n ?? 0;
       this.store.storeSnapshot(this.id, node, "base", upto, snapshotRows(doc));
       this.dropSnapshotsThrough(turnId);
-    });
+    }, this.nodesThrough(turnId));
   }
 
   /** The state a chat starts from: its world revision's, or, for a chat that names no world, the blank world's. */
@@ -2466,8 +2543,9 @@ export class UserStore {
   }
 
   /**
-   * Folds the path ending at `node`, from the nearest state on it held in memory under the fold mark of the chat its turn was played
-   * in, else stored, else the chat's start. It writes nothing: the snapshots it finds worth storing wait for the user's next write.
+   * Folds the path ending at `node`, from the nearest state on it held in memory under its node's mark (`Store.nodeMark`, of the chat
+   * its turn was played in) or under that chat's mark as it is now, else stored, else the chat's start. It writes nothing: the
+   * snapshots it finds worth storing wait for the user's next write.
    */
   private foldNode(node: string): { folded: Folded; upto: number } {
     const own = this.db
@@ -2476,8 +2554,8 @@ export class UserStore {
       )
       .get(this.id, node);
     if (!own) throw new StoreInputError(`no path node ${node}`);
-    const mark = own.mark ?? "";
-    const hit = this.store.cached(this.cacheKey(node), mark);
+    const mark = this.store.nodeMark(this.id, own.chat, node, own.mark ?? "");
+    const hit = this.store.cached(this.cacheKey(node), mark, own.mark ?? "");
     if (hit) return { folded: hit.folded, upto: hit.upto };
     // The path back to the nearest stored snapshot this code may use, or to the start, each node with its turn's chat and that chat's mark.
     const chain = this.db
@@ -2493,7 +2571,7 @@ export class UserStore {
       )
       .all(this.id, this.store.fingerprint, node);
     if (chain.length === 0) throw new StoreInputError(`no path node ${node}`);
-    const at = new Map(chain.map((c) => [c.key, { chat: c.chat, mark: c.mark ?? "" }]));
+    const at = new Map(chain.map((c) => [c.key, { chat: c.chat, mark: this.store.nodeMark(this.id, c.chat, c.key, c.mark ?? ""), now: c.mark ?? "" }]));
     // Start from the latest state held in memory, else the stored snapshot, else the chat's start.
     let from = -1;
     let start: { state: StoreState; upto: number; notApplied: Folded["notApplied"]; rebased: string[] } | null = null;
@@ -2501,7 +2579,8 @@ export class UserStore {
     let base: StoreState | null = null;
     for (let i = chain.length - 2; i >= 0; i--) {
       const c = chain[i];
-      const held = c === undefined ? null : this.store.cached(this.cacheKey(c.key), c.mark ?? "");
+      const of = c === undefined ? undefined : at.get(c.key);
+      const held = c === undefined || of === undefined ? null : this.store.cached(this.cacheKey(c.key), of.mark, of.now);
       if (!held) continue;
       from = i;
       start = { state: draft(held.folded.state), upto: held.upto, notApplied: [...held.folded.notApplied], rebased: [...held.folded.rebased] };
