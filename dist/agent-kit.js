@@ -11504,7 +11504,7 @@ var events = [
     apply: (e, state) => {
       slice(state).pauseScene = typeof e.data.scene === "string" ? e.data.scene : null;
     },
-    describe: () => say("ev_clock_pause"),
+    describe: (e) => say(e.data.scene === null ? "ev_clock_resume" : "ev_clock_pause"),
     reverse: (_e, before) => [{ type: ENGINE_EVENTS.pause, data: { scene: readEngineSlice(before).pauseScene } }]
   },
   {
@@ -103803,7 +103803,7 @@ var package_default = {
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "fa66b187";
+var BUILD = "11026ed1";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;

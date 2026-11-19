@@ -13349,7 +13349,7 @@ var init_engine_pack = __esm(() => {
       apply: (e, state) => {
         slice(state).pauseScene = typeof e.data.scene === "string" ? e.data.scene : null;
       },
-      describe: () => say("ev_clock_pause"),
+      describe: (e) => say(e.data.scene === null ? "ev_clock_resume" : "ev_clock_pause"),
       reverse: (_e, before) => [{ type: ENGINE_EVENTS.pause, data: { scene: readEngineSlice(before).pauseScene } }]
     },
     {
@@ -111412,7 +111412,7 @@ function worldState(store, input) {
       if (told2.has(x.change) || listed3.has(x.change))
         continue;
       const t = x.turn === "" ? null : store.turn(x.turn);
-      lines.push({ kind: "unsettled_stopped", depth: 0, fields: { op: x.op, ...t === null ? { between: true } : { turn: t.depth + 1 }, ...aboutField(x.about ?? [], nameOf9, view), value: said2(x.value ?? null), codes: x.reports.map((r) => r.code) } });
+      lines.push({ kind: "unsettled_stopped", depth: 0, fields: { op: x.op, ...t === null ? { between: true } : { turn: t.depth + 1 }, ...aboutField(x.about ?? [], nameOf9, view), ...clockField(clockWay(x.op, x.value ?? undefined)), value: said2(x.value ?? null), codes: x.reports.map((r) => r.code) } });
     }
     const holds4 = new Set;
     for (const h of input.holds ?? []) {
@@ -111490,7 +111490,7 @@ function aboutField(about2, nameOf9, view) {
 }
 function unsettledChange(u, n, nameOf9, view) {
   const c = u.change;
-  const fields = { op: c.op, lane: c.lane, ...n === null ? { between: true } : { turn: n }, ...aboutField(u.about, nameOf9, view), value: said2(c.value), applied: c.applied && !u.why.includes("not_applied") };
+  const fields = { op: c.op, lane: c.lane, ...n === null ? { between: true } : { turn: n }, ...aboutField(u.about, nameOf9, view), ...clockField(clockWay(c.op, c.value)), value: said2(c.value), applied: c.applied && !u.why.includes("not_applied") };
   if (c.by !== null)
     fields.by = c.by;
   if (c.reports.length > 0) {
@@ -111638,6 +111638,19 @@ function around2(view, scenePlace, shown3) {
   }
   return out;
 }
+function clockWay(op, value) {
+  if (!isRecord(value))
+    return;
+  if (op === STORE_OPS.marker)
+    return value.kind === "time" && value.control === "pause" ? value.to === true ? "paused" : value.to === false ? "resumed" : undefined : undefined;
+  if (op !== ENGINE_EVENTS.pause)
+    return;
+  const scene = isRecord(value.data) ? value.data.scene : undefined;
+  return scene === null ? "resumed" : typeof scene === "string" ? "paused" : undefined;
+}
+function clockField(way) {
+  return way === undefined ? {} : { clock: { pieces: [{ kind: CLOCK_LINES[way], fields: {} }] } };
+}
 function changedLines(view, rows2, nameOf9) {
   const out = [];
   const lineOf = (kind, lane, mine) => {
@@ -111653,7 +111666,9 @@ function changedLines(view, rows2, nameOf9) {
     }
     const by = [...new Set(mine.flatMap((r) => r.change.by === null ? [] : [r.change.by]))];
     const unapplied = mine.filter((r) => !r.applied).length;
-    const fields = { lane, n: mine.length, one: mine.length === 1, ops: { list: [...new Set(mine.map((r) => r.change.op))] } };
+    const ops = [...new Set(mine.filter((r) => clockWay(r.change.op, r.change.value) === undefined).map((r) => r.change.op))];
+    const last = mine.filter((r) => r.applied && clockWay(r.change.op, r.change.value) !== undefined).reduce((a, r) => a === null || r.change.id > a.id ? r.change : a, null);
+    const fields = { lane, n: mine.length, one: mine.length === 1, ...ops.length > 0 ? { ops: { list: ops } } : {}, ...last === null ? {} : clockField(clockWay(last.op, last.value)) };
     if (touched.length > 0)
       fields.touched = { names: touched };
     if (by.length > 0)
@@ -111744,12 +111759,13 @@ function outline(view, part, room, horizon, root) {
     walk3(ref2);
   return fit(part, "outline", out, room, 0).lines;
 }
-var SCENE_READ = "scene", WORLD_STATE_DEFAULTS, WORLD_STATE_SECTIONS, SOFT_PRECISION, SOFT_STANDING, isSoft = (m) => m.precision !== null && SOFT_PRECISION.has(m.precision) || m.standing !== null && SOFT_STANDING.has(m.standing) || m.source === null || m.unchecked === true, READ_THROUGH = 4096;
+var SCENE_READ = "scene", WORLD_STATE_DEFAULTS, WORLD_STATE_SECTIONS, SOFT_PRECISION, SOFT_STANDING, isSoft = (m) => m.precision !== null && SOFT_PRECISION.has(m.precision) || m.standing !== null && SOFT_STANDING.has(m.standing) || m.source === null || m.unchecked === true, READ_THROUGH = 4096, CLOCK_LINES;
 var init_world_state2 = __esm(() => {
   init_json();
   init_ids();
   init_world();
   init_calendar();
+  init_engine_pack();
   init_pack_kit();
   init_realism();
   init_time();
@@ -111768,6 +111784,7 @@ var init_world_state2 = __esm(() => {
   WORLD_STATE_SECTIONS = ["horizon", "above", "around", "outline", "passed", "due", "open", "changed", "unsettled"];
   SOFT_PRECISION = new Set(["approximate", "vague", "unknown"]);
   SOFT_STANDING = new Set(["proposed", "assumed"]);
+  CLOCK_LINES = { paused: "clock_paused", resumed: "clock_resumed" };
 });
 
 // src/store/search.ts
@@ -165806,8 +165823,15 @@ async function engineAnswers(guidance) {
   return Lines.parse(await readFile14(join44(guidance, ".prompts", `${ANSWERS_PART}.md`), "utf8"), `.prompts/${ANSWERS_PART}.md`);
 }
 function changeSaid(part, registry2, world, state2, change2) {
-  const said5 = (world === undefined || state2 === undefined ? undefined : changeLine2(registry2, world, state2, change2.op, change2.value)) ?? own2(part.keys, change2.op);
+  const way = wayOf(change2);
+  const said5 = (world === undefined || state2 === undefined ? undefined : changeLine2(registry2, world, state2, change2.op, change2.value)) ?? (way === undefined ? undefined : own2(part.keys, `${change2.op}.${way}`)) ?? own2(part.keys, change2.op);
   return said5 === undefined || said5.trim() === "" ? undefined : said5.charAt(0).toUpperCase() + said5.slice(1);
+}
+function wayOf(change2) {
+  if (change2.op !== ENGINE_EVENTS.pause)
+    return;
+  const scene2 = isRecord(change2.value) && isRecord(change2.value.data) ? change2.value.data.scene : undefined;
+  return scene2 === null ? "off" : typeof scene2 === "string" ? "on" : undefined;
 }
 function changeWords(part, registry2, world, state2, change2) {
   return changeSaid(part, registry2, world, state2, change2) ?? answerWords2(part, "card_change_unknown");
@@ -165825,11 +165849,13 @@ function undoWords(part, ops) {
   return answerWords2(part, ops.length === 0 ? "card_undo_none" : "card_undo_whole");
 }
 var init_card_words = __esm(() => {
+  init_engine_pack();
   init_pack_kit();
   init_kit();
   init_texts();
   init_due2();
   init_service();
+  init_json();
 });
 
 // src/turn/folder.ts
@@ -166164,6 +166190,13 @@ function pressedOf(request, registry2, world) {
     return (world === undefined ? undefined : own2(world.actions, request.action)?.label) ?? registry2.actions.get(request.action)?.label ?? request.action;
   return isRecord(request.fix) && typeof request.fix.label === "string" && request.fix.label !== "" ? request.fix.label : null;
 }
+function clockPressed(request) {
+  if (!isRecord(request) || request.kind !== "time" || request.control !== "pause")
+    return null;
+  if (request.to === true)
+    return { pause: true };
+  return request.to === false ? { resume: true } : null;
+}
 function saidOf(changes, answers2, registry2, world, state2) {
   const words13 = new Set;
   let unworded = 0;
@@ -166217,15 +166250,17 @@ async function ownerEditsBefore(store2, chat, turn, tell2, world, registry2) {
     const refused5 = said5(e.notApplied);
     const undone = e.of !== null ? said5(changesOf(e.of).filter((c) => c.applied)).words : e.undid !== null ? said5([e.undid]).words : [];
     const unworded = recorded2.unworded + refused5.unworded;
+    const clock = clockPressed(request);
     return {
       edit,
       fields: {
         is: { [kindOf4(request)]: true },
         ...what !== null ? { what } : {},
-        changes: recorded2.words,
+        ...clock !== null ? { clock } : {},
+        changes: clock === null ? recorded2.words : [],
         not_applied: refused5.words,
-        ...unworded > 0 ? { unworded } : {},
-        ...undo2 ? { undo: true, of: undone, ...e.of === null ? { by_turn: true } : {} } : {}
+        ...unworded > 0 && clock === null ? { unworded } : {},
+        ...undo2 ? { undo: true, of: clock === null ? undone : [], ...e.of === null ? { by_turn: true } : {} } : {}
       }
     };
   });
@@ -281006,5 +281041,5 @@ if (Bun.isMainThread) {
     stopped,
     fetch: (url2, init) => fetch(url2, init),
     invoked: invokedAs2(process.execPath, Bun.main)
-  }, { version: "fa66b187", areas: compose2().areas, appFile: Bun.main, host: { platform: process.platform, uid: process.getuid?.() ?? null, bun: process.execPath } });
+  }, { version: "11026ed1", areas: compose2().areas, appFile: Bun.main, host: { platform: process.platform, uid: process.getuid?.() ?? null, bun: process.execPath } });
 }
