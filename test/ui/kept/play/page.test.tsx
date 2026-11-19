@@ -80,8 +80,8 @@ describe("the Play page", () => {
     const held = catalog.panels.filter((panel) => !panel.id.startsWith("core.") && FIRST.panels[panel.id] !== undefined && FIRST.panels[panel.id] !== null).map((panel) => panel.id);
     expect(held.length).toBeGreaterThan(0);
     expect([...shown].filter((id) => !id.startsWith("core.")).sort()).toEqual([...held].sort());
-    // Every pack whose panel the state holds and today's frontend draws: the weather's is shown in the HUD alone.
-    expect(new Set(held.map((id) => id.split(".")[0]))).toEqual(new Set(["calendar", "space", "economy", "gear", "vehicles", "castlife", "sheets", "story", "minds", "orgs"]));
+    // Every pack whose panel the state holds and today's frontend draws: the weather's is shown in the HUD alone, and with the tabletop rules on in the recorded chat, You is d20's sheet, not the sheets pack's.
+    expect(new Set(held.map((id) => id.split(".")[0]))).toEqual(new Set(["calendar", "space", "economy", "gear", "vehicles", "castlife", "d20", "story", "minds", "orgs"]));
     expect(shown.has("core.scene") && shown.has("core.journal")).toBe(true);
     await leave(root);
   });
