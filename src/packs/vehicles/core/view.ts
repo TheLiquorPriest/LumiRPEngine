@@ -18,6 +18,7 @@ import { orgTypeOf } from "../../../engine/org";
 import { numOf, strOf, own, rowOf } from "../../../engine/pack-kit";
 import { isGone, kindIs, placeOfEntity } from "../../../engine/scope";
 import { loanChoices } from "../../../engine/thing-gm";
+import { contentsIndex } from "../../../engine/thing-index";
 import { canSeeEntity, canSeePlace, HIDDEN_PLACE_NAME } from "../../../engine/visibility";
 import { useTier, vehiclesFor, type VehicleUse } from "./access";
 import { driverOf, rangeLeft, serviceInterval } from "./index";
@@ -169,10 +170,8 @@ export function buildGarageView(ctx: ReadContext): GarageView {
           return { who: g.who, name: nameOf(g.who), basis: grantBasisOf(fields, g.until), ...(g.until !== undefined ? { until: formatClock(cal, g.until) } : {}), ...(g.until !== undefined && g.until <= ctx.state.clock ? { overdue: true as const } : {}) };
         });
     }
-    const cargo = Object.keys(ctx.state.entities)
-      .sort()
-      .filter((x) => !isGone(ctx.state, x) && seesEntity(x) && own(ctx.state.entities, x)?.relations.some((r) => r.type === "in" && r.to === id))
-      .map((x) => own(ctx.state.entities, x)?.name ?? x);
+    // What is in it, from the pass's index of what holds what (a walk of every entity for each vehicle was most of the garage).
+    const cargo = [...new Set(contentsIndex(ctx.state).contents.get(id) ?? [])].filter((x) => !isGone(ctx.state, x) && seesEntity(x)).map((x) => own(ctx.state.entities, x)?.name ?? x);
     if (cargo.length > 0) v.cargo = cargo;
     const specs = vehicleSpecsOf(e.fields.specs) ?? [];
     if (specs.length > 0) v.specs = specs;
