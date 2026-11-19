@@ -35,7 +35,7 @@ import { bodyProblem, JOINED_STATUS, problemsOf, readQuery, RouteError, shape, s
 import { RefusedSignIns } from "./refusals";
 import { LUMIVERSE_SIGNIN_PATH } from "./signin-routes";
 import type { Workers } from "./workers/pool";
-import type { ChatNamedHook } from "./hooks";
+import type { ChatNamedHook, ChatReadyHook } from "./hooks";
 
 /** The address a request came from, as the socket says it; words for where none can be read. */
 function addressOf(server: Server<LiveSocketData> | null, request: Request): string {
@@ -57,6 +57,8 @@ export interface ServerParts {
   commandSocket?: string;
   /** Takes on the chat a route names in its path (`/api/v1/chats/:chat/…`) before a route that keeps or changes something of it is given the call (`takesChat`; plan §4.2: nothing has to be prepared first); absent, nothing is done first. */
   chatNamed?: ChatNamedHook;
+  /** Waits, for any route that names a chat in its path, while RPE prepares that chat after a start or an update; absent, nothing is waited for. */
+  chatReady?: ChatReadyHook;
 }
 
 export interface RunningServer {
@@ -263,6 +265,8 @@ interface Asked {
   later: ((work: (signal: AbortSignal) => Promise<Response>) => Response) | null;
   /** For a page's call over TCP: how long it may run before its work is taken in hand and answered with an id, and what takes it in hand; null where it is answered directly. */
   late: { ms: number; start(work: Promise<Response>): Response } | null;
+  /** What is done before the route's handler is given the call: the chat it names waited for and taken on (`chatReady`, `chatNamed`). */
+  before: () => Promise<void>;
 }
 
 /**
@@ -308,6 +312,7 @@ async function answerDeclared(route: DeclaredRoute<any, any, any, any, any, any>
     if (problem !== null) return await refused(problem, `${at} does not take this body: ${problemsOf(declared, body, "body").slice(0, 3).join(" ")}`);
   }
   const run = async (signal: AbortSignal): Promise<Response> => {
+    await asked.before();
     const reply: unknown = await route.handle({ params: asked.params, query, body, user: asked.user, auth: asked.auth, signal });
     if ((route.reply as AnyShape).kind === "nothing") return new Response(null, { status: 204 });
     // A page's `next` is the place of its last item; the page is handed it sealed, as its cursor.
@@ -416,10 +421,17 @@ export function startServer(parts: ServerParts): RunningServer {
     };
     const rest = route.path.endsWith("/*") ? restOf(route.path, path) : null;
     try {
-      // The chat a route that keeps or changes something of it names is taken on before the route answers: a chat Lumiverse does not have is refused in words.
-      // A route that only reads it answers a chat RPE does not hold as an untouched chat reads, and makes nothing.
-      if (parts.chatNamed !== undefined && takesChat(route) && typeof params.chat === "string") await parts.chatNamed(user, params.chat);
+      // The chat a route names is waited for while RPE prepares it (after a start or an update), and taken on where the route keeps or
+      // changes something of it: a chat Lumiverse does not have is refused in words. A route that only reads it answers a chat RPE does
+      // not hold as an untouched chat reads, and makes nothing. A declared route does both inside its work, so a page's request answered
+      // later by id (`late`) covers the wait too.
+      const before = async (): Promise<void> => {
+        if (typeof params.chat !== "string") return;
+        if (parts.chatReady !== undefined) await parts.chatReady(user, params.chat);
+        if (parts.chatNamed !== undefined && takesChat(route)) await parts.chatNamed(user, params.chat);
+      };
       if ("raw" in route) {
+        await before();
         const given = bytes === null ? request : new Request(request.url, { method: request.method, headers: request.headers, body: bytes, signal: request.signal });
         // A socket keeps what auth answered, its credential's hash and end, and never the credential's text.
         const openLiveSocket = (headers?: Record<string, string>): boolean => server?.upgrade(request, { data: { follows: new Map(), auth: call, ends: undefined, catchUp: undefined, counted: false }, ...(headers === undefined ? {} : { headers }) }) ?? false;
@@ -430,7 +442,7 @@ export function startServer(parts: ServerParts): RunningServer {
       if (rest !== null && rest.decoded === null) return withCors(refusal(path, 400, `The path ${path} has a part that is not well encoded.`), origin);
       const later = on === "tcp" ? (work: (signal: AbortSignal) => Promise<Response>): Response => parts.answers.start(work(new AbortController().signal).catch((error: unknown) => failure(error, path, at, placed.area))) : null;
       const late = on === "tcp" && route.access === "page" ? { ms: config.server.answerLateSeconds * 1000, start: (work: Promise<Response>): Response => parts.answers.start(work.catch((error: unknown) => failure(error, path, at, placed.area))) } : null;
-      const asked: Asked = { path, params: rest === null ? params : { ...params, "*": rest.decoded ?? "" }, search: url.searchParams, user, auth: call, bytes, signal: request.signal, json: json(true), later, late };
+      const asked: Asked = { path, params: rest === null ? params : { ...params, "*": rest.decoded ?? "" }, search: url.searchParams, user, auth: call, bytes, signal: request.signal, json: json(true), later, late, before };
       return withCors(await answerDeclared(route, asked, cursorKey), origin);
     } catch (error) {
       // A Lumiverse sign-in that RPE or Lumiverse refused is told in the log, by the address it came from and never its password.

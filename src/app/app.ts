@@ -337,8 +337,8 @@ export async function openApp(options: OpenAppOptions): Promise<App> {
       if (closing !== null) throw new Error("RPE is stopping, so its server was not started.");
       if (starting !== null) throw new Error("RPE's server is already started.");
       const run = (async () => {
-        // A chat a route names is taken on by the one area that fills the hook, before the route answers.
-        const server = startServer({ config, routes, auth, live, log, now, workers, answers, commandSocket: commandSocketPath(paths.root), ...(hooks.chatNamed === undefined ? {} : { chatNamed: hooks.chatNamed }) });
+        // A chat a route names is waited for while it is prepared, and taken on, by the one area that fills each hook, before the route answers.
+        const server = startServer({ config, routes, auth, live, log, now, workers, answers, commandSocket: commandSocketPath(paths.root), ...(hooks.chatNamed === undefined ? {} : { chatNamed: hooks.chatNamed }), ...(hooks.chatReady === undefined ? {} : { chatReady: hooks.chatReady }) });
         running = server;
         for (const area of mounted) await hook(area, "started");
         // This version has started: the copies taken before migrations are kept to the setting, the oldest let go.
