@@ -207,7 +207,8 @@ export async function swapUp(line: SwapLine, io: CliIO, version: string): Promis
     swapIo,
   );
   if (ran === null) return 1;
-  const after = { ...current, lumiverse: { ...current.lumiverse, connections: ids } };
+  // RPE answers where the previous runtime did from here on, so what is said next names that address, not the one the config held before the switch.
+  const after = { ...current, address: plan.at.address, port: plan.at.port, lumiverse: { ...current.lumiverse, connections: ids } };
   await webToken(ctx, after);
   const left = await extensionLeft(call);
   left.push(...(await connectionsWithoutLimits(paths, after, io)));
