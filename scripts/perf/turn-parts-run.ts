@@ -20,19 +20,26 @@ import { textHash } from "../../src/adapter/lumiverse/wire";
 import { dataPaths, openApp, readQuery } from "../../src/app";
 import { compose } from "../../src/app/compose";
 import { configOf } from "../../src/app/config";
+import { loadGuidance } from "../../src/app/guidance";
+import { CAST_VIEWS, castPresentViews, castViews, type CastViewName, MemorySearch } from "../../src/cast";
 import { charactersOf } from "../../src/cast/record";
 import { ROW_PARTS } from "../../src/cast/fold";
-import { historyTexts } from "../../src/iface";
+import { historyTexts, mapView, mapWording } from "../../src/iface";
+import { placeLinesAt } from "../../src/places";
+import { tidyHolds } from "../../src/play/path-events";
 import { journalNotes } from "../../src/play/journal";
 import { playAnswers } from "../../src/play/service";
 import { hashParts } from "../../src/shared/hash";
 import type { JsonObject, JsonValue } from "../../src/shared/json";
 import { own } from "../../src/engine/pack-kit";
-import type { ChangeInput } from "../../src/store";
+import { type ChangeInput, timeDue, worldState } from "../../src/store";
+import { storyBrief } from "../../src/story";
 import { RPE_GUIDANCE } from "../../src/tree";
+import { maskWorldInfoScanExclusions, SCAN_SETTING, scannedSteps, scanSettingsOf } from "../../src/turn/scan";
 import { turnSettings } from "../../src/turn/settings";
+import { stageAt, stageCues } from "../../src/turn/stage";
 import { guidanceTexts } from "../../src/turn/texts";
-import { NO_SESSION } from "../../src/turn/turns";
+import { castLayouts, NO_SESSION, ON_STAGE_VIEWS, PARTS, tokenCount } from "../../src/turn/turns";
 
 const [rpeDb, filesDir, indexFile, lumiverseDb, chat, build] = process.argv.slice(2);
 if (rpeDb === undefined || filesDir === undefined || indexFile === undefined || lumiverseDb === undefined || chat === undefined || build === undefined) {
@@ -197,6 +204,83 @@ const words = { texts, code: (code: string) => own(keys, code) ?? code, key: has
 
 await timed("before the turn: the head's state", () => s.headState(chat));
 
+// ---------------------------------------------------------------- what a briefing is built from, each on its own
+
+// Read as the newest turn's own briefing read them, at its start, before the turn the probe plays: each cold, as the intake's
+// briefing finds them for its turn (that step's row below is all of them together, and the rest of the briefing).
+const newestTurn = s.path(chat).findLast((e) => e.turn !== null && !e.user)?.turn ?? null;
+if (newestTurn === null) notMade.push("the briefing's parts (the chat has no turn yet)");
+else {
+  const point = { user: owner, chat, session: NO_SESSION, turn: newestTurn };
+  const guidance = loadGuidance(turns.files, point);
+  const statePart = await guidance.part(PARTS.worldState);
+  const layout = statePart === undefined ? null : await turns.files.read(point, statePart.source.path);
+  const maps = mapView(await mapWording(guidanceTexts(turns.files, point, turns.env.log)), settings.map);
+  if (layout?.status === "read") {
+    const text = layout.text;
+    await timed(
+      "a briefing's world state",
+      () => worldState(s, { chat, turn: newestTurn, layout: text, map: maps, drawnGiven: {}, placeLines: placeLinesAt(s, turns.store.env, chat, newestTurn, settings.places, settings.map), holds: tidyHolds(turns.store, owner, newestTurn, settings.taps.tidy), due: timeDue(turns.store), settings: settings.worldState, charsPerToken: settings.charsPerToken }),
+      (o) => o.text.length,
+    );
+  } else notMade.push("a briefing's world state (its layout part is not in force for the chat)");
+  const said = (await guidance.part(PARTS.briefing))?.header[ON_STAGE_VIEWS];
+  const named = Array.isArray(said) ? said.flatMap((n) => (typeof n === "string" && n.trim() !== "" ? [n.trim()] : [])) : [];
+  const stage = stageAt(turns.store, owner, chat, newestTurn);
+  const search = new MemorySearch(app.index);
+  const tokens = tokenCount(settings.charsPerToken);
+  if (stage !== null && stage.who.length > 0) {
+    const present = stage.who;
+    const cues = stageCues(stage);
+    if (named.length > 0) {
+      await timed("a briefing's views of those on stage", async () => castPresentViews(named, { store: turns.store, user: owner, chat, turn: newestTurn, present, sources: turns.sources, search, layouts: await castLayouts(guidance, named), tokens, settings: settings.cast, cues }), size);
+    } else notMade.push("a briefing's views of those on stage (the briefing names none)");
+    // The turn's folder's cast views: every view of each character on stage, as the lane writes them alongside the first model call.
+    const all = Object.keys(CAST_VIEWS) as CastViewName[];
+    await timed(
+      "the cast's folder: every view of each on stage",
+      async () => {
+        const layouts = await castLayouts(guidance, all);
+        const out = [];
+        for (const character of new Set(present)) out.push(await castViews(all, { store: turns.store, user: owner, chat, turn: newestTurn, character, present, sources: turns.sources, search, layouts, tokens, settings: settings.cast, cues }));
+        return out;
+      },
+      size,
+    );
+  } else notMade.push("the cast's views (nobody is on stage at the newest turn)");
+  const reads = composition.door.lumiverse()?.reads;
+  if (reads !== undefined) {
+    await timed(
+      "a briefing's lore map: the chat's scan and the lore's catalogue",
+      async () => {
+        const scan = scanSettingsOf((await reads.setting(SCAN_SETTING))?.value);
+        const steps = (await reads.path(chat)) ?? [];
+        const scanned = scannedSteps(steps, new Set(), scan.depth);
+        const first = scanned[0] === undefined ? -1 : steps.indexOf(scanned[0]);
+        const ids = new Set(scanned.map((m) => m.id));
+        const messages = first < 0 ? [] : (await reads.messages(chat, { from: first, to: steps.length })).filter((m) => ids.has(m.id)).map((m) => maskWorldInfoScanExclusions(m.text));
+        return await turns.loreIndex.loreMap({ user: owner, chat, turn: newestTurn, messages, matching: scan.matching });
+      },
+      size,
+    );
+  }
+  const briefPart = await guidance.part(PARTS.storyBrief);
+  if (briefPart?.format === "template") await timed("a briefing's story brief", () => storyBrief({ store: turns.store, user: owner, chat, turn: newestTurn, ...(stage !== null ? { stage: stage.who } : {}), layout: briefPart }), (o) => o.text.length);
+  await timed("the window, as the next briefing works it out", () => turns.lane.windowOf(owner, chat), size);
+}
+notMade.push("the lore's search and the session files (an agent's run reads and writes them, after the model's first call)");
+
+// What a page reads before the turn, so that what is read after it is what a turn changes.
+const newestReplies = (): string[] =>
+  s
+    .path(chat)
+    .filter((e) => !e.user && e.turn !== null)
+    .slice(-20)
+    .map((e) => e.message);
+await timed("before the turn: the Journal's notes", () => journalNotes(turns.store, owner, chat, settings.taps.journalMost, words), size);
+await timed("before the turn: /state", () => route("/api/v1/chats/:chat/state", { chat }), size);
+await timed("before the turn: the reply lines of the newest 20 replies", () => route("/api/v1/chats/:chat/replies", { chat }, { ids: newestReplies().join(",") }), size);
+
 // ---------------------------------------------------------------- the intake, to the model's first call
 
 const generation = `probe-${crypto.randomUUID()}`;
@@ -270,17 +354,11 @@ await timed("the commit: the turn tied to its reply", () => app.writes.run(() =>
 
 // ---------------------------------------------------------------- what a page reads after it
 
-const newest = (): string[] =>
-  s
-    .path(chat)
-    .filter((e) => !e.user && e.turn !== null)
-    .slice(-20)
-    .map((e) => e.message);
 async function afterReads(after: string): Promise<void> {
   // The Journal's notes, as the first state asked works them out; the state asked after them finds them kept.
   await timed(`${after}: the Journal's notes`, () => journalNotes(turns.store, owner, chat, settings.taps.journalMost, words), size);
   await timed(`${after}: /state, the first ask (its notes worked out the row before)`, () => route("/api/v1/chats/:chat/state", { chat }), size);
-  await timed(`${after}: the reply lines of the newest 20 replies`, () => route("/api/v1/chats/:chat/replies", { chat }, { ids: newest().join(",") }), size);
+  await timed(`${after}: the reply lines of the newest 20 replies`, () => route("/api/v1/chats/:chat/replies", { chat }, { ids: newestReplies().join(",") }), size);
   await timed(`${after}: the head's state`, () => s.headState(chat));
   await timed(`${after}: /state, a second ask`, () => route("/api/v1/chats/:chat/state", { chat }), size);
 }
