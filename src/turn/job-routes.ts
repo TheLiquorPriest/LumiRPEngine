@@ -1,8 +1,8 @@
 // The jobs as the Jobs page shows and steers them (plan §13.5, §14 l.1548, l.1560; App. A `JobsApi`), each
 // route a call of RPH's jobs, live view or usage, declared in the route form so the page's types are
 // written from it: the user's jobs a page at a time, of every chat or of one, in one state or all, the
-// newest started first; one job with its run's trace, the calls it made and how full each of its
-// agents' windows is; what a job he started was told (its gap checks, consents and rules fired); the
+// newest started first, each by its row (what a list shows of it); one job whole, alone or with its run's
+// trace, the calls it made and how full each of its agents' windows is; what a job he started was told (its gap checks, consents and rules fired); the
 // switches over all his jobs with the limits in force for jobs and the day's use against each that
 // counts one; and every control. He starts any job, as his own and tied to no turn (R-27): of a chat, or
 // of no chat (C-23); and, from the Cast page, the job in which a character's own agent takes in what it
@@ -15,18 +15,52 @@
 
 import type { JobLimits, JobRefusal, JobState, JobView, RunScope, Scope, Usage, UserScope } from "rp-harness/contract";
 import { loadGuidance } from "../app/guidance";
-import { agentRef, type Exactly, type Holds, type Infer, jobView, route, RouteError, shape, traceRecord, usage } from "../app";
+import { agentRef, type Exactly, type Holds, type Infer, jobRow, jobView, route, RouteError, shape, traceRecord, usage } from "../app";
 import { type ConfigRead, portTexts, readConfig } from "../app/config-read";
+import { PAGE_SETTINGS } from "../app/page-settings";
 import { harnessSettings } from "../app/setting-list";
+import { PAGE_SETTING_DEFS } from "../shared/page-settings";
 import { toldRows } from "./events";
 import type { Turns } from "./lane";
 import { ownerJobRoutes } from "./owner-jobs";
 import { jobToldReply } from "./shapes";
+import { jobsPage } from "./settings";
 import { NO_SESSION } from "./turns";
 
 const T = shape.text();
 const N = shape.number();
 const opt = shape.optional;
+
+/** The characters of a job's brief the Jobs list shows (`pages.briefChars`), as the shared levels set it. */
+const BRIEF_CHARS = PAGE_SETTINGS.find((s) => s.key === PAGE_SETTING_DEFS.briefChars.key);
+
+/**
+ * A job as a list shows it, and no more (`jobRow`): its brief's first characters, one past those the Jobs list shows so a page marks a
+ * brief it cut; none of its report, what it wrote or what its start was not given, which a page reads with the job whole.
+ */
+function rowOf(job: JobView, briefChars: number): Infer<typeof jobRow> {
+  return {
+    id: job.id,
+    agent: job.agent,
+    brief: job.brief.slice(0, briefChars + 1),
+    state: job.state,
+    scope: job.scope,
+    startedBy: job.startedBy,
+    started: job.started,
+    ...(job.ended !== undefined ? { ended: job.ended } : {}),
+    usage: job.usage,
+    ...(job.limit !== undefined ? { limit: job.limit } : {}),
+    ...(job.stoppedBy !== undefined ? { stoppedBy: job.stoppedBy } : {}),
+    ...(job.attach !== undefined ? { attach: job.attach } : {}),
+    ...(job.limits !== undefined ? { limits: job.limits } : {}),
+  };
+}
+
+/** A job whole as RPH keeps it, without what RPE keeps beside a carried job's record and no page reads: the earlier build's transcript and the mark. */
+function wholeOf(job: JobView): JobView {
+  const { transcript: _transcript, carried: _carried, ...whole } = job as JobView & { transcript?: unknown; carried?: unknown };
+  return whole;
+}
 
 /** Why RPH started no job, or why a control of one did nothing, in RPE's words for the page: RPH gives the fact and its numbers. */
 export function refusalWords(refusal: JobRefusal): string {
@@ -79,6 +113,14 @@ function viewOrThrow(answer: JobView | JobRefusal, lead: string): JobView {
 
 const jobState = shape.oneOf("queued", "held", "running", "asking", "done", "failed", "cancelled", "off-path", "interrupted");
 type JobStateMirrored = Holds<Exactly<Infer<typeof jobState>, JobState>>;
+
+/** The states a list's query names, a comma between two; a 400 that names the states a job can be in for one that is none of them. */
+function statesIn(given: string): JobState[] {
+  const named = given.split(",").map((s) => s.trim());
+  const unknown = named.filter((s) => !(jobState.values as readonly string[]).includes(s));
+  if (unknown.length > 0) throw new RouteError(400, `The query's state names ${unknown.map((s) => JSON.stringify(s)).join(", ")}, which is no state a job can be in: each is one of ${jobState.values.join(", ")}, a comma between two.`);
+  return named as JobState[];
+}
 
 const WHOLE = shape.whole({ least: 1 });
 const jobLimitsAsk = shape.named(
@@ -142,11 +184,11 @@ export function jobRoutes(deps: JobRoutesDeps) {
   const { turns } = deps;
   const jobs = turns.harness.jobs;
 
-  /** The user's job by id; a 404 for one he has none by. */
+  /** The user's job by id, whole (`wholeOf`); a 404 for one he has none by. */
   const jobOf = async (user: string, id: string): Promise<JobView> => {
     const job = await jobs.get(user, id);
     if (job === undefined) throw new RouteError(404, `There is no job ${id}.`);
-    return job;
+    return wholeOf(job);
   };
 
   /** He starts a job, as his own and tied to no turn (R-27): of the chat the scope names, or of none. */
@@ -193,22 +235,24 @@ export function jobRoutes(deps: JobRoutesDeps) {
       path: "/api/v1/jobs",
       access: "page",
       group: "jobs",
-      does: "His jobs a page at a time, of every chat or of one, in one state or in any, the newest started first, each as RPH keeps it: where it stands, its agent, who started it and the turn that did.",
+      does: "His jobs a page at a time (the setting jobs.page, at most jobs.maxPage), of every chat or of one, in the states named or in any, the newest started first, each by its row: what a list shows of it, its whole read by its id.",
       query: {
         chat: opt(T, "Only the jobs of this chat."),
-        state: opt(jobState, "Only the jobs in this state."),
+        state: opt(T, `Only the jobs in these states, a comma between two: running,asking. Each is one of ${jobState.values.join(", ")}.`),
       },
-      reply: shape.page(jobView),
-      paged: {},
+      reply: shape.page(jobRow),
+      paged: { sizes: () => jobsPage(deps.shared()) },
       handle: async ({ user, query }) => {
+        const states = query.state === undefined ? undefined : statesIn(query.state);
         const page = await jobs.list({
           user,
           ...(query.chat !== undefined ? { chat: query.chat } : {}),
-          ...(query.state !== undefined ? { states: [query.state] } : {}),
-          ...(query.limit !== undefined ? { limit: query.limit } : {}),
+          ...(states !== undefined ? { states } : {}),
+          limit: query.limit,
           ...(query.after !== undefined ? { cursor: query.after } : {}),
         });
-        return { items: page.jobs, next: page.next ?? null };
+        const briefChars = BRIEF_CHARS === undefined ? PAGE_SETTING_DEFS.briefChars.default : (deps.shared().value(BRIEF_CHARS) as number);
+        return { items: page.jobs.map((job) => rowOf(job, briefChars)), next: page.next ?? null };
       },
     }),
     route({
@@ -297,6 +341,15 @@ export function jobRoutes(deps: JobRoutesDeps) {
             : [];
         return { job, trace, usage: spent, windows };
       },
+    }),
+    route({
+      method: "GET",
+      path: "/api/v1/jobs/:job/record",
+      access: "page",
+      group: "jobs",
+      does: "One job whole, as RPH keeps it, without its run's work: what a page shows of a job it opens, its trace read behind the chat's gate.",
+      reply: jobReply,
+      handle: async ({ user, params }) => ({ job: await jobOf(user, params.job) }),
     }),
     route({
       method: "GET",

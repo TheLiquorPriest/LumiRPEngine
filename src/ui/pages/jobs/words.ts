@@ -17,7 +17,7 @@ export const JOB_STATE_WORDS: Readonly<Record<JobState, { words: string; tone?: 
 };
 
 /** Whether a Cancel can do anything: the job has not ended (waiting, held, running, or asking). */
-export function cancellable(job: JobView): boolean {
+export function cancellable(job: Pick<JobView, "state">): boolean {
   return job.state === "queued" || job.state === "held" || job.state === "running" || job.state === "asking";
 }
 

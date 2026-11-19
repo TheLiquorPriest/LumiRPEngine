@@ -1,25 +1,26 @@
 // The jobs (plan §13.5) as the pages list them: a chat's on its Turns page, and the user's of every chat
-// on Chats. Each job as RPH last kept it: its agent and what it was asked, how it stands, who started it,
-// when, what it spent, the limit it ended at and its report; and Cancel while it has not ended.
-// What RPE refuses (no such job) is shown in its words. A chat's list reads
-// when the page opens, when the live view says a run of the chat began or ended, and after a Cancel;
-// nothing polls.
+// on Chats. Each job by its row: its agent and the start of what it was asked, how it stands, who started it,
+// when, what it spent and the limit it ended at; the way to its page on Jobs, where it is read whole with its
+// report; and Cancel while it has not ended. What RPE refuses (no such job) is shown in its words. A chat's
+// list reads when the page opens, when the live view says a run of the chat began or ended, and after a
+// Cancel; nothing polls.
 
-import type { JobView } from "../../../shared/api";
+import type { JobRow } from "../../../shared/api";
 import { Badge, Banner, Button, Section } from "../../../frontend/components";
+import { useApp } from "../../app";
 import { type RpeClient, walk } from "../../client";
 import type { PageEntry } from "../../page-entry";
-import { Written } from "../../markdown";
+import { useUiSetting } from "../../ui-settings";
 import { errorWords, limitCount, limitName, tokenWords, when } from "../../words";
-import { BootstrapBrief, BootstrapMark, isBootstrapJob } from "./bootstrap-mark";
-import { JobsPage } from "./page";
+import { BootstrapMark, briefLine, isBootstrapJob } from "./bootstrap-mark";
+import { chatOfJob, JobsPage } from "./page";
 import { cancellable, JOB_STATE_WORDS, stoppedByWords } from "./words";
 
 export { cancellable, JOB_STATE_WORDS } from "./words";
 
 /** The jobs as a page holds them: the list read last, what could not be read, the Cancel out, and what RPE answered to the last one. */
 export interface JobsShown {
-  jobs: JobView[] | null;
+  jobs: JobRow[] | null;
   loading: boolean;
   problem: string | null;
   cancelling: string | null;
@@ -70,7 +71,22 @@ export function readJobs(client: Pick<RpeClient, "call">, chat: string | null, o
   };
 }
 
-function JobItem(props: { job: JobView; shown: JobsShown; withChat: boolean; onCancel(job: string): void }) {
+/** A job's brief in a list: its start, cut at the characters the Jobs list shows (`pages.briefChars`). */
+export function JobBrief(props: { job: Pick<JobRow, "attach" | "brief"> }) {
+  return <p class="rpe-line">{briefLine(props.job, useUiSetting("briefChars"))}</p>;
+}
+
+/** The way to a job's page on Jobs, where it is read whole, with its report and what it wrote. */
+export function OpenOnJobs(props: { job: Pick<JobRow, "id" | "scope"> }) {
+  const app = useApp();
+  return (
+    <Button size="sm" variant="ghost" onClick={() => app.go({ page: "jobs", chat: chatOfJob(props.job), at: [props.job.id] })}>
+      Its page on Jobs
+    </Button>
+  );
+}
+
+function JobItem(props: { job: JobRow; shown: JobsShown; withChat: boolean; onCancel(job: string): void }) {
   const { job, shown } = props;
   const state = JOB_STATE_WORDS[job.state];
   const stopped = stoppedByWords(job);
@@ -82,19 +98,19 @@ function JobItem(props: { job: JobView; shown: JobsShown; withChat: boolean; onC
         <Badge tone={state.tone}>{state.words}</Badge>
         {isBootstrapJob(job) ? <BootstrapMark job={job} /> : null}
         {props.withChat ? <span class="rpe-meta">{typeof job.scope.chat === "string" ? `chat ${job.scope.chat}` : "no chat"}</span> : null}
+        <OpenOnJobs job={job} />
         {cancellable(job) ? (
           <Button size="sm" variant="ghost" busy={shown.cancelling === job.id} onClick={() => props.onCancel(job.id)}>
             Cancel
           </Button>
         ) : null}
       </div>
-      {isBootstrapJob(job) ? <BootstrapBrief job={job} /> : <p class="rpe-line">{job.brief}</p>}
+      <JobBrief job={job} />
       <span class="rpe-meta">
         {`${job.id} · started by ${job.startedBy === "user" ? "you" : `the ${job.startedBy.definition}`} ${when(job.started)}${job.ended === undefined ? "" : `, ended ${when(job.ended)}`} · ${tokenWords(job.usage)}`}
       </span>
       {job.limit === undefined ? null : <span class="rpe-meta">{`Ended at its limit on ${limitName(job.limit)}: ${limitCount(job.limit)}.`}</span>}
       {stopped === null ? null : <span class="rpe-meta">{stopped}</span>}
-      {job.report === undefined ? null : <Written text={job.report} />}
       {answered === null || answered.refused === null ? null : (
         <Banner tone="neg" icon="alert" title="Not cancelled">
           <span>{answered.refused}</span>

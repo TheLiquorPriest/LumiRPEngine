@@ -316,6 +316,8 @@ Jobs and the bootstrap: how many run, and what they may spend.
 | `jobs.run.seconds` | none (no limit) | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Time for a job's run: Seconds one job's run may take. Below 1: At 0 a job's run ends as it starts. |
 | `jobs.run.agents` | none (no limit) | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Sub-agents in a job's run: Sub-agents the agents of one job's run may start in all; 0 starts none. |
 | `jobs.keepDays` | `90` days | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Days a job is kept: Days the record of a job is kept; the older ones are removed when the next job starts. |
+| `jobs.page` | `50` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Jobs on a page: The jobs a list of jobs gives when the page names no number, each by its line; a page reads a job whole when it opens it. |
+| `jobs.maxPage` | `500` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Most jobs on a page: The most jobs one page of a list of jobs may ask for. |
 
 ### Bootstrap
 

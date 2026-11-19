@@ -101,8 +101,10 @@ function jobRecords(db: Database, writes: Writes): JobRecords {
       }
       // One past the page is read, to know whether another page follows.
       args.push(query.limit === undefined ? -1 : query.limit + 1);
+      // A carried job's record keeps the earlier build's whole transcript beside its report (`carryJob`), outside RPH's view of a job and
+      // read by no list: it is left in the database, so a page of jobs never parses it.
       const jobs = db
-        .query<{ value: string }, (string | number)[]>(`SELECT value FROM job WHERE ${where.join(" AND ")} ORDER BY started DESC, id DESC LIMIT ?`)
+        .query<{ value: string }, (string | number)[]>(`SELECT json_remove(value, '$.transcript') AS value FROM job WHERE ${where.join(" AND ")} ORDER BY started DESC, id DESC LIMIT ?`)
         .all(...args)
         .map((r) => JSON.parse(r.value) as JobView);
       if (query.limit === undefined || jobs.length <= query.limit) return { jobs };

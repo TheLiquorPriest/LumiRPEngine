@@ -1,8 +1,8 @@
 // The jobs on the pages, against the turn lane's own job routes in RPE's own server (in this process, on
 // a free loopback port), over a list of jobs kept in memory in place of RPH's: a chat's jobs on its Turns
-// page and the user's of every chat on Chats, newest first, each as RPH keeps it; Cancel only where a job
-// has not ended, and what it answered shown; RPE's refusal of a job that is not the user's shown in its
-// words. Every name and number here is made up.
+// page and the user's of every chat on Chats, newest first, each by its row (no report: that is read with
+// the job whole, on its page on Jobs); Cancel only where a job has not ended, and what it answered shown;
+// RPE's refusal of a job that is not the user's shown in its words. Every name and number here is made up.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -11,14 +11,16 @@ import { join } from "node:path";
 import { h } from "preact";
 import type { JobsApi, JobView } from "rp-harness/contract";
 import { type App, dataPaths, lineLog, openApp } from "../../src/app";
+import { readConfig } from "../../src/app/config-read";
 import { configOf } from "../../src/app/config";
 import { jobRoutes } from "../../src/turn/job-routes";
 import { createClient, type RpeClient, webConnector } from "../../src/ui/client";
-import { type JobsShown, JobsView, readJobs } from "../../src/ui/pages/jobs";
+import { type JobsShown, JobBrief, JobsView, OpenOnJobs, readJobs } from "../../src/ui/pages/jobs";
+import { briefLine } from "../../src/ui/pages/jobs/bootstrap-mark";
 import { TurnsView } from "../../src/ui/pages/turns";
 import { browserDeps } from "../../src/ui/roads";
 import { CHAT, USER } from "./recorded";
-import { elements, expand, press, textOf } from "./vnodes";
+import { elements, expand, press, type Stand, textOf } from "./vnodes";
 
 const usage = { calls: 3, input: 9_000, output: 700, cacheRead: 0, cacheWrite: 0 };
 const job = (id: string, state: JobView["state"], started: number, over: Partial<JobView> = {}): JobView => ({ id, agent: "historian", brief: "Summarize the chapter that closed.", state, scope: { user: USER, chat: CHAT, session: "s-1" }, startedBy: "user", started, usage, ...over });
@@ -80,7 +82,8 @@ beforeAll(async () => {
     paths: dataPaths(join(root, "data")),
     config: configOf({ port: 0, lumiverse: { url: "http://127.0.0.1:7860", user: USER } }, {}, "the test's config"),
     version: "1.0.0",
-    areas: [{ name: "jobs", mount: (at) => at.routes.add("jobs", jobRoutes({ turns: turns as never, shared: () => { throw new Error("The jobs read here are listed and cancelled; the shared levels are for the switches, which are read nowhere here."); } })) }],
+    // The shared levels as shipped: the list's page and the characters of a brief a row keeps.
+    areas: [{ name: "jobs", mount: (at) => at.routes.add("jobs", jobRoutes({ turns: turns as never, shared: () => readConfig([], null) })) }],
     log: lineLog(() => undefined),
   });
   base = (await app.start()).url;
@@ -122,30 +125,37 @@ async function reading(chat: string | null, done: (shown: JobsShown) => boolean)
   };
 }
 
+/** The parts of a row that read the page's settings and its address: a brief cut at the shipped 90 characters, and the way to the job's page as a button. */
+const STAND: Stand = new Map<unknown, (props: Record<string, unknown>) => unknown>([
+  [JobBrief, (props) => h("p", { class: "rpe-line" }, briefLine(props.job as Parameters<typeof briefLine>[0], 90))],
+  [OpenOnJobs, () => h("button", { type: "button" }, "Its page on Jobs")],
+]);
+
 const view = (shown: JobsShown, everyChat = false) => {
   const pressed: string[] = [];
-  const tree = expand(h(JobsView, { shown, everyChat, onCancel: (id) => pressed.push(id) }));
+  const tree = expand(h(JobsView, { shown, everyChat, onCancel: (id) => pressed.push(id) }), STAND);
   return { tree, pressed, row: (id: string) => elements(tree).find((e) => e.props["data-job"] === id) };
 };
 const buttons = (node: unknown): string[] => elements(node).filter((e) => e.type === "button").map((e) => textOf(e.props.children));
 
 // The routes read the harness's jobs, kept in memory here, through the job routes the turn lane's area mounts (`jobRoutes`, as `turnRoutes` no longer carries them).
 describe("the jobs, on RPE's own job routes", () => {
-  test("a chat's jobs on its Turns page, newest started first, each as RPH keeps it; Cancel only on one that has not ended", async () => {
+  test("a chat's jobs on its Turns page, newest started first, each by its row; Cancel only on one that has not ended, and its page on Jobs for the rest", async () => {
     jobs = keptJobs();
     const read = await reading(CHAT, (s) => s.jobs !== null);
     read.reader.stop();
     expect(read.shown().jobs?.map((j) => j.id)).toEqual(["job-run", "job-old"]);
     const { tree, row } = view(read.shown());
-    expect(textOf(row("job-run")?.props.children)).toContain("keeperrunningCancelIndex the lore that changed.");
-    expect(buttons(row("job-run"))).toEqual(["Cancel"]);
-    expect(buttons(row("job-old"))).toEqual([]);
+    expect(textOf(row("job-run")?.props.children)).toContain("keeperrunningIts page on JobsCancelIndex the lore that changed.");
+    expect(buttons(row("job-run"))).toEqual(["Its page on Jobs", "Cancel"]);
+    expect(buttons(row("job-old"))).toEqual(["Its page on Jobs"]);
     expect(textOf(row("job-old")?.props.children)).toContain("started by the author");
-    // The report is written as markdown now, not a block of preformatted text.
-    expect(textOf(row("job-old")?.props.children)).toContain("Chapter one, summarized.");
+    // The row holds no report: it is read with the job whole, on its page.
+    expect(read.shown().jobs?.find((j) => j.id === "job-old")).not.toHaveProperty("report");
+    expect(textOf(row("job-old")?.props.children)).not.toContain("Chapter one, summarized.");
     expect(textOf(tree)).toContain("This chat's jobs");
     // On the Turns page, below its turns.
-    const page = expand(h(TurnsView, { turns: [], more: false, loading: false, problem: null, jobs: { shown: read.shown(), onCancel: () => undefined }, onOpen: () => undefined, onMore: () => undefined }));
+    const page = expand(h(TurnsView, { turns: [], more: false, loading: false, problem: null, jobs: { shown: read.shown(), onCancel: () => undefined }, onOpen: () => undefined, onMore: () => undefined }), STAND);
     expect(elements(page).some((e) => e.props["data-section"] === "jobs")).toBe(true);
   });
 
@@ -158,7 +168,7 @@ describe("the jobs, on RPE's own job routes", () => {
     read.reader.cancel("job-run");
     await read.next((s) => s.cancelling === null && s.jobs?.find((j) => j.id === "job-run")?.state === "cancelled");
     expect(jobs.all.find((j) => j.id === "job-run")?.state).toBe("cancelled");
-    expect(buttons(view(read.shown()).row("job-run"))).toEqual([]);
+    expect(buttons(view(read.shown()).row("job-run"))).toEqual(["Its page on Jobs"]);
 
     read.reader.cancel("job-theirs");
     await read.next((s) => s.cancelled?.job === "job-theirs" && s.cancelled.refused !== null);

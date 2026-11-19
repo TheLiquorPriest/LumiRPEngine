@@ -1,9 +1,9 @@
-// One job open (plan §13.5, §10.9, §14 Jobs): what it is, its report and what it wrote, its work step by step as Live draws a run (the trace view),
-// behind the chat's spoiler gate, with its calls against its limit and each agent's window; and what he may do with it by where it stands: Cancel
-// while it waits or runs, Start again, Carry on at a limit with more, Hold and Let go, Pause and Resume, a word to its lead, and his answer when it asks.
-// Every refusal is shown in RPE's words. It is read again when RPE says a job changed.
+// One job open (plan §13.5, §10.9, §14 Jobs), read whole by its id: what it is, its report and what it wrote, its work step by step as Live draws a
+// run (the trace view), behind the chat's spoiler gate, with its calls against its limit and each agent's window; and what he may do with it by where
+// it stands: Cancel while it waits or runs, Start again, Carry on at a limit with more, Hold and Let go, Pause and Resume, a word to its lead, and his
+// answer when it asks. Every refusal is shown in RPE's words. It is read again when RPE says a job changed.
 
-import { useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import type { JobLimitsAsk, JobView } from "../../../shared/api";
 import { useApp, useNow } from "../../app";
 import { Badge, Banner, Button, Gated, Section } from "../../../frontend/components";
@@ -37,15 +37,27 @@ export function controlsOf(job: JobView): { cancel: boolean; restart: boolean; c
 
 export interface JobOpenProps {
   chat: string | null;
-  job: JobView;
-  /** The jobs changed (his press, or RPE's word): the list is read again. */
+  /** The job's id: it is read whole. */
+  id: string;
+  /** The jobs changed (his press, or RPE's word): the job is read again. */
   stamp: number;
   onChanged(job: JobView): void;
   onAgent(definition: string): void;
   onTurn(turn: string): void;
 }
 
+/** A job opened by its id, read whole, and again as the jobs change; after his press, shown as RPE answered it until it is read again. */
 export function JobOpen(props: JobOpenProps) {
+  const app = useApp();
+  const record = useRead(() => app.client.call("GET /api/v1/jobs/:job/record", { job: props.id }), [props.id, props.stamp]);
+  const [pressed, setPressed] = useState<JobView | null>(null);
+  useEffect(() => setPressed(null), [record.value]);
+  const job = pressed ?? record.value?.job ?? null;
+  if (job === null) return <p class="lre-muted rpe-line">{record.problem ?? "Reading the job…"}</p>;
+  return <JobShown {...props} job={job} onChanged={(next) => (setPressed(next), props.onChanged(next))} />;
+}
+
+function JobShown(props: Omit<JobOpenProps, "id"> & { job: JobView }) {
   const app = useApp();
   const { job } = props;
   // A job of a chat is watched behind that chat's gate; one of no chat behind the one gate the jobs have.

@@ -182,6 +182,30 @@ export const jobView = shape.named(
     check: opt(shape.object({ connection: T }), "For a tag check: the connection it measures, by id."),
   }),
 );
+/**
+ * A job as a list of jobs shows it, and no more: a list reads its rows, and a page reads the job whole by its id when it opens one. Its
+ * brief is the first line of what it was asked, cut at the characters the Jobs list shows (`pages.briefChars`); what its start named and
+ * its own limits are kept for the mark of a bootstrap job and its ask point.
+ */
+export const jobRow = shape.named(
+  "JobRow",
+  "A job as a list shows it: its id, its agent, the first line of what it was asked (cut at the characters the Jobs list shows), where it stands, its scope (its chat and the turn that started it), who started it, when it started and ended, what it spent, the limit it ended at, who ended it, the attachments its start named and the limits of its own its start gave. The whole job is read by its id.",
+  shape.object({
+    id: T,
+    agent: T,
+    brief: T,
+    state: jobState,
+    scope: runScope,
+    startedBy: shape.union(agentRef, shape.literal("user")),
+    started: N,
+    ended: opt(N),
+    usage,
+    limit: opt(limitHit),
+    stoppedBy: opt(jobStopper),
+    attach: opt(shape.list(T)),
+    limits: opt(jobLimits),
+  }),
+);
 export const jobRefusal = shape.named(
   "JobRefusal",
   "Why a job was not started or a control did not apply: jobs switched off; the day's count or tokens reached; a limit that is no whole number above 0; no such agent or no model for it; no such job; a job not in a state the control applies to, or not stopped at one of its own limits; his job-start hook, with its reason; a tag check of none of his connections, or whose part is missing or not as it needs.",

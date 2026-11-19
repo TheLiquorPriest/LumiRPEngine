@@ -374,6 +374,26 @@ const DEFS = {
     about: "The most turns one page of a chat's list may ask for.",
     effect: "use",
   },
+  jobsPage: {
+    key: "jobs.page",
+    default: 50,
+    takes: { type: "whole", least: 1 },
+    levels: ["shipped", "global"],
+    perConnection: false,
+    name: "Jobs on a page",
+    about: "The jobs a list of jobs gives when the page names no number, each by its line; a page reads a job whole when it opens it.",
+    effect: "use",
+  },
+  jobsPageMost: {
+    key: "jobs.maxPage",
+    default: 500,
+    takes: { type: "whole", least: 1 },
+    levels: ["shipped", "global"],
+    perConnection: false,
+    name: "Most jobs on a page",
+    about: "The most jobs one page of a list of jobs may ask for.",
+    effect: "use",
+  },
   requestsTextMost: {
     key: "turn.maxRequestChars",
     default: TURN_DEFAULTS.requestsTextMost,
@@ -441,6 +461,11 @@ const DEFS = {
 
 /** Every setting the turn lane lists, as a config file writes it: its own, the map's and the taps'. `turn.lead` is RPH's, read here and listed once, by RPH. */
 export const TURN_SETTINGS: readonly Setting[] = [...Object.values(DEFS), ...MAP_SETTINGS, ...TAP_SETTINGS];
+
+/** A list of jobs' page when the caller names none, and the most one page may ask (`jobs.page`, `jobs.maxPage`), as `read` sets them. */
+export function jobsPage(read: ConfigRead): { default: number; most: number } {
+  return { default: read.value(DEFS.jobsPage) as number, most: read.value(DEFS.jobsPageMost) as number };
+}
 
 /** The turn's settings for a scope, as its levels' config files set them over the defaults. */
 export async function turnSettings(files: FilesPort, scope: Scope, log: Log): Promise<TurnSettings> {
