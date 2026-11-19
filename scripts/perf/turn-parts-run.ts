@@ -1,19 +1,21 @@
 // The turn probe itself (`turn-parts.ts` is its entry, which a worker thread runs too and serves its tasks from): a turn's parts, timed
 // one at a time on copies of a user's RPE data, with the longest each held RPE's thread in one piece: the reads a turn's intake makes
 // until the model's first call (where the probe stops it), the turn's commit from invented changes, the reads a page makes after it,
-// and the same after a swipe of that turn and after an Undo. RPE's own composition is opened over the copies, with Lumiverse's database
-// read where it lies, read-only, by the door's own reader. It has no network: every road out (an HTTP call, a web socket, a model) is a
-// part that throws by name, and the run stops there, saying which. It writes only to the copies and to the folder the copy of the
-// database is in. Nothing of his text is printed: one line of JSON a part (its name, ms, kb, the longest hold), a total, what it could
-// not make, and an error by its kind and the part it stopped (with `RPE_PROBE_DEBUG` set, an error's stack goes to standard error too,
-// for a trial on invented data).
+// the same after a swipe of that turn and after an Undo, and a second turn's intake, after a reply and his next message as play leaves
+// them. RPE's own composition is opened over the copies, with a copy of Lumiverse's database (made beside the copies where the one
+// given lies elsewhere, and read by the door's own reader); the second turn writes its two messages into that copy. It has no network:
+// every road out (an HTTP call, a web socket, a model) is a part that throws by name, and the run stops there, saying which. It writes
+// only to the copies and to the folder the copy of the database is in. Nothing of his text is printed: one line of JSON a part (its
+// name, ms, kb, the longest hold), a total, what it could not make, and an error by its kind and the part it stopped (with
+// `RPE_PROBE_DEBUG` set, an error's stack goes to standard error too, for a trial on invented data).
 //
 // The copy of the database's folder is RPE's data folder for the run: it takes a first config.json there (no secrets.json is read or
 // made), and a backup of the database there if this build migrates it. The build id names the snapshots the folds use: the id of the
 // build that made them (his server's) folds from them; another folds from the chat's start, as an update does.
 
-import { Database } from "bun:sqlite";
-import { dirname, resolve } from "node:path";
+import { Database, type SQLQueryBindings } from "bun:sqlite";
+import { rmSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import type { TaggedTurn } from "../../src/adapter/lumiverse/provider";
 import type { ReplyStream } from "../../src/adapter/lumiverse/stream";
 import { textHash } from "../../src/adapter/lumiverse/wire";
@@ -158,9 +160,20 @@ if (fromFiles.files !== resolve(filesDir)) {
   process.exit(2);
 }
 const paths = { ...dataPaths(root), database: resolve(rpeDb), index: resolve(indexFile), files: fromFiles.files, globalConfig: fromFiles.globalConfig, shippedConfig: fromFiles.shippedConfig };
+// Lumiverse's database as the probe reads it: a copy beside the copies, made where the one given lies elsewhere, held open in WAL as a
+// running Lumiverse holds its file (the door reads it through the `-wal` and `-shm` beside it). The second turn writes its messages here.
+const lumiverseCopy = dirname(resolve(lumiverseDb)) === root ? resolve(lumiverseDb) : join(root, "probe-lumiverse.db");
+if (lumiverseCopy !== resolve(lumiverseDb)) {
+  for (const side of ["", "-wal", "-shm", "-journal"]) rmSync(lumiverseCopy + side, { force: true });
+  const from = new Database(resolve(lumiverseDb), { readonly: true });
+  from.run(`VACUUM INTO '${lumiverseCopy.replaceAll("'", "''")}'`);
+  from.close();
+}
+const lumiverseWrites = new Database(lumiverseCopy);
+lumiverseWrites.run("PRAGMA journal_mode = WAL");
 // Config.json's values the composition needs, invented: Lumiverse at an address nothing answers at (every call to it is refused before it
-// leaves), his user (the chat's, read from the copy), and Lumiverse's database where it lies, which the door's reader opens read-only.
-const config = configOf({ v: 1, port: 0, lumiverse: { url: "http://lumiverse.probe.invalid", user: owner, database: resolve(lumiverseDb) } }, {}, "the probe's config");
+// leaves), his user (the chat's, read from the copy), and the copy of Lumiverse's database, which the door's reader opens read-only.
+const config = configOf({ v: 1, port: 0, lumiverse: { url: "http://lumiverse.probe.invalid", user: owner, database: lumiverseCopy } }, {}, "the probe's config");
 const logged = { debug: 0, info: 0, warn: 0, error: 0 };
 // What RPE logs is counted by level and never printed; a trial on invented data (`RPE_PROBE_DEBUG`) has each line's words on standard error.
 const debug = process.env.RPE_PROBE_DEBUG !== undefined;
@@ -263,19 +276,32 @@ else {
   } else notMade.push("the cast's views (nobody is on stage at the newest turn)");
   const reads = composition.door.lumiverse()?.reads;
   if (reads !== undefined) {
-    await timed(
-      "a briefing's lore map: the chat's scan and the lore's catalogue",
-      async () => {
-        const scan = scanSettingsOf((await reads.setting(SCAN_SETTING))?.value);
-        const steps = (await reads.path(chat)) ?? [];
-        const scanned = scannedSteps(steps, new Set(), scan.depth);
-        const first = scanned[0] === undefined ? -1 : steps.indexOf(scanned[0]);
-        const ids = new Set(scanned.map((m) => m.id));
-        const messages = first < 0 ? [] : (await reads.messages(chat, { from: first, to: steps.length })).filter((m) => ids.has(m.id)).map((m) => maskWorldInfoScanExclusions(m.text));
-        return await turns.loreIndex.loreMap({ user: owner, chat, turn: newestTurn, messages, matching: scan.matching });
-      },
-      size,
-    );
+    // The lore map by its parts, each read cold as a turn's start after a start finds it, then the map whole at the same turn, which
+    // finds them held: the chat's path (the intake reads it before its briefing), the messages Lumiverse scans for lore, what activated
+    // and the world's entries over no messages and over those (the world's keys looked for in them), the lore's catalogue (its books read
+    // from Lumiverse, each entry numbered and worked out) cold and again, and every entry with its index lines and bindings.
+    const at = { user: owner, chat, turn: newestTurn };
+    const path = await timed("a briefing's lore map, cold: the scan's setting and the chat's path", async () => ({ scan: scanSettingsOf((await reads.setting(SCAN_SETTING))?.value), steps: (await reads.path(chat)) ?? [] }));
+    if (path !== undefined) {
+      const { scan, steps } = path;
+      const messages = await timed(
+        "a briefing's lore map, cold: the messages it scans, read and masked",
+        async () => {
+          const scanned = scannedSteps(steps, new Set(), scan.depth);
+          const first = scanned[0] === undefined ? -1 : steps.indexOf(scanned[0]);
+          const ids = new Set(scanned.map((m) => m.id));
+          return first < 0 ? [] : (await reads.messages(chat, { from: first, to: steps.length })).filter((m) => ids.has(m.id)).map((m) => maskWorldInfoScanExclusions(m.text));
+        },
+        (o) => o.join("").length,
+      );
+      const ask = { ...at, messages: messages ?? [], matching: scan.matching };
+      await timed("a briefing's lore map, cold: its first form over no messages (what activated, the world's entries)", () => turns.lore.loreMap({ ...ask, messages: [] }), size);
+      await timed("a briefing's lore map: its first form (the world's keys looked for in the messages it scans)", () => turns.lore.loreMap(ask), size);
+      await timed("a briefing's lore map, cold: the lore's catalogue (its books read from Lumiverse, numbered, worked out)", () => turns.lore.catalog(at), size);
+      await timed("a briefing's lore map: the lore's catalogue again (its books held as read)", () => turns.lore.catalog(at), size);
+      await timed("a briefing's lore map: every entry with its index lines and bindings", () => turns.loreIndex.entries(at), size);
+      await timed("a briefing's lore map whole, at the same turn after its parts", () => turns.loreIndex.loreMap(ask), size);
+    }
   }
   const briefPart = await guidance.part(PARTS.storyBrief);
   if (briefPart?.format === "template") await timed("a briefing's story brief", () => storyBrief({ store: turns.store, user: owner, chat, turn: newestTurn, ...(stage !== null ? { stage: stage.who } : {}), layout: briefPart }), (o) => o.text.length);
@@ -310,7 +336,7 @@ const tagged: TaggedTurn = {
 };
 const out: ReplyStream = { reasoning: () => undefined, content: () => undefined, progress: () => undefined, toolCalls: () => undefined, finish: () => undefined, error: () => undefined };
 // The intake ends where the harness is asked to answer: the model's first call comes after. The probe stops the turn there.
-let reached: number | null = null;
+const stop: { at: number | null } = { at: null };
 class ProbeStop extends Error {
   constructor() {
     super("the probe stops the turn before its model's first call");
@@ -318,34 +344,40 @@ class ProbeStop extends Error {
   }
 }
 turns.harness.answer = async () => {
-  reached = performance.now();
+  stop.at = performance.now();
   throw new ProbeStop();
 };
-const began = performance.now();
-await timed("the intake, to the model's first call", async () => {
-  try {
-    await turns.lane.play(tagged, out, new AbortController().signal);
-  } catch (error) {
-    if (reached === null) throw error;
+/**
+ * A turn's intake played to the model's first call (its row is `whole`), then each step of it as the lane timed it (`RunRecord.intake`,
+ * each row `steps` and the step's name) with the longest hold inside it, and what is left of it to the model's first call. The run kept.
+ */
+async function intake(whole: string, steps: string, turn: TaggedTurn): Promise<{ turn: string; intake: string | null } | null> {
+  stop.at = null;
+  const began = performance.now();
+  await timed(whole, async () => {
+    try {
+      await turns.lane.play(turn, out, new AbortController().signal);
+    } catch (error) {
+      if (stop.at === null) throw error;
+    }
+    if (stop.at === null) throw new Error("the intake ended before the model's first call");
+  });
+  const kept = app?.db.query<{ turn: string; intake: string | null }, [string, string]>("SELECT turn, intake FROM turn_run WHERE user = ? AND generation = ?").get(owner, turn.tag.generation) ?? null;
+  let stepped = 0;
+  for (const step of JSON.parse(kept?.intake ?? "[]") as { step: string; from: number; to: number }[]) {
+    const row = { part: `${steps}${step.step}`, ms: Math.round(step.to - step.from), kb: 0, held: heldBetween(step.from - offset, step.to - offset) };
+    stepped += row.ms;
+    rows.push(row);
+    say(row);
   }
-  if (reached === null) throw new Error("the intake ended before the model's first call");
-});
-// Each step of the intake as the lane timed it (`RunRecord.intake`), with the longest hold inside it.
-const run = app.db.query<{ turn: string; intake: string | null }, [string, string]>("SELECT turn, intake FROM turn_run WHERE user = ? AND generation = ?").get(owner, generation);
-for (const step of JSON.parse(run?.intake ?? "[]") as { step: string; from: number; to: number }[]) {
-  const from = step.from - offset;
-  const to = step.to - offset;
-  const row = { part: `intake: ${step.step}`, ms: Math.round(step.to - step.from), kb: 0, held: heldBetween(from, to) };
-  rows.push(row);
-  say(row);
+  const reached = stop.at as number | null;
+  if (reached !== null) say({ part: `${steps}the briefing kept, to the model's first call`, ms: Math.round(reached - began - stepped), kb: 0, held: 0 });
+  // An intake that stopped before it kept a run (its row says how) leaves the turn to the store's own call: the rest is measured as after one.
+  if (kept === null) notMade.push(`${whole}: its steps (it stopped before it kept its run: its row names the error's kind)`);
+  await turns.lane.settled();
+  return kept;
 }
-if (reached !== null) {
-  const row = { part: "intake: the briefing kept, to the model's first call", ms: Math.round(reached - began - rows.filter((r) => r.part.startsWith("intake: ")).reduce((n, r) => n + r.ms, 0)), kb: 0, held: 0 };
-  say(row);
-}
-// An intake that stopped before it kept a run (its row says how) leaves the turn to the store's own call: the rest is measured as after one.
-if (run === null) notMade.push("the intake's steps (it stopped before it kept its run: its row names the error's kind)");
-await turns.lane.settled();
+const run = await intake("the intake, to the model's first call", "intake: ", tagged);
 
 // ---------------------------------------------------------------- the commit, of invented changes of the kinds his turns hold most
 
@@ -413,9 +445,35 @@ if (edit !== undefined) {
   }
 }
 
+// ---------------------------------------------------------------- a second turn, as play makes the turn after one
+
+// The probe's reply as Lumiverse saved it (the swipe's text showing, as the swipe was tied to it) and his next message after it, written
+// into the copy of Lumiverse's database, each a copy of the newest message of its kind in the chat with its own id, place and text and
+// nothing hidden; then the next turn's tag, played as the first was, to the model's first call. Its rows are what a turn's start pays
+// with a message new on the path and the turn before it played, and not only the first turn after a start.
+const REPLIED = ["An invented reply, the probe's.", ...(swipe !== undefined ? ["Another invented reply, the probe's."] : [])];
+const NEXT = "His next invented message, the probe's.";
+const place = (lumiverseWrites.query<{ n: number | null }, [string]>("SELECT max(index_in_chat) AS n FROM messages WHERE chat_id = ?").get(chat)?.n ?? -1) + 1;
+const written = [
+  { user: 0, id: reply, saves: REPLIED },
+  { user: 1, id: `probe-message-${crypto.randomUUID()}`, saves: [NEXT] },
+].every((m, i) => {
+  const like = lumiverseWrites.query<Record<string, SQLQueryBindings>, [string, number]>("SELECT * FROM messages WHERE chat_id = ? AND is_user = ? ORDER BY index_in_chat DESC LIMIT 1").get(chat, m.user);
+  if (like === null) return false;
+  const row: Record<string, SQLQueryBindings> = { ...like, id: m.id, index_in_chat: place + i, content: m.saves.at(-1) ?? "", swipes: JSON.stringify(m.saves), swipe_id: m.saves.length - 1, swipe_dates: JSON.stringify(m.saves.map(() => like.send_date ?? null)), extra: "{}" };
+  const columns = Object.keys(row);
+  lumiverseWrites.run(`INSERT INTO messages (${columns.map((c) => `"${c}"`).join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`, columns.map((c) => row[c] ?? null));
+  return true;
+});
+if (!written) notMade.push("a second turn (the chat holds no reply or no message of his to write the probe's after)");
+else {
+  const second: TaggedTurn = { ...tagged, tag: { ...tagged.tag, generation: `probe-${crypto.randomUUID()}`, target: { message: `probe-reply-${crypto.randomUUID()}`, swipe: 0 } }, prompt: [{ role: "user", content: NEXT }] };
+  await intake("a second turn's intake, to the model's first call", "a second turn's intake: ", second);
+}
+
 clearInterval(ticker);
-// The intake's steps are parts of the intake, counted in its own row once.
-const counted = rows.filter((r) => !r.part.startsWith("intake: "));
+// The intakes' steps are parts of their intakes, counted in each one's own row once.
+const counted = rows.filter((r) => !r.part.startsWith("intake: ") && !r.part.startsWith("a second turn's intake: "));
 say({ total: { ms: counted.reduce((n, r) => n + r.ms, 0), held: Math.max(0, ...rows.map((r) => r.held)) }, logged });
 say({ "not made": notMade });
 await app.close();
