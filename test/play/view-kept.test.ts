@@ -7,6 +7,8 @@ import { playedWorld } from "../../src/engine/places-in-play";
 import { readPass } from "../../src/engine/read-pass";
 import type { JsonValue } from "../../src/shared/json";
 import { MAP_DEFAULTS } from "../../src/shared/map-config";
+import { installHistoryLines } from "../../src/iface/history-lines";
+import { shippedTexts } from "../../src/iface/texts";
 import { CHAT, makeBed, USER } from "./bed";
 
 describe("a chat's state view", () => {
@@ -52,5 +54,17 @@ describe("a chat's state view", () => {
     const next = await bed.state();
     expect(next.panels).not.toBe(first.panels);
     expect(next.hud?.clock.minutes).toBe(s.headState(CHAT).state.world.clock);
+  });
+
+  test("is built again once the application's lines are given again, as a history file written gives them", async () => {
+    const bed = makeBed();
+    await bed.plays("modern_slice_of_life");
+    await bed.turn();
+    const first = await bed.state();
+    expect((await bed.state()).panels).toBe(first.panels);
+    await installHistoryLines(shippedTexts());
+    const again = await bed.state();
+    expect(again.panels).not.toBe(first.panels);
+    expect(again.panels).toEqual(first.panels);
   });
 });

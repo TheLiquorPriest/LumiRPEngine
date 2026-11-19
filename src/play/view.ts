@@ -22,6 +22,7 @@ import type { JsonValue } from "../shared/json";
 import type { MapConfig } from "../shared/map-config";
 import type { WorldDoc } from "../shared/world";
 import type { JournalNote } from "../shared/ledger";
+import { linesGiven } from "../shared/lines";
 import type { OffstageSettings } from "../shared/offstage";
 import type { CallMeterView, Chip, PendingMark, StagedPress, StateView } from "../shared/state-view";
 import type { RequestRecord } from "../turn/requests";
@@ -110,10 +111,10 @@ interface ViewParts {
 
 /**
  * The latest states' built parts, by the store's key for the state (`stateKey`, another once anything its fold reads changes) and what
- * else shaped them: the chat's head node (the path its quests' trails were read along), the turn shown, the time it moved the clock by
- * and the chat's settings the parts read. Kept by key, never by the state object, so the store letting the state go (to fold the states
- * of other replies) loses nothing; a second page, a second tab and every `state` event after the first read them, and build nothing.
- * Read them, never change them. The newest asked are kept, `VIEWS_KEPT` of them.
+ * else shaped them: the chat's head node (the path its quests' trails were read along), the chat's world revision, the giving of the
+ * application's lines the panels word with (`linesGiven`) and the chat's settings the parts read. Kept by key, never by the state object,
+ * so the store letting the state go (to fold the states of other replies) loses nothing; a second page, a second tab and every `state`
+ * event after the first read them, and build nothing. Read them, never change them. The newest asked are kept, `VIEWS_KEPT` of them.
  */
 const built = new Map<string, Built>();
 const VIEWS_KEPT = 4;
@@ -200,7 +201,9 @@ export async function chatView(input: ChatViewInput): Promise<StateView> {
   const row = s.chat(chat);
   if (row === null || row.world === null) return notWorldView(chat);
   const registry = store.env.registry;
-  const key = JSON.stringify([s.stateKey(chat, input.turn), row.head, input.map, input.knowledge, input.offstage]);
+  // The panels word some lines with the application's lines in force (`say`): they shape the view as the state does.
+  const lines = linesGiven();
+  const key = JSON.stringify([s.stateKey(chat, input.turn), row.head, row.revision, lines, input.map, input.knowledge, input.offstage]);
   let kept = built.get(key);
   if (kept !== undefined) {
     // The newest asked last: the first is the one let go.
@@ -217,10 +220,13 @@ export async function chatView(input: ChatViewInput): Promise<StateView> {
     const at = input.turn ?? headTurn(s, chat);
     const elapsed = at === null ? 0 : state.clock - s.startOf(at).state.world.clock;
     kept = { ...(await buildParts(input, s, folded, world, state, elapsed)), world, revision: state.revision, lag: definitionsLag(state), place: placeOfEntity(state, world.pov) };
-    built.set(key, kept);
-    for (const old of built.keys()) {
-      if (built.size <= VIEWS_KEPT) break;
-      built.delete(old);
+    // A view whose stretches the lines were given again between is answered once and not kept: some of it may be worded with the old ones.
+    if (linesGiven() === lines) {
+      built.set(key, kept);
+      for (const old of built.keys()) {
+        if (built.size <= VIEWS_KEPT) break;
+        built.delete(old);
+      }
     }
   }
   const packs: Record<PackId, number> = {};

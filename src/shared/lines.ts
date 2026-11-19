@@ -24,10 +24,19 @@ let installed: LineSource | null | undefined;
 /** The chat's own source while `withLines` runs (null there: the chat's copy is off, and nothing is said); undefined outside it. */
 let current: LineSource | null | undefined;
 
+/** How many times the application's lines were given (`useLines`): what was worded with the lines in force names them by it (`linesGiven`). */
+let given = 0;
+
 /** The source the application's lines come from, until another is given (null: none in force, and nothing is said). */
 export function useLines(source: LineSource | null): void {
   installed = source;
   current = undefined;
+  given++;
+}
+
+/** Which giving of the application's lines is in force: another once they are given again (a history file written), so what was kept worded with them is worded again. */
+export function linesGiven(): number {
+  return given;
 }
 
 /** Runs `work` (synchronously) with `source` as the lines' source, as the chat's own copy of the file reads; the one in use comes back after. */
