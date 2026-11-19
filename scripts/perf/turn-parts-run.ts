@@ -325,13 +325,16 @@ await timed("before the turn: the reply lines of the newest 20 replies", () => r
 const generation = `probe-${crypto.randomUUID()}`;
 const reply = `probe-reply-${crypto.randomUUID()}`;
 const INVENTED = "An invented message, the probe's.";
+// The lore Lumiverse said activated, as the newest turn's request carried it (each entry with its text): a turn's tag carries as much,
+// which the lore map names and reads first.
+const activated = JSON.parse(app.db.query<{ lore: string }, [string, string, string]>("SELECT lore FROM turn_prompt WHERE user = ? AND chat = ? AND turn = ?").get(owner, chat, newestTurn ?? "")?.lore ?? "[]") as TaggedTurn["lore"];
 const tagged: TaggedTurn = {
   tag: { v: 1, user: owner, chat, generation, kind: "new", target: { message: reply, swipe: 0 }, speaker: { id: null, name: null }, connection: "probe", preset: null, persona: null, cut: { answered: false }, secrecy: { by: "rpe" }, question: null, messages: [] },
   prompt: [{ role: "user", content: INVENTED }],
   layout: { messages: [], complete: true, blocks: [], blocksFrom: null, preset: null },
   cut: { keep: null, byExtension: null, byRpe: 0, joining: { post: "none", collapse: false, from: "settings" }, told: true, clipped: null, notices: [], secrecy: { by: "rpe" }, question: null, trimmed: null, lore: null },
   model: null,
-  lore: [],
+  lore: activated,
   parameters: {},
 };
 const out: ReplyStream = { reasoning: () => undefined, content: () => undefined, progress: () => undefined, toolCalls: () => undefined, finish: () => undefined, error: () => undefined };
