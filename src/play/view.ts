@@ -33,7 +33,7 @@ import { replyClocks } from "./panel-reads";
 import { type ControlsKnowledge, controls } from "./state/controls";
 import { hud } from "./state/hud";
 import { notWorldView } from "./state/not-world";
-import { palette } from "./state/palette";
+import { paletteSteps } from "./state/palette";
 import { scene } from "./state/scene";
 
 export interface ChatViewInput {
@@ -191,9 +191,14 @@ async function buildParts(input: ChatViewInput, s: UserStore, folded: Folded, wo
     shown = scene(world, state, elapsed, registry);
     parts.hud = hud(world, state, panels, ctx);
   });
-  steps.push(() => {
-    parts.palette = palette(world, state, registry);
-  });
+  // The palette an action a step, its steps right after this one.
+  const paletteStep = (): void => {
+    const built = paletteSteps(world, state, registry);
+    steps.splice(steps.indexOf(paletteStep) + 1, 0, ...built.steps, () => {
+      parts.palette = built.done();
+    });
+  };
+  steps.push(paletteStep);
   steps.push(() => {
     parts.controls = controls(world, state, shown?.sceneType ?? "", registry, input.knowledge, input.offstage);
   });

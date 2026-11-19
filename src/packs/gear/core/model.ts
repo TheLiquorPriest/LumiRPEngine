@@ -21,7 +21,7 @@ import type { ReadContext } from "../../../engine/registry";
 import type { Registry } from "../../../engine/registry-impl";
 import { numOf, objOf, strOf, own, rowOf } from "../../../engine/pack-kit";
 import { isGone, kindIs } from "../../../engine/scope";
-import { readPass } from "../../../engine/read-pass";
+import { passMemo, readPass } from "../../../engine/read-pass";
 import type { WorldState } from "../../../engine/state";
 import { typeRowOf } from "../../../engine/thing-index";
 import type { Adding } from "../../../engine/thing-ops";
@@ -274,19 +274,24 @@ export interface Grant {
   overdue: boolean;
 }
 
-/** Every use grant (`uses` from borrower to thing), in borrower then thing order. */
+/**
+ * Every use grant (`uses` from borrower to thing), in borrower then thing order: kept for a read pass, since `lent_out` asks it of
+ * every thing the palette offers to take back.
+ */
 export function grants(state: Readonly<WorldState>): Grant[] {
-  const out: Grant[] = [];
-  for (const borrower of Object.keys(state.entities).sort()) {
-    for (const r of own(state.entities, borrower)?.relations ?? []) {
-      if (r.type !== "uses") continue;
-      const thing = own(state.entities, r.to);
-      if (!thing) continue;
-      const owner = typeof thing.fields.owner === "string" ? thing.fields.owner : null;
-      out.push({ thing: r.to, borrower, owner, until: r.until ?? null, overdue: r.until !== undefined && r.until <= state.clock });
+  return passMemo([state, state.entities], "gear.grants", () => {
+    const out: Grant[] = [];
+    for (const borrower of Object.keys(state.entities).sort()) {
+      for (const r of own(state.entities, borrower)?.relations ?? []) {
+        if (r.type !== "uses") continue;
+        const thing = own(state.entities, r.to);
+        if (!thing) continue;
+        const owner = typeof thing.fields.owner === "string" ? thing.fields.owner : null;
+        out.push({ thing: r.to, borrower, owner, until: r.until ?? null, overdue: r.until !== undefined && r.until <= state.clock });
+      }
     }
-  }
-  return out;
+    return out;
+  });
 }
 
 /** Things lent out by `owner` whose grants have expired: the owner's retrieval tasks. */

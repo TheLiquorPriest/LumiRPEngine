@@ -26,7 +26,8 @@ import type { Registry } from "./registry-impl";
 import type { Rng } from "./rng";
 import { evalExpr, isGone, kindIs, placeOfEntity, scopeEnv, toValue, truthy } from "./scope";
 import { selectorMatches } from "./selector";
-import type { WorldState } from "./state";
+import type { EntityState, WorldState } from "./state";
+import { passMemo } from "./read-pass";
 import { Working } from "./working";
 import { canSeeEntity, canSeePlace } from "./visibility";
 import { povMayKnow } from "./player-events";
@@ -519,28 +520,53 @@ export function resolveOn(reg: Registry, world: WorldDoc, state: Readonly<WorldS
  * What can fill a ref parameter. A `place` ref offers the places the actor may see (`placeCandidates`);
  * any other ref offers entities of the right kind that the param's selector (`of`) matches and the
  * actor may see, at the actor's place or held by the actor, and for a `nearby` param also what is a
- * short walk away (`reachOf`: the same site, within the world's fetch minutes on foot).
+ * short walk away (`reachOf`: the same site, within the world's fetch minutes on foot). With `most`,
+ * only the first so many of those (the palette shows no more), so no more are looked at.
  */
-export function paramCandidates(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, action: ActionDef, param: string, actor: EntityId = world.pov): EntityId[] {
+export function paramCandidates(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, action: ActionDef, param: string, actor: EntityId = world.pov, most = Number.POSITIVE_INFINITY): EntityId[] {
   const def = own(action.params, param);
   if (!def || def.type !== "ref") return [];
-  const here = placeOfEntity(state, actor);
   if (def.ref === "place") return placeCandidates(reg, world, state, actor);
   const filters = candidateFilters(action, param);
   const ctx = filters.length > 0 || def.nearby === true ? reg.context(world, state) : null;
+  const fits = (id: EntityId, e: EntityState): boolean =>
+    (!def.ref || kindIs(reg, world, e.kind, def.ref)) && (!def.of || selectorMatches(reg, world, state, def.of, id)) && (!ctx || filters.length === 0 || filters.every((f) => truthy(evalExpr(f, scopeEnv({ reg, ctx, bindings: { self: actor, [param]: id } }), false))));
   const out: EntityId[] = [];
+  if (def.nearby !== true) {
+    for (const id of nearActor(reg, world, state, actor)) {
+      if (out.length >= most) break;
+      const e = own(state.entities, id);
+      if (e !== undefined && fits(id, e)) out.push(id);
+    }
+    return out;
+  }
+  const here = placeOfEntity(state, actor);
   for (const id of Object.keys(state.entities).sort()) {
+    if (out.length >= most) break;
     if (id === actor) continue;
     const e = own(state.entities, id);
     if (!e || isGone(state, id)) continue;
-    if (def.ref && !kindIs(reg, world, e.kind, def.ref)) continue;
-    if (def.of && !selectorMatches(reg, world, state, def.of, id)) continue;
-    if (placeOfEntity(state, id) !== here && !e.relations.some((r) => r.to === actor) && !heldBy(state.entities, id, actor) && !(ctx && def.nearby === true && reachOf(ctx, actor, id).reach === "nearby")) continue;
-    if (!canSeeEntity(reg, world, state, actor, id)) continue;
-    if (ctx && filters.length > 0 && !filters.every((f) => truthy(evalExpr(f, scopeEnv({ reg, ctx, bindings: { self: actor, [param]: id } }), false)))) continue;
+    if (placeOfEntity(state, id) !== here && !e.relations.some((r) => r.to === actor) && !heldBy(state.entities, id, actor) && !(ctx && reachOf(ctx, actor, id).reach === "nearby")) continue;
+    if (!canSeeEntity(reg, world, state, actor, id) || !fits(id, e)) continue;
     out.push(id);
   }
   return out;
+}
+
+/**
+ * The entities a ref param may name without walking for them, in id order: not the actor, not gone, at the actor's place, tied to the
+ * actor or held by it, and seen by it. One walk of the entities for a read pass, which the palette asks for every action's params.
+ */
+function nearActor(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, actor: EntityId): EntityId[] {
+  return passMemo([state, state.entities, world, reg], `resolve.near\u0000${actor}`, () => {
+    const here = placeOfEntity(state, actor);
+    return Object.keys(state.entities)
+      .sort()
+      .filter((id) => {
+        const e = own(state.entities, id);
+        return id !== actor && !!e && !isGone(state, id) && (placeOfEntity(state, id) === here || e.relations.some((r) => r.to === actor) || heldBy(state.entities, id, actor)) && canSeeEntity(reg, world, state, actor, id);
+      });
+  });
 }
 
 /**

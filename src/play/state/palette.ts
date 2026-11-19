@@ -1,5 +1,6 @@
 // The palette the player picks from: each action's options, priced and judged now, and the
-// timelapse's. Pure, over a world, its state and the registry.
+// timelapse's. Pure, over a world, its state and the registry; built an action a step
+// (`paletteSteps`), so the state view lets RPE's thread go between them.
 
 import { checkView, policyOf } from "../../engine/adjudication";
 import { identifiers } from "../../engine/expr";
@@ -37,7 +38,15 @@ function unavailable(failed: { code: string; reason: string; words?: string } | 
   return failed.code === "requirement" ? (failed.words ?? "Not possible here and now") : failed.reason;
 }
 
+/** The palette, built whole. */
 export function palette(world: WorldDoc, state: WorldState, registry: Registry): PaletteView {
+  const built = paletteSteps(world, state, registry);
+  for (const step of built.steps) step();
+  return built.done();
+}
+
+/** The palette as steps, one an action, each of which the caller takes in turn (in one read pass), then `done` for what it comes to. */
+export function paletteSteps(world: WorldDoc, state: WorldState, registry: Registry): { steps: (() => void)[]; done(): PaletteView } {
   const entries: PaletteEntry[] = [];
   const ctx = registry.context(world, state);
   const actions = offeredActions(registry, ctx);
@@ -46,11 +55,11 @@ export function palette(world: WorldDoc, state: WorldState, registry: Registry):
   // Paying as (ORG-SPEC §3.6): the organizations the POV may spend for, worked out once, for Pay and Buy.
   let spendsFor: { id: EntityId; name: string }[] | undefined;
   const payingFor = (): { id: EntityId; name: string }[] => (spendsFor ??= actsFor(ctx, world.pov, "money.spend").map((id) => ({ id, name: state.entities[id]?.name ?? id })));
-  for (const action of actions.values()) {
+  const add = (action: ActionDef): void => {
     // Combat actions are the combat pack's Combat tab (below), and only where the world's ruleset has combat.
-    if (action.id === TIMELAPSE_ACTION || action.combat) continue;
+    if (action.id === TIMELAPSE_ACTION || action.combat) return;
     // A step the story hasn't come to isn't an option yet (DESIGN §11): listed, even locked, it would tell what lies ahead.
-    if (storyLocked(env, action)) continue;
+    if (storyLocked(env, action)) return;
     const refParam = Object.entries(action.params).find(([, p]) => p.type === "ref" && !p.optional)?.[0];
     const amountParam = Object.entries(action.params).find(([, p]) => p.type === "money")?.[0];
     const options: PaletteEntry["options"] = [];
@@ -96,10 +105,11 @@ export function palette(world: WorldDoc, state: WorldState, registry: Registry):
         ...(odds.available ? {} : { disabled: unavailable(odds.failed) }),
       });
     }
-    const targets = offers.length > 0 || stats.length > 0 || rows.length > 0 ? [] : refParam ? paramCandidates(registry, world, state, action, refParam) : [null];
+    // At most 24 first picks are shown, so no more are looked for (on a long-played chat a place holds hundreds of things).
+    const targets = offers.length > 0 || stats.length > 0 || rows.length > 0 ? [] : refParam ? paramCandidates(registry, world, state, action, refParam, world.pov, 24) : [null];
     // A second required ref (Drive's destination, Lend's borrower) is a nested pick.
     const secondParam = refParam ? Object.entries(action.params).find(([name, p]) => name !== refParam && p.type === "ref" && !p.optional)?.[0] : undefined;
-    // Its candidates are the same for every first pick, so they are found once.
+    // Its candidates are the same for every first pick, so they are found once: 12 shown, and one more for the first pick itself.
     let secondCandidates: string[] | undefined;
     // Take from a kit (gear): the pieces still in a kit are its second pick, with how many are left.
     const kitStatus = action.id === "take_piece" && action.params.piece?.type === "text" ? optionalQuery(ctx, "gear.kit_status") : undefined;
@@ -122,7 +132,7 @@ export function palette(world: WorldDoc, state: WorldState, registry: Registry):
     for (const target of targets.slice(0, 24)) {
       const params: JsonObject = refParam && target ? { [refParam]: target } : {};
       if (secondParam && target) {
-        const seconds = (secondCandidates ??= paramCandidates(registry, world, state, action, secondParam)).filter((id) => id !== target).slice(0, 12);
+        const seconds = (secondCandidates ??= paramCandidates(registry, world, state, action, secondParam, world.pov, 13)).filter((id) => id !== target).slice(0, 12);
         const next = seconds.map((id) => {
           const final = pick({ ...params, [secondParam]: id }, nameOf(id));
           return { ...final, params: { [secondParam]: id } };
@@ -143,7 +153,7 @@ export function palette(world: WorldDoc, state: WorldState, registry: Registry):
       const person = target !== null && kindIs(registry, world, state.entities[target]?.kind ?? "", "person");
       options.push({ ...pick(params, target ? nameOf(target) : action.label), ...(person ? { person: true as const } : {}) });
     }
-    if (options.length === 0) continue;
+    if (options.length === 0) return;
     // Who comes along (Go's With): the scene's people the POV can see, ticked in the sheet.
     const peopleParam = Object.entries(action.params).find(([, p]) => p.type === "list" && p.ref !== undefined)?.[0];
     const company = peopleParam ? companionCandidates(registry, world, state, action, peopleParam).map((id) => ({ id, name: nameOf(id) })) : [];
@@ -163,25 +173,28 @@ export function palette(world: WorldDoc, state: WorldState, registry: Registry):
       // A press with no words of one that manages is done at once, as the taps route does it (`playsOffstage`); any other waits for his next message.
       ...(playsOffstage(action.id, {}, action.mechanical === true) ? { atOnce: true as const } : {}),
     });
-  }
-  entries.push(...combatEntries(ctx));
-  entries.sort((a, b) => a.group.localeCompare(b.group) || a.label.localeCompare(b.label));
-  const calendar = ctx.levelOf(world.pov, "calendar");
-  const timelapse: TimelapseView = {
-    action: TIMELAPSE_ACTION,
-    // A fight's rounds take no clock time, so neither does skipping ahead in one (DESIGN §11).
-    blocked: calendar < 1 ? "Calendar is off" : clockPaused(world, state) ? "Resume the clock first" : optionalQuery(ctx, "combat.engaged")?.(ctx, world.pov) === true ? "Not during a fight" : null,
-    durations: [30, 60, 180, 480, 1440, 10080],
-    until: [
-      ...world.calendar.dayParts.map((d) => ({ label: d.label, target: { type: "day_part" as const, dayPart: d.id } })),
-      { label: "Next shift", target: { type: "shift" as const } },
-      { label: "Next commitment", target: { type: "commitment" as const } },
-      { label: "Next interruption", target: { type: "interrupt" as const } },
-    ],
-    interrupts: { ...state.time.interrupts },
-    dayParts: calendar === 1,
-    followRoutine: routineSettingsOf(world).paletteFollowsRoutine,
   };
-  const encounter = paletteEncounter(ctx);
-  return { entries, timelapse, ...(encounter ? { encounter } : {}) };
+  const done = (): PaletteView => {
+    entries.push(...combatEntries(ctx));
+    entries.sort((a, b) => a.group.localeCompare(b.group) || a.label.localeCompare(b.label));
+    const calendar = ctx.levelOf(world.pov, "calendar");
+    const timelapse: TimelapseView = {
+      action: TIMELAPSE_ACTION,
+      // A fight's rounds take no clock time, so neither does skipping ahead in one (DESIGN §11).
+      blocked: calendar < 1 ? "Calendar is off" : clockPaused(world, state) ? "Resume the clock first" : optionalQuery(ctx, "combat.engaged")?.(ctx, world.pov) === true ? "Not during a fight" : null,
+      durations: [30, 60, 180, 480, 1440, 10080],
+      until: [
+        ...world.calendar.dayParts.map((d) => ({ label: d.label, target: { type: "day_part" as const, dayPart: d.id } })),
+        { label: "Next shift", target: { type: "shift" as const } },
+        { label: "Next commitment", target: { type: "commitment" as const } },
+        { label: "Next interruption", target: { type: "interrupt" as const } },
+      ],
+      interrupts: { ...state.time.interrupts },
+      dayParts: calendar === 1,
+      followRoutine: routineSettingsOf(world).paletteFollowsRoutine,
+    };
+    const encounter = paletteEncounter(ctx);
+    return { entries, timelapse, ...(encounter ? { encounter } : {}) };
+  };
+  return { steps: [...actions.values()].map((action) => () => add(action)), done };
 }
