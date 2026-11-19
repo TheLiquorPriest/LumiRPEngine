@@ -15,7 +15,7 @@ import { accessFor } from "../../src/engine/access";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { Working } from "../../src/engine/working";
 import { ALL_PACKS } from "../../src/packs/index";
-import { buildMapView } from "../../src/packs/space/core/view";
+import { travelWays } from "../../src/packs/space/core/view";
 import { useTier, vehiclesFor } from "../../src/packs/vehicles/core/access";
 import { buildGarageView } from "../../src/packs/vehicles/core/view";
 import { modernUsWorld } from "./riverton";
@@ -131,7 +131,7 @@ describe("the ladder, the Garage and Drive read the one answer", () => {
     expect(card("box")).toMatchObject({ owner: "other", ownerName: "Rivera Hauling", access: "Rivera Hauling's", mine: false, canLend: true });
     expect(card("wagon")).toMatchObject({ owner: "household", access: "Your household's", mine: false });
     // From his apartment, with the building's garage below him: Drive takes what the reader gives there.
-    const driven = new Set(buildMapView(w.ctx).travel.flatMap((r) => (typeof r.params.vehicle === "string" ? [r.params.vehicle] : [])));
+    const driven = new Set(travelWays(w.ctx, null).flatMap((r) => (typeof r.params.vehicle === "string" ? [r.params.vehicle] : [])));
     for (const id of ["truck", "jeep", "wagon", "van", "sedan"]) expect(driven.has(id)).toBe(true);
     for (const id of ["stranger", "returned", "wreck"]) expect(driven.has(id)).toBe(false);
   });

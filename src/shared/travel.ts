@@ -3,6 +3,7 @@
 // core never imports another's.
 
 import type { PlaceId, TravelMode } from "./ids";
+import type { JsonObject } from "./json";
 
 export interface TravelLeg {
   from: PlaceId;
@@ -55,4 +56,27 @@ export interface TravelPart {
   kind: "fetch" | "start" | "drive" | "park" | "walk";
   minutes: number;
   words: string;
+}
+
+/**
+ * A way to a place as the map's place sheet lists it (DESIGN §12): the walk, or a vehicle's trip with how its minutes break down
+ * (`parts`, none for a walk) and its fare; the action and values that take it; and why it is greyed, where it is.
+ */
+export interface TravelWay {
+  to: PlaceId;
+  label: string;
+  mode: TravelMode;
+  minutes: number;
+  parts?: TravelPart[];
+  cents?: number;
+  vehicle?: string;
+  action: string;
+  params: JsonObject;
+  disabled?: string;
+}
+
+/** The quickest way to a place there is one to, as the map's list of places shows it: its minutes. */
+export interface QuickestWay {
+  to: PlaceId;
+  minutes: number;
 }

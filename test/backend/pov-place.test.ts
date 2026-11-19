@@ -12,7 +12,7 @@ import { Working } from "../../src/engine/working";
 import { ALL_PACKS } from "../../src/packs/index";
 import { buildCastView } from "../../src/packs/castlife/core/index";
 import { buildGarageView } from "../../src/packs/vehicles/core/view";
-import { buildMapView } from "../../src/packs/space/core/view";
+import { buildMapView, travelWays } from "../../src/packs/space/core/view";
 import { modernUsWorld } from "../packs/riverton";
 import { startState } from "../packs/support";
 
@@ -59,7 +59,7 @@ describe("a place the POV is inside", () => {
     const map = buildMapView(w.ctx);
     expect([map.here, map.path, map.scope]).toEqual(["maya_kitchen", ["riverton", "maya_flat", "maya_kitchen"], "maya_flat"]);
     expect(JSON.stringify(map)).not.toContain(HIDDEN_PLACE_NAME);
-    expect(map.travel.some((t) => t.to === "maya_bedroom")).toBe(true);
+    expect(travelWays(w.ctx, null).some((t) => t.to === "maya_bedroom")).toBe(true);
     expect(paramCandidates(reg, w.world, w.state, go, "to")).toContain("maya_bedroom");
     // Out of the flat again, it is someone else's home the POV doesn't know.
     expect(resolveAction(reg, w, { action: "go", params: { to: "cafe" } }, createRng("go:cafe")).ok).toBe(true);

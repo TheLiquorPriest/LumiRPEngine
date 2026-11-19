@@ -1478,7 +1478,7 @@ export interface LiveBatch {
 }
 
 /** One event as the live socket sends it: of a chat (or of ~jobs, ~user, or an address), numbered from 1 for each, of one of the kinds the socket carries, with that kind's data; an event of a kind declared with a key carries it. */
-export type LiveEvent = { chat: string; seq: number; kind: "trace"; at: number; data: TraceRecord } | { chat: string; seq: number; kind: "delta"; at: number; data: TraceDelta } | { chat: string; seq: number; kind: "reply"; at: number; data: ReplyPiece } | { chat: string; seq: number; kind: "released"; at: number; data: ReplyReleased } | { chat: string; seq: number; kind: "state"; key: "state"; at: number; data: Record<string, never> } | { chat: string; seq: number; kind: "handler_failed"; at: number; data: { op: string; error: string; turn: string; change: number | null } } | { chat: string; seq: number; kind: "requests"; at: number; data: { waiting: number } } | { chat: string; seq: number; kind: "folder"; at: number; data: { turn: string; path: string } } | { chat: string; seq: number; kind: "job"; at: number; data: { job: JobView } } | { chat: string; seq: number; kind: "empty_reply"; at: number; data: { turn: string; message: string; off: boolean } } | { chat: string; seq: number; kind: "world"; at: number; data: WorldChanged } | { chat: string; seq: number; kind: "build_job"; at: number; data: BuildJobChanged } | { chat: string; seq: number; kind: "extension"; at: number; data: ExtensionStatusReply };
+export type LiveEvent = { chat: string; seq: number; kind: "trace"; at: number; data: TraceRecord } | { chat: string; seq: number; kind: "delta"; at: number; data: TraceDelta } | { chat: string; seq: number; kind: "reply"; at: number; data: ReplyPiece } | { chat: string; seq: number; kind: "released"; at: number; data: ReplyReleased } | { chat: string; seq: number; kind: "state"; key: "state"; at: number; data: Record<string, never> } | { chat: string; seq: number; kind: "handler_failed"; at: number; data: { op: string; error: string; turn: string; change: number | null } } | { chat: string; seq: number; kind: "requests"; at: number; data: { waiting: number } } | { chat: string; seq: number; kind: "folder"; at: number; data: { turn: string; path: string } } | { chat: string; seq: number; kind: "job"; at: number; data: { job: JobRow } } | { chat: string; seq: number; kind: "empty_reply"; at: number; data: { turn: string; message: string; off: boolean } } | { chat: string; seq: number; kind: "world"; at: number; data: WorldChanged } | { chat: string; seq: number; kind: "build_job"; at: number; data: BuildJobChanged } | { chat: string; seq: number; kind: "extension"; at: number; data: ExtensionStatusReply };
 
 /** What the live socket sends a page: that following a chat (or a name) began, with the number of its last event then; its events in order, with the numbers of those the hub dropped before them for a page that fell behind; or why it did not take what the page sent. */
 export type LiveMessage = { type: "following"; chat: string; seq: number } | { type: "events"; chat: string; events: LiveEvent[]; missed?: LiveMissed } | { type: "refused"; message: string };
@@ -3737,6 +3737,24 @@ export interface TraceRecord {
   event: TraceEvent;
 }
 
+/** One way to a place: what it is called, how it goes (walk, road, offroad, water, air), its minutes and how a vehicle trip's minutes break down, its fare, the vehicle, the action and values that take it, and why it is greyed where it is. */
+export interface TravelWay {
+  to: string;
+  label: string;
+  mode: "walk" | "road" | "offroad" | "water" | "air";
+  minutes: number;
+  /** How a vehicle trip's minutes break down, each part in words; left out for a walk. */
+  parts?: ({ kind: "fetch" | "start" | "drive" | "park" | "walk"; minutes: number; words: string })[];
+  /** Its fare, where it has one. */
+  cents?: number;
+  /** The vehicle, by name, for a trip in one. */
+  vehicle?: string;
+  action: string;
+  params: { [key: string]: JsonValue };
+  /** Why it cannot be taken now; left out where it can. */
+  disabled?: string;
+}
+
 /** A file's differences: from the shipped file of its name to this one; and what the updates that changed the shipped file since this one was written changed of it, together and one by one. */
 export interface TreeDiffReply {
   path: string;
@@ -5530,6 +5548,26 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
+  /** The quickest way's minutes to each place the player's character knows and can go to from where it is now, for the map's list of places. */
+  "GET /api/v1/chats/:chat/travel": {
+    params: { chat: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: { ways: { to: string; minutes: number }[] };
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Every way the player's character could go from where it is now to one place, for that place's sheet: the walk and each vehicle's trip, worked out for that place alone. */
+  "GET /api/v1/chats/:chat/travel/:place": {
+    params: { chat: string; place: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: { options: TravelWay[] };
+    paged: false;
+    long: false;
+    joined: false;
+  };
   /** A chat's turns, newest first, each with what its runs spent together and each of its runs by itself (its kind, where it stands, its error, its moments and its own spend); `before` is a turn's id, and older ones follow it. The settings `turns.page` and `turns.maxPage` give a page's length. */
   "GET /api/v1/chats/:chat/turns": {
     params: { chat: string };
@@ -6160,6 +6198,16 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
+  /** One job whole, as RPH keeps it, without its run's work: what a page shows of a job it opens, its trace read behind the chat's gate. */
+  "GET /api/v1/jobs/:job/record": {
+    params: { job: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: JobReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
   /** Lets go a job he held while it waited, or one he paused while it ran. */
   "POST /api/v1/jobs/:job/release": {
     params: { job: string };
@@ -6198,16 +6246,6 @@ export interface ApiRoutes {
     reply: JobToldReply;
     paged: false;
     long: false;
-  /** One job whole, as RPH keeps it, without its run's work: what a page shows of a job it opens, its trace read behind the chat's gate. */
-  "GET /api/v1/jobs/:job/record": {
-    params: { job: string };
-    query: Record<string, never>;
-    body: undefined;
-    reply: JobReply;
-    paged: false;
-    long: false;
-    joined: false;
-  };
     joined: false;
   };
   /** Undoes all a job recorded that no change of his undid yet, the newest first, as his own. Says what was recorded and what is left, as report codes and in the play answers' words. */
@@ -7208,8 +7246,8 @@ export interface LiveKinds {
   requests: { waiting: number };
   /** A turn's folder gained or changed a file: the turn and the file's path; a page reads the folder again. */
   folder: { turn: string; path: string };
-  /** One of his jobs changed: the job as RPH keeps it now. */
-  job: { job: JobView };
+  /** One of his jobs changed: its row as a list shows it now; its whole is read by its id. */
+  job: { job: JobRow };
   /** A turn ended before a word of its reply went out, and the empty reply Lumiverse kept for it stays in the chat, by its turn and message; `off` says the setting lumiverse.reply.removeEmpty is off (false: it is on, and taking the reply away failed). The page says what to do with it. */
   empty_reply: { turn: string; message: string; off: boolean };
   /** A world of his changed: the page reads what it shows of that world again. */

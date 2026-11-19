@@ -6,8 +6,9 @@
 // nothing. Places aren't entities, so opening one observes nothing new (the map was observed when
 // its destination opened). The same details show in the map overlay's dock, where no sheet stack is.
 
-import { useMemo } from "preact/hooks";
+import { useEffect, useMemo, useState } from "preact/hooks";
 import type { TravelMode } from "../../../shared/ids";
+import type { TravelWay } from "../../../shared/travel";
 import { PLACE_MARK_LABEL } from "../../../shared/maps";
 import { playAt, useApp } from "../../../frontend/app";
 import { Badge, Empty, IdText, List, ListRow, PageHeader, Section, useBusy } from "../../../frontend/components";
@@ -54,18 +55,37 @@ export function placeStatus(view: MapView, place: MapPlaceView): { icon: IconNam
 }
 
 /** A row's time in words: the whole, then how a vehicle trip's breaks down ("13 min: 4 min to reach it at home, 1 min to get going, 8 min driving"). */
-export function tripWords(option: Pick<MapView["travel"][number], "minutes" | "parts">): string {
+export function tripWords(option: Pick<TravelWay, "minutes" | "parts">): string {
   const parts = option.parts ?? [];
   const whole = formatMinutes(option.minutes);
   return parts.length === 0 ? whole : `${whole}: ${parts.map((p) => `${formatMinutes(p.minutes)} ${p.words}`).join(", ")}`;
 }
 
-/** A place's details: where you stand with it, its travel options and its map actions. */
+/** A place's details: where you stand with it, its travel options (read when the details open: the ways are no part of the state view) and its map actions. */
 export function PlaceDetail(props: { view: MapView; place: MapPlaceView; chatId: string; onOpen(): void; onShow?: () => void; onTravelled(): void }) {
   const app = useApp();
   const [busy, run] = useBusy();
   const { view, place } = props;
   const status = placeStatus(view, place);
+  const there = place.id === view.here || view.path.includes(place.id);
+  // Every way there, worked out for this place alone; none shown until it is read.
+  const [options, setOptions] = useState<readonly TravelWay[] | null>(null);
+  useEffect(() => {
+    setOptions(null);
+    if (there || !place.known) return;
+    let live = true;
+    app.request({ type: "lre.map", op: "travel", chatId: props.chatId, to: place.id }).then(
+      (result) => {
+        if (live) setOptions(result?.travel ?? []);
+      },
+      () => {
+        if (live) setOptions([]);
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [props.chatId, place.id, place.known, there, view]);
   if (!place.known) {
     return (
       <Empty icon="help" title="Somewhere">
@@ -73,9 +93,7 @@ export function PlaceDetail(props: { view: MapView; place: MapPlaceView; chatId:
       </Empty>
     );
   }
-  const options = view.travel.filter((t) => t.to === place.id);
   const opens = view.scopes.some((s) => s.id === place.id);
-  const there = place.id === view.here || view.path.includes(place.id);
   const onShow = props.onShow;
   return (
     <div class="lre-stack" data-lre-place-detail={place.id}>
@@ -84,7 +102,7 @@ export function PlaceDetail(props: { view: MapView; place: MapPlaceView; chatId:
         <span>{status.text}</span>
         {place.mark ? <Badge tone="accent">{PLACE_MARK_LABEL[place.mark]}</Badge> : null}
       </p>
-      {!there ? (
+      {!there && options !== null ? (
         <Section title="Getting there" flush>
           {options.length === 0 ? (
             <Empty icon="route">No route from here.</Empty>

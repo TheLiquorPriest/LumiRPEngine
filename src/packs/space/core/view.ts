@@ -1,6 +1,6 @@
 // The map panel's view model (`space.map`): every scope the POV can open (map-scope.ts), each drawn
-// as its own frame; the scope the map opens on (the one around the POV); and travel options as
-// ready-to-send actions. A scope lists a place the POV can see (`canSeePlace`), and the places the
+// as its own frame; and the scope the map opens on (the one around the POV). The ways to go somewhere,
+// ready-to-send actions, are worked out when the page asks for them (`travelWays`), never with the view. A scope lists a place the POV can see (`canSeePlace`), and the places the
 // POV is inside even when it can't, each marked known and visited; one it can't see goes by a
 // stand-in (an opaque id and "Somewhere") everywhere the view names it, and is never somewhere to
 // travel to. The view is built for the chat's display (DESIGN §12): its grids carry only the cells
@@ -30,7 +30,7 @@ import { cellOf, doorState, drawnOf, indexOf, movingOf, squareAt, standsAt, type
 import { whereOf } from "./grid-play";
 import { hiddenCells, sightFor } from "./positions";
 import { closedRoutes, goMinutes, routeAt } from "./travel";
-import type { TravelPart } from "../../../shared/travel";
+import type { TravelWay } from "../../../shared/travel";
 
 export type { MapDoorView, MapGridView, MapItemView, MapPieceView, MapPlaceView, MapRouteView, MapScaleView, MapScopeView, MapUnplacedView } from "./map-scope";
 
@@ -47,8 +47,6 @@ export interface MapView {
   movement: boolean;
   /** Every scope the POV can open: the world, and each place it can see with places inside it or a grid. */
   scopes: MapScopeView[];
-  /** `parts`: how a vehicle trip's minutes break down, each in words after its minutes ("to reach it at home", "driving"); none for a walk. */
-  travel: { to: PlaceId; label: string; mode: TravelMode; minutes: number; parts?: TravelPart[]; cents?: number; vehicle?: string; action: ActionId; params: JsonObject; disabled?: string }[];
 }
 
 /**
@@ -225,21 +223,30 @@ export function buildMapView(ctx: ReadContext, chosen: MapDisplay | null = null,
   }
   const scope = defaultScope(world, here, children, filter);
   const shownScope = scope === null ? null : filter.shown(scope);
-  // Somewhere to go is a place the POV knows: a stand-in names nowhere it could ask for.
-  const targets = new Set(ids.filter(known));
-  const travel: MapView["travel"] = [];
-  if (here && level >= 1) {
-    for (const id of targets) {
-      if (id === here) continue;
-      // Story first, a Go leads anywhere (`goMinutes`); only the travel simulation leaves one with no
-      // walk disabled, and a place that gives the POV no leave to enter is greyed with why (ORG-SPEC §3.9).
-      const minutes = goMinutes(ctx, here, id);
-      const name = own(world.places, id)?.name ?? id;
-      const shut = entryFor(ctx, world.pov, id) === null ? entryRefusal(ctx, world.pov, id) : "";
-      travel.push({ to: id, label: `Walk to ${name}`, mode: "walk", minutes: minutes ?? 0, action: "go", params: { to: id }, ...(minutes === null ? { disabled: "no walking route" } : shut !== "" ? { disabled: shut } : {}) });
-    }
-    const vehicles = optionalQuery(ctx, "vehicles.travel_options");
-    if (vehicles) for (const o of vehicles(ctx, here)) if (targets.has(o.to)) travel.push(o);
+  return { level, here: here === null ? null : filter.shown(here), path: path.map(filter.shown), scope: shownScope === null || scopes.some((s) => s.id === shownScope) ? shownScope : null, display, movement: settings.grid.movement, scopes };
+}
+
+/**
+ * Every way the POV could go from where it is to `to`, or to each place it knows where `to` is null: the walk (story first, a Go
+ * leads anywhere, `goMinutes`; only the travel simulation leaves one with no walk disabled, and a place that gives the POV no leave to
+ * enter is greyed with why, ORG-SPEC §3.9), then each vehicle's trip there where one is offered. None below Space 1, from nowhere, or to
+ * a place the POV does not know: a stand-in names nowhere it could ask for. Worked out for the places asked only.
+ */
+export function travelWays(ctx: ReadContext, to: PlaceId | null): TravelWay[] {
+  const { world, state } = ctx;
+  const here = placeOfEntity(state, world.pov);
+  if (!here || ctx.levelOf(world.pov, "space") < 1) return [];
+  const known = (id: PlaceId): boolean => canSeePlace(ctx.registry, world, state, world.pov, id);
+  const targets = new Set((to === null ? Object.keys(world.places).sort() : own(world.places, to) !== undefined ? [to] : []).filter((id) => id !== here && known(id)));
+  if (targets.size === 0) return [];
+  const ways: TravelWay[] = [];
+  for (const id of targets) {
+    const minutes = goMinutes(ctx, here, id);
+    const name = own(world.places, id)?.name ?? id;
+    const shut = entryFor(ctx, world.pov, id) === null ? entryRefusal(ctx, world.pov, id) : "";
+    ways.push({ to: id, label: `Walk to ${name}`, mode: "walk", minutes: minutes ?? 0, action: "go", params: { to: id }, ...(minutes === null ? { disabled: "no walking route" } : shut !== "" ? { disabled: shut } : {}) });
   }
-  return { level, here: here === null ? null : filter.shown(here), path: path.map(filter.shown), scope: shownScope === null || scopes.some((s) => s.id === shownScope) ? shownScope : null, display, movement: settings.grid.movement, scopes, travel };
+  const vehicles = optionalQuery(ctx, "vehicles.travel_options");
+  if (vehicles) for (const o of vehicles(ctx, here, to ?? undefined)) if (targets.has(o.to)) ways.push(o);
+  return ways;
 }

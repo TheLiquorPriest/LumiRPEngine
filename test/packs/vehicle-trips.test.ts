@@ -14,7 +14,8 @@ import { Working } from "../../src/engine/working";
 import { placeOfEntity } from "../../src/engine/scope";
 import type { WorldState } from "../../src/engine/state";
 import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
-import { buildMapView, type MapView } from "../../src/packs/space/core/view";
+import { travelWays } from "../../src/packs/space/core/view";
+import type { TravelWay } from "../../src/shared/travel";
 import { routeAt } from "../../src/packs/space/core/travel";
 import { startState } from "./support";
 
@@ -33,10 +34,10 @@ function portAlder(where: PlaceId, travel?: Partial<TravelTuning>): { world: Wor
   return { world, state };
 }
 
-type Row = MapView["travel"][number];
+type Row = TravelWay;
 
 function rows(world: WorldDoc, state: WorldState): Row[] {
-  return buildMapView(reg.context(world, state)).travel;
+  return travelWays(reg.context(world, state), null);
 }
 
 function row(list: readonly Row[], to: PlaceId, vehicle: string | null): Row {

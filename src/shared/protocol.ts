@@ -28,6 +28,7 @@ import type { JobKind, JobResult, JobStatus, JobSummary } from "./jobs";
 import type { LintIssue } from "./lint";
 import type { NarratorView } from "./narrator-view";
 import type { TableUpdate } from "./tables";
+import type { QuickestWay, TravelWay } from "./travel";
 import type { GM_OUTLINE, GmPartReply, GmReadPart, QueuedOn } from "./gm-parts";
 
 // Moved to homes of their own (PlanSwap-13): today's files take them from here until PlanSwap-10 removes this protocol.
@@ -358,9 +359,10 @@ export interface UiRequest extends Request<"lre.ui"> {
  * knows or fog of war; presentation, kept beside the chat rather than in its ledger, so it never
  * changes the world. `walk`: what Walk here to a cell of the grid the POV stands on takes, judged
  * as the step action is, on the real ground: the page's grid is cut to the display, so it can't
- * path-find under fog.
+ * path-find under fog. `ways`: the quickest way's minutes to each place there is a way to, for the
+ * list of places; `travel`: every way to one place, for its sheet. Neither is in the state view.
  */
-export type MapRequest = Request<"lre.map"> & { chatId: ChatId } & ({ op?: "display"; display: MapDisplay } | { op: "walk"; x: number; y: number });
+export type MapRequest = Request<"lre.map"> & { chatId: ChatId } & ({ op?: "display"; display: MapDisplay } | { op: "walk"; x: number; y: number } | { op: "ways" } | { op: "travel"; to: PlaceId });
 
 /**
  * GM → This chat → Knowledge (DESIGN §6.11): the chat's own knowledge choices, knowledge tracking
@@ -924,7 +926,7 @@ export interface ResultBodies {
    */
   "lre.world": { worlds?: WorldIndex[]; world?: WorldDoc; revision?: RevisionId; lint?: LintIssue[]; file?: JsonValue; packKinds?: Record<string, KindDef>; packRelations?: Record<string, RelationTypeDef>; packLabels?: Record<string, string>; functions?: string[]; sheet?: SheetSectionView[] | null; templates?: TemplateInfo[]; chats?: WorldChatInfo[]; history?: RevisionNote[]; pending?: boolean; updates?: TableUpdate[]; undo?: string; undone?: boolean; words?: string; limits?: { editOps: number; patchOps: number; noteChars: number }; revisions?: WorldRevisionInfo[]; next?: string | null; changes?: WorldChangesInfo };
   "lre.ui": { done: true };
-  "lre.map": { display?: MapDisplay; walk?: { minutes: number; disabled?: string } };
+  "lre.map": { display?: MapDisplay; walk?: { minutes: number; disabled?: string }; ways?: QuickestWay[]; travel?: TravelWay[] };
   /** The chat's own knowledge choices after the request, null where it follows; `tidy`, its own Tidy up switch (absent: the world's). `engine` and `harnessBlocked` are retired: nothing sets them, for RPE plays every chat itself. */
   "lre.chat.knowledge": { knowledge: boolean | null; narrator: NarratorView | null; engine?: "agents" | "harness"; tidy?: boolean; harnessBlocked?: string };
   /** `start`, `cancel` and `dismiss` name the job; `list` returns the world's kept jobs. */

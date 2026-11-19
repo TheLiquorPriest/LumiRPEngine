@@ -1,7 +1,6 @@
 // The `space.map` view model as the UI reads it (`src/packs/space/core`).
 // Decoded defensively from JSON; the space core builds it, already filtered to the POV.
 
-import type { JsonObject } from "../../../shared/json";
 import { placeMarkOf } from "../../../shared/maps";
 import { isRecord } from "../../../shared/json";
 import type { TravelMode } from "../../../shared/ids";
@@ -11,7 +10,6 @@ import type { GridScene } from "../core/map-scope";
 import { DOOR_STATES } from "../core/grid-play";
 
 export const TRAVEL_MODES = ["walk", "road", "offroad", "water", "air"] as const satisfies readonly TravelMode[];
-const TRIP_PARTS = ["fetch", "start", "drive", "park", "walk"] as const;
 
 function numbers(value: unknown): number[] {
   return Array.isArray(value) ? value.filter((n): n is number => typeof n === "number") : [];
@@ -127,10 +125,5 @@ export function decodeMapView(value: unknown): MapView | null {
     display: value.display === "fog" ? "fog" : "knowledge",
     movement: value.movement === true,
     scopes: list(value.scopes, decodeScope),
-    travel: list(value.travel, (t) =>
-      typeof t.to === "string" && typeof t.action === "string"
-        ? { to: t.to, label: str(t.label, t.action), mode: oneOf(t.mode, TRAVEL_MODES, "walk"), minutes: num(t.minutes), parts: list(t.parts, (p) => (typeof p.words === "string" ? { kind: oneOf(p.kind, TRIP_PARTS, "drive"), minutes: num(p.minutes), words: p.words } : null)), cents: optNum(t.cents), vehicle: optStr(t.vehicle), action: t.action, params: isRecord(t.params) ? (t.params as JsonObject) : {}, disabled: optStr(t.disabled) }
-        : null,
-    ),
   };
 }

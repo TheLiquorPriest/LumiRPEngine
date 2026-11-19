@@ -883,6 +883,34 @@ One of the HUD's time controls (Pause clock, Resume clock, and the others the cl
 | Reply | [`TapReply`](#tapreply) |
 | The chat | taken on first, as the route keeps or changes something of it: RPE's record of the chat and its folders are made, by what Lumiverse says of it; a chat Lumiverse does not have is refused with 404 |
 
+### `GET /api/v1/chats/:chat/travel`
+
+The quickest way's minutes to each place the player's character knows and can go to from where it is now, for the map's list of places.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat` |
+| Query | none |
+| Body | none |
+| Reply | `{ ways: { to: string; minutes: number }[] }` |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
+
+### `GET /api/v1/chats/:chat/travel/:place`
+
+Every way the player's character could go from where it is now to one place, for that place's sheet: the walk and each vehicle's trip, worked out for that place alone.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat`, `place` |
+| Query | none |
+| Body | none |
+| Reply | `{ options: TravelWay[] }` |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
+
 ### `GET /api/v1/chats/:chat/walk`
 
 What a step to a square of the grid the player's character stands on would take: its minutes, or the reason there is no way there.
@@ -2367,6 +2395,19 @@ Pauses a running job: every agent of its run waits at its next call until he let
 | Body | none |
 | Reply | [`JobReply`](#jobreply) |
 
+### `GET /api/v1/jobs/:job/record`
+
+One job whole, as RPH keeps it, without its run's work: what a page shows of a job it opens, its trace read behind the chat's gate.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `job` |
+| Query | none |
+| Body | none |
+| Reply | [`JobReply`](#jobreply) |
+
 ### `POST /api/v1/jobs/:job/release`
 
 Lets go a job he held while it waited, or one he paused while it ran.
@@ -2394,19 +2435,6 @@ Starts again a job that was interrupted by a restart, failed or was cancelled: a
 | Reply | [`JobReply`](#jobreply) |
 
 ### `POST /api/v1/jobs/:job/resume`
-
-### `GET /api/v1/jobs/:job/record`
-
-One job whole, as RPH keeps it, without its run's work: what a page shows of a job it opens, its trace read behind the chat's gate.
-
-| | |
-|---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | takes no body |
-| Params | `job` |
-| Query | none |
-| Body | none |
-| Reply | [`JobReply`](#jobreply) |
 
 Resumes an interrupted job from the last call its own session holds, with what it had done and spent.
 
@@ -3973,7 +4001,7 @@ What a page following a chat on `/api/v1/live` is sent: each event is `{ chat, s
 | `handler_failed` | `{ op: string; error: string; turn: string; change: number | null }` | An engine handler failed on a change of this chat, which is recorded as not applied: the operation, the handler's error, the turn and the change (null for one never kept). |
 | `requests` | `{ waiting: number }` | What waits in the chat, asked for beside the player's words, changed: how many requests wait now; a page reads them again. |
 | `folder` | `{ turn: string; path: string }` | A turn's folder gained or changed a file: the turn and the file's path; a page reads the folder again. |
-| `job` | `{ job: JobView }` | One of his jobs changed: the job as RPH keeps it now. |
+| `job` | `{ job: JobRow }` | One of his jobs changed: its row as a list shows it now; its whole is read by its id. |
 | `empty_reply` | `{ turn: string; message: string; off: boolean }` | A turn ended before a word of its reply went out, and the empty reply Lumiverse kept for it stays in the chat, by its turn and message; `off` says the setting lumiverse.reply.removeEmpty is off (false: it is on, and taking the reply away failed). The page says what to do with it. |
 | `world` | [`WorldChanged`](#worldchanged) | A world of his changed: the page reads what it shows of that world again. |
 | `build_job` | [`BuildJobChanged`](#buildjobchanged) | A job of his changed: the page shows its progress or its result. |
@@ -5845,6 +5873,28 @@ export interface JobReply {
 }
 ```
 
+### `JobRow`
+
+A job as a list shows it: its id, its agent, the first line of what it was asked (cut at the characters the Jobs list shows), where it stands, its scope (its chat and the turn that started it), who started it, when it started and ended, what it spent, the limit it ended at, who ended it, the attachments its start named and the limits of its own its start gave. The whole job is read by its id.
+
+```ts
+export interface JobRow {
+  id: string;
+  agent: string;
+  brief: string;
+  state: JobState;
+  scope: RunScope;
+  startedBy: AgentRef | "user";
+  started: number;
+  ended?: number;
+  usage: Usage;
+  limit?: LimitHit;
+  stoppedBy?: JobStopper;
+  attach?: string[];
+  limits?: JobLimits;
+}
+```
+
 ### `JobShownReply`
 
 One job: its record, its run's trace as the live view shows a turn's, what its run spent by agent (null before it spent anything or after the record was let go), and how full each of its agents' windows is while it runs.
@@ -5870,28 +5920,6 @@ export interface JobStartAsk {
   given?: string[];
   /** Limits of its own: each holds in place of the setting's for this job. */
   limits?: JobLimitsAsk;
-}
-```
-
-### `JobRow`
-
-A job as a list shows it: its id, its agent, the first line of what it was asked (cut at the characters the Jobs list shows), where it stands, its scope (its chat and the turn that started it), who started it, when it started and ended, what it spent, the limit it ended at, who ended it, the attachments its start named and the limits of its own its start gave. The whole job is read by its id.
-
-```ts
-export interface JobRow {
-  id: string;
-  agent: string;
-  brief: string;
-  state: JobState;
-  scope: RunScope;
-  startedBy: AgentRef | "user";
-  started: number;
-  ended?: number;
-  usage: Usage;
-  limit?: LimitHit;
-  stoppedBy?: JobStopper;
-  attach?: string[];
-  limits?: JobLimits;
 }
 ```
 
@@ -6257,7 +6285,7 @@ export interface LiveBatch {
 One event as the live socket sends it: of a chat (or of ~jobs, ~user, or an address), numbered from 1 for each, of one of the kinds the socket carries, with that kind's data; an event of a kind declared with a key carries it.
 
 ```ts
-export type LiveEvent = { chat: string; seq: number; kind: "trace"; at: number; data: TraceRecord } | { chat: string; seq: number; kind: "delta"; at: number; data: TraceDelta } | { chat: string; seq: number; kind: "reply"; at: number; data: ReplyPiece } | { chat: string; seq: number; kind: "released"; at: number; data: ReplyReleased } | { chat: string; seq: number; kind: "state"; key: "state"; at: number; data: Record<string, never> } | { chat: string; seq: number; kind: "handler_failed"; at: number; data: { op: string; error: string; turn: string; change: number | null } } | { chat: string; seq: number; kind: "requests"; at: number; data: { waiting: number } } | { chat: string; seq: number; kind: "folder"; at: number; data: { turn: string; path: string } } | { chat: string; seq: number; kind: "job"; at: number; data: { job: JobView } } | { chat: string; seq: number; kind: "empty_reply"; at: number; data: { turn: string; message: string; off: boolean } } | { chat: string; seq: number; kind: "world"; at: number; data: WorldChanged } | { chat: string; seq: number; kind: "build_job"; at: number; data: BuildJobChanged } | { chat: string; seq: number; kind: "extension"; at: number; data: ExtensionStatusReply };
+export type LiveEvent = { chat: string; seq: number; kind: "trace"; at: number; data: TraceRecord } | { chat: string; seq: number; kind: "delta"; at: number; data: TraceDelta } | { chat: string; seq: number; kind: "reply"; at: number; data: ReplyPiece } | { chat: string; seq: number; kind: "released"; at: number; data: ReplyReleased } | { chat: string; seq: number; kind: "state"; key: "state"; at: number; data: Record<string, never> } | { chat: string; seq: number; kind: "handler_failed"; at: number; data: { op: string; error: string; turn: string; change: number | null } } | { chat: string; seq: number; kind: "requests"; at: number; data: { waiting: number } } | { chat: string; seq: number; kind: "folder"; at: number; data: { turn: string; path: string } } | { chat: string; seq: number; kind: "job"; at: number; data: { job: JobRow } } | { chat: string; seq: number; kind: "empty_reply"; at: number; data: { turn: string; message: string; off: boolean } } | { chat: string; seq: number; kind: "world"; at: number; data: WorldChanged } | { chat: string; seq: number; kind: "build_job"; at: number; data: BuildJobChanged } | { chat: string; seq: number; kind: "extension"; at: number; data: ExtensionStatusReply };
 ```
 
 ### `LiveMessage`
@@ -9704,6 +9732,29 @@ export interface TraceRecord {
   agent?: AgentRef;
   parent?: { agent: string; run: string; call: string };
   event: TraceEvent;
+}
+```
+
+### `TravelWay`
+
+One way to a place: what it is called, how it goes (walk, road, offroad, water, air), its minutes and how a vehicle trip's minutes break down, its fare, the vehicle, the action and values that take it, and why it is greyed where it is.
+
+```ts
+export interface TravelWay {
+  to: string;
+  label: string;
+  mode: "walk" | "road" | "offroad" | "water" | "air";
+  minutes: number;
+  /** How a vehicle trip's minutes break down, each part in words; left out for a walk. */
+  parts?: ({ kind: "fetch" | "start" | "drive" | "park" | "walk"; minutes: number; words: string })[];
+  /** Its fare, where it has one. */
+  cents?: number;
+  /** The vehicle, by name, for a trip in one. */
+  vehicle?: string;
+  action: string;
+  params: { [key: string]: JsonValue };
+  /** Why it cannot be taken now; left out where it can. */
+  disabled?: string;
 }
 ```
 

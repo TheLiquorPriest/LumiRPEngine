@@ -258,9 +258,23 @@ function pieceWords(piece: MapPieceView, all: readonly MapPieceView[]): string {
   return parts.filter((p) => p !== "").join(" · ");
 }
 
-/** The scope's known places as a list: where the POV is first, then by name, each with its quickest way there. */
-function PlaceList(props: { view: MapView; scope: MapScopeView; top: number; onPick(place: MapPlaceView): void }) {
+/** The scope's known places as a list: where the POV is first, then by name, each with its quickest way there, read when the list opens (the ways are no part of the state view). */
+function PlaceList(props: { view: MapView; scope: MapScopeView; top: number; chatId: string; onPick(place: MapPlaceView): void }) {
+  const app = useApp();
   const { view, scope } = props;
+  const [quickest, setQuickest] = useState<ReadonlyMap<string, number>>(new Map());
+  useEffect(() => {
+    let live = true;
+    app.request({ type: "lre.map", op: "ways", chatId: props.chatId }).then(
+      (result) => {
+        if (live) setQuickest(new Map((result?.ways ?? []).map((w) => [w.to, w.minutes])));
+      },
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [props.chatId, view]);
   const rank = (p: MapPlaceView): number => (p.id === view.here ? 0 : view.path.includes(p.id) ? 1 : 2);
   const places = scope.places.filter((p) => p.known).sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
   return (
@@ -272,8 +286,8 @@ function PlaceList(props: { view: MapView; scope: MapScopeView; top: number; onP
           <List>
             {places.map((p) => {
               const status = placeStatus(view, p);
-              const ways = view.travel.filter((t) => t.to === p.id && t.disabled === undefined).map((t) => t.minutes);
-              return <ListRow key={p.id} id={p.id} icon={status.icon} title={p.name} subtitle={status.short} value={ways.length > 0 ? formatMinutes(Math.min(...ways)) : undefined} valueTone="muted" chevron onClick={() => props.onPick(p)} />;
+              const minutes = quickest.get(p.id);
+              return <ListRow key={p.id} id={p.id} icon={status.icon} title={p.name} subtitle={status.short} value={minutes !== undefined ? formatMinutes(minutes) : undefined} valueTone="muted" chevron onClick={() => props.onPick(p)} />;
             })}
           </List>
         )}
@@ -564,6 +578,7 @@ function MapCanvas(props: { view: MapView; chatId: string }) {
           view={view}
           scope={scope}
           top={top}
+          chatId={props.chatId}
           onPick={(p) => {
             if (docked) setListing(false);
             pick(p);

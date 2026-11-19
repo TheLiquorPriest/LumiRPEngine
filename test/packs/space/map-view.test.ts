@@ -12,7 +12,7 @@ import { paramCandidates } from "../../../src/engine/resolve";
 import { typedIntent } from "../../../src/engine/typed-intent";
 import { ALL_PACKS, STARTER_WORLDS } from "../../../src/packs/index";
 import { HIDDEN_PLACE_NAME } from "../../../src/engine/visibility";
-import { buildMapView, type MapView } from "../../../src/packs/space/core/view";
+import { buildMapView, travelWays, type MapView } from "../../../src/packs/space/core/view";
 import { modernUsWorld } from "../riverton";
 import { Working } from "../../../src/engine/working";
 import { initialState } from "../../../src/engine/world-state";
@@ -115,7 +115,7 @@ describe("map scopes", () => {
     // The chapel's only room is the secret cistern: nothing to open, and the cistern is nowhere.
     expect(view.scopes.some((s) => s.id === "chapel_quiet_bell")).toBe(false);
     expect(view.scopes.some((s) => s.places.some((p) => p.id === "chapel_cistern"))).toBe(false);
-    expect(view.travel.some((t) => t.to === "chapel_cistern")).toBe(false);
+    expect(travelWays(reg.context(world, startState(world)), null).some((t) => t.to === "chapel_cistern")).toBe(false);
     // A grid opens on its own, with no places in it (the marina).
     const alder = starter("modern_slice_of_life");
     const marina = scopeOf(buildMapView(reg.context(alder, startState(alder))), "alder_harbor_marina");
@@ -187,7 +187,7 @@ describe("map scopes", () => {
     expect(view.scope).toBe("harrowmere_hall");
     expect(scopeOf(view, "harrowmere_hall").places.some((p) => p.id === "saltreach")).toBe(false);
     // The map draws one scope at a time, but its travel options reach every place the POV can see.
-    expect(view.travel.some((t) => t.action === "go" && t.to === "saltreach")).toBe(true);
+    expect(travelWays(reg.context(world, state), null).some((t) => t.action === "go" && t.to === "saltreach")).toBe(true);
     const go = reg.actions.get("go");
     expect(go ? paramCandidates(reg, world, state, go, "to") : []).toEqual(expect.arrayContaining(["saltreach", "boathouse", "gatehouse"]));
     expect(typedIntent(reg, world, state, "I walk to Saltreach")).toMatchObject({ action: "go", params: { to: "saltreach" } });

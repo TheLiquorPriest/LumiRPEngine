@@ -78,7 +78,8 @@ declare module "../../../engine/registry" {
     /** Whether the vehicle has fuel for the trip (always true below Vehicles level 2). */
     fuel_ok: (ctx: ReadContext, vehicle: EntityId, leg: Leg) => boolean;
     /** Drive, ride or sail options from a place for the POV's vehicles (the map panel). */
-    "vehicles.travel_options": (ctx: ReadContext, from: PlaceId) => TravelOption[];
+    /** Each vehicle's trip from `from` to every place, or to `to` alone where it is given: worked out for the places asked only. */
+    "vehicles.travel_options": (ctx: ReadContext, from: PlaceId, to?: PlaceId) => TravelOption[];
     /** Each insured vehicle's monthly premium, its owner and its name: the economy pays it as a flow linked to the vehicle. */
     "vehicles.insurance": (ctx: ReadContext) => { vehicle: EntityId; owner: EntityId; cents: number; label: string }[];
     /** Each registered vehicle's yearly fee, its owner, its name and the month it renews, where the world registers vehicles (Vehicles 4, `packs.vehicles.config.registration`). */
@@ -569,13 +570,12 @@ export const vehiclesPack: PackDef = {
     for (const t of TABLES) r.table({ id: t.id, schema: t.schema, columns: t.columns, defaults: t, shipped: SHIPPED[t.id] ?? [] });
     r.kind(VEHICLE);
     r.query("fuel_ok", fuelOk);
-    r.query("vehicles.travel_options", (ctx, from) => {
+    r.query("vehicles.travel_options", (ctx, from, to) => {
       const out: TravelOption[] = [];
       const pov = ctx.world.pov;
       const walk = optionalQuery(ctx, "space.route");
-      const targets = Object.keys(ctx.world.places)
-        .sort()
-        .filter((to) => to !== from);
+      const targets = (to === undefined ? Object.keys(ctx.world.places).sort() : own(ctx.world.places, to) !== undefined ? [to] : []).filter((p) => p !== from);
+      if (targets.length === 0) return out;
       const placeName = (p: PlaceId): string => own(ctx.world.places, p)?.name ?? p;
       const home = own(ctx.state.entities, pov)?.fields.home;
       for (const v of vehiclesFor(ctx, pov).map((u) => u.id)) {

@@ -9,7 +9,7 @@ import { runTimelapse } from "../../../src/engine/time";
 import { ALL_NOTE } from "../../../src/engine/simulate";
 import { modernUsWorld } from "../riverton";
 import { findRoute, routeAt } from "../../../src/packs/space/core/travel";
-import { buildMapView } from "../../../src/packs/space/core/view";
+import { buildMapView, travelWays } from "../../../src/packs/space/core/view";
 import { startState } from "../support";
 
 const reg = createRegistry(ALL_PACKS);
@@ -102,9 +102,10 @@ describe("space: routes", () => {
   test("the map lists known places and travel options, including the POV's vehicles", () => {
     const world = modernUsWorld("w", "R");
     world.entities.you!.fields.place = "garage";
-    const view = buildMapView(reg.context(world, startState(world)));
+    const ctx = reg.context(world, startState(world));
+    const view = buildMapView(ctx);
     expect(view.scopes.some((s) => s.places.some((p) => p.id === "maya_flat"))).toBe(false); // known_by, not known yet
-    expect(view.travel.some((t) => t.action === "go" && t.to === "cafe")).toBe(true);
-    expect(view.travel.some((t) => t.action === "drive" && t.to === "lake" && t.params.vehicle === "truck")).toBe(true);
+    expect(travelWays(ctx, null).some((t) => t.action === "go" && t.to === "cafe")).toBe(true);
+    expect(travelWays(ctx, null).some((t) => t.action === "drive" && t.to === "lake" && t.params.vehicle === "truck")).toBe(true);
   });
 });

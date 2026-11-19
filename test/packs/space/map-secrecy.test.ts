@@ -16,7 +16,7 @@ import { canSeePlace, HIDDEN_PLACE_NAME } from "../../../src/engine/visibility";
 import { Working } from "../../../src/engine/working";
 import { initialState } from "../../../src/engine/world-state";
 import { ALL_PACKS } from "../../../src/packs/index";
-import { buildMapView, type MapView } from "../../../src/packs/space/core/view";
+import { buildMapView, travelWays, type MapView } from "../../../src/packs/space/core/view";
 import { modernUsWorld } from "../riverton";
 import { positionEvent } from "../../../src/iface/map/record";
 import { drawnOf } from "../../../src/packs/space/core/grid-model";
@@ -141,7 +141,7 @@ describe("a place the POV can't see", () => {
     const inside = view.scopes.find((s) => s.id === standIn);
     expect([inside?.name, inside?.places.map((p) => [p.id, p.name]), inside?.trail.map((c) => c.id)]).toEqual([HIDDEN_PLACE_NAME, [[here, HIDDEN_PLACE_NAME]], [null, "riverton"]]);
     expect(view.scope).toBe(standIn ?? "");
-    expect(view.travel.some((t) => t.to === standIn || t.to === here)).toBe(false);
+    expect(travelWays(reg.context(world, state), null).some((t) => t.to === standIn || t.to === here)).toBe(false);
   });
 
   test("a public room inside it is offered from nowhere outside it: not on the map, not in the palette's Go to", () => {
@@ -151,7 +151,7 @@ describe("a place the POV can't see", () => {
     });
     state.realism.levels.space = 2;
     const view = buildMapView(reg.context(world, state));
-    expect(view.travel.some((t) => t.to === "cellar_room")).toBe(false);
+    expect(travelWays(reg.context(world, state), null).some((t) => t.to === "cellar_room")).toBe(false);
     expect(JSON.stringify(view)).not.toContain("Cellar room");
     const go = reg.actions.get("go");
     if (!go) throw new Error("no go action");
@@ -244,10 +244,10 @@ describe("routes on the map", () => {
     const view = buildMapView(reg.context(world, state));
     const town = view.scopes.find((s) => s.id === "riverton");
     expect(town?.routes.some((r) => [r.from, r.to].sort().join() === "apartment_bldg,park")).toBe(false);
-    const walk = (v: MapView) => v.travel.find((t) => t.to === "park" && t.mode === "walk");
+    const walk = (w: ReturnType<typeof riverton>) => travelWays(reg.context(w.world, w.state), null).find((t) => t.to === "park" && t.mode === "walk");
     const open = riverton(() => undefined);
-    expect(walk(buildMapView(reg.context(open.world, open.state)))?.disabled).toBeUndefined();
-    expect(walk(view)?.disabled).toBe("no walking route");
+    expect(walk(open)?.disabled).toBeUndefined();
+    expect(walk({ world, state })?.disabled).toBe("no walking route");
   });
 
   test("opening or closing a way to a place the POV can't see says somewhere; the author's line names it", () => {

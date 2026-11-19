@@ -113,7 +113,12 @@ export const COVERAGE: Coverage = {
     changes: { excluded: "Build's part-by-part reading of what the draft or a revision changed, against the head or another revision: lre_diff gives an outside agent the same difference from the two documents." },
   },
   "lre.ui": { close_drawer: { excluded: "Closes the drawer on the user's screen: the page's own presentation, which nothing an agent does needs." } },
-  "lre.map": { display: { tools: ["lre_map_display"] }, walk: { tools: ["lre_map_walk"] } },
+  "lre.map": {
+    display: { tools: ["lre_map_display"] },
+    walk: { tools: ["lre_map_walk"] },
+    ways: { excluded: "The map panel's own read when its list of places opens, for the minutes beside each place; an outside agent reads the places from lre_chat_state's map and sends a Go or a drive with lre_action." },
+    travel: { excluded: "The map panel's own read when a place's sheet opens, for the ways to that place; each way is an action, which lre_action sends." },
+  },
   "lre.chat.knowledge": { tools: ["lre_chat_knowledge"] },
   "lre.job": { start: { tools: ["lre_job_start"] }, cancel: { tools: ["lre_job_cancel"] }, list: { tools: ["lre_jobs", "lre_job", "lre_job_apply"] }, dismiss: { tools: ["lre_job_dismiss"] } },
   "lre.lore": {

@@ -3,6 +3,7 @@
 
 import type { Area } from "../app";
 import { gmRoutes } from "./gm-read";
+import { mapTravelRoutes } from "./map-travel";
 import { mapWalkRoutes } from "./map-walk";
 import { OwnService, ownRoutes } from "./own";
 import { playRoutes } from "./routes";
@@ -32,6 +33,7 @@ export function playArea(takes: () => PlayTakes): Area {
       at.routes.add("play-rules", rulesRoutes(new RulesService({ worlds: taken.worlds, store: taken.store, writes: at.writes, guidance: taken.guidance })));
       at.routes.add("play-things", thingsRoutes(taken.store));
       at.routes.add("play-map-walk", mapWalkRoutes(taken.store));
+      at.routes.add("play-map-travel", mapTravelRoutes(taken.store));
       at.routes.add("play-gm", gmRoutes(taken));
     },
   };
