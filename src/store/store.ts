@@ -11,6 +11,13 @@
 // A snapshot a read finds worth keeping is stored by that user's next write. States held in memory
 // carry the user's fold mark, a row every write that changes what a fold gives replaces, so a state
 // folded inside a write the caller then rolls back is never used again.
+//
+// What is stored of a state (a snapshot, and what `KEPT_BY_NODE` keeps of a node) is a fact: it is kept under the store's own identity
+// (`storeIdentity`: what a fold computes, and the shape a state is stored in), never a build's, so a snapshot one build stored serves
+// every later build, and an update replays nothing. `FOLD_VERSION`, or a pack's own version, is bumped when, and only when, a stored
+// state of an earlier build must not be used: its stored shape changed with no migration of the rows, or what a fold computes changed
+// and the past must follow. A bump costs him one pass at his next start (`Preparer`: each chat's path folded again in stretches, a read
+// of a chat waiting for it). A rule fixed without a bump applies from the next turn; the world as it was played stays as it was stored.
 
 import { Database } from "bun:sqlite";
 import { hashParts } from "../shared/hash";
@@ -98,8 +105,17 @@ export const STORE_DEFAULTS = Object.freeze({
   workerFoldAt: 500,
 });
 
-/** Bumped whenever this fold's output for the same changes would differ: snapshots made before are not used. */
+/** Bumped when a stored state of an earlier build must not be used (what a fold computes, or the shape a state is stored in, changed): see the header. */
 const FOLD_VERSION = 8;
+
+/**
+ * The store's own identity, which a state is stored and read under (`snapshot.fingerprint`, `KEPT_BY_NODE`'s rows): the fold's version
+ * and the packs' own, never a build's. The app's store and the import's open with it alike (no `fingerprint` given), so what one stores
+ * the other reads; the engine's walk limits join it where they are not the shipped ones (`Store`).
+ */
+export function storeIdentity(registry: Registry): string {
+  return hashParts("rpe.store", String(FOLD_VERSION), ...registry.packs.map((p) => `${p.id}@${p.version}`));
+}
 
 /** A fold that holds the thread this long or longer says so in the log, once (`saidLong`). */
 const LONG_FOLD_MS = 1000;
@@ -137,7 +153,7 @@ export interface StoreOptions {
   /** Told once a world's revision, index, draft or history note is durable (`UserWorlds`): the app passes it to the live socket for open Build pages. */
   worldChanged?: (change: WorldChange) => void;
   snapshotEvery?: number;
-  /** Identifies the code that folds (a build id): snapshots other code made are not used. Defaults to the packs and their versions. */
+  /** Identifies what folds, where a probe reads another store's states: none given (the app's store, the import's), `storeIdentity`. */
   fingerprint?: string;
   /** How many chats' states are held in memory, the chat read least recently let go first; null (the default): every chat. */
   chatsHeld?: number | null;
@@ -566,9 +582,9 @@ export class Store {
       { kindChain: options.kindChain, holderDepth: options.holderDepth, visitDepth: options.visitDepth },
       log && ((cut) => log("An engine walk stopped at its setting; what lies past it is not counted.", { walk: cut.walk, setting: WALK_SETTINGS[cut.walk], from: cut.from, at: cut.at, limit: cut.limit })),
     );
-    // A state folded or a snapshot stored under other walk limits is not used: the limits join whatever fingerprint the store is given.
+    // A state folded or a snapshot stored under other walk limits is not used: the limits join the identity the store folds under.
     const walks = walkLimits();
-    const given = options.fingerprint ?? hashParts("rpe.store", String(FOLD_VERSION), ...options.registry.packs.map((p) => `${p.id}@${p.version}`));
+    const given = options.fingerprint ?? storeIdentity(options.registry);
     const usual = walks.kindChain === WALK_DEFAULTS.kindChain && walks.holderDepth === WALK_DEFAULTS.holderDepth && walks.visitDepth === WALK_DEFAULTS.visitDepth;
     this.fingerprint = usual ? given : hashParts(given, "walks", String(walks.kindChain), String(walks.holderDepth), String(walks.visitDepth));
     this.viewOptions = { ownOnly: options.ownOnly ?? STORE_DEFAULTS.ownOnly, notable: Math.max(0, Math.floor(options.notable ?? STORE_DEFAULTS.notable)), placeDepth: whole(options.placeDepth, STORE_DEFAULTS.placeDepth, 1) };

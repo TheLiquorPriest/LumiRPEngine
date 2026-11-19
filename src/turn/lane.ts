@@ -244,13 +244,14 @@ export const MACHINE_CLOCK: Clock = {
 
 /**
  * RPE's store over the application's database: the shipped packs' handlers fold its changes, a chat on a
- * real world folds over the revision's document the store keeps, and its snapshots are this build's. A
+ * real world folds over the revision's document the store keeps, and its snapshots are the store's own (`storeIdentity`), never a
+ * build's: what one build stored serves the next, and the import's serve it from the first read. A
  * handler that throws is an error in the engine, not in the story: its text goes to the log, and to the
  * live view of the chat whose change failed, with the turn and the change, and of no other chat, whether
  * or not a run goes on there; the change's report, all a model is shown, says only that it failed. Its
  * limits are the global level's settings, read once: the store is made once for every chat.
  */
-export function openAppStore(app: Pick<App, "db" | "version" | "log" | "live" | "paths" | "workers" | "writes">): Store {
+export function openAppStore(app: Pick<App, "db" | "log" | "live" | "paths" | "workers" | "writes">): Store {
   const handlerFailed = (failure: StoreFailure): void => {
     const { op, chat, turn, change, user } = failure;
     const error = failure.error instanceof Error ? failure.error.message : String(failure.error);
@@ -274,7 +275,7 @@ export function openAppStore(app: Pick<App, "db" | "version" | "log" | "live" | 
       });
     });
   };
-  const store = openStore({ db: app.db, registry: createRegistry(ALL_PACKS), worlds, fingerprint: app.version, handlerFailed, log: (message, data) => app.log.warn(message, data as Record<string, JsonValue>), areas: STORE_AREAS, away, heldWaiting, ...global.numbers(STORE_SETTING_DEFS) });
+  const store = openStore({ db: app.db, registry: createRegistry(ALL_PACKS), worlds, handlerFailed, log: (message, data) => app.log.warn(message, data as Record<string, JsonValue>), areas: STORE_AREAS, away, heldWaiting, ...global.numbers(STORE_SETTING_DEFS) });
   return store;
 }
 

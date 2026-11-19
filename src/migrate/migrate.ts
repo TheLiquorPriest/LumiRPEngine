@@ -202,8 +202,9 @@ export async function migrate(sources: Sources, options: MigrateOptions): Promis
           if (doc) worlds.set(r, doc);
         }
       }
-      // Folded as the RPE of this build folds (its fingerprint, its areas), so the snapshots the import stores serve it from its first read.
-      const store = openStore({ db, registry, worlds: (r) => worlds.get(r), areas: STORE_AREAS, fingerprint: options.version ?? "dev" });
+      // Folded under the store's own identity (`storeIdentity`), as RPE's own store folds, never a build's: the snapshots the import stores
+      // serve RPE from its first read, whichever build reads them.
+      const store = openStore({ db, registry, worlds: (r) => worlds.get(r), areas: STORE_AREAS });
       step = "importing the chats";
       const s = store.user(sources.userId);
       const run = crypto.randomUUID();

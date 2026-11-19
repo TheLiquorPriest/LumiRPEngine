@@ -1,10 +1,11 @@
-// A chat's states made ready for the build that runs (plan §18.1 row 0.5: "snapshots every 25 turns keep a cold start short"). The
-// store folds under the build's own fingerprint, so after an update, or an import under another build, no snapshot of a chat serves
-// this one, and the first fold of each of its turns would run from the chat's start. Once RPE listens, each such chat is folded once
-// along its path, the chat played most recently first, in stretches that let RPE's one thread go between them, each stretch's snapshot
-// stored as soon as it is folded; the log says, for each chat, how long it took. RPE answers meanwhile: a read of a chat not yet ready
-// waits for it (`ready`), and that chat is taken next. Readings that work over many turns at once let the thread go the same way
-// (`inStretches`).
+// A chat's states made ready for the store that runs (plan §18.1 row 0.5: "snapshots every 25 turns keep a cold start short"). The
+// store keeps its snapshots under its own identity (`storeIdentity`), which an update leaves as it was; where it changed (a bump of
+// `FOLD_VERSION` or a pack's version, the first start after snapshots were kept under a build's id, an import under another identity),
+// no snapshot of a chat serves it, and the first fold of each of its turns would run from the chat's start. Once RPE listens, each such
+// chat is folded once along its path, the chat played most recently first, in stretches that let RPE's one thread go between them, each
+// stretch's snapshot stored as soon as it is folded; the log says, for each chat, how long it took. RPE answers meanwhile: a read of a
+// chat not yet ready waits for it (`ready`), and that chat is taken next. Readings that work over many turns at once let the thread go
+// the same way (`inStretches`).
 
 import type { JsonValue } from "../shared/json";
 import type { ChatPreparing } from "../shared/preparing";
