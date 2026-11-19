@@ -6670,18 +6670,32 @@ function providersOf(reg, world, kind) {
   }
   return out;
 }
-function tiedTo(ctx, group) {
-  return passMemo([ctx.state, ctx.state.entities, ctx.world], `orgs.tied:${group}`, () => {
-    const out = new Set;
+function tieHolders(ctx) {
+  return passMemo([ctx.state, ctx.state.entities, ctx.world], "orgs.tie_holders", () => {
+    const byKind = new Map;
+    const out = [];
     for (const id of Object.keys(ctx.state.entities).sort()) {
       const e = ctx.state.entities[id];
       if (!e || isGone(ctx.state, id))
         continue;
-      const ties = providersOf(ctx.registry, ctx.world, e.kind).filter((p) => p.provider !== linkRows);
-      if (ties.length === 0 || id !== group && !linkedMemberOf(ctx.state, id, group))
+      let ties = byKind.get(e.kind);
+      if (ties === undefined) {
+        ties = providersOf(ctx.registry, ctx.world, e.kind).filter((p) => p.provider !== linkRows).map((p) => p.provider);
+        byKind.set(e.kind, ties);
+      }
+      if (ties.length > 0)
+        out.push({ id, ties, company: kindIs(ctx.registry, ctx.world, e.kind, COMPANY_KIND) });
+    }
+    return out;
+  });
+}
+function tiedTo(ctx, group) {
+  return passMemo([ctx.state, ctx.state.entities, ctx.world], `orgs.tied:${group}`, () => {
+    const out = new Set;
+    for (const { id, ties, company: company2 } of tieHolders(ctx)) {
+      if (id !== group && !linkedMemberOf(ctx.state, id, group))
         continue;
-      const company2 = kindIs(ctx.registry, ctx.world, e.kind, COMPANY_KIND);
-      for (const { provider } of ties)
+      for (const provider of ties)
         for (const row of provider(ctx, id))
           if (row.how !== "member" && (row.how !== "staff" || company2))
             out.add(row.who);
@@ -8670,6 +8684,8 @@ function wordPattern(w) {
   return `(?<!${WORD_CHAR})${plural}(?!${WORD_CHAR})`;
 }
 function saysInOrder(said, words) {
+  if (words.some((w) => !said.includes(/^[a-z0-9]+$/.test(w) && /[^aeiou]y$/.test(w) ? w.slice(0, -1) : w)))
+    return false;
   return patternOf(words.map(wordPattern).join(`${WORD_CHAR}*(?: ${WORD_CHAR}*)?`)).test(said);
 }
 function sayings(text) {
@@ -9941,7 +9957,7 @@ function nameSizeOf(byName, names) {
   }
   return null;
 }
-var SIZES, SIZE_LABELS, VOLUME_SIZES, GOT_HOWS, HANDOVER_BASES, GRANT_BASES, PERMIT_SCOPES, SET_KINDS, SET_KIND_LABEL, isSetKind = (v) => typeof v === "string" && SET_KINDS.includes(v), PLACE_KINDS, THING_FACTS, CURATOR_FACTS, ITEM_CHANGES, FACT_CHANGE, id = (v) => typeof v === "string" && v !== "" && safeKey(v), text = (v) => typeof v === "string", strings = (v) => Array.isArray(v) && v.every((s) => typeof s === "string"), finite = (v) => typeof v === "number" && Number.isFinite(v), optional = (v, ok) => v === undefined || ok(v), THING_IS, FIX_HAND_BASES, CONTAINER_RULES, CONTAINER_DEPTH_MAX = 32, SETS_MAX = 50, ARSENAL_CATEGORIES, MODERN_US_CATEGORY_SIZES, MODERN_US_NAME_SIZES, DEFAULT_THINGS_CONFIG, obj2 = (v) => isRecord(v) ? v : {}, flag = (v, fallback) => typeof v === "boolean" ? v : fallback, atLeast = (v, floor, fallback) => typeof v === "number" && Number.isFinite(v) && v >= floor ? v : fallback, DETERMINERS, TRAILING, COLLECTIONS, PHRASES;
+var SIZES, SIZE_LABELS, VOLUME_SIZES, GOT_HOWS, HANDOVER_BASES, GRANT_BASES, ACCESS_BASES, PERMIT_SCOPES, SET_KINDS, SET_KIND_LABEL, isSetKind = (v) => typeof v === "string" && SET_KINDS.includes(v), PLACE_KINDS, THING_FACTS, CURATOR_FACTS, ITEM_CHANGES, FACT_CHANGE, id = (v) => typeof v === "string" && v !== "" && safeKey(v), text = (v) => typeof v === "string", strings = (v) => Array.isArray(v) && v.every((s) => typeof s === "string"), finite = (v) => typeof v === "number" && Number.isFinite(v), optional = (v, ok) => v === undefined || ok(v), THING_IS, FIX_HAND_BASES, CONTAINER_RULES, CONTAINER_DEPTH_MAX = 32, SETS_MAX = 50, ARSENAL_CATEGORIES, MODERN_US_CATEGORY_SIZES, MODERN_US_NAME_SIZES, DEFAULT_THINGS_CONFIG, obj2 = (v) => isRecord(v) ? v : {}, flag = (v, fallback) => typeof v === "boolean" ? v : fallback, atLeast = (v, floor, fallback) => typeof v === "number" && Number.isFinite(v) && v >= floor ? v : fallback, DETERMINERS, TRAILING, COLLECTIONS, PHRASES;
 var init_things = __esm(() => {
   init_json();
   init_vehicles();
@@ -9953,6 +9969,7 @@ var init_things = __esm(() => {
   GOT_HOWS = ["bought", "given", "holding", "loan", "found", "took", "fetched", "put_away", "made"];
   HANDOVER_BASES = ["hold", "loan", "return", "gift", "sale", "trade", "theft"];
   GRANT_BASES = ["hold", "loan", "assign"];
+  ACCESS_BASES = ["owner", "member", "position", "delegate", "control", "grant", "permit", "household", "housemate", "partner", "family", "staff", "customer", "public"];
   PERMIT_SCOPES = ["all", "home"];
   SET_KINDS = ["outfit", "loadout"];
   SET_KIND_LABEL = { outfit: "Outfit", loadout: "Loadout" };
@@ -11341,10 +11358,24 @@ function employerOf(ctx, employer) {
   return own2(ctx.world.places, employer) ? businessAt(ctx, employer) ?? employer : null;
 }
 function jobsAt(ctx, org) {
-  return passMemo([ctx.state, ctx.state.entities, ctx.world], `orgs.jobs:${org}`, () => Object.keys(ctx.state.entities).sort().filter((id2) => {
-    const e = own2(ctx.state.entities, id2);
-    return !!e && kindIs(ctx.registry, ctx.world, e.kind, "job") && !isGone(ctx.state, id2) && jobInForce(ctx, e.fields) && employerOf(ctx, e.fields.employer) === org;
-  }));
+  const byEmployer = passMemo([ctx.state, ctx.state.entities, ctx.world], "orgs.jobs", () => {
+    const out = new Map;
+    for (const id2 of Object.keys(ctx.state.entities).sort()) {
+      const e = own2(ctx.state.entities, id2);
+      if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "job") || isGone(ctx.state, id2) || !jobInForce(ctx, e.fields))
+        continue;
+      const employer = employerOf(ctx, e.fields.employer);
+      if (employer === null)
+        continue;
+      const jobs = out.get(employer);
+      if (jobs)
+        jobs.push(id2);
+      else
+        out.set(employer, [id2]);
+    }
+    return out;
+  });
+  return byEmployer.get(org) ?? [];
 }
 function isStaff(ctx, who, org) {
   const job = jobsAt(ctx, org).find((id2) => own2(ctx.state.entities, id2)?.fields.worker === who);
@@ -16207,8 +16238,10 @@ function allSchedules(reg, world) {
   return out;
 }
 function chatSchedulesIn(ctx) {
-  const mine = optionalQuery(ctx, "castlife.chat_schedules")?.(ctx) ?? [];
-  return mine.length === 0 ? allSchedules(ctx.registry, ctx.world) : [...allSchedules(ctx.registry, ctx.world), ...mine];
+  return passMemo([ctx.state, ctx.world, ctx.registry], "schedules.in_chat", () => {
+    const mine = optionalQuery(ctx, "castlife.chat_schedules")?.(ctx) ?? [];
+    return mine.length === 0 ? allSchedules(ctx.registry, ctx.world) : [...allSchedules(ctx.registry, ctx.world), ...mine];
+  });
 }
 function slotSpan(slot) {
   const start = parseHHMM(slot.start);
@@ -16499,21 +16532,23 @@ function appliedInPlay(schedule) {
   return schedule.target !== "place" && schedule.target !== "activity" && (isRecord(owner) || typeof owner === "string" && owner !== "");
 }
 function scheduleOwners(reg, world, state, schedule) {
-  const owner = schedule.owner;
-  const acting = (ids) => ids.filter((id2) => acts(world, state, id2));
-  if (isRecord(owner))
-    return acting(selectEntities(reg, world, state, owner));
-  if (typeof owner !== "string" || owner === "")
-    return [];
-  const e = own2(state.entities, owner);
-  if (e) {
-    if (isGone(state, owner))
+  return passMemo([state, state.entities, world, reg, schedule], "schedules.owners", () => {
+    const owner = schedule.owner;
+    const acting = (ids) => ids.filter((id2) => acts(world, state, id2));
+    if (isRecord(owner))
+      return acting(selectEntities(reg, world, state, owner));
+    if (typeof owner !== "string" || owner === "")
       return [];
-    return acting(ownsAsGroup(reg, world, e.kind) ? membersOf(reg, world, state, owner) : [owner]);
-  }
-  return Object.keys(state.entities).sort().filter((id2) => {
-    const x = own2(state.entities, id2);
-    return !!x && kindIs(reg, world, x.kind, owner) && !isGone(state, id2) && acts(world, state, id2);
+    const e = own2(state.entities, owner);
+    if (e) {
+      if (isGone(state, owner))
+        return [];
+      return acting(ownsAsGroup(reg, world, e.kind) ? membersOf(reg, world, state, owner) : [owner]);
+    }
+    return Object.keys(state.entities).sort().filter((id2) => {
+      const x = own2(state.entities, id2);
+      return !!x && kindIs(reg, world, x.kind, owner) && !isGone(state, id2) && acts(world, state, id2);
+    });
   });
 }
 function keyOf(v) {
@@ -24807,7 +24842,7 @@ function managesParty(state, party, who) {
 function managesAccount(ctx, account, who) {
   if (!classOf2(ctx, account))
     return false;
-  return ownersOf(ctx.state, account).some((o) => ROLE_RIGHTS[o.role].manage && (o.party === who || managesParty(ctx.state, o.party, who) || mayAct(ctx, who, o.party, "money.manage", { account }).ok));
+  return passMemo([ctx.state, ctx.state.entities, ctx.world], `economy.manages\x00${isRuled(ctx) ? "ruled" : ""}\x00${account}\x00${who}`, () => ownersOf(ctx.state, account).some((o) => ROLE_RIGHTS[o.role].manage && (o.party === who || managesParty(ctx.state, o.party, who) || mayAct(ctx, who, o.party, "money.manage", { account }).ok)));
 }
 function moneyLevel(ctx, party) {
   const level = ctx.levelOf(party, "money");
@@ -26557,7 +26592,7 @@ function isBusinessDay(cal, day) {
 }
 function businessDay(cal, day, roll) {
   let d = day;
-  for (let guard = 0;guard < 14 && !isBusinessDay(cal, d); guard++)
+  for (let guard = 0;guard < ROLL_MOST && !isBusinessDay(cal, d); guard++)
     d += roll === "before" ? -1 : 1;
   return d;
 }
@@ -26570,15 +26605,12 @@ function safeDay(cal, text4) {
     return null;
   }
 }
-function dayMatches(cal, days, d) {
-  const date = dateAt(cal, clockAt(cal, d, 0));
+function dayMatches(cal, days, date) {
   const len = cal.system.monthLength(date.year, date.month);
   return days.some((n) => n > 0 ? Math.min(n, len) === date.day : n < 0 && len + n + 1 === date.day);
 }
-function falls(cal, s, d, anchor) {
+function falls(cal, s, d, date, anchor, start) {
   const interval = Math.max(1, Math.round(s.interval ?? 1));
-  const date = dateAt(cal, clockAt(cal, d, 0));
-  const start = dateAt(cal, clockAt(cal, anchor, 0));
   switch (s.every) {
     case "day":
       return d >= anchor && (d - anchor) % interval === 0;
@@ -26590,14 +26622,14 @@ function falls(cal, s, d, anchor) {
       return d >= weekStart && Math.floor((d - weekStart) / 7) % interval === 0;
     }
     case "month": {
-      if (!dayMatches(cal, s.days && s.days.length > 0 ? s.days : [start.day], d))
+      if (!dayMatches(cal, s.days && s.days.length > 0 ? s.days : [start.day], date))
         return false;
       const months = date.year * 12 + date.month - (start.year * 12 + start.month);
       return months >= 0 && months % interval === 0;
     }
     case "year": {
       const months = s.months && s.months.length > 0 ? s.months : [start.month];
-      if (!months.includes(date.month) || !dayMatches(cal, s.days && s.days.length > 0 ? s.days : [start.day], d))
+      if (!months.includes(date.month) || !dayMatches(cal, s.days && s.days.length > 0 ? s.days : [start.day], date))
         return false;
       const years = date.year - start.year;
       return years >= 0 && years % interval === 0;
@@ -26606,7 +26638,7 @@ function falls(cal, s, d, anchor) {
       return false;
   }
 }
-function occurrences(world, s, from, to, start, end) {
+function occurrences(world, s, from, to, start, end, most = Number.POSITIVE_INFINITY) {
   if (to <= from)
     return [];
   const cal = calendarOf(world);
@@ -26638,19 +26670,27 @@ function occurrences(world, s, from, to, start, end) {
   const anchor = startDay ?? 0;
   const roll = s.roll === "before" || s.roll === "after" ? s.roll : null;
   const margin = roll ? 10 : 1;
+  const startDate = dateAt(cal, clockAt(cal, anchor, 0));
+  const last = dateAt(cal, to).dayIndex + margin;
+  const reach2 = roll ? 2 * ROLL_MOST + 1 : 0;
+  let stop = last;
   const out = [];
-  for (let d = dateAt(cal, from).dayIndex - margin;d <= dateAt(cal, to).dayIndex + margin; d++) {
+  for (let d = dateAt(cal, from).dayIndex - margin;d <= stop; d++) {
     if (startDay !== null && d < startDay || endDay !== null && d > endDay)
       continue;
-    if (!falls(cal, s, d, anchor))
+    if (!falls(cal, s, d, dateAt(cal, clockAt(cal, d, 0)), anchor, startDate))
       continue;
     if (s.except && s.except.length > 0 && holidaysOn(cal, d).some((h) => s.except?.includes(h.id)))
       continue;
     const at = clockAt(cal, roll ? businessDay(cal, d, roll) : d, minute);
-    if (at > from && at <= to)
-      out.push({ at, day: d });
+    if (at <= from || at > to)
+      continue;
+    out.push({ at, day: d });
+    if (out.length >= most)
+      stop = Math.min(stop, d + reach2);
   }
-  return out.sort((a, b) => a.at - b.at || a.day - b.day);
+  out.sort((a, b) => a.at - b.at || a.day - b.day);
+  return out.length > most ? out.slice(0, most) : out;
 }
 function present(v) {
   return v !== undefined && v !== null && v !== "" && !(Array.isArray(v) && v.length === 0);
@@ -27213,7 +27253,7 @@ function sharedAttempt(hooks, ctx, flow, cents2, at, overdraft) {
   }
   return { events: asUnit(events2), paid: cents2 };
 }
-var DEFAULT_FLOW_MINUTE, LIVING_COSTS;
+var DEFAULT_FLOW_MINUTE, ROLL_MOST = 14, LIVING_COSTS;
 var init_flows = __esm(() => {
   init_finance();
   init_world();
@@ -29042,7 +29082,7 @@ function holdingOwners(api, state, holding) {
   return api.ownersOf(state, account ?? holding);
 }
 function holdingIds(state) {
-  return Object.keys(state.entities).filter((id2) => own2(state.entities, id2)?.kind === "holding" && !isGone(state, id2)).sort();
+  return passMemo([state, state.entities], "economy.holding_ids", () => Object.keys(state.entities).filter((id2) => own2(state.entities, id2)?.kind === "holding" && !isGone(state, id2)).sort());
 }
 function legacyHolding(state, account) {
   const units = own2(state.entities, account)?.fields.units;
@@ -32683,7 +32723,7 @@ function paychecksDue(api, ctx, business, running2) {
       }
     } else if (!running2)
       return [];
-    const at = api.occurrences(ctx, flow.schedule, ctx.state.clock - 1, until, flow.start)[0];
+    const at = api.occurrences(ctx, flow.schedule, ctx.state.clock - 1, until, flow.start, 1)[0];
     if (at === undefined)
       return [];
     const posting2 = payrollPosting(ctx, api, flow, at);
@@ -33730,11 +33770,13 @@ function registerShares(r) {
     lexicon: ["add a share class", "non-voting shares", "change the votes"],
     observable: "does some paperwork"
   });
+  const ownershipShown = (ctx, org) => isBusiness(ctx, org) && ctx.levelOf(org, "money") >= 1;
   core.orgSection({
     id: "ownership",
     label: "Ownership",
     power: "money.view",
-    build: (ctx, org, viewer) => isBusiness(ctx, org) && ctx.levelOf(org, "money") >= 1 ? ownershipView(api, ctx, org, viewer) : null
+    shown: ownershipShown,
+    build: (ctx, org, viewer) => ownershipShown(ctx, org) ? ownershipView(api, ctx, org, viewer) : null
   });
 }
 var SHARE_UNITS = 1000, STRUCTURE_DEPTH = 4;
@@ -34425,12 +34467,12 @@ function owesEstimates(api, ctx, person, paths, work) {
   }
   if (until === null)
     return false;
-  const due = api.occurrences(ctx, ESTIMATE_SCHEDULE, until - 1, until + 40 * MINUTES_PER_DAY)[0];
+  const due = api.occurrences(ctx, ESTIMATE_SCHEDULE, until - 1, until + 40 * MINUTES_PER_DAY, undefined, 1)[0];
   if (due === undefined || now <= due)
     return true;
   const d = dateAt(calendarOf(ctx.world), due);
   const last = estimatePeriod(d.year, d.month);
-  const next = api.occurrences(ctx, ESTIMATE_SCHEDULE, now, now + 400 * MINUTES_PER_DAY)[0];
+  const next = api.occurrences(ctx, ESTIMATE_SCHEDULE, now, now + 400 * MINUTES_PER_DAY, undefined, 1)[0];
   if (last === null || next === undefined)
     return false;
   const n = dateAt(calendarOf(ctx.world), next);
@@ -34553,7 +34595,7 @@ function taxesView(api, ctx, org, viewer) {
     const mine = [`salestax:${org}`, `esttax:${org}`, `futa:${org}`, `suta:${org}`].includes(flow.id) || flow.id.startsWith("property_tax:") && flow.link !== undefined && api.shareOf(ctx.state, flow.link, org) > 0;
     if (!mine || flow.status !== "active")
       continue;
-    const at = api.occurrences(ctx, flow.schedule, now, now + 400 * MINUTES_PER_DAY, flow.start)[0];
+    const at = api.occurrences(ctx, flow.schedule, now, now + 400 * MINUTES_PER_DAY, flow.start, 1)[0];
     if (at === undefined)
       continue;
     const cents2 = flow.id === `salestax:${org}` ? Math.max(0, payablesOf(ctx.state, org).sales_tax) : flow.id === `esttax:${org}` ? estimatedDue(api, ctx, org, true, at).reduce((a, p) => a + p.cents, 0) : flow.id === `futa:${org}` ? unemploymentDueAt(ctx, org, "futa", at) : flow.id === `suta:${org}` ? unemploymentDueAt(ctx, org, "suta", at) : null;
@@ -35038,7 +35080,7 @@ function flowStart(cal, job) {
 function firstPeriodDay(ctx, api, job) {
   const cal = calendarOf(ctx.world);
   const begun = chatStart(ctx.world);
-  const at = api.occurrences(ctx, payFlowSchedule(ctx, job), begun, begun + 400 * MINUTES_PER_DAY, flowStart(cal, job))[0];
+  const at = api.occurrences(ctx, payFlowSchedule(ctx, job), begun, begun + 400 * MINUTES_PER_DAY, flowStart(cal, job), 1)[0];
   if (at === undefined)
     return null;
   const day = dateAt(cal, at).dayIndex;
@@ -35552,7 +35594,7 @@ function jobView(ctx, api, job, viewer) {
   const cal = calendarOf(ctx.world);
   const now = ctx.state.clock;
   const flow = api.flows(ctx).find((f) => f.source === "job" && f.link === job.id);
-  const next = flow && job.status !== "ended" ? api.occurrences(ctx, flow.schedule, now, now + 62 * MINUTES_PER_DAY, flow.start)[0] ?? null : null;
+  const next = flow && job.status !== "ended" ? api.occurrences(ctx, flow.schedule, now, now + 62 * MINUTES_PER_DAY, flow.start, 1)[0] ?? null : null;
   const record3 = payRecord(ctx.state, job.id);
   const last = objOf(record3.last);
   const sheet = objOf(record3.sheet);
@@ -36166,7 +36208,7 @@ function selfDealing(ctx, api, viewer, party, business) {
 }
 function nextDue(ctx, api, flowId) {
   const flow = api.flows(ctx).find((f) => f.id === flowId);
-  const next = flow ? api.occurrences(ctx, flow.schedule, ctx.state.clock, ctx.state.clock + 400 * MINUTES_PER_DAY, flow.start)[0] : undefined;
+  const next = flow ? api.occurrences(ctx, flow.schedule, ctx.state.clock, ctx.state.clock + 400 * MINUTES_PER_DAY, flow.start, 1)[0] : undefined;
   return next === undefined ? null : formatClock(calendarOf(ctx.world), next);
 }
 function businessView(ctx, api, business, party, viewer) {
@@ -36678,7 +36720,7 @@ function periodAmount(api, ctx, stream) {
   const earner = earnerOf(api, ctx, stream.flow);
   if (!earner)
     return 0;
-  const next = occurrences(chatWorld(ctx), stream.flow.schedule, ctx.state.clock, ctx.state.clock + 62 * 1440, stream.flow.start, stream.flow.end)[0];
+  const next = occurrences(chatWorld(ctx), stream.flow.schedule, ctx.state.clock, ctx.state.clock + 62 * 1440, stream.flow.start, stream.flow.end, 1)[0];
   return next ? earnedAt(engineReader(ctx, earner), stream.flow, stream.model, next.at)?.cents ?? 0 : 0;
 }
 function adjustBoundsOf(world) {
@@ -37037,7 +37079,7 @@ function fieldsOf(state, id2) {
   return own2(state.entities, id2)?.fields ?? {};
 }
 function propertyIds(state) {
-  return Object.keys(state.entities).filter((id2) => own2(state.entities, id2)?.kind === "property").sort();
+  return passMemo([state, state.entities], "economy.property_ids", () => Object.keys(state.entities).filter((id2) => own2(state.entities, id2)?.kind === "property").sort());
 }
 function propertyValue(state, id2) {
   return Math.max(0, Math.round(numOf(fieldsOf(state, id2).value)));
@@ -41204,7 +41246,7 @@ function moneySummary(hooks, ctx, who) {
       const toMine = f.to === who || own2(ctx.state.entities, f.to)?.kind === "account" && rightsOf(ctx.state, f.to, who)?.worth === true;
       if (fromMine === toMine)
         continue;
-      const next = occurrences(chatWorld(ctx), f.schedule, now, now + 14 * DAY, f.start, f.end)[0];
+      const next = occurrences(chatWorld(ctx), f.schedule, now, now + 14 * DAY, f.start, f.end, 1)[0];
       if (!next)
         continue;
       const amount = "provider" in f.amount ? null : occurrenceAmount(hooks, ctx, f, next.at, createRng(`summary:${f.id}`), flowRunOf(ctx.state, f.id).deferred ?? 0);
@@ -41742,7 +41784,7 @@ function flowTouches(ctx, viewer, f, party) {
 function nextOf(ctx, f, horizon) {
   const from = ctx.state.clock;
   const retry = flowRunOf(ctx.state, f.id).retry;
-  const first = occurrences(chatWorld(ctx), f.schedule, from, from + horizon, f.start, f.end)[0];
+  const first = occurrences(chatWorld(ctx), f.schedule, from, from + horizon, f.start, f.end, 1)[0];
   const candidates = [first?.at, retry?.at].filter((x) => typeof x === "number" && x > from);
   return candidates.length > 0 ? Math.min(...candidates) : null;
 }
@@ -43288,7 +43330,7 @@ function makeApi(hooks) {
     note: (ctx, who, cls, line2, fields) => notice(cls, line2, fields, who, ctx.state.clock),
     money: (ctx, cents2) => formatMoney(cents2, ctx.world.currency),
     split: (cents2, splits, rest) => splitAmount(cents2, splits, rest),
-    occurrences: (ctx, schedule, from, to, start) => occurrences(chatWorld(ctx), schedule, from, to, start).map((o) => o.at),
+    occurrences: (ctx, schedule, from, to, start, most) => occurrences(chatWorld(ctx), schedule, from, to, start, undefined, most).map((o) => o.at),
     businessDay: (ctx, day2, roll) => businessDay(calendarIn(ctx), day2, roll),
     flows: (ctx) => allFlows(hooks, ctx),
     openAccount: (ctx, spec) => openAccount(ctx, spec),
@@ -45483,19 +45525,21 @@ function findPiece(ctx, kit, name) {
   return best?.piece ?? null;
 }
 function grants(state) {
-  const out = [];
-  for (const borrower of Object.keys(state.entities).sort()) {
-    for (const r of own2(state.entities, borrower)?.relations ?? []) {
-      if (r.type !== "uses")
-        continue;
-      const thing = own2(state.entities, r.to);
-      if (!thing)
-        continue;
-      const owner2 = typeof thing.fields.owner === "string" ? thing.fields.owner : null;
-      out.push({ thing: r.to, borrower, owner: owner2, until: r.until ?? null, overdue: r.until !== undefined && r.until <= state.clock });
+  return passMemo([state, state.entities], "gear.grants", () => {
+    const out = [];
+    for (const borrower of Object.keys(state.entities).sort()) {
+      for (const r of own2(state.entities, borrower)?.relations ?? []) {
+        if (r.type !== "uses")
+          continue;
+        const thing = own2(state.entities, r.to);
+        if (!thing)
+          continue;
+        const owner2 = typeof thing.fields.owner === "string" ? thing.fields.owner : null;
+        out.push({ thing: r.to, borrower, owner: owner2, until: r.until ?? null, overdue: r.until !== undefined && r.until <= state.clock });
+      }
     }
-  }
-  return out;
+    return out;
+  });
 }
 function overdueFor(state, owner2) {
   return grants(state).filter((g) => g.owner === owner2 && g.overdue);
@@ -46858,8 +46902,6 @@ function buildGearView(ctx) {
         out.wearable = true;
       if (mayFixThing(ctx, pov, id2)) {
         out.mine = true;
-        if (level >= 2)
-          out.use = useChips(ctx, id2, known);
         const grants2 = (granted2.get(id2) ?? []).filter((g) => known(g.who));
         if (grants2.length > 0)
           out.grants = grants2.map((g) => ({ who: g.who, name: nameOf5(g.who), basis: g.basis, ...g.until !== undefined ? { until: formatClock(cal, g.until) } : {}, ...g.until !== undefined && g.until <= ctx.state.clock ? { overdue: true } : {} }));
@@ -47011,7 +47053,17 @@ function buildGearView(ctx) {
     };
   });
 }
-var GOT_WORDS, upper = (text4) => `${text4.charAt(0).toUpperCase()}${text4.slice(1)}`;
+function thingUse(ctx, id2) {
+  const pov = ctx.world.pov;
+  if (ctx.levelOf(pov, "gear") < 2 || !mayFixThing(ctx, pov, id2))
+    return [];
+  return useChips(ctx, id2, (who) => who === pov || canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, who));
+}
+function thingUseIds(ctx) {
+  const pov = ctx.world.pov;
+  return Object.keys(ctx.state.entities).sort().filter((id2) => own2(ctx.state.entities, id2)?.kind !== "account" && !isGone(ctx.state, id2) && mayFixThing(ctx, pov, id2));
+}
+var GOT_WORDS, upper = (text4) => `${text4.charAt(0).toUpperCase()}${text4.slice(1)}`, GEAR_USE_PANEL = "gear.use";
 var init_view4 = __esm(() => {
   init_things();
   init_access();
@@ -48475,6 +48527,7 @@ var init_core4 = __esm(() => {
       r.renderer({ slot: "gear", label: "What your character carries and wears", render: (ctx) => gearLines(ctx, "player").map((l) => l.text), feed: gearLines });
       r.renderer({ slot: "people", source: "present_gear", label: "What the people here wear and carry", render: (ctx) => presentGearLines(ctx, "player").map((l) => l.text), feed: presentGearLines });
       r.view({ panel: "gear.gear", build: (ctx) => buildGearView(ctx) });
+      r.view({ panel: GEAR_USE_PANEL, apart: true, build: (ctx) => Object.fromEntries(thingUseIds(ctx).map((id2) => [id2, thingUse(ctx, id2)])), items: { ids: (ctx) => thingUseIds(ctx), build: (ctx, _prefs, id2) => thingUse(ctx, id2) } });
       const settled2 = (p, ctx, salt) => {
         const w = new Working(ctx.registry, ctx.world, ctx.state);
         return { out: reconcileFact(w, p, { viewer: ctx.world.pov, salt, confirmed: p.confirmed === true }), w };
@@ -49010,7 +49063,7 @@ function buildGarageView(ctx) {
         return { who: g.who, name: nameOf5(g.who), basis: grantBasisOf(fields, g.until), ...g.until !== undefined ? { until: formatClock(cal, g.until) } : {}, ...g.until !== undefined && g.until <= ctx.state.clock ? { overdue: true } : {} };
       });
     }
-    const cargo = Object.keys(ctx.state.entities).sort().filter((x) => !isGone(ctx.state, x) && seesEntity(x) && own2(ctx.state.entities, x)?.relations.some((r) => r.type === "in" && r.to === id2)).map((x) => own2(ctx.state.entities, x)?.name ?? x);
+    const cargo = [...new Set(contentsIndex(ctx.state).contents.get(id2) ?? [])].filter((x) => !isGone(ctx.state, x) && seesEntity(x)).map((x) => own2(ctx.state.entities, x)?.name ?? x);
     if (cargo.length > 0)
       v.cargo = cargo;
     const specs = vehicleSpecsOf(e.fields.specs) ?? [];
@@ -49052,6 +49105,7 @@ var init_view5 = __esm(() => {
   init_pack_kit();
   init_scope();
   init_thing_gm();
+  init_thing_index();
   init_visibility();
   init_access2();
   init_core5();
@@ -49953,7 +50007,7 @@ var init_core5 = __esm(() => {
       r.query("vehicles.priced", (ctx, words4, _place, cls, fresh) => pricedVehicle(ctx, words4, cls, fresh));
       r.query("vehicles.named", (ctx, noun) => matchVehicleClass(noun, ctx.tables.get("vehicles.classes")));
       r.service("vehicles.spawn", spawnVehicle);
-      r.query("vehicles.values", (ctx) => {
+      r.query("vehicles.values", (ctx) => passMemo([ctx.state, ctx.state.entities, ctx.world], "vehicles.values", () => {
         const out = [];
         for (const v of Object.keys(ctx.state.entities).sort()) {
           const e = own2(ctx.state.entities, v);
@@ -49964,7 +50018,7 @@ var init_core5 = __esm(() => {
             out.push({ vehicle: v, cents: cents2 });
         }
         return out;
-      });
+      }));
       r.materializer({
         domain: "vehicles",
         version: 1,
@@ -55189,35 +55243,51 @@ function resolveAction(reg, w, req, rng, opts = {}) {
     adjudged
   };
 }
-function paramCandidates(reg, world, state2, action, param, actor2 = world.pov) {
+function paramCandidates(reg, world, state2, action, param, actor2 = world.pov, most = Number.POSITIVE_INFINITY) {
   const def = own2(action.params, param);
   if (!def || def.type !== "ref")
     return [];
-  const here = placeOfEntity(state2, actor2);
   if (def.ref === "place")
     return placeCandidates(reg, world, state2, actor2);
   const filters = candidateFilters(action, param);
   const ctx = filters.length > 0 || def.nearby === true ? reg.context(world, state2) : null;
+  const fits2 = (id2, e) => (!def.ref || kindIs(reg, world, e.kind, def.ref)) && (!def.of || selectorMatches(reg, world, state2, def.of, id2)) && (!ctx || filters.length === 0 || filters.every((f) => truthy2(evalExpr(f, scopeEnv({ reg, ctx, bindings: { self: actor2, [param]: id2 } }), false))));
   const out = [];
+  if (def.nearby !== true) {
+    for (const id2 of nearActor(reg, world, state2, actor2)) {
+      if (out.length >= most)
+        break;
+      const e = own2(state2.entities, id2);
+      if (e !== undefined && fits2(id2, e))
+        out.push(id2);
+    }
+    return out;
+  }
+  const here = placeOfEntity(state2, actor2);
   for (const id2 of Object.keys(state2.entities).sort()) {
+    if (out.length >= most)
+      break;
     if (id2 === actor2)
       continue;
     const e = own2(state2.entities, id2);
     if (!e || isGone(state2, id2))
       continue;
-    if (def.ref && !kindIs(reg, world, e.kind, def.ref))
+    if (placeOfEntity(state2, id2) !== here && !e.relations.some((r) => r.to === actor2) && !heldBy(state2.entities, id2, actor2) && !(ctx && reachOf(ctx, actor2, id2).reach === "nearby"))
       continue;
-    if (def.of && !selectorMatches(reg, world, state2, def.of, id2))
-      continue;
-    if (placeOfEntity(state2, id2) !== here && !e.relations.some((r) => r.to === actor2) && !heldBy(state2.entities, id2, actor2) && !(ctx && def.nearby === true && reachOf(ctx, actor2, id2).reach === "nearby"))
-      continue;
-    if (!canSeeEntity(reg, world, state2, actor2, id2))
-      continue;
-    if (ctx && filters.length > 0 && !filters.every((f) => truthy2(evalExpr(f, scopeEnv({ reg, ctx, bindings: { self: actor2, [param]: id2 } }), false))))
+    if (!canSeeEntity(reg, world, state2, actor2, id2) || !fits2(id2, e))
       continue;
     out.push(id2);
   }
   return out;
+}
+function nearActor(reg, world, state2, actor2) {
+  return passMemo([state2, state2.entities, world, reg], `resolve.near\x00${actor2}`, () => {
+    const here = placeOfEntity(state2, actor2);
+    return Object.keys(state2.entities).sort().filter((id2) => {
+      const e = own2(state2.entities, id2);
+      return id2 !== actor2 && !!e && !isGone(state2, id2) && (placeOfEntity(state2, id2) === here || e.relations.some((r) => r.to === actor2) || heldBy(state2.entities, id2, actor2)) && canSeeEntity(reg, world, state2, actor2, id2);
+    });
+  });
 }
 function companionCandidates(reg, world, state2, action, param, actor2 = world.pov) {
   const def = own2(action.params, param);
@@ -60353,9 +60423,10 @@ function candidatesOf(ctx, subject, viewer, powers) {
   return Object.keys(ctx.state.entities).filter((id2) => id2 !== viewer && !isGone(ctx.state, id2) && kindIs(ctx.registry, ctx.world, own2(ctx.state.entities, id2)?.kind ?? "", "person") && acts(ctx.world, ctx.state, id2) && povMayKnow(ctx.registry, ctx.world, ctx.state, id2)).map((id2) => ({ id: id2, name: own2(ctx.state.entities, id2)?.name ?? id2 })).sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
 }
 function sectionOf(ctx, subject, viewer, def) {
-  if (def.power !== undefined && (!subject.exists || viewer !== null && orgPower(ctx, viewer, subject.id, def.power) === null))
-    return null;
-  return def.build(ctx, subject.id, viewer);
+  return sectionAllowed(ctx, subject, viewer, def) ? def.build(ctx, subject.id, viewer) : null;
+}
+function sectionAllowed(ctx, subject, viewer, def) {
+  return def.power === undefined || subject.exists && (viewer === null || orgPower(ctx, viewer, subject.id, def.power) !== null);
 }
 function buildOrgView(ctx, id2, viewer) {
   const subject = subjectOf(ctx, id2);
@@ -60421,9 +60492,16 @@ function buildOrgSummary(ctx, id2, viewer) {
   if (!subject)
     return null;
   const page = new Page(ctx, subject, viewer);
+  const defOf = (sid) => ctx.registry.orgSections.find((d) => d.id === sid);
   const section = (sid) => {
-    const def = ctx.registry.orgSections.find((d) => d.id === sid);
+    const def = defOf(sid);
     return def === undefined ? null : sectionOf(ctx, subject, viewer, def);
+  };
+  const shown3 = (sid) => {
+    const def = defOf(sid);
+    if (def === undefined || !sectionAllowed(ctx, subject, viewer, def))
+      return false;
+    return def.shown === undefined ? def.build(ctx, subject.id, viewer) !== null : def.shown(ctx, subject.id, viewer);
   };
   const { name, badge } = header(ctx, subject);
   const mine = subject.rows.filter((r) => r.who === viewer);
@@ -60435,7 +60513,7 @@ function buildOrgSummary(ctx, id2, viewer) {
   const alerts = section(ALERTS_SECTION);
   const above2 = subject.exists ? linksOf(page, holdersOf(ctx, subject.id), (h) => h.holder) : { links: [], hidden: 0 };
   const below = subject.exists ? linksOf(page, holdsOf(ctx, subject.id), (h) => h.org) : { links: [], hidden: 0 };
-  const stakes = below.links.some((l) => l.type === "company" && l.share !== null && l.share > 0) && page.powersOf(viewer).some((p) => powerCovers(p.power, "shares.manage")) && section(OWNERSHIP_SECTION) !== null;
+  const stakes = below.links.some((l) => l.type === "company" && l.share !== null && l.share > 0) && page.powersOf(viewer).some((p) => powerCovers(p.power, "shares.manage")) && shown3(OWNERSHIP_SECTION);
   return {
     id: subject.id,
     name,
@@ -63111,7 +63189,23 @@ function paydaysMissed(ctx, job) {
   return Math.min(run.missed, Math.round((run.last - paid) / period2));
 }
 function accountsOf2(ctx, org) {
-  return Object.keys(ctx.state.entities).sort().filter((id2) => !isGone(ctx.state, id2) && kindIs(ctx.registry, ctx.world, own2(ctx.state.entities, id2)?.kind ?? "", "account") && ownersIn(own2(ctx.state.entities, id2)?.fields ?? {}).some((o) => o.party === org));
+  const byOwner = passMemo([ctx.state, ctx.state.entities, ctx.world], "orgs.accounts", () => {
+    const out = new Map;
+    for (const id2 of Object.keys(ctx.state.entities).sort()) {
+      const e = own2(ctx.state.entities, id2);
+      if (!e || isGone(ctx.state, id2) || !kindIs(ctx.registry, ctx.world, e.kind, "account"))
+        continue;
+      for (const party of new Set(ownersIn(e.fields).map((o) => o.party))) {
+        const held3 = out.get(party);
+        if (held3)
+          held3.push(id2);
+        else
+          out.set(party, [id2]);
+      }
+    }
+    return out;
+  });
+  return byOwner.get(org) ?? [];
 }
 function worthAtMonthStart(ctx, org, now) {
   const cal = calendarOf(ctx.world);
@@ -107697,6 +107791,8 @@ class Store {
   held = new Map;
   marksSince = new Map;
   compared = new Map;
+  asked = new Map;
+  chains = new Map;
   views = new WeakMap;
   envs = new Map;
   handlerFailed;
@@ -107799,6 +107895,38 @@ class Store {
     this.byChat.clear();
     this.held.clear();
     this.compared.clear();
+    this.asked.clear();
+    this.chains.clear();
+  }
+  askedThrough(user, turns, chats) {
+    for (const turn of turns) {
+      const key = `${user}\x00${turn}`;
+      const had = this.asked.get(key);
+      if (had === undefined)
+        this.asked.set(key, new Set(chats));
+      else
+        for (const chat of chats)
+          had.add(chat);
+    }
+  }
+  askedOf(user, turn) {
+    return [...this.asked.get(`${user}\x00${turn}`) ?? []];
+  }
+  chainHeld(user, node) {
+    return this.chains.get(`${user}\x00${node}`);
+  }
+  holdChain(user, node, rows2) {
+    const key = `${user}\x00${node}`;
+    this.chains.delete(key);
+    this.chains.set(key, rows2);
+    for (const oldest of this.chains.keys()) {
+      if (this.chains.size <= this.folds.size + this.statesPerChat)
+        break;
+      this.chains.delete(oldest);
+    }
+  }
+  dropChains() {
+    this.chains.clear();
   }
   async afar(read) {
     const away = this.away;
@@ -108058,16 +108186,21 @@ class UserStore {
   }
   write(chats, fn, nodes) {
     return this.db.transaction(() => {
-      this.store.flush(this.id);
-      if (chats !== false)
-        this.store.newMarks(this.id, chats, nodes);
-      const out = fn();
-      if (chats !== false)
-        this.store.newMarks(this.id, chats, nodes);
-      else
+      this.store.dropChains();
+      try {
         this.store.flush(this.id);
-      this.store.wrote(this.id, chats === false ? null : chats);
-      return out;
+        if (chats !== false)
+          this.store.newMarks(this.id, chats, nodes);
+        const out = fn();
+        if (chats !== false)
+          this.store.newMarks(this.id, chats, nodes);
+        else
+          this.store.flush(this.id);
+        this.store.wrote(this.id, chats === false ? null : chats);
+        return out;
+      } finally {
+        this.store.dropChains();
+      }
     })();
   }
   throughTurn(turn) {
@@ -108077,7 +108210,7 @@ class UserStore {
          WHERE k.chat = ?2 OR EXISTS (SELECT 1 FROM json_each(c.path) j WHERE json_extract(j.value, '$.turn') = ?3)`).all(this.id, turn.chat, turn.id).map((r) => r.chat);
   }
   foldsThrough(turn) {
-    return this.db.query(`WITH RECURSIVE down(key) AS (
+    const stored = this.db.query(`WITH RECURSIVE down(key) AS (
            SELECT key FROM path_node WHERE user = ?1 AND turn = ?2
            UNION SELECT n.key FROM path_node n JOIN down d ON n.user = ?1 AND n.prev = d.key),
          after(turn) AS (SELECT DISTINCT n.turn FROM down d JOIN path_node n ON n.user = ?1 AND n.key = d.key),
@@ -108085,6 +108218,7 @@ class UserStore {
          kin(chat) AS (SELECT chat FROM played UNION SELECT l.chat FROM message_link l JOIN kin k ON l.user = ?1 AND l.source_chat = k.chat)
          SELECT k.chat FROM kin k JOIN chat c ON c.user = ?1 AND c.id = k.chat
          WHERE k.chat IN (SELECT chat FROM played) OR EXISTS (SELECT 1 FROM json_each(c.path) j WHERE json_extract(j.value, '$.turn') IN (SELECT turn FROM after))`).all(this.id, turn.id, turn.chat).map((r) => r.chat);
+    return [...new Set([...stored, ...this.store.askedOf(this.id, turn.id)])];
   }
   withBranches(chat) {
     return this.db.query("WITH RECURSIVE kin(chat) AS (SELECT ?2 UNION SELECT l.chat FROM message_link l JOIN kin k ON l.user = ?1 AND l.source_chat = k.chat) SELECT chat FROM kin").all(this.id, chat).map((r) => r.chat);
@@ -108316,7 +108450,7 @@ class UserStore {
     }
     if (put3.length === 0)
       return { placed: 0, lost };
-    const chats = [...new Set(put3.map((p) => p.k.chat))];
+    const chats = [...new Set(put3.flatMap((p) => this.withBranches(p.k.chat)))];
     const now = this.store.now();
     this.write(chats, () => {
       const ords = new Map;
@@ -109029,7 +109163,22 @@ class UserStore {
     const last = held3.at(-1);
     const at = last === undefined ? null : { message: last.message, turn: last.turn };
     const endTurn = fresh.nodes.at(-1)?.[2] ?? "";
-    const folded = end === null ? this.withOwner(chat, null, row?.revision ?? null, true) : fresh.nodes.length === 0 ? this.withOwner(chat, end, row?.revision ?? null, true) : this.foldPath(end, endTurn, () => chainOf3(held3, null, 0, this.goesOn(chat, held3, 0)).nodes);
+    let folded;
+    if (end === null)
+      folded = this.withOwner(chat, null, row?.revision ?? null, true);
+    else if (fresh.nodes.length === 0)
+      folded = this.withOwner(chat, end, row?.revision ?? null, true);
+    else {
+      let whole4;
+      const chain = () => whole4 ??= chainOf3(held3, null, 0, this.goesOn(chat, held3, 0)).nodes;
+      const turns = new Map(this.db.query("SELECT t.id, t.chat, t.created FROM json_each(?2) j CROSS JOIN turn t ON t.user = ?1 AND t.id = j.value").all(this.id, JSON.stringify(held3.map((h) => h.turn))).map((t) => [t.id, t]));
+      this.store.askedThrough(this.id, turns.keys(), [chat, ...[...turns.values()].map((t) => t.chat)]);
+      const run2 = () => chain().flatMap(([key, , turn, depth3]) => {
+        const t = turns.get(turn);
+        return t === undefined ? [] : [{ key, turn, depth: depth3, chat: t.chat, created: t.created }];
+      });
+      folded = this.laidOn(chat, end, endTurn, this.foldPath(end, endTurn, chain), true, run2);
+    }
     return { ...folded, messages, at, known: row !== null };
   }
   headState(chat) {
@@ -109038,46 +109187,59 @@ class UserStore {
   }
   withOwner(chat, node, revision, jobs = false) {
     const base = node === null ? this.initial(revision) : this.foldNode(node).folded;
+    const turn = jobs && node !== null ? this.db.query("SELECT turn FROM path_node WHERE user = ? AND key = ?").get(this.id, node)?.turn ?? null : null;
+    return this.laidOn(chat, node, turn, base, jobs, () => node === null ? [] : this.chainRows(node));
+  }
+  laidOn(chat, end, turn, base, jobs, path) {
     const owner2 = this.ownerIn(chat);
-    const due = jobs && node !== null && this.jobEndedSince(node);
+    const due = jobs && turn !== null && this.jobEndedSince(turn);
     if (!owner2 && !due)
       return base;
     const mark2 = this.store.markOf(this.id, chat);
-    const key = `${this.cacheKey(node ?? "~")}\x00@${chat}${jobs ? "+jobs" : ""}`;
+    const key = `${this.cacheKey(end ?? "~")}\x00@${chat}${jobs ? "+jobs" : ""}`;
     const hit = this.store.cached(key, mark2);
     if (hit)
       return hit.folded;
-    const path = node === null ? [] : this.chainRows(node);
-    const after = owner2 ? this.placeOwner(path, false, chat).after : [];
-    const pending = due ? this.jobsPending(path) : [];
+    const rows2 = path();
+    const after = owner2 ? this.placeOwner(rows2, false, chat).after : [];
+    const pending = due ? this.jobsPending(rows2) : [];
     if (after.length === 0 && pending.length === 0) {
       this.store.keep(key, base, 0, this.id, chat, mark2);
       return base;
     }
     const state2 = draft(base.state);
-    const n = (path.at(-1)?.depth ?? -1) + 2;
+    const n = (rows2.at(-1)?.depth ?? -1) + 2;
     const notApplied = [...base.notApplied];
     if (pending.length > 0) {
       const env = this.store.envOf(this.id);
-      foldSteps(env, { state: state2, upto: 0 }, [{ node: node ?? "", turn: "", n, own: true, changes: [], jobs: pending }], (_s, _st, _u, missed) => notApplied.push(...missed));
+      foldSteps(env, { state: state2, upto: 0 }, [{ node: end ?? "", turn: "", n, own: true, changes: [], jobs: pending }], (_s, _st, _u, missed) => notApplied.push(...missed));
     }
     notApplied.push(...applyOwner(this.store.envOf(this.id), state2, after, n));
     const folded = { ...base, state: state2, notApplied };
     this.store.keep(key, folded, 0, this.id, chat, mark2);
     return folded;
   }
-  jobEndedSince(node) {
-    return this.db.query("SELECT EXISTS(SELECT 1 FROM job e WHERE e.user = ?1 AND e.ended >= (SELECT t.created FROM path_node n JOIN turn t ON t.user = n.user AND t.id = n.turn WHERE n.user = ?1 AND n.key = ?2)) AS any").get(this.id, node)?.any === 1;
+  jobEndedSince(turn) {
+    return this.db.query("SELECT EXISTS(SELECT 1 FROM job e WHERE e.user = ?1 AND e.ended >= (SELECT created FROM turn WHERE user = ?1 AND id = ?2)) AS any").get(this.id, turn)?.any === 1;
   }
   ownerIn(chat) {
     return this.db.query(`WITH RECURSIVE up(chat) AS (SELECT ?2 UNION SELECT c.source_chat FROM chat c JOIN up ON c.user = ?1 AND c.id = up.chat WHERE c.source_chat IS NOT NULL)
            SELECT EXISTS(SELECT 1 FROM change WHERE user = ?1 AND chat IN (SELECT chat FROM up)) AS any`).get(this.id, chat)?.any === 1;
   }
   chainRows(node) {
-    return this.db.query(`WITH RECURSIVE up(key, prev, turn, depth) AS (
-           SELECT key, prev, turn, depth FROM path_node WHERE user = ?1 AND key = ?2
-           UNION ALL SELECT n.key, n.prev, n.turn, n.depth FROM path_node n JOIN up ON n.user = ?1 AND n.key = up.prev)
-         SELECT up.key, up.turn, up.depth, t.chat, t.created FROM up JOIN turn t ON t.user = ?1 AND t.id = up.turn ORDER BY up.depth`).all(this.id, node);
+    const held3 = this.store.chainHeld(this.id, node);
+    if (held3 !== undefined)
+      return held3;
+    const own3 = this.db.query("SELECT n.prev, n.turn, n.depth, t.chat, t.created FROM path_node n LEFT JOIN turn t ON t.user = n.user AND t.id = n.turn WHERE n.user = ?1 AND n.key = ?2").get(this.id, node);
+    if (own3 === null)
+      return [];
+    const before2 = own3.prev === null ? [] : this.store.chainHeld(this.id, own3.prev);
+    const chain = Object.freeze(before2 !== undefined ? [...before2, ...own3.chat === null || own3.created === null ? [] : [Object.freeze({ key: node, turn: own3.turn, depth: own3.depth, chat: own3.chat, created: own3.created })]] : this.db.query(`WITH RECURSIVE up(key, prev, turn, depth) AS (
+                 SELECT key, prev, turn, depth FROM path_node WHERE user = ?1 AND key = ?2
+                 UNION ALL SELECT n.key, n.prev, n.turn, n.depth FROM path_node n JOIN up ON n.user = ?1 AND n.key = up.prev)
+               SELECT up.key, up.turn, up.depth, t.chat, t.created FROM up JOIN turn t ON t.user = ?1 AND t.id = up.turn ORDER BY up.depth`).all(this.id, node).map((r) => Object.freeze(r)));
+    this.store.holdChain(this.id, node, chain);
+    return chain;
   }
   ownerOf(chats) {
     return this.db.query(`SELECT c.id, c.chat, c.op, c.lane, c.value, c.by, c.cite, c.precision, c.standing, c.source, MAX(COALESCE(c.moment, 0), COALESCE(e.ended, c.created)) AS at, pn.depth AS placed
@@ -109380,11 +109542,7 @@ class UserStore {
     return byTurn;
   }
   jobsPlaced(node) {
-    const path = this.db.query(`WITH RECURSIVE up(key, prev, turn, depth) AS (
-           SELECT key, prev, turn, depth FROM path_node WHERE user = ?1 AND key = ?2
-           UNION ALL SELECT n.key, n.prev, n.turn, n.depth FROM path_node n JOIN up ON n.user = ?1 AND n.key = up.prev)
-         SELECT up.key, up.turn, up.depth, t.created FROM up JOIN turn t ON t.user = ?1 AND t.id = up.turn ORDER BY up.depth`).all(this.id, node);
-    return this.jobsAlong(path).placed;
+    return this.jobsAlong(this.chainRows(node)).placed;
   }
   jobsAlong(path) {
     const placed2 = new Map;
@@ -116035,11 +116193,11 @@ function answersRoute(answers2) {
     access: "page",
     group: "service",
     does: "The answer of a request to a long route, by the id it was answered with: the same 202 and id while its work runs, with how far the chat it waits for is from ready while RPE makes it ready for its build, then the route's own answer, once.",
-    answers: "202 with `{ answer: <id> }` while the work runs, and `preparing: { chat, ahead, done, of }` beside it while the chat is made ready; then the route's own status and body, once; 404 for an id RPE does not hold",
-    raw: (_request, { params }) => answers2.read(params.id) ?? Response.json({ error: "RPE holds no answer by that id: it was read already, was dropped once its time to be read had passed, or was never given." }, { status: 404 })
+    answers: "202 with `{ answer: <id> }` while the work runs, and `preparing: { chat, ahead, done, of }` beside it while the chat is made ready; then the route's own status and body, once; 410 for an id RPE does not hold",
+    raw: (_request, { params }) => answers2.read(params.id) ?? Response.json({ error: "RPE holds no answer by that id: it was read already, was dropped once its time to be read had passed, was given before RPE restarted, or was never given." }, { status: ANSWER_GONE_STATUS })
   });
 }
-var ANSWER_STATUS = 202, ANSWERS_PATH = "/api/v1/answers";
+var ANSWER_STATUS = 202, ANSWER_GONE_STATUS = 410, ANSWERS_PATH = "/api/v1/answers";
 var init_answers = __esm(() => {
   init_routes();
 });
@@ -121381,6 +121539,14 @@ async function writeSetting(deps, asked2) {
     await writeWhole(target.disk, spliced);
   });
 }
+async function valuesNow(deps, chat, under) {
+  const read = readConfig(await diskTexts(await deps.levels(chat)), null, deps.settings);
+  const values = {};
+  for (const def of deps.settings)
+    if (def.key.startsWith(under) && setFor(def) === null)
+      values[def.key] = read.read(def).value;
+  return { values, facts: deps.facts() };
+}
 function settingsRoutes(deps) {
   return [
     route({
@@ -121392,6 +121558,19 @@ function settingsRoutes(deps) {
       query: { chat: shape.optional(T9, "The chat whose levels are read; left out or empty, the levels every chat shares.") },
       reply: settingsReply,
       handle: ({ user, query: query2 }) => settingsNow(deps, user, query2.chat || null)
+    }),
+    route({
+      method: "GET",
+      path: `${SETTINGS_PATH}/values`,
+      access: "page",
+      group: "settings",
+      does: "The values in force of the settings whose keys begin with `under` (a page's own: `pages.`), for a chat or for every chat, and the install's facts: what a page reads of its own settings at its start, without each setting's words, levels and advice.",
+      query: {
+        under: shape.field(shape.text({ blank: false }), "The start of the keys whose values are given, such as `pages.`."),
+        chat: shape.optional(T9, "The chat whose levels are read; left out or empty, the levels every chat shares.")
+      },
+      reply: settingsValues,
+      handle: ({ query: query2 }) => valuesNow(deps, query2.chat || null, query2.under)
     }),
     route({
       method: "PUT",
@@ -121408,7 +121587,7 @@ function settingsRoutes(deps) {
     })
   ];
 }
-var SETTINGS_PATH = "/api/v1/settings", T9, layerLevel2, rphTakes, takes2, effect2, advice, setForView, settingView, installFact, settingsReply, settingsWrite;
+var SETTINGS_PATH = "/api/v1/settings", T9, layerLevel2, rphTakes, takes2, effect2, advice, setForView, settingView, installFact, settingsReply, settingsWrite, settingsValues;
 var init_settings_routes = __esm(() => {
   init_config_read();
   init_disk();
@@ -121458,6 +121637,7 @@ var init_settings_routes = __esm(() => {
     facts: shape.list(installFact)
   }));
   settingsWrite = shape.named("SettingsWrite", "A key written at a level, a chat's naming the chat (left out or null: no chat): its value, null to take the key away at that level, or `none: true` to set `~`.", shape.object({ level: layerLevel2, chat: shape.optional(shape.nullable(shape.text({ blank: false }))), key: shape.text({ blank: false }), value: shape.optional(shape.json()), none: shape.optional(shape.yesNo()) }));
+  settingsValues = shape.named("SettingsValues", "The values in force of the settings whose keys begin with what was asked, by key, and the install's facts: what a page reads of its own settings, without the rest of each setting.", shape.object({ values: shape.record(shape.json()), facts: shape.list(installFact) }));
 });
 
 // src/app/switches-routes.ts
@@ -130728,6 +130908,7 @@ function createDbReader(deps) {
     open5?.db.close();
     open5 = null;
     memo.clear();
+    stepsKept.clear();
   };
   const refuse12 = (why) => {
     const sentence2 = `RPE does not read Lumiverse's database: ${why}.`;
@@ -130811,6 +130992,18 @@ function createDbReader(deps) {
   const memo = new Memo({ most: () => deps.settings?.().kept ?? KEPT2, now: () => Date.now() });
   const version = () => step("the file's version", (db) => String(row(db.query(Q.version).get()).data_version));
   const ofChat = async (chat, part, fill) => memo.get(KEEP.chat(chat), await version(), Infinity, part, fill);
+  const stepsKept = new Map;
+  const stepOf = (s) => ({
+    id: String(s.id),
+    chat: String(s.chat_id),
+    index: Number(s.index_in_chat),
+    role: s.is_user ? "user" : s.system ? "system" : "assistant",
+    swipe: Number(s.swipe_id),
+    swipes: Number(s.swipe_count),
+    hidden: s.hidden === 1,
+    revision: Number(s.revision),
+    shown: { hash: textHash(String(s.shown_text)), date: typeof s.shown_date === "number" ? s.shown_date : null }
+  });
   const reader = {
     kind: "database",
     async chat(chat) {
@@ -130826,20 +131019,30 @@ function createDbReader(deps) {
         return db.transaction(() => {
           if (db.query(Q.chat).get(chat, user) === null)
             return null;
-          return db.query(Q.path).all(chat, user).map((r) => {
-            const s = row(r);
-            return {
-              id: String(s.id),
-              chat: String(s.chat_id),
-              index: Number(s.index_in_chat),
-              role: s.is_user ? "user" : s.system ? "system" : "assistant",
-              swipe: Number(s.swipe_id),
-              swipes: Number(s.swipe_count),
-              hidden: s.hidden === 1,
-              revision: Number(s.revision),
-              shown: { hash: textHash(String(s.shown_text)), date: typeof s.shown_date === "number" ? s.shown_date : null }
-            };
+          const had = stepsKept.get(chat);
+          const marks = db.query(Q.pathMarks).all(chat, user).map(row);
+          const keys = marks.map((m) => [m.is_user, m.swipe_id, m.revision, m.swipes_bytes, m.dates_bytes, m.extra_bytes, Bun.hash(String(m.content))].join("\x00"));
+          const moved3 = had === undefined ? null : marks.flatMap((m, i) => had.get(String(m.id))?.key === keys[i] ? [] : [String(m.id)]);
+          const fresh = moved3 === null ? db.query(Q.path).all(chat, user) : moved3.length === 0 ? [] : db.query(Q.pathOf).all(chat, user, JSON.stringify(moved3));
+          const read = new Map(fresh.map((r) => [String(row(r).id), stepOf(row(r))]));
+          const now = new Map;
+          const out = marks.flatMap((m, i) => {
+            const id3 = String(m.id);
+            const kept4 = had?.get(id3)?.step;
+            const s = read.get(id3) ?? (kept4 === undefined ? undefined : { ...kept4, index: Number(m.index_in_chat) });
+            if (s === undefined)
+              return [];
+            now.set(id3, { key: keys[i], step: s });
+            return [s];
           });
+          stepsKept.delete(chat);
+          stepsKept.set(chat, now);
+          for (const oldest of stepsKept.keys()) {
+            if (stepsKept.size <= Math.max(1, deps.settings?.().kept ?? KEPT2))
+              break;
+            stepsKept.delete(oldest);
+          }
+          return out;
         })();
       }));
       return steps === null ? null : [...steps];
@@ -130927,7 +131130,10 @@ function createDbReader(deps) {
         return null;
       }
     },
-    dropChat: (chat) => memo.drop(KEEP.chat(chat)),
+    dropChat: (chat) => {
+      memo.drop(KEEP.chat(chat));
+      stepsKept.delete(chat);
+    },
     heard: () => {
       return;
     },
@@ -131009,6 +131215,8 @@ var init_db = __esm(() => {
     chat: "SELECT id, user_id, character_id, name, metadata, updated_at FROM chats WHERE id = ? AND user_id = ?",
     chats: "SELECT id, user_id, character_id, name, metadata, updated_at FROM chats WHERE user_id = ? ORDER BY updated_at DESC, rowid",
     path: `SELECT ${STEP} ${OF_CHAT} ${ORDER2}`,
+    pathMarks: `SELECT m.id, m.index_in_chat, m.is_user, m.swipe_id, m.revision, m.content, octet_length(m.swipes) AS swipes_bytes, octet_length(m.swipe_dates) AS dates_bytes, octet_length(m.extra) AS extra_bytes ${OF_CHAT} ${ORDER2}`,
+    pathOf: `SELECT ${STEP} ${OF_CHAT} AND m.id IN (SELECT value FROM json_each(?)) ${ORDER2}`,
     messages: `SELECT ${MESSAGE} ${OF_CHAT} ${ORDER2} LIMIT ? OFFSET ?`,
     messagesById: `SELECT ${MESSAGE} ${OF_CHAT} AND m.id IN (SELECT value FROM json_each(?)) ${ORDER2}`,
     book: "SELECT id, name, description, metadata, created_at, updated_at FROM world_books WHERE id = ? AND user_id = ?",
@@ -164697,13 +164905,28 @@ function notesOf(store2, s, entry, words13) {
     return [];
   }
 }
+function unkept2(s, entry, words13) {
+  if (entry.turn === null)
+    return false;
+  try {
+    return !kept4.has(`${s.foldKey(entry.turn)}\x00${entry.message}\x00${words13.key}`);
+  } catch (error) {
+    if (!(error instanceof JoinedTurnError))
+      throw error;
+    return false;
+  }
+}
 async function journalNotes(store2, user, chat, most, words13) {
   const s = store2.user(user);
   if (s.chat(chat) === null)
     return [];
   const turns = s.path(chat).filter((entry) => !entry.user && entry.turn !== null);
   const lines = linesOf(words13.texts);
-  const notes = await inStretches(turns.slice(-Math.max(1, most)), (entry) => notesOf(store2, s, entry, words13), (stretch) => withLines(lines, stretch));
+  const asked4 = turns.slice(-Math.max(1, most));
+  const cold = asked4.find((entry) => unkept2(s, entry, words13))?.turn ?? null;
+  if (cold !== null)
+    await store2.afar(() => s.stateAt(cold));
+  const notes = await inStretches(asked4, (entry) => notesOf(store2, s, entry, words13), (stretch) => withLines(lines, stretch));
   return notes.flat();
 }
 var kept4, KEPT4 = 4096;
@@ -164809,7 +165032,7 @@ function unavailable(failed2) {
     return "Not available";
   return failed2.code === "requirement" ? failed2.words ?? "Not possible here and now" : failed2.reason;
 }
-function palette(world, state2, registry2) {
+function paletteSteps(world, state2, registry2) {
   const entries3 = [];
   const ctx = registry2.context(world, state2);
   const actions = offeredActions(registry2, ctx);
@@ -164817,11 +165040,11 @@ function palette(world, state2, registry2) {
   const retry = policyOf(world, state2).retry;
   let spendsFor;
   const payingFor = () => spendsFor ??= actsFor(ctx, world.pov, "money.spend").map((id3) => ({ id: id3, name: state2.entities[id3]?.name ?? id3 }));
-  for (const action2 of actions.values()) {
+  const add4 = (action2) => {
     if (action2.id === TIMELAPSE_ACTION2 || action2.combat)
-      continue;
+      return;
     if (storyLocked(env, action2))
-      continue;
+      return;
     const refParam = Object.entries(action2.params).find(([, p]) => p.type === "ref" && !p.optional)?.[0];
     const amountParam = Object.entries(action2.params).find(([, p]) => p.type === "money")?.[0];
     const options = [];
@@ -164863,7 +165086,7 @@ function palette(world, state2, registry2) {
         ...odds2.available ? {} : { disabled: unavailable(odds2.failed) }
       });
     }
-    const targets = offers.length > 0 || stats.length > 0 || rows2.length > 0 ? [] : refParam ? paramCandidates(registry2, world, state2, action2, refParam) : [null];
+    const targets = offers.length > 0 || stats.length > 0 || rows2.length > 0 ? [] : refParam ? paramCandidates(registry2, world, state2, action2, refParam, world.pov, 24) : [null];
     const secondParam = refParam ? Object.entries(action2.params).find(([name, p]) => name !== refParam && p.type === "ref" && !p.optional)?.[0] : undefined;
     let secondCandidates;
     const kitStatus2 = action2.id === "take_piece" && action2.params.piece?.type === "text" ? optionalQuery(ctx, "gear.kit_status") : undefined;
@@ -164883,7 +165106,7 @@ function palette(world, state2, registry2) {
     for (const target of targets.slice(0, 24)) {
       const params = refParam && target ? { [refParam]: target } : {};
       if (secondParam && target) {
-        const seconds = (secondCandidates ??= paramCandidates(registry2, world, state2, action2, secondParam)).filter((id3) => id3 !== target).slice(0, 12);
+        const seconds = (secondCandidates ??= paramCandidates(registry2, world, state2, action2, secondParam, world.pov, 13)).filter((id3) => id3 !== target).slice(0, 12);
         const next = seconds.map((id3) => {
           const final = pick3({ ...params, [secondParam]: id3 }, nameOf11(id3));
           return { ...final, params: { [secondParam]: id3 } };
@@ -164906,7 +165129,7 @@ function palette(world, state2, registry2) {
       options.push({ ...pick3(params, target ? nameOf11(target) : action2.label), ...person2 ? { person: true } : {} });
     }
     if (options.length === 0)
-      continue;
+      return;
     const peopleParam = Object.entries(action2.params).find(([, p]) => p.type === "list" && p.ref !== undefined)?.[0];
     const company2 = peopleParam ? companionCandidates(registry2, world, state2, action2, peopleParam).map((id3) => ({ id: id3, name: nameOf11(id3) })) : [];
     const actingParam = Object.entries(action2.params).find(([, p]) => p.type === "ref" && p.acting === "money.spend")?.[0];
@@ -164922,26 +165145,29 @@ function palette(world, state2, registry2) {
       ...actingParam && acting.length > 0 ? { acting: { param: actingParam, label: "Paying as", options: acting } } : {},
       ...playsOffstage(action2.id, {}, action2.mechanical === true) ? { atOnce: true } : {}
     });
-  }
-  entries3.push(...combatEntries(ctx));
-  entries3.sort((a, b) => a.group.localeCompare(b.group) || a.label.localeCompare(b.label));
-  const calendar2 = ctx.levelOf(world.pov, "calendar");
-  const timelapse = {
-    action: TIMELAPSE_ACTION2,
-    blocked: calendar2 < 1 ? "Calendar is off" : clockPaused(world, state2) ? "Resume the clock first" : optionalQuery(ctx, "combat.engaged")?.(ctx, world.pov) === true ? "Not during a fight" : null,
-    durations: [30, 60, 180, 480, 1440, 10080],
-    until: [
-      ...world.calendar.dayParts.map((d) => ({ label: d.label, target: { type: "day_part", dayPart: d.id } })),
-      { label: "Next shift", target: { type: "shift" } },
-      { label: "Next commitment", target: { type: "commitment" } },
-      { label: "Next interruption", target: { type: "interrupt" } }
-    ],
-    interrupts: { ...state2.time.interrupts },
-    dayParts: calendar2 === 1,
-    followRoutine: routineSettingsOf(world).paletteFollowsRoutine
   };
-  const encounter = paletteEncounter(ctx);
-  return { entries: entries3, timelapse, ...encounter ? { encounter } : {} };
+  const done = () => {
+    entries3.push(...combatEntries(ctx));
+    entries3.sort((a, b) => a.group.localeCompare(b.group) || a.label.localeCompare(b.label));
+    const calendar2 = ctx.levelOf(world.pov, "calendar");
+    const timelapse = {
+      action: TIMELAPSE_ACTION2,
+      blocked: calendar2 < 1 ? "Calendar is off" : clockPaused(world, state2) ? "Resume the clock first" : optionalQuery(ctx, "combat.engaged")?.(ctx, world.pov) === true ? "Not during a fight" : null,
+      durations: [30, 60, 180, 480, 1440, 10080],
+      until: [
+        ...world.calendar.dayParts.map((d) => ({ label: d.label, target: { type: "day_part", dayPart: d.id } })),
+        { label: "Next shift", target: { type: "shift" } },
+        { label: "Next commitment", target: { type: "commitment" } },
+        { label: "Next interruption", target: { type: "interrupt" } }
+      ],
+      interrupts: { ...state2.time.interrupts },
+      dayParts: calendar2 === 1,
+      followRoutine: routineSettingsOf(world).paletteFollowsRoutine
+    };
+    const encounter = paletteEncounter(ctx);
+    return { entries: entries3, timelapse, ...encounter ? { encounter } : {} };
+  };
+  return { steps: [...actions.values()].map((action2) => () => add4(action2)), done };
 }
 var TIMELAPSE_ACTION2 = "timelapse", GROUPS4;
 var init_palette = __esm(() => {
@@ -165379,16 +165605,20 @@ async function buildParts(input, s, folded, world, state2, elapsed) {
     shown5 = scene(world, state2, elapsed, registry2);
     parts.hud = hud(world, state2, panels, ctx);
   });
-  steps.push(() => {
-    parts.palette = palette(world, state2, registry2);
-  });
+  const paletteStep = () => {
+    const built3 = paletteSteps(world, state2, registry2);
+    steps.splice(steps.indexOf(paletteStep) + 1, 0, ...built3.steps, () => {
+      parts.palette = built3.done();
+    });
+  };
+  steps.push(paletteStep);
   steps.push(() => {
     parts.controls = controls(world, state2, shown5?.sceneType ?? "", registry2, input.knowledge, input.offstage);
   });
   await inStretches(steps, (step2) => step2(), (stretch) => pass.run(stretch));
   if (shown5 === null || parts.hud === undefined || parts.palette === undefined || parts.controls === undefined)
     throw new Error("the state view's parts were not all built");
-  return { panels, scene: shown5, hud: parts.hud, palette: parts.palette, controls: parts.controls };
+  return { panels, scene: shown5, hud: parts.hud, palette: parts.palette, controls: parts.controls, pass };
 }
 async function chatView(input) {
   const { store: store2, chat } = input;
@@ -165452,6 +165682,11 @@ async function chatView(input) {
 function viewKey(s, row, lines, input) {
   return JSON.stringify([s.stateKey(input.chat, input.turn), row.head, row.revision, lines, input.map, input.knowledge, input.offstage]);
 }
+function chatViewKey(input) {
+  const s = input.store.user(input.user);
+  const row = s.chat(input.chat);
+  return viewKey(s, { head: row?.head ?? null, revision: row?.revision ?? null }, linesGiven(), input);
+}
 function chatViewItem(input, panel, id3) {
   const { store: store2, chat } = input;
   const s = store2.user(input.user);
@@ -165471,11 +165706,17 @@ ${id3}`;
       return kept5.get(at3) ?? null;
   }
   const state2 = (input.turn === null ? s.headState(chat) : s.stateAt(input.turn)).state.world;
-  const doc = store2.env.worlds(state2.revision) ?? (row.revision === null ? undefined : store2.env.worlds(row.revision));
-  if (doc === undefined)
-    return null;
-  const world = playedWorld(doc, state2);
-  const item = readPass(() => items.build(store2.env.registry.context(world, state2), { mapDisplay: null, mapConfig: input.map }, id3));
+  const view2 = built2.get(key2);
+  let world = view2?.world;
+  if (world === undefined) {
+    const doc = store2.env.worlds(state2.revision) ?? (row.revision === null ? undefined : store2.env.worlds(row.revision));
+    if (doc === undefined)
+      return null;
+    world = playedWorld(doc, state2);
+  }
+  const ctx = store2.env.registry.context(world, state2);
+  const read3 = () => items.build(ctx, { mapDisplay: null, mapConfig: input.map }, id3);
+  const item = view2 === undefined ? readPass(read3) : view2.pass.run(read3);
   if (linesGiven() === lines) {
     const into = kept5 ?? new Map;
     into.set(at3, item);
@@ -165598,11 +165839,13 @@ class PlayService {
       throw new RouteError(404, `Chat ${chat} has no turn ${turn}.`);
     if (turn !== null && row?.joined != null)
       throw new JoinedTurnError(turn, row.joined);
-    const key2 = s.stateKey(chat, turn);
+    const { taps, map } = await this.deps.settings(user, chat);
+    const knowledge = knowledgeOf(taps);
+    const key2 = chatViewKey({ store: this.deps.store, user, chat, turn, map, knowledge, offstage: taps.tell });
     const going = this.building.get(key2);
     if (going !== undefined)
       return await going;
-    const work = this.stateView(user, chat, turn);
+    const work = this.stateView(user, chat, turn, { taps, map }, knowledge);
     this.building.set(key2, work);
     try {
       return await work;
@@ -165611,15 +165854,13 @@ class PlayService {
     }
   }
   building = new Map;
-  async stateView(user, chat, turn) {
+  async stateView(user, chat, turn, { taps, map }, knowledge) {
     const s = this.deps.store.user(user);
-    const { taps, map } = await this.deps.settings(user, chat);
     const keys = (await this.part()).keys;
     const texts4 = await historyTexts(this.deps.texts(user, chat));
     const journal = await journalNotes(this.deps.store, user, chat, taps.journalMost, { texts: texts4, code: (code2) => own2(keys, code2) ?? code2, key: hashParts("journal-words", JSON.stringify(texts4), JSON.stringify(keys)) });
     const turning = this.deps.turning(user, chat);
     const { db } = this.deps;
-    const knowledge = knowledgeOf(taps);
     this.runEnds.follow(chat);
     return chatView({
       store: this.deps.store,
@@ -165640,8 +165881,14 @@ class PlayService {
     });
   }
   async orgPage(user, chat, org2) {
+    return await this.viewItem(user, chat, ORGS_ORG_PANEL, org2);
+  }
+  async thingUse(user, chat, thing) {
+    return await this.viewItem(user, chat, GEAR_USE_PANEL, thing) ?? [];
+  }
+  async viewItem(user, chat, panel, id3) {
     const { taps, map } = await this.deps.settings(user, chat);
-    return chatViewItem({ store: this.deps.store, user, chat, turn: null, offstage: taps.tell, map, knowledge: knowledgeOf(taps) }, ORGS_ORG_PANEL, org2);
+    return chatViewItem({ store: this.deps.store, user, chat, turn: null, offstage: taps.tell, map, knowledge: knowledgeOf(taps) }, panel, id3);
   }
   async due(user, chat, turn) {
     const s = this.deps.store.user(user);
@@ -166029,6 +166276,7 @@ var init_service = __esm(() => {
   init_json();
   init_offstage();
   init_org_view();
+  init_view4();
   init_things();
   init_world();
   init_store2();
@@ -168144,8 +168392,8 @@ ${parent}`);
     const edits = of("player_edited");
     const inserted = of("player_inserted");
     const newest2 = steps.findLast((s) => s.role === "user");
-    const unkept2 = newest2 !== undefined && !hidden2.has(newest2.id) ? [newest2.id] : [];
-    const ids3 = [...new Set([...edited3.map((e) => e.message), ...edits.map((e) => e.message), ...inserted.map((e) => e.message), ...unkept2])].filter((id3) => !hidden2.has(id3));
+    const unkept3 = newest2 !== undefined && !hidden2.has(newest2.id) ? [newest2.id] : [];
+    const ids3 = [...new Set([...edited3.map((e) => e.message), ...edits.map((e) => e.message), ...inserted.map((e) => e.message), ...unkept3])].filter((id3) => !hidden2.has(id3));
     const now = new Map((ids3.length === 0 ? [] : await reads.messagesById(chat, ids3)).map((m) => [m.id, m]));
     const textNow = (message) => {
       const m = now.get(message);
@@ -265663,13 +265911,13 @@ function keptLanes(store2, registry3, turn, words14) {
   }
   return lanes;
 }
-function unkept2(store2, turn, words14) {
+function unkept3(store2, turn, words14) {
   try {
     return kept5.has(`${store2.foldKey(turn)}\x00${words14}`) ? null : turn;
   } catch (error3) {
     if (!(error3 instanceof JoinedTurnError))
       throw error3;
-    return unkept2(store2, error3.joined, words14);
+    return unkept3(store2, error3.joined, words14);
   }
 }
 function lanesAt(store2, registry3, turn) {
@@ -265744,7 +265992,7 @@ async function replyLines(turns, user, chat2, ids3, errors, words14) {
   const replies = [...new Set(ids3)].filter((id3) => path7.get(id3)?.entry.user === false).sort((a, b) => (path7.get(a)?.at ?? 0) - (path7.get(b)?.at ?? 0));
   const cold = replies.reduce((found, id3) => {
     const turn = path7.get(id3)?.entry.turn;
-    return found ?? (turn == null ? null : unkept2(store2, turn, words14.key));
+    return found ?? (turn == null ? null : unkept3(store2, turn, words14.key));
   }, null);
   if (cold !== null)
     await turns.store.afar(() => store2.stateAt(cold));
@@ -277262,6 +277510,15 @@ function playRoutes(play) {
       handle: async ({ user, params }) => ({ page: await play.orgPage(user, params.chat, params.org) })
     }),
     route({
+      method: "GET",
+      path: THING_USE_PATH,
+      access: "page",
+      group: "state",
+      does: "Who may use a thing of the player's character beyond a grant, ground by ground, among the people it knows, read when its Owner & use opens (the state view carries none of it): built from the state the view is, and kept with it while that state stands. None on a thing not theirs.",
+      reply: shape.object({ use: shape.list(accessChip) }),
+      handle: async ({ user, params }) => ({ use: await play.thingUse(user, params.chat, params.thing) })
+    }),
+    route({
       method: "POST",
       path: TIME_PATH,
       access: "page",
@@ -277323,9 +277580,10 @@ function playRoutes(play) {
     })
   ];
 }
-var STATE_PATH = "/api/v1/chats/:chat/state", ORG_PAGE_PATH = "/api/v1/chats/:chat/state/orgs/:org", DUE_PATH = "/api/v1/chats/:chat/state/due", TAPS_PATH = "/api/v1/chats/:chat/taps", EDIT_UNDO_PATH = "/api/v1/chats/:chat/edits/:edit/undo", TIME_PATH = "/api/v1/chats/:chat/time", PANEL_REQUEST_PATH = "/api/v1/chats/:chat/requests/panel", PLAYS_PATH = "/api/v1/chats/:chat/plays", T39, opt16, tell2, editOpAsk, tapAsk, values3, panelTapAsk, panelHeldReply, playAsk, playedReply, tapAsked, tapReply, dueShown2, dueReply, orgPage;
+var STATE_PATH = "/api/v1/chats/:chat/state", ORG_PAGE_PATH = "/api/v1/chats/:chat/state/orgs/:org", THING_USE_PATH = "/api/v1/chats/:chat/state/things/:thing/use", DUE_PATH = "/api/v1/chats/:chat/state/due", TAPS_PATH = "/api/v1/chats/:chat/taps", EDIT_UNDO_PATH = "/api/v1/chats/:chat/edits/:edit/undo", TIME_PATH = "/api/v1/chats/:chat/time", PANEL_REQUEST_PATH = "/api/v1/chats/:chat/requests/panel", PLAYS_PATH = "/api/v1/chats/:chat/plays", T39, opt16, tell2, editOpAsk, tapAsk, values3, panelTapAsk, panelHeldReply, playAsk, playedReply, tapAsked, tapReply, dueShown2, dueReply, orgPage, accessChip;
 var init_routes12 = __esm(() => {
   init_json();
+  init_things();
   init_app2();
   init_shapes5();
   T39 = shape.text();
@@ -277360,6 +277618,7 @@ var init_routes12 = __esm(() => {
     more: shape.nullable(shape.number())
   }));
   orgPage = shape.carried("OrgView", "../org-view", "One organization's page as Orgs draws it: the reader's place there, who runs it, its people, positions and delegations, the organizations holding it and held by it, and the packs' sections the reader may see.", "an organization's page", (value) => isRecord(value));
+  accessChip = shape.named("AccessChip", "One ground on which people may use a thing beyond a grant, as Owner & use shows it: what it rests on, its words, and the people it covers by name.", shape.object({ basis: shape.oneOf(...ACCESS_BASES), label: T39, who: shape.list(T39) }));
 });
 
 // src/play/rules.ts
@@ -281361,5 +281620,5 @@ if (Bun.isMainThread) {
     stopped,
     fetch: (url2, init) => fetch(url2, init),
     invoked: invokedAs2(process.execPath, Bun.main)
-  }, { version: "b13442d0", areas: compose2().areas, appFile: Bun.main, host: { platform: process.platform, uid: process.getuid?.() ?? null, bun: process.execPath } });
+  }, { version: "e1de5492", areas: compose2().areas, appFile: Bun.main, host: { platform: process.platform, uid: process.getuid?.() ?? null, bun: process.execPath } });
 }

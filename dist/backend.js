@@ -274,7 +274,7 @@ function startPipe(deps) {
     } catch (error) {
       if (TOO_LARGE.test(words(error)))
         return answer(413, JSON.stringify({ error: `RPE's answer is larger than Lumiverse's proxy carries (${words(error)}).` }));
-      answer(502, JSON.stringify({ error: `RPE was not reached through Lumiverse: ${words(error)}` }));
+      toPage(user, page, { rpe: "unreached", id: req.id, error: `RPE was not reached through Lumiverse: ${words(error)}` });
     }
   }
   async function follow(user, page, chat, on) {
@@ -314,6 +314,8 @@ function startPipe(deps) {
           }
           await toRpe(user, { rpe: "registered", missing: deps.missing(), build: deps.build });
           deps.registered(user);
+          for (const page2 of pages.get(user) ?? [])
+            toPage(user, page2, { rpe: "restarted" });
           const record = untold.get(user);
           if (record !== undefined)
             tell(user, record);
@@ -1594,8 +1596,8 @@ async function startExtension(spindle2, options = {}) {
     spindle: spindle2,
     registrations,
     missing: lacking,
-    build: options.build ?? "b13442d0" ?? "dev",
-    statedHash: options.statedHash !== undefined ? options.statedHash : "0fddc317f1dc0df5dd3763c203cb3e73c59fff945ee39c4699b315c40ec97037",
+    build: options.build ?? "e1de5492" ?? "dev",
+    statedHash: options.statedHash !== undefined ? options.statedHash : "54e370f50ba13920beb1c1f0f7ad2623bfce8b21a0ba2beb1594f991bf8ccb58",
     log,
     registered: () => notice(),
     refused: (user) => {
