@@ -5,6 +5,7 @@
 
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { ENGINE_EVENTS } from "../engine/engine-pack";
 import { own } from "../engine/pack-kit";
 import type { Registry } from "../engine/registry-impl";
 import type { WorldState } from "../engine/state";
@@ -12,7 +13,7 @@ import { ANSWERS_PART } from "../iface/kit";
 import { Lines } from "../iface/texts";
 import { changeLine } from "../play/due";
 import { answerWords } from "../play/service";
-import type { JsonValue } from "../shared/json";
+import { isRecord, type JsonValue } from "../shared/json";
 import type { WorldDoc } from "../shared/world";
 import type { Part, Report } from "../store";
 
@@ -27,8 +28,19 @@ export async function engineAnswers(guidance: string): Promise<Lines> {
  * words for kinds; its first letter a capital. None where neither has words for it.
  */
 export function changeSaid(part: Part, registry: Registry, world: WorldDoc | undefined, state: WorldState | undefined, change: { op: string; value: JsonValue }): string | undefined {
-  const said = (world === undefined || state === undefined ? undefined : changeLine(registry, world, state, change.op, change.value)) ?? own(part.keys, change.op);
+  const way = wayOf(change);
+  const said = (world === undefined || state === undefined ? undefined : changeLine(registry, world, state, change.op, change.value)) ?? (way === undefined ? undefined : own(part.keys, `${change.op}.${way}`)) ?? own(part.keys, change.op);
   return said === undefined || said.trim() === "" ? undefined : said.charAt(0).toUpperCase() + said.slice(1);
+}
+
+/**
+ * Which way a change that goes two ways went, as the end of the key its words are kept under (`engine.pause.on`, `engine.pause.off`): the
+ * clock's pause pinned to a scene (`on`) or lifted (`off`). Undefined for a change that goes one way, which has its kind's words only.
+ */
+function wayOf(change: { op: string; value: JsonValue }): "on" | "off" | undefined {
+  if (change.op !== ENGINE_EVENTS.pause) return undefined;
+  const scene = isRecord(change.value) && isRecord(change.value.data) ? change.value.data.scene : undefined;
+  return scene === null ? "off" : typeof scene === "string" ? "on" : undefined;
 }
 
 /** A change in words on the turn's card (`changeSaid`); the play answers' line for a change they have no words for, where neither has any. */

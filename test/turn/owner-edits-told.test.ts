@@ -4,8 +4,11 @@
 
 import { afterAll, beforeAll, expect, setSystemTime, test } from "bun:test";
 import type { LinesPart } from "../../src/app/guidance";
+import { playAnswers } from "../../src/play/service";
 import { TAP_DEFAULTS } from "../../src/play/settings";
 import type { LedgerEvent } from "../../src/shared/ledger";
+import { RPE_GUIDANCE } from "../../src/tree";
+import { changeSaid } from "../../src/turn/card-words";
 import { ownerEditsBefore } from "../../src/turn/owner-changes";
 import { openSet, type OpenSet, shippedTexts } from "../guidance/set";
 import { CHAT, registry } from "../play/bed";
@@ -55,4 +58,12 @@ test("the clock's Pause and Resume are told by what was pressed and where the cl
     "Before this turn, the player used the clock's controls (Resume clock: the clock is running, and the world state says it is paused only while it is).",
   ]);
   for (const line of told) expect(line).not.toMatch(/a pause of the clock|Recorded/i);
+});
+
+test("the clock's pause event is worded by its direction wherever a change is said, never alike both ways", async () => {
+  const r = await rig();
+  const answers = await playAnswers(RPE_GUIDANCE);
+  const said = (scene: string | null) => changeSaid(answers, registry(), r.doc, r.world(), { op: "engine.pause", value: { type: "engine.pause", data: { scene } } });
+  expect(said("harbor_street|quiet")).toBe("The clock paused for this scene");
+  expect(said(null)).toBe("The clock running again");
 });

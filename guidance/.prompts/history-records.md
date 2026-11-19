@@ -28,7 +28,8 @@ ev_attempt: attempt on {{track}}
 ev_hint_opened: hint opened on {{track}}
 ev_hint_closed: hint closed on {{track}}
 ev_track_revealed: {{track}} revealed
-ev_clock_pause: clock pause
+ev_clock_pause: the clock is paused for this scene
+ev_clock_resume: the clock runs again
 ev_clock_set_back: clock set back {{minutes}} min
 ev_renamed: {{was}} is now called {{name}}
 ev_meanwhile: what you saw meanwhile

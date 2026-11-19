@@ -431,7 +431,7 @@ const events: EventTypeDef<PackEvent>[] = [
     apply: (e, state) => {
       slice(state).pauseScene = typeof e.data.scene === "string" ? e.data.scene : null;
     },
-    describe: () => say("ev_clock_pause"),
+    describe: (e) => say(e.data.scene === null ? "ev_clock_resume" : "ev_clock_pause"),
     // The clock's pause is pinned to the scene it was before (or to none).
     reverse: (_e, before) => [{ type: ENGINE_EVENTS.pause, data: { scene: readEngineSlice(before).pauseScene } }],
   },

@@ -4,7 +4,7 @@ description: The clock, the calendar and the needs that rise with them. How to l
 ---
 # Keeping the time
 
-The world has one clock for the chat. The world state shows the date, the hour and the weather, each with the level of the world it comes from.
+The world has one clock for the chat. The world state shows the date, the hour and the weather, each with the level of the world it comes from. The world state is what is true now and a record says what was true then, so the clock is paused only while the world state says it is paused for this scene: a record that says it was paused does not hold it.
 
 ## Letting time pass
 
