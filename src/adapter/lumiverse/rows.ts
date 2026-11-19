@@ -188,7 +188,8 @@ export function chatFrom(row: Record<string, unknown>): LvChat {
 /**
  * A message (`rowToMessage`, `chats.service.ts:587-605`): `swipes` and `extra` as stored (JSON text,
  * with Lumiverse's fallbacks) or as sent (parsed); the role as `getMessageRole` gives it
- * (`utils/message-role.ts:4-6`).
+ * (`utils/message-role.ts:4-6`). A row of the database reader carries no `extra`, only the two marks RPE
+ * reads of it, worked out in SQL (`hidden`, `system`, `db.ts`).
  */
 export function messageFrom(row: Record<string, unknown>): LvMessage {
   let swipes: unknown = row.swipes;
@@ -199,15 +200,7 @@ export function messageFrom(row: Record<string, unknown>): LvMessage {
       swipes = [row.content ?? ""];
     }
   }
-  let extra: unknown = row.extra;
-  if (typeof extra === "string") {
-    try {
-      extra = JSON.parse(extra);
-    } catch {
-      extra = {};
-    }
-  }
-  const ex = object(extra);
+  const marks = "extra" in row ? marksOf(row.extra) : { hidden: flag(row.hidden), system: flag(row.system) };
   // Lumiverse's mapper reads `swipe_dates` that are not JSON as none (`chats.service.ts:589-592`).
   let dates: unknown = row.swipe_dates;
   if (typeof dates === "string") {
@@ -225,12 +218,12 @@ export function messageFrom(row: Record<string, unknown>): LvMessage {
     id: id(row.id),
     chat: str(row.chat_id),
     index: num(row.index_in_chat),
-    role: isUser ? "user" : ex.spindle_role === "system" ? "system" : "assistant",
+    role: isUser ? "user" : marks.system ? "system" : "assistant",
     name: str(row.name),
     text: str(row.content),
     swipe,
     swipes: Array.isArray(swipes) ? swipes.length : 1,
-    hidden: ex.hidden === true,
+    hidden: marks.hidden,
     sentAt: num(row.send_date) * 1000,
     revision: num(row.revision),
     shown: { hash: textHash(typeof saved === "string" ? saved : str(row.content)), date: typeof date === "number" ? date : null },
@@ -241,6 +234,20 @@ export function messageFrom(row: Record<string, unknown>): LvMessage {
         })
       : [{ text: str(row.content), date: null }],
   };
+}
+
+/** A message's two marks RPE reads, from its `extra` as stored or as sent: none where it is not JSON. */
+function marksOf(extra: unknown): { hidden: boolean; system: boolean } {
+  let parsed = extra;
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      parsed = {};
+    }
+  }
+  const ex = object(parsed);
+  return { hidden: ex.hidden === true, system: ex.spindle_role === "system" };
 }
 
 /** A world book (`rowToBook`, `world-books.service.ts:271-282`). */

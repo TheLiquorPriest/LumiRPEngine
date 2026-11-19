@@ -104,17 +104,22 @@ export function schemaDifference(db: Database): string | null {
 }
 
 // The statements. A chat's messages in Lumiverse's order: by place, then as they were stored.
-const MESSAGE = "m.id, m.chat_id, m.index_in_chat, m.is_user, m.name, m.content, m.send_date, m.swipe_id, m.swipes, m.swipe_dates, m.extra, m.revision";
+// A message's marks (hidden, a system message an extension added) read in SQL, as `messageFrom` in `rows.ts` reads them after
+// Lumiverse's mapper: none where `extra` is not JSON. Its `extra` itself is never read into RPE: an old engine's reply can carry
+// everything it recorded there.
+const HIDDEN = "CASE WHEN json_valid(m.extra) THEN coalesce(json_type(m.extra, '$.hidden') = 'true', 0) ELSE 0 END AS hidden";
+const SYSTEM = "CASE WHEN json_valid(m.extra) THEN coalesce(json_extract(m.extra, '$.spindle_role') = 'system', 0) ELSE 0 END AS system";
+const MESSAGE = `m.id, m.chat_id, m.index_in_chat, m.is_user, m.name, m.content, m.send_date, m.swipe_id, m.swipes, m.swipe_dates, m.revision, ${HIDDEN}, ${SYSTEM}`;
 const OF_CHAT = "FROM messages m JOIN chats c ON c.id = m.chat_id WHERE m.chat_id = ? AND c.user_id = ?";
 const ORDER = "ORDER BY m.index_in_chat, m.rowid";
 // A step's swipe count, marks and showing swipe read in SQL, so listing a long chat reads one text per
 // message and not every swipe of it. As `messageFrom` in `rows.ts`, after Lumiverse's mapper: one swipe
-// where `swipes` is not a JSON list, no marks where `extra` is not JSON, no dates where `swipe_dates` is
-// not (`chats.service.ts:589-592`), and `content` where the list has no text at the showing swipe.
+// where `swipes` is not a JSON list, no dates where `swipe_dates` is not (`chats.service.ts:589-592`), and
+// `content` where the list has no text at the showing swipe.
 const STEP = `m.id, m.chat_id, m.index_in_chat, m.is_user, m.swipe_id, m.revision,
   CASE WHEN json_valid(m.swipes) AND json_type(m.swipes) = 'array' THEN json_array_length(m.swipes) ELSE 1 END AS swipe_count,
-  CASE WHEN json_valid(m.extra) THEN coalesce(json_type(m.extra, '$.hidden') = 'true', 0) ELSE 0 END AS hidden,
-  CASE WHEN json_valid(m.extra) THEN coalesce(json_extract(m.extra, '$.spindle_role') = 'system', 0) ELSE 0 END AS system,
+  ${HIDDEN},
+  ${SYSTEM},
   CASE WHEN m.swipe_id < 0 OR NOT json_valid(m.swipes) THEN m.content
     WHEN json_type(m.swipes, '$[' || m.swipe_id || ']') = 'text' THEN json_extract(m.swipes, '$[' || m.swipe_id || ']')
     ELSE m.content END AS shown_text,
@@ -141,7 +146,9 @@ const Q = {
   preset: "SELECT id, name, provider, engine, parameters, prompt_order, prompts, metadata, cache_revision, updated_at FROM presets WHERE id = ? AND user_id = ?",
   setting: "SELECT key, value, updated_at FROM settings WHERE key = ? AND user_id = ?",
   // The breakdown of the chat's latest reply that has one: a swipe replaces its message's breakdown in place (`breakdown.service.ts:3-11`).
-  breakdown: "SELECT b.data FROM message_breakdowns b JOIN messages m ON m.id = b.message_id WHERE b.chat_id = ? AND b.user_id = ? ORDER BY m.index_in_chat DESC, m.rowid DESC LIMIT 1",
+  // That message is found first, so the one breakdown is read: each holds its prompt's whole history.
+  breakdown:
+    "SELECT b.data FROM message_breakdowns b WHERE b.user_id = ? AND b.message_id = (SELECT n.message_id FROM message_breakdowns n JOIN messages m ON m.id = n.message_id WHERE n.chat_id = ? AND n.user_id = ? ORDER BY m.index_in_chat DESC, m.rowid DESC LIMIT 1)",
   // What says a book's entries are as they were read: Lumiverse's own signature of them (`world-books.service.ts:1083-1094`, which it makes its entity tags from) and the book's own `updated_at`; they move with any entry added, edited, reordered or removed.
   bookStamp: "SELECT w.updated_at AS book, COUNT(e.id) AS count, COALESCE(MAX(e.updated_at), 0) AS latest, COALESCE(SUM(e.revision), 0) AS revisions FROM world_books w LEFT JOIN world_book_entries e ON e.world_book_id = w.id WHERE w.id = ? AND w.user_id = ?",
   presetStamp: "SELECT updated_at, cache_revision FROM presets WHERE id = ? AND user_id = ?",
@@ -152,6 +159,8 @@ const Q = {
 /** How many times a statement is tried while Lumiverse holds the file locked, and the wait before the second try, doubled after. */
 export const TRIES = 4;
 export const RETRY_MS = 25;
+/** The default of `lumiverse.database.slowSeconds`, in milliseconds: a read that held RPE this long is told in its log. */
+export const SLOW_MS = 1_000;
 
 export interface DbReaderDeps {
   /** Lumiverse's database file: `lumiverse.db` in its data folder (`db/connection.ts:38`, `env.ts:157`). */
@@ -160,8 +169,8 @@ export interface DbReaderDeps {
   user: string;
   sleep(ms: number): Promise<void>;
   log(message: string): void;
-  /** Its tries and first wait, read at each statement (the door's settings); `TRIES` and `RETRY_MS` when not given. */
-  settings?: () => { tries: number; retryMs: number; kept: number };
+  /** Its tries, first wait and slow read, read at each statement (the door's settings); `TRIES`, `RETRY_MS` and `SLOW_MS` when not given. */
+  settings?: () => { tries: number; retryMs: number; slowMs: number; kept: number };
 }
 
 export interface DbState {
@@ -281,12 +290,19 @@ export function createDbReader(deps: DbReaderDeps): DbReader {
     return at;
   }
 
-  /** One statement, tried again after a short wait while another connection holds the file locked. */
+  /**
+   * One statement, tried again after a short wait while another connection holds the file locked. A statement holds RPE's one thread
+   * while it runs: one that takes `slowMs` or more is told in the log, in one line, with how long it took.
+   */
   async function step<T>(what: string, run: (db: Database) => T): Promise<T> {
-    const { tries, retryMs } = deps.settings?.() ?? { tries: TRIES, retryMs: RETRY_MS };
+    const { tries, retryMs, slowMs } = deps.settings?.() ?? { tries: TRIES, retryMs: RETRY_MS, slowMs: SLOW_MS };
     for (let tried = 1; ; tried++) {
       try {
-        return run(file().db);
+        const began = performance.now();
+        const out = run(file().db);
+        const took = performance.now() - began;
+        if (took >= slowMs) deps.log(`Reading ${what} from Lumiverse's database held RPE for ${Math.round(took)} ms.`);
+        return out;
       } catch (error) {
         if (error instanceof SourceOff || error instanceof Unreadable) throw error;
         const c = code(error);
@@ -432,7 +448,7 @@ export function createDbReader(deps: DbReaderDeps): DbReader {
       return r === null ? null : mapped(`setting ${key}`, () => settingFrom(row(r)));
     },
     async breakdown(chat) {
-      const r = await step(`chat ${chat}'s breakdown`, (db) => db.query(Q.breakdown).get(chat, user));
+      const r = await step(`chat ${chat}'s breakdown`, (db) => db.query(Q.breakdown).get(user, chat, user));
       if (r === null) return null;
       // `getBreakdown` (`breakdown.service.ts:14-23`): data that is not JSON is no breakdown.
       try {

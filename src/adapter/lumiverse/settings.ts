@@ -13,7 +13,7 @@
 //       openWaitSeconds: 20              seconds an opening socket waits for Lumiverse's answer
 //       retrySeconds: 1                  seconds before opening again, doubled after each failure
 //       maxRetrySeconds: 30              the longest of those waits
-//     database: { tries: 4, waitSeconds: 0.025 }  tries of a statement while Lumiverse holds its file locked; seconds before the second, doubled
+//     database: { tries: 4, waitSeconds: 0.025, slowSeconds: 1 }  tries of a statement while Lumiverse holds its file locked; seconds before the second, doubled; seconds a read may hold RPE before its log says so
 //     reads: { rereads: 3, breakdownReplies: 10, keepSeconds: 15, kept: 32 }  a changing chat's rereads; newest replies asked for a stored breakdown; seconds a read over HTTP is held; chats, books and presets held at once
 //     dryRun: { waitSeconds: 10 }        seconds a dry run is waited for before the reply goes on without its names
 //     stream: { commentSeconds: 5 }      seconds a reply's stream may send nothing before a comment line keeps its connection
@@ -39,7 +39,7 @@
 import { type ConfigRead, readConfig } from "../../app/config-read";
 import type { Effect, NumberSettings, Setting, SettingAdvice, SettingTakes } from "../../app/setting-list";
 import { CHAT_SEARCH_DEFAULTS, type ChatSearchSettings } from "./chat";
-import { RETRY_MS, TRIES } from "./db";
+import { RETRY_MS, SLOW_MS, TRIES } from "./db";
 import { DRY_RUN_MS } from "./hint";
 import { BREAKDOWN_TRIES, REREADS } from "./http-reads";
 import { HTTP_KEEP_MS, KEPT } from "./memo";
@@ -56,7 +56,7 @@ import { WHOSE_WAIT_MS } from "../../ext/registration";
 export interface LumiverseSettings {
   sessionCheckMs: number;
   socket: SocketSettings;
-  database: { tries: number; retryMs: number };
+  database: { tries: number; retryMs: number; slowMs: number };
   reads: { rereads: number; breakdownReplies: number; keepMs: number; kept: number };
   dryRunMs: number;
   commentMs: number;
@@ -119,6 +119,7 @@ export const LUMIVERSE_SETTING_DEFS = {
   retryMax: setting("sockets.maxRetrySeconds", SOCKET_DEFAULTS.retryMaxMs / S, { type: "number", least: 1 }, "Socket longest retry", "The longest wait in seconds between tries to open a socket."),
   dbTries: setting("database.tries", TRIES, { type: "whole", least: 1 }, "Database tries", "Tries of a read while Lumiverse holds its database file locked."),
   dbWait: setting("database.waitSeconds", RETRY_MS / S, { type: "number", least: 0.001 }, "Database first wait", "Seconds before the second try of a locked read, doubled after each try."),
+  dbSlow: setting("database.slowSeconds", SLOW_MS / S, { type: "number", least: 0.001 }, "Slow database read", "Seconds a read of Lumiverse's database file may hold RPE before RPE's log says, in one line, which read it was and how long it took."),
   rereads: setting("reads.rereads", REREADS, { type: "whole", least: 1 }, "Rereads of a changing chat", "Times a chat read over HTTP is read again when it changed while it was read."),
   breakdownReplies: setting("reads.breakdownReplies", BREAKDOWN_TRIES, { type: "whole", least: 1 }, "Replies asked for a breakdown", "The newest replies asked when looking for the prompt breakdown Lumiverse stored.", "use", [{ above: PAGE_ROWS, says: "Lumiverse gives at most 1000 rows a page: no more replies than that are asked." }]),
   readKeep: setting("reads.keepSeconds", HTTP_KEEP_MS / S, { type: "number", least: 0 }, "Seconds a read over HTTP is held", "Seconds what RPE read of Lumiverse's rows over HTTP is held before it is read again; an event Lumiverse sends for a change lets it go at once. Read from the database file, a read is held exactly as long as the rows are unchanged."),
@@ -184,7 +185,7 @@ export function lumiverseSettings(read: ConfigRead): LumiverseSettings {
   return {
     sessionCheckMs: v.sessionCheck * S,
     socket: { pingMs: v.ping * S, pongMs: v.pong * S, openMs: v.open * S, retryMs: v.retry * S, retryMaxMs: v.retryMax * S },
-    database: { tries: v.dbTries, retryMs: v.dbWait * S },
+    database: { tries: v.dbTries, retryMs: v.dbWait * S, slowMs: v.dbSlow * S },
     reads: { rereads: v.rereads, breakdownReplies: v.breakdownReplies, keepMs: v.readKeep * S, kept: v.readKept },
     dryRunMs: v.dryRun * S,
     commentMs: v.comment * S,

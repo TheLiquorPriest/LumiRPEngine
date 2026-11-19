@@ -5,7 +5,7 @@
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { CHAT_SEARCH_DEFAULTS } from "../../src/adapter/lumiverse/chat";
-import { RETRY_MS, TRIES } from "../../src/adapter/lumiverse/db";
+import { RETRY_MS, SLOW_MS, TRIES } from "../../src/adapter/lumiverse/db";
 import { DRY_RUN_MS } from "../../src/adapter/lumiverse/hint";
 import { BREAKDOWN_TRIES, REREADS } from "../../src/adapter/lumiverse/http-reads";
 import { HTTP_KEEP_MS, KEPT } from "../../src/adapter/lumiverse/memo";
@@ -44,7 +44,7 @@ describe("the door's settings", () => {
     expect(LUMIVERSE_DEFAULTS).toEqual({
       sessionCheckMs: KEEP_EVERY_MS,
       socket: SOCKET_DEFAULTS,
-      database: { tries: TRIES, retryMs: RETRY_MS },
+      database: { tries: TRIES, retryMs: RETRY_MS, slowMs: SLOW_MS },
       reads: { rereads: REREADS, breakdownReplies: BREAKDOWN_TRIES, keepMs: HTTP_KEEP_MS, kept: KEPT },
       dryRunMs: DRY_RUN_MS,
       commentMs: COMMENT_MS,
