@@ -26,7 +26,6 @@
 //   - a revision that turns the grid system on leaves the POV on its square where that grid has it, clears one it lacks, and lets it see from there.
 
 import { cellIndex, placedItems, standingGrid } from "../shared/grid";
-import { hashJson } from "../shared/hash";
 import type { EntityId, FieldId, RelationTypeId, RevisionId, StageId, TrackId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { safeKey } from "../shared/json";
@@ -139,9 +138,34 @@ function revisionDoc(env: MarkerEnv, revision: RevisionId): WorldDoc {
   return world;
 }
 
-/** Deep equality of plain values (key order aside). */
+/** Deep equality of plain values (key order aside), as their JSON reads them: an undefined property left out, an undefined item null. */
 function same(a: unknown, b: unknown): boolean {
-  return a === undefined || b === undefined ? a === b : hashJson(a) === hashJson(b);
+  return a === undefined || b === undefined ? a === b : sameJson(a, b);
+}
+
+/**
+ * Whether two JSON values read the same, as their canonical JSON (`hashJson`) would, without writing either out: a revision's
+ * documents are compared part by part at every Upgrade a fold applies, and hashing both sides of each part was most of what one cost.
+ */
+function sameJson(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  // A number reads as JSON writes it (0 and -0 alike); any other value that is no object is equal only to itself.
+  if (a === null || b === null || typeof a !== "object" || typeof b !== "object") return typeof a === "number" && typeof b === "number" && String(a) === String(b);
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (!sameJson(a[i] ?? null, b[i] ?? null)) return false;
+    return true;
+  }
+  const x = a as Record<string, unknown>;
+  const y = b as Record<string, unknown>;
+  let keys = 0;
+  for (const k of Object.keys(x)) {
+    if (x[k] === undefined) continue;
+    keys++;
+    if (y[k] === undefined || !Object.hasOwn(y, k) || !sameJson(x[k], y[k])) return false;
+  }
+  for (const k of Object.keys(y)) if (y[k] !== undefined) keys--;
+  return keys === 0;
 }
 
 /** Every entity's relations as a chat starting on `world` holds them: the authored ones, their other sides added. */
