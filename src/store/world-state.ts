@@ -20,6 +20,7 @@ import type { TidyFinding } from "../shared/thing-gm";
 import { DOMAINS } from "../shared/ids";
 import { trackOwner } from "../shared/world";
 import { calendarOf, formatClock, placeOffset, placeZone } from "../engine/calendar";
+import { ENGINE_EVENTS } from "../engine/engine-pack";
 import { own } from "../engine/pack-kit";
 import { presetOf } from "../engine/realism";
 import { clockPaused } from "../engine/time";
@@ -29,7 +30,7 @@ import { answers } from "./due";
 import { standing } from "./facts";
 import { aboutOf, type FoldEnv } from "./fold";
 import type { UserStore } from "./store";
-import { LANES, StoreInputError, type ChangeRow, type Mark, type StoreState, type UnsettledChange } from "./types";
+import { LANES, STORE_OPS, StoreInputError, type ChangeRow, type Mark, type StoreState, type UnsettledChange } from "./types";
 import { factFields, HORIZON, markFields, type TreeView, type ViewReading } from "./view";
 import { readPart, wordLine, type Part, type ViewLine } from "./words";
 
@@ -383,7 +384,7 @@ export function worldState(store: UserStore, input: WorldStateInput): WorldState
     for (const x of folded.notApplied) {
       if (told.has(x.change) || listed.has(x.change)) continue;
       const t = x.turn === "" ? null : store.turn(x.turn);
-      lines.push({ kind: "unsettled_stopped", depth: 0, fields: { op: x.op, ...(t === null ? { between: true } : { turn: t.depth + 1 }), ...aboutField(x.about ?? [], nameOf, view), value: said(x.value ?? null), codes: x.reports.map((r) => r.code) } });
+      lines.push({ kind: "unsettled_stopped", depth: 0, fields: { op: x.op, ...(t === null ? { between: true } : { turn: t.depth + 1 }), ...aboutField(x.about ?? [], nameOf, view), ...clockField(clockWay(x.op, x.value ?? undefined)), value: said(x.value ?? null), codes: x.reports.map((r) => r.code) } });
     }
     // The holds that cannot be, each once, with the fix the tidy would make as its operations.
     const holds = new Set<string>();
@@ -480,7 +481,7 @@ function aboutField(about: readonly string[], nameOf: (ref: string) => string, v
  */
 function unsettledChange(u: UnsettledChange, n: number | null, nameOf: (ref: string) => string, view: TreeView): ViewLine {
   const c = u.change;
-  const fields: JsonObject = { op: c.op, lane: c.lane, ...(n === null ? { between: true } : { turn: n }), ...aboutField(u.about, nameOf, view), value: said(c.value), applied: c.applied && !u.why.includes("not_applied") };
+  const fields: JsonObject = { op: c.op, lane: c.lane, ...(n === null ? { between: true } : { turn: n }), ...aboutField(u.about, nameOf, view), ...clockField(clockWay(c.op, c.value)), value: said(c.value), applied: c.applied && !u.why.includes("not_applied") };
   if (c.by !== null) fields.by = c.by;
   if (c.reports.length > 0) {
     fields.codes = c.reports.map((r) => r.code);
@@ -660,6 +661,27 @@ function around(view: TreeView, scenePlace: string | null, shown: ReadonlySet<st
   return out;
 }
 
+/** The part's lines that word the clock's pause by the way it went: it was paused, or it runs again. */
+const CLOCK_LINES = { paused: "clock_paused", resumed: "clock_resumed" } as const;
+
+/**
+ * Which way a change put the clock's pause, where it is one of the clock's two controls: the player's pause control (a time marker for
+ * `pause`, its value true or false) or the pause pinned to a scene or lifted (`engine.pause`, its scene a key or none). Undefined for any
+ * other change, and for a marker of another time control.
+ */
+function clockWay(op: string, value: JsonValue | undefined): keyof typeof CLOCK_LINES | undefined {
+  if (!isRecord(value)) return undefined;
+  if (op === STORE_OPS.marker) return value.kind === "time" && value.control === "pause" ? (value.to === true ? "paused" : value.to === false ? "resumed" : undefined) : undefined;
+  if (op !== ENGINE_EVENTS.pause) return undefined;
+  const scene = isRecord(value.data) ? value.data.scene : undefined;
+  return scene === null ? "resumed" : typeof scene === "string" ? "paused" : undefined;
+}
+
+/** A line's `clock` field, worded by the part's line for the way the pause went; none where the change is no control of the clock's pause. */
+function clockField(way: keyof typeof CLOCK_LINES | undefined): JsonObject {
+  return way === undefined ? {} : { clock: { pieces: [{ kind: CLOCK_LINES[way], fields: {} }] } };
+}
+
 /**
  * What changed since the turn before began, a line for each lane (plan §6.9): how many changes, which operations, what they touched,
  * who made them, how many did not apply; his own edits told apart as his, a line for each lane they reach; a lane with nothing, a
@@ -678,7 +700,11 @@ function changedLines(view: TreeView, rows: readonly { change: ChangeRow; applie
     }
     const by = [...new Set(mine.flatMap((r) => (r.change.by === null ? [] : [r.change.by])))];
     const unapplied = mine.filter((r) => !r.applied).length;
-    const fields: JsonObject = { lane, n: mine.length, one: mine.length === 1, ops: { list: [...new Set(mine.map((r) => r.change.op))] } };
+    // The clock's two controls are told by the way the pause last went (the part's `clock_paused` and `clock_resumed` lines), never by their operations'
+    // codes, which read as a pause whichever way it went; the other operations are named as they are.
+    const ops = [...new Set(mine.filter((r) => clockWay(r.change.op, r.change.value) === undefined).map((r) => r.change.op))];
+    const last = mine.filter((r) => r.applied && clockWay(r.change.op, r.change.value) !== undefined).reduce<ChangeRow | null>((a, r) => (a === null || r.change.id > a.id ? r.change : a), null);
+    const fields: JsonObject = { lane, n: mine.length, one: mine.length === 1, ...(ops.length > 0 ? { ops: { list: ops } } : {}), ...(last === null ? {} : clockField(clockWay(last.op, last.value))) };
     if (touched.length > 0) fields.touched = { names: touched };
     if (by.length > 0) fields.by = { names: by };
     if (unapplied > 0) fields.unapplied = unapplied;

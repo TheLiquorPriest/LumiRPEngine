@@ -3,15 +3,18 @@
 // his with what that edit had recorded, and an Undo of a change an earlier turn made as that. Every chat, person and place is invented.
 
 import { afterAll, beforeAll, expect, setSystemTime, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { LinesPart } from "../../src/app/guidance";
 import { playAnswers } from "../../src/play/service";
 import { TAP_DEFAULTS } from "../../src/play/settings";
 import type { LedgerEvent } from "../../src/shared/ledger";
+import { worldState } from "../../src/store";
 import { RPE_GUIDANCE } from "../../src/tree";
 import { changeSaid } from "../../src/turn/card-words";
 import { ownerEditsBefore } from "../../src/turn/owner-changes";
 import { openSet, type OpenSet, shippedTexts } from "../guidance/set";
-import { CHAT, registry } from "../play/bed";
+import { CHAT, GUIDANCE, registry } from "../play/bed";
 import { rig } from "../play/undo-rig";
 
 let set: OpenSet;
@@ -66,4 +69,22 @@ test("the clock's pause event is worded by its direction wherever a change is sa
   const said = (scene: string | null) => changeSaid(answers, registry(), r.doc, r.world(), { op: "engine.pause", value: { type: "engine.pause", data: { scene } } });
   expect(said("harbor_street|quiet")).toBe("The clock paused for this scene");
   expect(said(null)).toBe("The clock running again");
+});
+
+test("the world state's lines of what changed and what is unsettled tell the clock's pause by the way it last went, never by operation codes", async () => {
+  const layout = readFileSync(join(GUIDANCE, ".prompts", "world-state.md"), "utf8");
+  for (const [presses, said, other] of [
+    [[true, false], "the clock running again", "the clock paused for this scene"],
+    [[true, false, true], "the clock paused for this scene", "the clock running again"],
+  ] as const) {
+    const r = await rig();
+    for (const to of presses) expect((await r.time({ control: "pause", scope: { all: true }, to })).applied).toBe(true);
+    setSystemTime(new Date(Date.now() + 1000));
+    const next = await r.writes.run(() => r.s.beginTurn({ chat: CHAT, kind: "normal" }), "the next turn").finally(() => setSystemTime());
+    const block = worldState(r.s, { chat: CHAT, turn: next.id, layout, charsPerToken: 3.2 });
+    const changed = block.text.split("\n").filter((line) => line.startsWith("engine: ") && line.includes("of the player's own"));
+    expect(changed).toEqual([expect.stringContaining(`(${said})`)]);
+    expect(block.text).not.toMatch(/engine\.pause|store\.marker/);
+    expect(changed[0]).not.toContain(other);
+  }
 });
