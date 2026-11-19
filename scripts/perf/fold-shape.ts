@@ -1,7 +1,9 @@
 // What a chat's fold does, step by step, counted from a read-only copy of RPE's database: how many of its path's turns fold as they
-// were recorded (`foldSteps`' clean steps: on their own path, every change after all those before) and how many are checked again; and
-// of the checked ones, how many units of events land in place (the store knows what each event writes) and how many are tried on a copy
-// of the whole world first (`trialOnCopy`), by the event types that send them there. Counts and type names only: no value, no text.
+// were recorded (`foldSteps`' clean steps: on their own path, every change after all those before) and how many are checked again; of
+// the clean ones, how many hold an event whose writes the store does not know, which makes the step's draft copy the whole world
+// (`thaw`), by the types that do; and of the checked ones, how many units of events land in place (the store knows what each event
+// writes) and how many are tried on a copy of the whole world first (`trialOnCopy`), by the event types that send them there. Counts
+// and type names only: no value, no text.
 //
 //   bun build scripts/perf/fold-shape.ts --target bun --outfile fold-shape.js
 //   bun fold-shape.js <copy of rpe.db> <chat id>
@@ -35,8 +37,9 @@ const eventOf = (op: string, value: string): { type: string; group: string | nul
 };
 
 let upto = 0;
-const counts = { turns: turns.length, clean: 0, checked: 0, changes: 0, applied: 0, eventsChecked: 0, singlesChecked: 0, unitsInPlace: 0, unitsOnCopy: 0, eventsOnCopy: 0 };
+const counts = { turns: turns.length, clean: 0, cleanThawing: 0, checked: 0, changes: 0, applied: 0, eventsChecked: 0, singlesChecked: 0, unitsInPlace: 0, unitsOnCopy: 0, eventsOnCopy: 0 };
 const onCopyBy = new Map<string, number>();
+const thawBy = new Map<string, number>();
 const groupSizes = new Map<number, number>();
 for (const turn of turns) {
   const rows = changesOf.all(row.user, turn);
@@ -48,6 +51,15 @@ for (const turn of turns) {
   for (const c of rows) if (c.id > upto) upto = c.id;
   if (clean) {
     counts.clean++;
+    // The first event of a type whose writes the store does not know thaws the step's draft: the whole world copied once.
+    const unknown = live.flatMap((c) => {
+      const ev = eventOf(c.op, c.value);
+      return ev === null || KNOWN.has(ev.type) ? [] : [ev.type];
+    });
+    if (unknown.length > 0) {
+      counts.cleanThawing++;
+      for (const t of new Set(unknown)) thawBy.set(t, (thawBy.get(t) ?? 0) + 1);
+    }
     continue;
   }
   counts.checked++;
@@ -79,6 +91,7 @@ for (const turn of turns) {
 }
 const snapshots = db.query<{ kind: string; n: number }, [string]>("SELECT kind, count(*) AS n FROM snapshot WHERE user = ? GROUP BY kind").all(row.user);
 console.log(JSON.stringify({ ...counts, snapshots: Object.fromEntries(snapshots.map((s) => [s.kind, s.n])) }));
+console.log(JSON.stringify({ cleanThawingByType: Object.fromEntries([...thawBy].sort((a, b) => b[1] - a[1])) }));
 console.log(JSON.stringify({ unitsOnCopyByType: Object.fromEntries([...onCopyBy].sort((a, b) => b[1] - a[1])) }));
 console.log(JSON.stringify({ groupSizes: Object.fromEntries([...groupSizes].sort((a, b) => a[0] - b[0])) }));
 db.close();
