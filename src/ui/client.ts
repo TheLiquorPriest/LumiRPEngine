@@ -9,7 +9,7 @@
 // why.
 
 import { createStore, type Readable } from "./store";
-import { ANSWER_STATUS, ANSWERS_PATH, type ApiRoutes, JOINED_STATUS, type JoinedAnswer, type LiveEvent, type MissingPermissionShown } from "../shared/api";
+import { ANSWER_GONE_STATUS, ANSWER_STATUS, ANSWERS_PATH, type ApiRoutes, JOINED_STATUS, type JoinedAnswer, type LiveEvent, type MissingPermissionShown } from "../shared/api";
 import { isRecord } from "../shared/json";
 import { type PreparingShown, preparingOf } from "../shared/preparing";
 import { type Credential, directRoad, type LiveUpdate, probeDirect, type RelayChannel, relayRoad, type Road, type RoadAnswer, type RoadDeps, SESSION_PATH, type StartFacts, type Timers } from "./roads";
@@ -341,7 +341,8 @@ export function createClient(connector: Connector): RpeClient {
 
   /**
    * One call's answer as RPE gives it at last: a long route's id asked after until its answer is ready. While the chat the call names is
-   * being made ready, each waiting answer says how far it is (`preparing`), until one no longer does or the answer comes.
+   * being made ready, each waiting answer says how far it is (`preparing`), until one no longer does or the answer comes. An id RPE no
+   * longer holds (it restarted meanwhile, on an update say) is a read asked again; anything else so lost is told as RPE's refusal.
    */
   async function answered(method: string, path: string, body: string | undefined): Promise<RoadAnswer> {
     let answer = await exchange(method, path, body);
@@ -356,6 +357,7 @@ export function createClient(connector: Connector): RpeClient {
         await promise;
         if (closed) throw new RpeError(0, "The page closed.");
         answer = await exchange("GET", pathOf(`${ANSWERS_PATH}/:id`, { id: wait.id }), undefined);
+        if (answer.status === ANSWER_GONE_STATUS && method === "GET") answer = await exchange(method, path, body);
       }
       return answer;
     } finally {
@@ -380,18 +382,38 @@ export function createClient(connector: Connector): RpeClient {
     }
   }
 
-  /** One request as RPE answers it: a road found if need be, found again once when the direct road stopped answering under the page, and a refused credential renewed. */
+  /**
+   * RPE was not reached on the road the page holds (it stopped, or restarts on an update): the road is let go, and RPE is found again by
+   * itself, waiting longer each time (`tryAgainLater`); once it is found every chat followed is read afresh (`followOn`), so what a cut read
+   * left undrawn is drawn without a reload.
+   */
+  function lost(connection: Connection, error: RpeError): void {
+    if (closed || road !== connection.road) return;
+    drop();
+    const failed = Promise.reject(error);
+    failed.catch(() => undefined);
+    current = failed;
+    state.set({ phase: "failed", error: error.message });
+    tryAgainLater(failed);
+  }
+
+  /** One request as RPE answers it: a road found if need be, found again once when the direct road stopped answering under the page, RPE found again when no road reached it, and a refused credential renewed. */
   async function exchange(method: string, path: string, body: string | undefined): Promise<RoadAnswer> {
     let connection = await connect();
     let answer: RoadAnswer;
     try {
-      answer = await send(connection, method, path, body);
+      try {
+        answer = await send(connection, method, path, body);
+      } catch (error) {
+        if (!(connector.canSwitch && connection.road.kind === "direct")) throw error;
+        // The direct road stopped answering under the page: find a road again, once (unless another call already has).
+        if (road === connection.road) client.reconnect();
+        connection = await connect();
+        answer = await send(connection, method, path, body);
+      }
     } catch (error) {
-      if (!(connector.canSwitch && connection.road.kind === "direct")) throw error;
-      // The direct road stopped answering under the page: find a road again, once (unless another call already has).
-      if (road === connection.road) client.reconnect();
-      connection = await connect();
-      answer = await send(connection, method, path, body);
+      if (error instanceof RpeError && error.status === 0) lost(connection, error);
+      throw error;
     }
     if (answer.status === 401 && (await connection.credential.renew().catch(() => false))) answer = await send(connection, method, path, body);
     if (answer.status === 401 && !connector.canSwitch) {

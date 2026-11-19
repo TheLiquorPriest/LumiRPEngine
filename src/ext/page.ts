@@ -1,9 +1,10 @@
 // The page's end of the pipe (STANDALONE-PLAN §4.3, "Relay"): what the shared UI uses to reach RPE
-// through the extension when the browser cannot reach RPE directly. One request, one whole answer;
-// the follows of chats, renewed while followed, since RPE drops a follow nobody renews; and the live
-// updates RPE sends for this page, put back together from their parts, in order. A list missing from
-// the count (a frame lost on the way) is passed on as a reset: the page reads afresh. What the hub
-// itself dropped for a page that fell behind, each batch says (`missed`).
+// through the extension when the browser cannot reach RPE directly. One request, one whole answer (a
+// request that did not reach RPE at all rejects); the follows of chats, renewed while followed, since RPE
+// drops a follow nobody renews, and asked again at once when RPE started again; and the live updates RPE
+// sends for this page, put back together from their parts, in order. A list missing from the count (a
+// frame lost on the way), and RPE's start again, are passed on as a reset: the page reads afresh. What
+// the hub itself dropped for a page that fell behind, each batch says (`missed`).
 
 import type { Clock } from "rp-harness/contract";
 import { readToPage, type MissingPermission, type PipeResponse, type StartFacts, type ToPage } from "../adapter/lumiverse/pipe-wire";
@@ -131,6 +132,22 @@ export function pageRoad(channel: PageChannel, options: { timers?: Timers; setti
         w.resolve({ status: message.status, headers: message.headers, body: message.body });
         return;
       }
+      case "unreached": {
+        // RPE was not reached at all: the request rejects, as a road's does where RPE is not reached (`Road.request`).
+        const w = waiting.get(message.id);
+        if (w === undefined) return;
+        waiting.delete(message.id);
+        timers.clearTimeout(w.timer);
+        w.reject(new Error(message.error));
+        return;
+      }
+      case "restarted":
+        // RPE started again (an update among the reasons): what it followed for this page went with it, and its frames are numbered
+        // anew. Each chat is followed again now, and the page reads afresh once they are (a reset), so it shows what RPE holds now.
+        lastSeq = null;
+        parts = null;
+        void Promise.allSettled([...followed.keys()].map((chat) => ask(chat, true))).then(() => deliver([], true));
+        return;
       case "following": {
         const w = following.get(message.chat)?.shift();
         if (w === undefined) return;

@@ -6,7 +6,8 @@
 // kept while the chat stays open. When RPE says the chat changed (a swipe flipped, a turn ended), the rows
 // mounted then are asked again, and the lines of rows no longer mounted are let go, to be asked when their
 // rows come back. A read that fails leaves its rows without their lines: they are asked again at the next
-// change, or when they are mounted again. The route is the turn area's (`GET /api/v1/chats/:chat/replies`).
+// change, when the page follows the chat again (RPE found again after a stop cut the read), or when they are
+// mounted again. The route is the turn area's (`GET /api/v1/chats/:chat/replies`).
 
 import type { LaneShown, ReplyLine } from "../../shared/api";
 import { createStore, type Readable } from "../store";
@@ -86,20 +87,29 @@ export function repliesOf(env: FrameEnv): Replies | null {
     queued = true;
     queueMicrotask(flush);
   };
+  /** The rows on the page now are asked again, and the lines of rows taken down are let go. */
+  const askAgain = (): void => {
+    const now = state.get();
+    const kept = new Map([...now.lines].filter(([message]) => mounted.has(message)));
+    if (kept.size !== now.lines.size) state.set({ ...now, lines: kept });
+    for (const message of mounted.keys()) {
+      if (asking?.has(message) === true) stale.add(message);
+      else wanted.add(message);
+    }
+    schedule();
+  };
   const unfollow = env.client.follow(chat, {
     events(events) {
-      // A swipe flipped or a turn ended: the rows on the page now are asked again, and the lines of rows taken down are let go.
-      if (!events.some((event) => event.kind === "state")) return;
-      const now = state.get();
-      const kept = new Map([...now.lines].filter(([message]) => mounted.has(message)));
-      if (kept.size !== now.lines.size) state.set({ ...now, lines: kept });
-      for (const message of mounted.keys()) {
-        if (asking?.has(message) === true) stale.add(message);
-        else wanted.add(message);
-      }
+      // A swipe flipped or a turn ended.
+      if (events.some((event) => event.kind === "state")) askAgain();
+    },
+    // Following began (at the start, or once RPE is found again after it was not reached): the rows on the page with no line and none
+    // being read are asked, the lines of a read RPE's stop cut among them.
+    reset() {
+      const { lines } = state.get();
+      for (const message of mounted.keys()) if (!lines.has(message) && asking?.has(message) !== true) wanted.add(message);
       schedule();
     },
-    reset: () => undefined,
     refused: () => undefined,
   });
   const replies: Replies = {

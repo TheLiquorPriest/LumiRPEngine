@@ -4,7 +4,7 @@
 // and a page's read of a chat RPE is making ready for its build at once (`server.ts`), so a page never asks again for what RPE is
 // still working. The work goes on; its answer, the route's own status and body, is kept here and read from one route,
 // `GET /api/v1/answers/:id`: while the work runs it answers the same 202 and id, once it is done it gives the answer once, and an id
-// it does not hold (never given, read already, or dropped) is 404. While the chat a read waits for is being made ready, each 202
+// it does not hold (never given, read already, dropped, or given before RPE restarted) is 410. While the chat a read waits for is being made ready, each 202
 // says how far that is (`preparing`, `src/shared/preparing.ts`). An answer never read is dropped `server.answerKeepSeconds` after it
 // was ready. Work that answers at once by naming its own run or job (Settle now, bootstrap) goes on doing so; this is for the rest.
 
@@ -14,6 +14,8 @@ import { rawRoute } from "./routes";
 
 /** The status a long route's call is answered with at once, and its answers route while the work runs. */
 export const ANSWER_STATUS = 202;
+/** The status of the answers route for an id it does not hold: no route answers it, so a page tells it from a route's own answer (a read so lost is asked again). */
+export const ANSWER_GONE_STATUS = 410;
 /** Where a long route's answer is read, by its id: `GET /api/v1/answers/:id`. */
 export const ANSWERS_PATH = "/api/v1/answers";
 
@@ -88,7 +90,8 @@ export function answersRoute(answers: Answers) {
     access: "page",
     group: "service",
     does: "The answer of a request to a long route, by the id it was answered with: the same 202 and id while its work runs, with how far the chat it waits for is from ready while RPE makes it ready for its build, then the route's own answer, once.",
-    answers: "202 with `{ answer: <id> }` while the work runs, and `preparing: { chat, ahead, done, of }` beside it while the chat is made ready; then the route's own status and body, once; 404 for an id RPE does not hold",
-    raw: (_request, { params }) => answers.read(params.id) ?? Response.json({ error: "RPE holds no answer by that id: it was read already, was dropped once its time to be read had passed, or was never given." }, { status: 404 }),
+    answers: "202 with `{ answer: <id> }` while the work runs, and `preparing: { chat, ahead, done, of }` beside it while the chat is made ready; then the route's own status and body, once; 410 for an id RPE does not hold",
+    raw: (_request, { params }) =>
+      answers.read(params.id) ?? Response.json({ error: "RPE holds no answer by that id: it was read already, was dropped once its time to be read had passed, was given before RPE restarted, or was never given." }, { status: ANSWER_GONE_STATUS }),
   });
 }

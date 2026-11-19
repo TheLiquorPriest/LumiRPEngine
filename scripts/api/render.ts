@@ -5,7 +5,7 @@
 
 import type { AnyShape, FieldShape, LiveKindDeclaration, LiveSocketDeclaration, Method, QueryFields, RouteGroup, RouteInfo } from "../../src/app";
 import { JOINED_STATUS, joinedAnswer, METHODS, ROUTE_GROUPS } from "../../src/app";
-import { ANSWER_STATUS, ANSWERS_PATH } from "../../src/app/answers";
+import { ANSWER_GONE_STATUS, ANSWER_STATUS, ANSWERS_PATH } from "../../src/app/answers";
 
 /** The table as the generator reads it: every route, every live kind (the app's and the areas'), the live socket over them, and the server's own body limits as shipped. */
 export interface Table {
@@ -250,6 +250,8 @@ function socketConstants(s: LiveSocketDeclaration): string[] {
     `export const JOINED_STATUS = ${JOINED_STATUS};`,
     "/** The status a long route answers at once with `{ answer: <id> }`, and its answer's route while the work runs. */",
     `export const ANSWER_STATUS = ${ANSWER_STATUS};`,
+    "/** The status of a long route's answer's route for an id RPE does not hold (read already, dropped, or given before RPE restarted): a read so lost is asked again. */",
+    `export const ANSWER_GONE_STATUS = ${ANSWER_GONE_STATUS};`,
     "/** Where a long route's answer is read, by the id it was answered with: `GET <this>/<id>`. */",
     `export const ANSWERS_PATH = ${JSON.stringify(ANSWERS_PATH)};`,
   ];

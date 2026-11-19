@@ -7180,7 +7180,7 @@ export interface RawRoutes {
   /** The answer of a request to a long route, by the id it was answered with: the same 202 and id while its work runs, with how far the chat it waits for is from ready while RPE makes it ready for its build, then the route's own answer, once. */
   "GET /api/v1/answers/:id": {
     params: { id: string };
-    answers: "202 with `{ answer: <id> }` while the work runs, and `preparing: { chat, ahead, done, of }` beside it while the chat is made ready; then the route's own status and body, once; 404 for an id RPE does not hold";
+    answers: "202 with `{ answer: <id> }` while the work runs, and `preparing: { chat, ahead, done, of }` beside it while the chat is made ready; then the route's own status and body, once; 410 for an id RPE does not hold";
     joined: false;
   };
   /** The extension asks whether the registration it holds is the one this RPE made. */
@@ -7288,5 +7288,7 @@ export const LIVE_ADDRESS_PREFIX = "~to:";
 export const JOINED_STATUS = 409;
 /** The status a long route answers at once with `{ answer: <id> }`, and its answer's route while the work runs. */
 export const ANSWER_STATUS = 202;
+/** The status of a long route's answer's route for an id RPE does not hold (read already, dropped, or given before RPE restarted): a read so lost is asked again. */
+export const ANSWER_GONE_STATUS = 410;
 /** Where a long route's answer is read, by the id it was answered with: `GET <this>/<id>`. */
 export const ANSWERS_PATH = "/api/v1/answers";

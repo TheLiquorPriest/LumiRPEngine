@@ -171,6 +171,10 @@ export type FromPage = { rpe: "start" } | ({ rpe: "request" } & PipeRequest) | {
 export type ToPage =
   | { rpe: "start"; facts: StartFacts | null; error?: string; missing: MissingPermission[] }
   | ({ rpe: "response" } & PipeResponse)
+  /** A page's request that did not reach RPE at all (it stopped, or restarts on an update): no answer of RPE's, and why. */
+  | { rpe: "unreached"; id: string; error: string }
+  /** RPE registered anew (it started again, on an update among the reasons): what it followed for the page went with it, so the page follows again and reads afresh. */
+  | { rpe: "restarted" }
   | ({ rpe: "live" } & Omit<LiveFrame, "page">)
   | { rpe: "following"; chat: string; error?: string }
   | { rpe: "permissions"; missing: MissingPermission[] }
@@ -270,6 +274,10 @@ export function readToPage(v: unknown): ToPage | null {
       const headers = headersOf(v.headers);
       return str(v.id) && count(v.status) && headers !== null && typeof v.body === "string" ? { rpe: "response", id: v.id, status: v.status, headers, body: v.body } : null;
     }
+    case "unreached":
+      return str(v.id) && str(v.error) ? { rpe: "unreached", id: v.id, error: v.error } : null;
+    case "restarted":
+      return { rpe: "restarted" };
     case "live": {
       const part = partOf(v.part);
       if (!count(v.seq) || typeof v.data !== "string" || part === null) return null;

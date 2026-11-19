@@ -2,13 +2,15 @@
 // §4.3): it holds no logic of its own. What it carries:
 // - RPE's registration, sent on RPE's relay socket each time it opens: kept once RPE confirms it
 //   (`registration.ts`), and answered to the socket it came from: taken, with what the extension is
-//   missing, or refused and why;
+//   missing, or refused and why; once taken, each page of the user is told RPE started again, so it
+//   follows again and reads afresh;
 // - a page's start: RPE's start-up facts (its addresses, its build, a short-lived page token), asked of
 //   RPE's start route and handed to that page alone;
 // - a page's request: carried to RPE's API through Spindle's proxy (one request, one whole answer, 30 s,
 //   25 MB: `worker-host.ts:4647-4741`) and answered to that page alone; what the proxy refuses (an answer
 //   over its size, a path naming a JavaScript file, a JavaScript answer: `worker-host.ts:772`,
-//   `utils/safe-fetch.ts:448-450`, `:495-504`) is told to the page as such;
+//   `utils/safe-fetch.ts:448-450`, `:495-504`) is told to the page as such, and a request that did not
+//   reach RPE at all as unreached, with why;
 // - a generation the extension stopped because it could not tell whose chat it was: its record, told to
 //   RPE on its road, or once RPE registers again where the road was not known;
 // - a page's follow of a chat: told to RPE's live route; RPE's live frames for that page come back on
@@ -134,7 +136,8 @@ export function startPipe(deps: PipeDeps): Pipe {
     } catch (error) {
       // An answer too large for the proxy: the page asks for it another way (a job's id, R-4).
       if (TOO_LARGE.test(words(error))) return answer(413, JSON.stringify({ error: `RPE's answer is larger than Lumiverse's proxy carries (${words(error)}).` }));
-      answer(502, JSON.stringify({ error: `RPE was not reached through Lumiverse: ${words(error)}` }));
+      // Not reached at all (RPE stopped, or restarts on an update): no answer of RPE's, so the page finds RPE again and reads afresh.
+      toPage(user, page, { rpe: "unreached", id: req.id, error: `RPE was not reached through Lumiverse: ${words(error)}` });
     }
   }
 
@@ -177,6 +180,8 @@ export function startPipe(deps: PipeDeps): Pipe {
           }
           await toRpe(user, { rpe: "registered", missing: deps.missing(), build: deps.build });
           deps.registered(user);
+          // RPE started again (an update among the reasons): what it followed for each page went with it, so each follows again and reads afresh.
+          for (const page of pages.get(user) ?? []) toPage(user, page, { rpe: "restarted" });
           const record = untold.get(user);
           if (record !== undefined) tell(user, record);
           if (deps.statedHash !== null && !arrivedTold.has(user)) {
