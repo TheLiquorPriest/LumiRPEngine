@@ -63,8 +63,8 @@ import { RunEnds, stateChanged } from "./live";
 import type { PanelAsk, RequestRecord, Requests, TapFrom } from "../turn/requests";
 import { editId, type Head, headOf, PLAYER, recordOwnerEdit, Refused, type Resolved } from "./owner-edits";
 import { type GuidanceFiles, historyTexts } from "../iface";
-import { type KeepTurnReads, turnReadKeeper } from "../store/turn-reads";
-import { journalNotes } from "./journal";
+import { afterTurns, type KeepTurnReads, turnReadKeeper } from "../store/turn-reads";
+import { journalNotes, type JournalWords, storeEndedNotes } from "./journal";
 import { chipsOf, meterOf, pendingOf } from "./panel-reads";
 import type { TapSettings } from "./settings";
 import { TIMELAPSE_ACTION } from "./state/palette";
@@ -299,13 +299,31 @@ export class PlayService {
 
   constructor(private readonly deps: PlayDeps) {
     this.runEnds = new RunEnds(deps.live);
-    this.keep = turnReadKeeper(deps.writes, (error) => {
-      if (!(error instanceof WritesClosed)) deps.log.warn("The Journal's notes a read worked out could not be stored; the next read after a restart works them out again.", { error: error instanceof Error ? error.message : String(error) });
-    });
+    const failed = (error: unknown): void => {
+      if (!(error instanceof WritesClosed)) deps.log.warn("The Journal's notes worked out could not be stored; the next read after a restart works them out again.", { error: error instanceof Error ? error.message : String(error) });
+    };
+    this.keep = turnReadKeeper(deps.writes, failed);
+    // A turn's end stores the notes of the turns it leaves without, whether or not the Journal is open (`storeEndedNotes`).
+    afterTurns(
+      deps.store,
+      deps.turning,
+      async (user, chat) => {
+        if (deps.store.user(user).chat(chat)?.world == null) return;
+        await storeEndedNotes(deps.store, user, chat, await this.journalWords(user, chat), this.keep);
+      },
+      failed,
+    );
   }
 
-  /** Stores the Journal's notes a read worked out with their turns, so a restart reads them (`journal.ts`). */
+  /** Stores the Journal's notes a read or a turn's end worked out with their turns, so a restart reads them (`journal.ts`). */
   private readonly keep: KeepTurnReads;
+
+  /** The words the chat's Journal notes are worded in: its history lines and a report's code in this area's words, named by what they hold. */
+  private async journalWords(user: string, chat: string): Promise<JournalWords> {
+    const keys = (await this.part()).keys;
+    const texts = await historyTexts(this.deps.texts(user, chat));
+    return { texts, code: (code: string) => own(keys, code) ?? code, key: hashParts("journal-words", JSON.stringify(texts), JSON.stringify(keys)) };
+  }
 
   /**
    * The chat's state view at its head, or at `turn`, one of its turns: its controls preset by the chat's out-of-play settings, its
@@ -375,10 +393,8 @@ export class PlayService {
     // A chat RPE plays on no world has none, as its view had none.
     if (s.chat(chat)?.world == null) return [];
     const { taps } = await this.deps.settings(user, chat);
-    const keys = (await this.part()).keys;
     // Each turn's notes are kept and stored while its state and these words stand, so the words name themselves by what they hold.
-    const texts = await historyTexts(this.deps.texts(user, chat));
-    const words = { texts, code: (code: string) => own(keys, code) ?? code, key: hashParts("journal-words", JSON.stringify(texts), JSON.stringify(keys)) };
+    const words = await this.journalWords(user, chat);
     const key = JSON.stringify([s.stateKey(chat, null), words.key, taps.journalMost]);
     const going = this.reading.get(key);
     if (going !== undefined) return await going;

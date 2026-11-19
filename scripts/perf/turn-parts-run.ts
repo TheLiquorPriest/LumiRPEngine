@@ -393,7 +393,22 @@ await timed("the commit: the turn tied to its reply", () => app.writes.run(() =>
 
 // ---------------------------------------------------------------- what a page reads after it
 
-async function afterReads(after: string): Promise<void> {
+/**
+ * Waits until `turn`'s node holds its notes and its line, which a turn's end stores once the chat's writes have settled and no run of it
+ * goes on (`afterTurns`, the settling `SETTLED_MS` included), whether or not a page reads them; ten seconds at most.
+ */
+async function endStored(turn: string): Promise<void> {
+  const began = performance.now();
+  const node = s.turn(turn)?.node ?? "";
+  while ((turns.store.db.query<{ n: number }, [string, string]>("SELECT count(*) AS n FROM turn_read WHERE user = ? AND node = ?").get(owner, node)?.n ?? 0) < 2) {
+    if (performance.now() - began > 10_000) throw new Error("a turn's end stored no notes and line within ten seconds");
+    await Bun.sleep(5);
+  }
+}
+
+async function afterReads(after: string, ended: string): Promise<void> {
+  // What the turn's end stores of its turn with no page asking: its notes and its line, in the background once the writes settle.
+  await timed(`${after}: its turn's notes and line stored by the turn's end, no page asking (from the last write, the settling included)`, () => endStored(ended));
   // The chat's own reading of its head alone (`headState`: the head turn's state with his changes that stand after it), as the first
   // read after a write folds it: the rows after it find it held.
   await timed(`${after}: the head's reading, alone`, () => s.headState(chat));
@@ -415,28 +430,28 @@ async function afterReads(after: string): Promise<void> {
   await timed(`${after}: the head's state`, () => s.headState(chat));
   await timed(`${after}: /state, a second ask`, () => route("/api/v1/chats/:chat/state", { chat }), size);
 }
-await afterReads("after the turn");
+await afterReads("after the turn", turn);
 
 // A swipe of that turn: another attempt at its reply, begun, recorded and tied as the lane does.
 const swipe = await timed("a swipe: begun", () => app.writes.run(() => s.beginTurn({ chat, kind: "swipe", target: reply }), "the probe's swipe"));
 if (swipe !== undefined) {
   await timed("a swipe: its changes recorded", () => app.writes.run(() => s.addChanges(swipe.id, invented(2)), "the probe's swipe's changes"));
   await timed("a swipe: tied to its reply", () => app.writes.run(() => s.tieTurn(swipe.id, { message: reply, hash: textHash("Another invented reply, the probe's."), date: Date.now() }), "the probe's swipe's tie"));
-  await afterReads("after a swipe");
+  await afterReads("after a swipe", swipe.id);
   // A job of the swipe's turn, with one invented change, ended as a job ends when it settles: what it changed takes effect at once.
   await timed("a job of the swipe: its change recorded", () => app.writes.run(() => s.addChanges(swipe.id, invented(3).slice(1, 2).map((c) => ({ ...c, job: "probe-job" }))), "the probe's job's change"));
   await timed("a job of the swipe: ended", () => app.writes.run(() => s.endJob("probe-job"), "the probe's job's end"));
-  await afterReads("after a job's end");
+  await afterReads("after a job's end", swipe.id);
 }
 
 // An edit of his own (invented, as the page writes one), then its Undo, with the same reads after each.
 const edit = await timed("an edit of his own", () => app.writes.run(() => s.addOwnerChanges(chat, [{ lane: "engine", op: "set", value: { type: "set", entity: someone, field: "probe_mark", value: 99 }, by: "player", source: "player" }]), "the probe's edit"));
 if (edit !== undefined) {
-  await afterReads("after an edit of his own");
+  await afterReads("after an edit of his own", swipe?.id ?? turn);
   const undone = edit.changes[0]?.id;
   if (undone !== undefined) {
     await timed("an Undo of his edit", () => app.writes.run(() => s.undo(undone), "the probe's undo"));
-    await afterReads("after an Undo of his edit");
+    await afterReads("after an Undo of his edit", swipe?.id ?? turn);
   }
 }
 

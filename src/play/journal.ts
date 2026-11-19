@@ -20,7 +20,7 @@ import type { JournalNote } from "../shared/ledger";
 import { withLines } from "../shared/lines";
 import { inStretches, JoinedTurnError, type ChangeRow, type PathEntry, type Store, type UserStore } from "../store";
 import { eventOf } from "../store/fold";
-import { type KeepTurnReads, storedTurnReads, type TurnReadMade, turnMark } from "../store/turn-reads";
+import { ENDED_MOST, endedRowless, type KeepTurnReads, storedTurnReads, type TurnReadMade, turnMark } from "../store/turn-reads";
 
 /** Why a change took no effect, in a person's words: the rule's own words where a report brought them, else the report's code worded by `code`. */
 function reasonOf(change: ChangeRow, code: (code: string) => string): string {
@@ -91,27 +91,29 @@ function noteAt(s: UserStore, entry: PathEntry, words: JournalWords, wording: st
   }
 }
 
-/** One turn's notes: those held in memory, else worked out from the state at its end, held, and put in `made` to be stored with its node. */
-function notesOf(store: Store, s: UserStore, entry: PathEntry, words: JournalWords, wording: string, made: Map<string, TurnReadMade>): JournalNote[] {
+/**
+ * One turn's notes: those held in memory, else worked out from the state at its end and held; put in `made` to be stored with its node
+ * where worked out, or where `all` asks it (its node holds no row: a turn's end, `storeEndedNotes`).
+ */
+function notesOf(store: Store, s: UserStore, entry: PathEntry, words: JournalWords, wording: string, made: Map<string, TurnReadMade>, all: boolean): JournalNote[] {
   const at = noteAt(s, entry, words, wording);
   if (at === null || entry.turn === null) return [];
   const kept = keptOf(store);
-  const hit = kept.get(at.held);
-  if (hit !== undefined) {
-    hold(kept, at.held, hit);
-    return hit;
+  let notes = kept.get(at.held);
+  const worked = notes === undefined;
+  if (notes === undefined) {
+    const view = s.viewAt(entry.turn);
+    const changes = s.changes(entry.turn);
+    const applied = changes.filter((c) => c.applied);
+    const events = applied.filter((c) => c.lane === "engine").flatMap((c) => eventOf(c.op, c.value) ?? []);
+    const lines = events.length === 0 ? [] : playerLines(store.env.registry, view.world, view.state.world, view.world.pov, events, events.length);
+    notes = [];
+    for (const text of [...lines, ...beatsOf(applied)]) notes.push({ kind: "note", messageId: entry.message, ref: null, text });
+    for (const change of changes) if (!change.applied) notes.push({ kind: "dropped", messageId: entry.message, ref: null, text: reasonOf(change, words.code) });
   }
-  const view = s.viewAt(entry.turn);
-  const changes = s.changes(entry.turn);
-  const applied = changes.filter((c) => c.applied);
-  const events = applied.filter((c) => c.lane === "engine").flatMap((c) => eventOf(c.op, c.value) ?? []);
-  const lines = events.length === 0 ? [] : playerLines(store.env.registry, view.world, view.state.world, view.world.pov, events, events.length);
-  const notes: JournalNote[] = [];
-  for (const text of [...lines, ...beatsOf(applied)]) notes.push({ kind: "note", messageId: entry.message, ref: null, text });
-  for (const change of changes) if (!change.applied) notes.push({ kind: "dropped", messageId: entry.message, ref: null, text: reasonOf(change, words.code) });
   hold(kept, at.held, notes);
   const node = s.turn(entry.turn)?.node;
-  if (node !== undefined) made.set(entry.turn, { node, mark: at.mark, key: at.worded, value: JSON.stringify(notes) });
+  if ((worked || all) && node !== undefined) made.set(entry.turn, { node, mark: at.mark, key: at.worded, value: JSON.stringify(notes) });
   return notes;
 }
 
@@ -123,8 +125,32 @@ export async function journalNotes(store: Store, user: string, chat: string, mos
   const s = store.user(user);
   if (s.chat(chat) === null) return [];
   const turns = s.path(chat).filter((entry) => !entry.user && entry.turn !== null);
+  return (await notesFor(store, user, turns.slice(-Math.max(1, most)), words, keep, false)).flat();
+}
+
+/**
+ * What a turn's end stores of the Journal's notes (`afterTurns`): those of the chat's newest turns whose node holds none in `words`
+ * (`endedRowless`), worked out and given to `keep`, whether or not the Journal is open.
+ */
+export async function storeEndedNotes(store: Store, user: string, chat: string, words: JournalWords, keep: KeepTurnReads): Promise<void> {
+  const s = store.user(user);
+  if (s.chat(chat) === null) return;
+  const wording = wordingOf(store);
+  const turns = s
+    .path(chat)
+    .filter((entry) => !entry.user && entry.turn !== null)
+    .slice(-ENDED_MOST);
+  const rowless = new Set(endedRowless(store, user, "notes", turns.map((entry) => ({ turn: entry.turn ?? "", key: noteAt(s, entry, words, wording)?.worded ?? null }))));
+  if (rowless.size > 0) await notesFor(store, user, turns.filter((entry) => entry.turn !== null && rowless.has(entry.turn)), words, keep, true);
+}
+
+/**
+ * The notes of `asked` (path entries, oldest first): from memory, else from their nodes' rows, else worked out; what was worked out, or
+ * with `all` everything (a turn's end, whose turns' nodes hold no row), given to `keep`.
+ */
+async function notesFor(store: Store, user: string, asked: readonly PathEntry[], words: JournalWords, keep: KeepTurnReads | undefined, all: boolean): Promise<JournalNote[][]> {
+  const s = store.user(user);
   const lines = linesOf(words.texts);
-  const asked = turns.slice(-Math.max(1, most));
   const kept = keptOf(store);
   const wording = wordingOf(store);
   // The turns whose notes memory does not hold are read from their nodes' rows, before anything is folded: after a restart, every turn's
@@ -150,7 +176,7 @@ export async function journalNotes(store: Store, user: string, chat: string, mos
   if (cold !== null) await store.afar(() => s.stateAt(cold));
   // Oldest first, so each turn's state folds on from the one before it.
   const made = new Map<string, TurnReadMade>();
-  const notes = await inStretches(asked, (entry) => notesOf(store, s, entry, words, wording, made), (stretch) => withLines(lines, stretch));
+  const notes = await inStretches(asked, (entry) => notesOf(store, s, entry, words, wording, made, all), (stretch) => withLines(lines, stretch));
   keep?.(store, user, "notes", made);
-  return notes.flat();
+  return notes;
 }

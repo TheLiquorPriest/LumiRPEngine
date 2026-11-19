@@ -22,7 +22,7 @@ import { isRecord } from "../shared/json";
 import { withLines } from "../shared/lines";
 import { inStretches, JoinedTurnError, ownerPlaceOf, type Store, timeOf, type UserStore } from "../store";
 import { eventOf } from "../store/fold";
-import { type KeepTurnReads, storedTurnReads, type TurnReadMade, turnMark, turnReadKeeper } from "../store/turn-reads";
+import { afterTurns, ENDED_MOST, endedRowless, type KeepTurnReads, storedTurnReads, type TurnReadMade, turnMark, turnReadKeeper } from "../store/turn-reads";
 import { STORY_OPS } from "../story/fold";
 import type { Turns } from "./lane";
 import { guidanceTexts } from "./texts";
@@ -118,22 +118,48 @@ function lineAt(s: UserStore, turn: string, words: string, wording: string): { t
 }
 
 /**
- * A turn's line: the one held in memory, else worked out from the state at its end, held, and put in `made` to be stored with its node.
- * Throws the store's `JoinedTurnError` for a joined turn.
+ * A turn's line: the one held in memory, else worked out from the state at its end and held; put in `made` to be stored with its node
+ * where worked out, or where `all` asks it (its node holds no row: a turn's end, `storeEndedLines`). Throws the store's `JoinedTurnError`
+ * for a joined turn.
  */
-function keptLanes(store: Store, s: UserStore, turn: string, words: string, wording: string, made: Map<string, TurnReadMade>): Lanes {
+function keptLanes(store: Store, s: UserStore, turn: string, words: string, wording: string, made: Map<string, TurnReadMade>, all = false): Lanes {
   const at = lineKey(s, turn, words, wording);
   const kept = keptOf(store);
   const hit = kept.get(at.held);
-  if (hit !== undefined) {
-    hold(kept, at.held, hit);
-    return hit;
-  }
-  const lanes = lanesAt(s, store.env.registry, turn);
+  const lanes = hit ?? lanesAt(s, store.env.registry, turn);
   hold(kept, at.held, lanes);
   const node = s.turn(turn)?.node;
-  if (node !== undefined) made.set(turn, { node, mark: at.mark, key: at.worded, value: JSON.stringify(lanes) });
+  if ((hit === undefined || all) && node !== undefined) made.set(turn, { node, mark: at.mark, key: at.worded, value: JSON.stringify(lanes) });
   return lanes;
+}
+
+/**
+ * What a turn's end stores of the lines under replies (`afterTurns`): those of the turns of the chat's newest replies (or the turns they
+ * joined) whose node holds none in `words` (`endedRowless`), worked out and given to `keep`, whether or not a page asks for them.
+ */
+export async function storeEndedLines(store: Store, user: string, chat: string, words: ReplyWords, keep: KeepTurnReads): Promise<void> {
+  const s = store.user(user);
+  if (s.chat(chat) === null) return;
+  const wording = wordingOf(store);
+  const newest = s
+    .path(chat)
+    .filter((e) => !e.user && e.turn !== null)
+    .slice(-ENDED_MOST)
+    .map((e) => lineAt(s, e.turn ?? "", words.key, wording));
+  const rowless = [...new Set(endedRowless(store, user, "line", newest.map((at) => ({ turn: at.turn, key: at.worded }))))];
+  const first = rowless[0];
+  if (first === undefined) return;
+  await store.afar(() => s.stateAt(first));
+  const made = new Map<string, TurnReadMade>();
+  const lines = wordsOf(words.texts);
+  await inStretches(rowless, (turn) => keptLanes(store, s, turn, words.key, wording, made, true), (stretch) => withLines(lines, stretch));
+  keep(store, user, "line", made);
+}
+
+/** The words a chat's lines are worded in: its own copy of the history lines, the nearest level's, named by what they hold. */
+async function lineWords(turns: Pick<Turns, "files" | "env">, user: string, chat: string): Promise<ReplyWords> {
+  const texts = await historyTexts(guidanceTexts(turns.files, { user, chat, session: NO_SESSION }, turns.env.log));
+  return { texts, key: hashParts("reply-words", JSON.stringify(texts)) };
 }
 
 /** A turn's line: the time and place at its end, and what each lane did. Throws the store's `JoinedTurnError` for a joined turn. */
@@ -258,10 +284,13 @@ export async function replyLines(turns: Pick<Turns, "store" | "marks" | "runs">,
 }
 
 export function replyRoutes(turns: Pick<Turns, "store" | "marks" | "runs" | "files" | "env" | "writes">) {
-  // The lines a read works out are stored with their turns, so a restart reads them.
-  const keep = turnReadKeeper(turns.writes, (error) => {
-    if (!(error instanceof WritesClosed)) turns.env.log.warn("The lines under replies a read worked out could not be stored; the next read after a restart works them out again.", { error: error instanceof Error ? error.message : String(error) });
-  });
+  const failed = (error: unknown): void => {
+    if (!(error instanceof WritesClosed)) turns.env.log.warn("The lines under replies worked out could not be stored; the next read after a restart works them out again.", { error: error instanceof Error ? error.message : String(error) });
+  };
+  // The lines a read or a turn's end works out are stored with their turns, so a restart reads them; a turn's end stores those of the
+  // turns it leaves without, whether or not a page asks (`storeEndedLines`).
+  const keep = turnReadKeeper(turns.writes, failed);
+  afterTurns(turns.store, (user, chat) => turns.runs.ofChat(user, chat).length > 0, async (user, chat) => storeEndedLines(turns.store, user, chat, await lineWords(turns, user, chat), keep), failed);
   return [
     route({
       method: "GET",
@@ -276,8 +305,7 @@ export function replyRoutes(turns: Pick<Turns, "store" | "marks" | "runs" | "fil
         const scope = { user, chat: params.chat, session: NO_SESSION };
         const part = await loadGuidance(turns.files, scope).part(PARTS.errors);
         const errors = part?.format === "lines" ? part : undefined;
-        const texts = await historyTexts(guidanceTexts(turns.files, scope, turns.env.log));
-        return { replies: await replyLines(turns, user, params.chat, query.ids.split(",").filter((id) => id !== ""), errors, { texts, key: hashParts("reply-words", JSON.stringify(texts)) }, keep) };
+        return { replies: await replyLines(turns, user, params.chat, query.ids.split(",").filter((id) => id !== ""), errors, await lineWords(turns, user, params.chat), keep) };
       },
     }),
   ] as const;

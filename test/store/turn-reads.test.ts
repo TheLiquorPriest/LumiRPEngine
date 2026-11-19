@@ -1,18 +1,19 @@
 // The Journal's notes and the lines under replies stored with their turns' nodes (`store/turn-reads.ts`): a read works out only the
 // turns whose node holds no row in the words asked, and stores those; what it gives from memory or rows is what a store with no rows
 // works out afresh; an edit of his own, an Undo, a job's end, a swipe and other words each have exactly the rows they leave missing
-// worked out again; a store opened again on the database reads the rows and works nothing out.
+// worked out again; a store opened again on the database reads the rows and works nothing out; and a turn's end, with no page open,
+// stores what its turn shows once the chat's writes settle and no run of it goes on.
 
 import { beforeAll, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { historyTexts, installHistoryLines } from "../../src/iface/history-lines";
 import { shippedTexts } from "../../src/iface/texts";
-import { journalNotes, type JournalWords } from "../../src/play/journal";
+import { journalNotes, type JournalWords, storeEndedNotes } from "../../src/play/journal";
 import { openStore, type Store } from "../../src/store";
-import { type KeepTurnReads, storedTurnReads, storeTurnReads, type TurnReadKind } from "../../src/store/turn-reads";
+import { afterTurns, type KeepTurnReads, storedTurnReads, storeTurnReads, type TurnReadKind } from "../../src/store/turn-reads";
 import { STORY_STORE_AREA } from "../../src/story";
 import type { Turns } from "../../src/turn/lane";
-import { replyLines, type ReplyWords } from "../../src/turn/replies";
+import { replyLines, type ReplyWords, storeEndedLines } from "../../src/turn/replies";
 import { engine, goTo, make, play, POV, registry, testStore, tick, USER } from "./fixtures";
 
 const REPLIES = ["m1", "m2", "m3", "m4"];
@@ -141,5 +142,62 @@ describe("a turn's reads stored with its node", () => {
     s.addChanges(done, engine(tick(2)));
     storeTurnReads(store, USER, "notes", new Map([[done, { node: s.turn(done)?.node ?? "", mark, key: "k", value: "[]" }]]));
     expect(storedTurnReads(store, USER, "notes", [s.turn(done)?.node ?? ""]).size).toBe(0);
+  });
+
+  test("are stored when a turn ends, with no page open: the turns it leaves without, once the chat's writes settle and no run goes on", async () => {
+    const { store, s, turns } = played();
+    let running = true;
+    const stored: Record<TurnReadKind, string[]> = { notes: [], line: [] };
+    const keep: KeepTurnReads = (at, user, kind, rows) => {
+      stored[kind].push(...rows.keys());
+      storeTurnReads(at, user, kind, rows);
+    };
+    // Told when a pass found the chat still running, or when it ended: what a step below waits for, rather than a guessed time.
+    let told = Promise.withResolvers<void>();
+    const ended = async (user: string, chat: string): Promise<void> => {
+      await storeEndedNotes(store, user, chat, words, keep);
+      await storeEndedLines(store, user, chat, lineWords, keep);
+      told.resolve();
+    };
+    const stop = afterTurns(
+      store,
+      () => {
+        if (running) told.resolve();
+        return running;
+      },
+      ended,
+      (error) => told.reject(error),
+      1,
+    );
+    const settled = async (): Promise<Record<TurnReadKind, string[]>> => {
+      await told.promise;
+      told = Promise.withResolvers<void>();
+      const out = { notes: stored.notes.sort(), line: stored.line.sort() };
+      stored.notes = [];
+      stored.line = [];
+      return out;
+    };
+    try {
+      // While a run of the chat goes on, nothing is worked out; once it is over, the turns no row is stored for (every turn here).
+      const next = play(s, "c", "m5", "Night.", 5, engine(make("candle", "Candle", POV)));
+      expect(await settled()).toEqual({ notes: [], line: [] });
+      running = false;
+      s.addChanges(next.id, engine(tick(1)));
+      const all = [...turns, next].map((t) => t.id).sort();
+      expect(await settled()).toEqual({ notes: all, line: all });
+      // The next turn ends: its own alone.
+      const last = play(s, "c", "m6", "Dawn.", 6, engine(goTo(POV, "cellar")));
+      expect(await settled()).toEqual({ notes: [last.id], line: [last.id] });
+      // A job's changes on that turn let its rows go; the job's end stores them again.
+      s.addChanges(last.id, engine(make("map", "Folded map", POV)).map((c) => ({ ...c, job: "j-map" })));
+      s.endJob("j-map");
+      expect(await settled()).toEqual({ notes: [last.id], line: [last.id] });
+      // A store opened again reads every row and works nothing out, and what they hold is what is worked out afresh.
+      const again = await read(opened(store), { notes: words, lines: lineWords });
+      expect(again.stored).toEqual({ notes: [], line: [] });
+      expect(again.gave).toEqual(await afresh(store));
+    } finally {
+      stop();
+    }
   });
 });
