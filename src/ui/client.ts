@@ -229,6 +229,11 @@ export function createClient(connector: Connector): RpeClient {
   let offLive: (() => void) | null = null;
   let closed = false;
   const resets = new Set<() => void>();
+  /** The GETs out now, by path: a page that asks the same while one is out shares its answer, one piece of RPE's work. */
+  const out = new Map<string, Promise<RoadAnswer>>();
+  /** The next try of a connect that failed, and how many failed in a row: the wait doubles from `reconnectMs` up to `reconnectMaxMs`. */
+  let again: unknown = null;
+  let failures = 0;
 
   const each = (chat: string | undefined, act: (listener: LiveListener) => void): void => {
     for (const [at, set] of listeners) if (chat === undefined || chat === at) for (const listener of [...set]) act(listener);
@@ -279,6 +284,7 @@ export function createClient(connector: Connector): RpeClient {
           connection.road.close();
           throw new RpeError(0, closed ? "The page closed." : "RPE is being reached again.");
         }
+        failures = 0;
         road = connection.road;
         offLive = road.onLive(deliver);
         state.set(connection.state);
@@ -286,12 +292,44 @@ export function createClient(connector: Connector): RpeClient {
         return connection;
       },
       (error: unknown) => {
-        if (current === attempt) state.set(error instanceof ConnectFailure ? error.state : { phase: "failed", error: errorWords(error) });
+        if (current === attempt) {
+          const failed = error instanceof ConnectFailure ? error.state : { phase: "failed" as const, error: errorWords(error) };
+          state.set(failed);
+          if (failed.phase === "failed") tryAgainLater(attempt);
+        }
         throw new RpeError(0, errorWords(error));
       },
     );
     current = attempt;
     return attempt;
+  }
+
+  /** A connect that failed (RPE did not answer through Lumiverse in time, say) is tried again by itself, so a slow moment leaves no page dead until it is pressed. */
+  function tryAgainLater(attempt: Promise<Connection>): void {
+    const { reconnectMs, reconnectMaxMs } = connector.settings.values.get();
+    const wait = Math.min(reconnectMaxMs, reconnectMs * 2 ** failures);
+    failures++;
+    connector.timers.clearTimeout(again);
+    again = connector.timers.setTimeout(() => {
+      again = null;
+      if (closed || current !== attempt) return;
+      current = null;
+      void connect().catch(() => undefined);
+    }, wait);
+  }
+
+  /** One call's answer as RPE gives it at last: a long route's id asked after until its answer is ready. */
+  async function answered(method: string, path: string, body: string | undefined): Promise<RoadAnswer> {
+    let answer = await exchange(method, path, body);
+    // A route that may outlast the relay's 30 s answers at once with the id of its answer, which is asked for until it is ready.
+    for (let id = answerIdOf(answer); id !== null; id = answerIdOf(answer)) {
+      const { promise, resolve } = Promise.withResolvers<void>();
+      connector.timers.setTimeout(resolve, connector.settings.values.get().jobPollMs);
+      await promise;
+      if (closed) throw new RpeError(0, "The page closed.");
+      answer = await exchange("GET", pathOf(`${ANSWERS_PATH}/:id`, { id }), undefined);
+    }
+    return answer;
   }
 
   function drop(): void {
@@ -341,16 +379,19 @@ export function createClient(connector: Connector): RpeClient {
       const method = key.slice(0, space);
       const path = pathOf(key.slice(space + 1), params as Readonly<Record<string, string>>, options.query);
       const body = options.body === undefined ? undefined : JSON.stringify(options.body);
-      let answer = await exchange(method, path, body);
-      // A route that may outlast the relay's 30 s answers at once with the id of its answer, which is asked for until it is ready.
-      for (let id = answerIdOf(answer); id !== null; id = answerIdOf(answer)) {
-        const { promise, resolve } = Promise.withResolvers<void>();
-        connector.timers.setTimeout(resolve, connector.settings.values.get().jobPollMs);
-        await promise;
-        if (closed) throw new RpeError(0, "The page closed.");
-        answer = await exchange("GET", pathOf(`${ANSWERS_PATH}/:id`, { id }), undefined);
+      // A read the page has out already is not asked again: the second asker shares its answer, and reads its own copy of it.
+      if (method !== "GET" || body !== undefined) return readAnswer(await answered(method, path, body)) as Answer<typeof key>;
+      let reading = out.get(path);
+      if (reading === undefined) {
+        const mine = answered(method, path, body);
+        reading = mine;
+        out.set(path, mine);
+        const done = (): void => {
+          if (out.get(path) === mine) out.delete(path);
+        };
+        mine.then(done, done);
       }
-      return readAnswer(answer) as Answer<typeof key>;
+      return readAnswer(await reading) as Answer<typeof key>;
     },
     follow(chat, listener) {
       let set = listeners.get(chat);
@@ -383,6 +424,7 @@ export function createClient(connector: Connector): RpeClient {
     },
     close() {
       closed = true;
+      connector.timers.clearTimeout(again);
       drop();
       listeners.clear();
       resets.clear();
