@@ -2,9 +2,8 @@
 // Belongings over the gear core's `GearView`, decoded here from the state push.
 
 import { isRecord } from "../../../shared/json";
-import { ACCESS_BASES, GRANT_BASES, isSize, SET_KINDS, SIZES, type SizeClass } from "../../../shared/things";
+import { GRANT_BASES, isSize, SET_KINDS, SIZES, type SizeClass } from "../../../shared/things";
 import type { LoanChoice } from "../../../shared/thing-gm";
-import type { AccessChip } from "../../../shared/thing-view";
 import { Empty, JsonView } from "../../../frontend/components";
 import { list, num, obj, oneOf, optNum, optStr, str, strings } from "../../../frontend/decode";
 import type { PanelProps } from "../../../frontend/registry";
@@ -27,11 +26,6 @@ function decodeHolder(value: unknown): GearHolder | null {
   return holder && typeof holder.id === "string" ? { id: holder.id, name: str(holder.name, holder.id) } : null;
 }
 
-/** Who may use a thing on one ground, as the engine names it. */
-function decodeChip(entry: Record<string, unknown>): AccessChip | null {
-  return typeof entry.label === "string" ? { basis: oneOf(entry.basis, ACCESS_BASES, "grant"), label: entry.label, who: strings(entry.who) } : null;
-}
-
 function decodeItem(entry: Record<string, unknown>): GearItem | null {
   if (typeof entry.id !== "string") return null;
   const load = obj(entry.load);
@@ -39,7 +33,6 @@ function decodeItem(entry: Record<string, unknown>): GearItem | null {
   const lent = obj(entry.lent);
   const borrowed = obj(entry.borrowed);
   const children = list(entry.children, decodeItem);
-  const use = list(entry.use, decodeChip);
   const grants = list(entry.grants, (g) => (typeof g.who === "string" ? { who: g.who, name: str(g.name, g.who), basis: oneOf(g.basis, GRANT_BASES, "assign"), ...(typeof g.until === "string" ? { until: g.until } : {}), ...(g.overdue === true ? { overdue: true as const } : {}) } : null));
   return {
     id: entry.id,
@@ -61,7 +54,6 @@ function decodeItem(entry: Record<string, unknown>): GearItem | null {
     ...(SIZE_CLASSES.some((s) => s === entry.size) ? { size: entry.size as SizeClass } : {}),
     ...(entry.mine === true ? { mine: true as const } : {}),
     ...(typeof entry.ownerId === "string" || entry.ownerId === null ? { ownerId: entry.ownerId } : {}),
-    ...(use.length > 0 ? { use } : {}),
     ...(grants.length > 0 ? { grants } : {}),
     ...(typeof entry.category === "string" ? { category: entry.category } : {}),
     children: children.length > 0 ? children : undefined,

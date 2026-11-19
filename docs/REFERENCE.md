@@ -1042,7 +1042,7 @@ Each is carried out by an agent with `world_apply`'s `act` operation: `action` i
 
 ### Panels and slots
 
-Panels: `gear.gear`. Slots it writes: `gear`, `people`.
+Panels: `gear.gear`, `gear.use`. Slots it writes: `gear`, `people`.
 
 ### Simulation
 

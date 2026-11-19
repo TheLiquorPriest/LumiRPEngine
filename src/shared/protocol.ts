@@ -14,7 +14,7 @@ import type { RoutineRead, RoutineReadResult } from "./routines";
 import type { ItemFix } from "./things";
 import type { VehicleClassChoice } from "./vehicles";
 import type { CharacterResult } from "./character";
-import type { GmThingsRead, PersonThings, ThingPage, ThingPicks, ThingsList, ThingsRead, ThingType } from "./thing-view";
+import type { AccessChip, GmThingsRead, PersonThings, ThingPage, ThingPicks, ThingsList, ThingsRead, ThingType } from "./thing-view";
 import type { UpgradePreview } from "./upgrade";
 import type { GmThingExtras, GmThingsList, KeepResult, MadeInPlay, TidyRun } from "./thing-gm";
 import type { ActionId, BoundMode, ChatId, ChipId, DomainId, EntityId, FieldId, Level, MessageId, PanelId, PlaceId, RevisionId, SlotId, TableId, WorldId } from "./ids";
@@ -296,9 +296,10 @@ export type CharacterRequest = Request<"lre.character"> & { op: "get"; entity: E
  * `left: false`) for this chat; `made`, the things and places the chat made in play, each saying
  * whether the world's draft has it; `keep`, copies of those into the world's draft. Play's
  * (`scope: "play"`): `types`, what Belongings' Add offers the player of the chat's head (the types,
- * the vehicle classes, and how many things one Add makes at most).
+ * the vehicle classes, and how many things one Add makes at most); `use`, who may use a thing of the
+ * player's, for its Owner & use, which the state view carries none of.
  */
-export type ThingsRequest = Request<"lre.things"> & (({ scope: "build"; worldId: WorldId } & ThingsRead) | ({ scope: "gm"; chatId: ChatId } & GmThingsRead) | { scope: "play"; chatId: ChatId; op: "types" });
+export type ThingsRequest = Request<"lre.things"> & (({ scope: "build"; worldId: WorldId } & ThingsRead) | ({ scope: "gm"; chatId: ChatId } & GmThingsRead) | { scope: "play"; chatId: ChatId; op: "types" } | { scope: "play"; chatId: ChatId; op: "use"; entity: EntityId });
 
 /**
  * A chat's state view, as a page's snapshot holds it, answered to an outside client (DESIGN §23),
@@ -962,7 +963,7 @@ export interface ResultBodies {
    * choices; `find`: the ids found, best first; `types`: the catalog's types; `tidy`: the run; `leave`: the run after it; `made`: what the chat made in play;
    * `keep`: what was kept, then what is made in play after it.
    */
-  "lre.things": { list?: ThingsList; here?: GmThingsList; thing?: ThingPage; gm?: GmThingExtras; person?: PersonThings; pick?: ThingPicks; found?: EntityId[]; types?: ThingType[]; tidy?: TidyRun; made?: MadeInPlay; kept?: KeepResult; classes?: VehicleClassChoice[]; cap?: number };
+  "lre.things": { list?: ThingsList; here?: GmThingsList; thing?: ThingPage; gm?: GmThingExtras; person?: PersonThings; pick?: ThingPicks; found?: EntityId[]; types?: ThingType[]; tidy?: TidyRun; made?: MadeInPlay; kept?: KeepResult; classes?: VehicleClassChoice[]; cap?: number; use?: AccessChip[] };
   /** `kit`: this build, where its kit is, and whether the asking session checked in since the extension started; every other op answers the `view`. */
   "lre.agents": { view?: AgentsView; build?: string; kit?: KitReport | null; known?: boolean };
   /** Every op: the chat's thread, the answer under way and the proposals, after the op. */

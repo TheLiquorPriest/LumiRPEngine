@@ -23,7 +23,7 @@ import { ORGS_LIST_PANEL, ORGS_SUMMARY_PANEL, type OrgView } from "../../../shar
 import type { StateView } from "../../../shared/state-view";
 import { OFFSTAGE_NOTE } from "../../../shared/offstage";
 import { toastQueued } from "../../../frontend/queued";
-import { useOrgPage } from "../../../frontend/org-page";
+import { useReadApart } from "../../../frontend/read-apart";
 import { hasChart, isWholePage, type ChartPage } from "./chart-model";
 import { OrgChart } from "./chart";
 import { decodeOrgList, decodeOrgSummaryOf, decodeOrgView } from "./decode";
@@ -196,9 +196,9 @@ export function OrgSheet(props: SheetProps) {
   const [renaming, setRenaming] = useState(false);
   const [busy, run] = useBusy();
   const panelId = useId();
-  const read = useOrgPage(props.chatId, target.org, props.state);
+  const read = useReadApart({ type: "lre.org", chatId: props.chatId, org: target.org }, props.state);
   const summaries = props.state.panels[ORGS_SUMMARY_PANEL];
-  const org = read.status === "read" ? decodeOrgView(read.page) : null;
+  const org = read.status === "read" ? decodeOrgView(read.value.page) : null;
   if (!org) {
     return (
       <div class="lre-stack">

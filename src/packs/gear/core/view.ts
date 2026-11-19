@@ -2,8 +2,9 @@
 // has on it (worn, in its pockets and hands, in its bags), what it holds for others, its own things
 // elsewhere with where each is, what it has lent out and what it has borrowed, as item trees sorted
 // by `gearOf`. Each item says whose it is, why the POV has it, where it is kept and where it is now,
-// and, for its own things, who may use it and whom it has let use it, as the POV may know them. Gear
-// 1 shows only things in play on it and elsewhere (`inPlay`); what changed hands always shows. Kits
+// and, for its own things, whom it has let use it, as the POV may know them; who else may use one
+// is read apart when its Owner & use opens (`gear.use`, `thingUse`), since it asks every person of
+// every thing. Gear 1 shows only things in play on it and elsewhere (`inPlay`); what changed hands always shows. Kits
 // and slots from Gear 3. Belongings' groups, derived and never stored: the outfit (worn, by slot),
 // what is carried and not worn, the wardrobe (their clothing at home, by what keeps it), everything
 // of theirs stored at home (by what holds it), the things where they are (furnishings, what lies
@@ -52,8 +53,6 @@ export interface GearItem {
   ownerId?: EntityId | null;
   /** Its category: its own, else its type row's (clothing, weapon, armor, ammo…). */
   category?: string;
-  /** On a thing that is yours: who may use it beyond a grant, ground by ground, among the people you know. */
-  use?: AccessChip[];
   /** On a thing that is yours: whom you (or anyone) let use it, each you know, with when it ends. */
   grants?: GearGrant[];
   load?: { used: number; capacity: number; unit: "l" };
@@ -247,8 +246,7 @@ export function buildGearView(ctx: ReadContext): GearView {
       if (level >= 3 && slotOf(ctx, e.fields) !== null) out.wearable = true;
       if (mayFixThing(ctx, pov, id)) {
         out.mine = true;
-        // Who may use it and whom it is lent to, as Owner & use shows them: only the people the POV knows.
-        if (level >= 2) out.use = useChips(ctx, id, known);
+        // Whom it is lent to, as Owner & use shows them: only the people the POV knows.
         const grants = (granted.get(id) ?? []).filter((g) => known(g.who));
         if (grants.length > 0) out.grants = grants.map((g) => ({ who: g.who, name: nameOf(g.who), basis: g.basis, ...(g.until !== undefined ? { until: formatClock(cal, g.until) } : {}), ...(g.until !== undefined && g.until <= ctx.state.clock ? { overdue: true as const } : {}) }));
       }
@@ -403,4 +401,25 @@ export function buildGearView(ctx: ReadContext): GearView {
       ceiling: thingsConfigOf(ctx.world).sizes.ceiling,
     };
   });
+}
+
+/** The panel read apart of who may use each thing of the POV's (`thingUse`): no part of the state view. */
+export const GEAR_USE_PANEL = "gear.use";
+
+/**
+ * Who may use a thing of the POV's beyond a grant, ground by ground, among the people it knows, as Owner & use shows them (`gear.use`,
+ * read when it opens): from Gear 2, on a thing that is the POV's (`mayFixThing`); none on any other.
+ */
+export function thingUse(ctx: ReadContext, id: EntityId): AccessChip[] {
+  const pov = ctx.world.pov;
+  if (ctx.levelOf(pov, "gear") < 2 || !mayFixThing(ctx, pov, id)) return [];
+  return useChips(ctx, id, (who) => who === pov || canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, who));
+}
+
+/** The things `thingUse` reads: the POV's own, accounts left out, in id order. */
+export function thingUseIds(ctx: ReadContext): EntityId[] {
+  const pov = ctx.world.pov;
+  return Object.keys(ctx.state.entities)
+    .sort()
+    .filter((id) => own(ctx.state.entities, id)?.kind !== "account" && !isGone(ctx.state, id) && mayFixThing(ctx, pov, id));
 }

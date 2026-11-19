@@ -34,7 +34,8 @@ describe("a chat's state view", () => {
     for (const id of Object.keys(pages)) expect(JSON.parse(JSON.stringify(await bed.service.orgPage(USER, CHAT, id)))).toEqual(JSON.parse(JSON.stringify(pages[id])));
     // The quest log takes the quests' trails after it is built; every other panel is as its pack builds it.
     const built = Object.fromEntries(Object.entries(view.panels).filter(([panel]) => panel !== "story.quests"));
-    const asWhole = Object.fromEntries(Object.entries(whole).filter(([panel]) => panel !== "story.quests" && panel !== "orgs.org"));
+    const apart = new Set(registry.views.filter((v) => v.apart === true).map((v) => v.panel));
+    const asWhole = Object.fromEntries(Object.entries(whole).filter(([panel]) => panel !== "story.quests" && !apart.has(panel)));
     expect(JSON.parse(JSON.stringify(built))).toEqual(JSON.parse(JSON.stringify(asWhole)));
   });
 

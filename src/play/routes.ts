@@ -6,12 +6,14 @@
 
 import { isRecord } from "../shared/json";
 import type { OrgView } from "../shared/org-view";
+import { ACCESS_BASES } from "../shared/things";
 import { route, shape, stateView } from "../app";
 import { requestShown } from "../turn/shapes";
 import type { PlayService } from "./service";
 
 export const STATE_PATH = "/api/v1/chats/:chat/state";
 export const ORG_PAGE_PATH = "/api/v1/chats/:chat/state/orgs/:org";
+export const THING_USE_PATH = "/api/v1/chats/:chat/state/things/:thing/use";
 export const DUE_PATH = "/api/v1/chats/:chat/state/due";
 export const TAPS_PATH = "/api/v1/chats/:chat/taps";
 export const EDIT_UNDO_PATH = "/api/v1/chats/:chat/edits/:edit/undo";
@@ -108,6 +110,12 @@ const dueReply = shape.named(
 
 const orgPage = shape.carried<OrgView>("OrgView", "../org-view", "One organization's page as Orgs draws it: the reader's place there, who runs it, its people, positions and delegations, the organizations holding it and held by it, and the packs' sections the reader may see.", "an organization's page", (value): value is OrgView => isRecord(value));
 
+const accessChip = shape.named(
+  "AccessChip",
+  "One ground on which people may use a thing beyond a grant, as Owner & use shows it: what it rests on, its words, and the people it covers by name.",
+  shape.object({ basis: shape.oneOf(...ACCESS_BASES), label: T, who: shape.list(T) }),
+);
+
 export function playRoutes(play: PlayService) {
   return [
     route({
@@ -129,6 +137,15 @@ export function playRoutes(play: PlayService) {
       does: "One organization's page at the chat's head as the player's character may see it, read when Orgs opens it (the state view carries only a summary of each page): built from the state the view is, and kept with it while that state stands. The page is null where the character knows of no such organization.",
       reply: shape.object({ page: shape.nullable(orgPage) }),
       handle: async ({ user, params }) => ({ page: await play.orgPage(user, params.chat, params.org) }),
+    }),
+    route({
+      method: "GET",
+      path: THING_USE_PATH,
+      access: "page",
+      group: "state",
+      does: "Who may use a thing of the player's character beyond a grant, ground by ground, among the people it knows, read when its Owner & use opens (the state view carries none of it): built from the state the view is, and kept with it while that state stands. None on a thing not theirs.",
+      reply: shape.object({ use: shape.list(accessChip) }),
+      handle: async ({ user, params }) => ({ use: await play.thingUse(user, params.chat, params.thing) }),
     }),
     route({
       method: "POST",

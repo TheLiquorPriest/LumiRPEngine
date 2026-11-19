@@ -2,7 +2,8 @@
 // PlanChatUI-P3 item 3, -P6, -P7): in the GM scope, GM → Things' list with where the player character is and why each thing is had,
 // a thing's page with the GM's rest, history and findings, a person's things, a search and the catalog; Tidy up's run, and Leave it
 // or bring back, written to the chat's leave list; what the chat made in play beside the world's draft, and Keep in the world, whose
-// draft patch goes to Build's draft route as one write, refused unchanged where the draft moved on. In the play scope, the catalog.
+// draft patch goes to Build's draft route as one write, refused unchanged where the draft moved on. In the play scope, the catalog,
+// and who may use a thing of the player's, for its Owner & use (no part of the state view).
 // A fix Tidy up offers is an edit of his (`lre.edit`), the play call file's. Build's own things, of a world's draft, are the worlds'
 // call file's.
 
@@ -54,6 +55,8 @@ export const calls: CallFile = {
         const catalog = (await client.call("GET /api/v1/chats/:chat/things/types", { chat })) as unknown as { types: NonNullable<Body["types"]> };
         return { types: catalog.types };
       }
+      case "use":
+        return { use: (await client.call("GET /api/v1/chats/:chat/state/things/:thing/use", { chat, thing: request.entity })).use };
       case "find":
         return { found: (await client.call("GET /api/v1/chats/:chat/things/find", { chat }, { query: { words: request.words } })) as unknown as NonNullable<Body["found"]> };
       case "thing":

@@ -72,6 +72,7 @@ export const COVERAGE: Coverage = {
     person: { excluded: "The Character page's Things they have, in its groups: lre_draft reads the same things and their holders from the draft, and lre_gm from the chat." },
     find: { tools: ["lre_items_find"] },
     types: { excluded: "The catalog types Add a thing searches, with the sizes they give: lre_draft reads the same tables from the draft's /tables." },
+    use: { excluded: "Owner & use's read of who may use a thing of the player's, ground by ground: an outside client reads a thing's owners, grants and its holders with lre_gm." },
     tidy: { excluded: "GM → Things → Tidy up's cards, each with the one GM edit that fixes it: an outside client reads the chat with lre_gm and fixes what it finds with lre_gm_edit's item ops." },
     leave: { excluded: "A Tidy up card the GM left as it is, kept beside the chat for its cards only; nothing an outside client reads depends on it." },
     made: { excluded: "GM → Things → Keep in the world's list of what the chat made in play: lre_gm lists the chat's spawned things, and lre_draft what the draft has." },

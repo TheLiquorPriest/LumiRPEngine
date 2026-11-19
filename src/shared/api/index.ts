@@ -10,6 +10,13 @@ import type { StateView } from "../state-view";
 /** Any JSON value. */
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
+/** One ground on which people may use a thing beyond a grant, as Owner & use shows it: what it rests on, its words, and the people it covers by name. */
+export interface AccessChip {
+  basis: "owner" | "member" | "position" | "delegate" | "control" | "grant" | "permit" | "household" | "housemate" | "partner" | "family" | "staff" | "customer" | "public";
+  label: string;
+  who: string[];
+}
+
 /** A line the Settings page shows beside a setting's control while its value is below `below` or above `above`, saying what such a value does; the value is taken all the same. */
 export interface Advice {
   below?: number;
@@ -5424,6 +5431,16 @@ export interface ApiRoutes {
     paged: false;
     long: false;
     joined: true;
+  };
+  /** Who may use a thing of the player's character beyond a grant, ground by ground, among the people it knows, read when its Owner & use opens (the state view carries none of it): built from the state the view is, and kept with it while that state stands. None on a thing not theirs. */
+  "GET /api/v1/chats/:chat/state/things/:thing/use": {
+    params: { chat: string; thing: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: { use: AccessChip[] };
+    paged: false;
+    long: false;
+    joined: false;
   };
   /** A chat's story record, at its newest turn or as it stood at one of its turns: the timeline, the story model's parts, the Author's horizon and the futures; each list bounded by the story's own setting, read further back with `part` and `skip`. */
   "GET /api/v1/chats/:chat/story": {

@@ -22,10 +22,9 @@ import { paletteRequest } from "../../../frontend/requests";
 import { toastQueued } from "../../../frontend/queued";
 import { AtOnceNotice, thingsFix, useAtOnce, type AtOnce } from "../../../frontend/things/at-once";
 import { MoveSheet, thingNames, type MoveThing } from "../../../frontend/things/move-sheet";
-import { OwnerUseSheet } from "../../../frontend/things/owner-sheet";
 import type { GearItem, GearView } from "../core/view";
 import { PlayAddSheet, addPolicy } from "./add-sheet";
-import { AS_LABEL, borrowedText, bulkRequest, bulkWords, itemBadge, lentText, ownerThing, RenameSheet, SizeSheet } from "./belongings";
+import { AS_LABEL, borrowedText, bulkRequest, bulkWords, GearOwnerSheet, itemBadge, lentText, RenameSheet, SizeSheet } from "./belongings";
 import { playChoices, povOf, type PlayChoices } from "./choices";
 import { cannotHold } from "../../../frontend/things/where";
 import { decodeGearView, SECTION_LABEL, SECTIONS, type GearSection } from "./panel";
@@ -357,7 +356,7 @@ function ItemSheets(props: { chatId: ChatId; sheet: ItemSheetKind | null; item: 
     case "empty":
       return <MoveSheet chatId={chatId} title={`Empty ${item.name} into`} things={children.map(moveThing)} choices={where.choices} at={where.at} kept={null} blocked={where.blocked} atOnce={atOnce} onClose={props.onClose} />;
     case "owner":
-      return <OwnerUseSheet chatId={chatId} thing={ownerThing(item, where.at.pov, view.household)} people={view.people} loans={view.loans} household={view.household} onClose={props.onClose} />;
+      return <GearOwnerSheet chatId={chatId} item={item} pov={where.at.pov} view={view} state={props.state} onClose={props.onClose} />;
     case "rename":
       return <RenameSheet item={item} busy={atOnce.busy} onClose={props.onClose} onRename={(name) => atOnce.send(thingsFix(chatId, [{ do: "label", item: item.id, name }], props.renamed(name)), props.renamed(name), props.onClose)} />;
     case "size":

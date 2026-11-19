@@ -14,7 +14,7 @@ import { createRegistry } from "../../src/engine/registry-impl";
 import type { WorldState } from "../../src/engine/state";
 import { personThings, thingRow } from "../../src/engine/thing-view";
 import { Working } from "../../src/engine/working";
-import { buildGearView } from "../../src/packs/gear/core/view";
+import { buildGearView, thingUse } from "../../src/packs/gear/core/view";
 import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { startState } from "../packs/support";
 
@@ -94,7 +94,8 @@ describe("Belongings' parts of the Gear panel's view (DESIGN §28.12)", () => {
     w.state.entities.danny_okafor?.relations.push({ type: "uses", to: "jacket", fields: { basis: "loan", by: JORDAN }, until });
     const jacket = buildGearView(w.ctx).outfit.find((i) => i.id === "jacket");
     expect(jacket).toMatchObject({ ownerId: JORDAN, category: "clothing", mine: true, grants: [{ who: "danny_okafor", name: "Danny Okafor", basis: "loan", until: expect.any(String) }] });
-    expect(jacket?.use).toContainEqual({ basis: "owner", label: "Jordan Ellis · owner", who: ["Jordan Ellis"] });
+    // Who may use it is read apart, when Owner & use opens.
+    expect(thingUse(w.ctx, "jacket")).toContainEqual({ basis: "owner", label: "Jordan Ellis · owner", who: ["Jordan Ellis"] });
     expect(jacket?.grants?.[0]?.overdue).toBeUndefined();
     w.state.clock = until + 1;
     expect(buildGearView(w.ctx).outfit.find((i) => i.id === "jacket")?.grants?.[0]?.overdue).toBe(true);

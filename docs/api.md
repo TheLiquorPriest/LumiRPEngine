@@ -785,6 +785,20 @@ A level's typed systems, at the chat's head or as it stood at a turn: each game 
 | The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
+### `GET /api/v1/chats/:chat/state/things/:thing/use`
+
+Who may use a thing of the player's character beyond a grant, ground by ground, among the people it knows, read when its Owner & use opens (the state view carries none of it): built from the state the view is, and kept with it while that state stands. None on a thing not theirs.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat`, `thing` |
+| Query | none |
+| Body | none |
+| Reply | `{ use: AccessChip[] }` |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
+
 ### `POST /api/v1/chats/:chat/taps`
 
 A tap that manages, or a correction from any page, recorded at once as his own edit; what the world's rules turn down is applied with its report; a refusal is answered in words with nothing changed. A tap of one of the world's actions that does not manage is held for his next message, taken back, or played now, as the panel's own routes do it, and the answer says which.
@@ -4048,6 +4062,18 @@ A page opens `/api/v1/live` as a WebSocket, offering the protocol `rpe.live`. A 
 ## Types
 
 Every type a route, a live kind or the live socket's messages name, as the generated types write it. `JsonValue` is any JSON value.
+
+### `AccessChip`
+
+One ground on which people may use a thing beyond a grant, as Owner & use shows it: what it rests on, its words, and the people it covers by name.
+
+```ts
+export interface AccessChip {
+  basis: "owner" | "member" | "position" | "delegate" | "control" | "grant" | "permit" | "household" | "housemate" | "partner" | "family" | "staff" | "customer" | "public";
+  label: string;
+  who: string[];
+}
+```
 
 ### `Advice`
 

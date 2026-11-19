@@ -51,7 +51,7 @@ import type { FeedScope } from "../../../shared/world";
 import type { EntityState } from "../../../engine/state";
 import { carryDue, carryProblems } from "./carry";
 import { gearLines, presentGearLines } from "./feed";
-import { buildGearView } from "./view";
+import { buildGearView, GEAR_USE_PANEL, thingUse, thingUseIds } from "./view";
 import { THING_LINTS } from "./thing-lint";
 import containers from "./tables/modern-us/containers.json";
 import items from "./tables/modern-us/items.json";
@@ -990,6 +990,8 @@ export const gearPack: PackDef = {
     r.renderer({ slot: "people", source: "present_gear", label: "What the people here wear and carry", render: (ctx) => presentGearLines(ctx, "player").map((l) => l.text), feed: presentGearLines });
 
     r.view({ panel: "gear.gear", build: (ctx) => buildGearView(ctx) as unknown as JsonValue });
+    // Who may use a thing of the POV's, read when its Owner & use opens: it asks every person of the thing, so it is no part of the view.
+    r.view({ panel: GEAR_USE_PANEL, apart: true, build: (ctx) => Object.fromEntries(thingUseIds(ctx).map((id) => [id, thingUse(ctx, id)])) as unknown as JsonValue, items: { ids: (ctx) => thingUseIds(ctx), build: (ctx, _prefs, id) => thingUse(ctx, id) as unknown as JsonValue } });
 
     // The reply's thing facts (ITEMS-SPEC §5.2, §5.3): a channel per change type a fact lands under
     // (`ITEM_CHANGES`, its mode), and one per fact's own name, readable as an input for anything

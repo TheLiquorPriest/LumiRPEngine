@@ -14,13 +14,16 @@ import { FormSheet } from "../build/form-kit";
 import { Badge, Button, Empty, HostSelect, List, ListRow, Section, Seg } from "../components";
 import { AtOnceNotice, thingsFix, useAtOnce } from "./at-once";
 
-/** A thing as Owner & use… shows it: whose it is now (`other`: someone else's, named), who may use it on what ground, and its grants. */
+/**
+ * A thing as Owner & use… shows it: whose it is now (`other`: someone else's, named), who may use it on what ground (being read, or
+ * its read failed, where the sheet reads it when it opens), and its grants.
+ */
 export interface OwnerUseThing {
   id: EntityId;
   name: string;
   owner: "self" | "household" | "nobody" | "other";
   ownerName?: string;
-  use: readonly { label: string; who: readonly string[] }[];
+  use: readonly { label: string; who: readonly string[] }[] | "reading" | "failed";
   grants: readonly { who: EntityId; name: string; basis: GrantBasis; until?: string; overdue?: true }[];
 }
 
@@ -82,9 +85,9 @@ export function OwnerUseSheet(props: { chatId: ChatId; thing: OwnerUseThing; peo
           )}
         </Section>
         <Section title="Who may use it" flush>
-          {thing.use.length === 0 && thing.grants.length === 0 ? <Empty icon="user">Only its owner.</Empty> : null}
+          {thing.use === "reading" ? <Empty icon="hourglass">Reading who may use it…</Empty> : thing.use === "failed" ? <Empty icon="user">Who may use it could not be read.</Empty> : thing.use.length === 0 && thing.grants.length === 0 ? <Empty icon="user">Only its owner.</Empty> : null}
           <List>
-            {thing.use.map((chip) => (
+            {(typeof thing.use === "string" ? [] : thing.use).map((chip) => (
               <ListRow key={chip.label} icon="users" title={chip.label} subtitle={chip.who.length > 0 ? chip.who.join(", ") : undefined} />
             ))}
             {thing.grants.map((g) => (

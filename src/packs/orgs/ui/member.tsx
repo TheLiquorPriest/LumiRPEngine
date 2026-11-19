@@ -22,7 +22,7 @@ import type { SheetProps } from "../../../frontend/registry";
 import { PAY_BASES, PAY_CHOICE_LABELS, PAY_CHOICES } from "../../../shared/finance";
 import { OFFSTAGE_NOTE } from "../../../shared/offstage";
 import { toastQueued } from "../../../frontend/queued";
-import { useOrgPage } from "../../../frontend/org-page";
+import { useReadApart } from "../../../frontend/read-apart";
 import { formatMoneyInput } from "../../../shared/money";
 import type { OrgPowerView, OrgPersonView, OrgView } from "../../../shared/org-view";
 import { ORGS_SUMMARY_PANEL } from "../../../shared/org-view";
@@ -307,8 +307,8 @@ export function OrgEditSheet(props: SheetProps) {
   const app = useApp();
   const [busy, run] = useBusy();
   const target = orgEditOf(props.id);
-  const read = useOrgPage(props.chatId, target?.org ?? null, props.state);
-  const org = read.status === "read" ? decodeOrgView(read.page) : null;
+  const read = useReadApart(target ? { type: "lre.org", chatId: props.chatId, org: target.org } : null, props.state);
+  const org = read.status === "read" ? decodeOrgView(read.value.page) : null;
   if (!target || !org) {
     return (
       <div class="lre-stack">

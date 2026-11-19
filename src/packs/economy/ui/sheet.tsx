@@ -14,7 +14,7 @@ import type { FinanceView } from "../../../shared/finance";
 import type { EntityId } from "../../../shared/ids";
 import { isRecord } from "../../../shared/json";
 import type { OrgView } from "../../../shared/org-view";
-import { useOrgPage } from "../../../frontend/org-page";
+import { useReadApart } from "../../../frontend/read-apart";
 import { decodeFinanceView } from "./decode";
 import type { HubControls, PlayerControls, Reader } from "./hub";
 import type { HubPage } from "./nav";
@@ -57,8 +57,8 @@ function HubSheet(props: SheetProps & { kind: SheetKind }) {
   const pov = raw === undefined || raw === null ? null : decodeFinanceView(raw);
   // An organization's money is its page's, read when the sheet opens (the state view carries only each page's summary).
   const org = route !== null && route.party !== null && route.party !== pov?.party ? route.party : null;
-  const read = useOrgPage(props.chatId, org, props.state);
-  const shown = route === null ? null : sheetMoney(route, pov, controls, () => (read.status === "read" ? orgMoney(read.page) : null));
+  const read = useReadApart(org === null ? null : { type: "lre.org", chatId: props.chatId, org }, props.state);
+  const shown = route === null ? null : sheetMoney(route, pov, controls, () => (read.status === "read" ? orgMoney(read.value.page) : null));
   if (!route || !shown) {
     return (
       <div class="lre-money-page">

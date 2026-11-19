@@ -32,6 +32,7 @@ import type { Req } from "../../../frontend/requests";
 import { AtOnceNotice, thingsFix, useAtOnce, type ThingsFixRequest } from "../../../frontend/things/at-once";
 import { MoveSheet, thingNames, type MoveThing } from "../../../frontend/things/move-sheet";
 import { OwnerUseSheet, type OwnerUseThing } from "../../../frontend/things/owner-sheet";
+import { useReadApart } from "../../../frontend/read-apart";
 import { SizeChoices } from "../../../frontend/things/what-it-is";
 import type { WornAs } from "../core/feed";
 import type { GearHolder, GearItem, GearView } from "../core/view";
@@ -362,11 +363,18 @@ export function bulkRequest(chatId: ChatId, action: "wear" | "take_off" | "away"
   return fixes.length === 0 || fixes.length > FIX_THINGS_MAX ? null : thingsFix(chatId, fixes, bulkWords(action, things));
 }
 
-/** Owner & use…'s view of a thing of the player's: whose it is now (theirs, the household's, nobody's or someone else's), who may use it and its grants. */
-export function ownerThing(item: GearItem, pov: EntityId | null, household: GearHolder | null): OwnerUseThing {
+/** Owner & use…'s view of a thing of the player's: whose it is now (theirs, the household's, nobody's or someone else's), who may use it (`use`, as it is read) and its grants. */
+export function ownerThing(item: GearItem, pov: EntityId | null, household: GearHolder | null, use: OwnerUseThing["use"]): OwnerUseThing {
   const id = item.ownerId ?? null;
   const owner = id === null ? "nobody" : id === pov ? "self" : household !== null && id === household.id ? "household" : "other";
-  return { id: item.id, name: item.name, owner, ...(owner === "other" && item.whose !== undefined ? { ownerName: item.whose.replace(/'s?$/, "") } : {}), use: item.use ?? [], grants: item.grants ?? [] };
+  return { id: item.id, name: item.name, owner, ...(owner === "other" && item.whose !== undefined ? { ownerName: item.whose.replace(/'s?$/, "") } : {}), use, grants: item.grants ?? [] };
+}
+
+/** Owner & use… over a thing of the player's, who may use it read when it opens (the state view carries none of it) and again when the state changes. */
+export function GearOwnerSheet(props: { chatId: ChatId; item: GearItem; pov: EntityId | null; view: GearView; state: StateView; onClose(): void }) {
+  const read = useReadApart({ type: "lre.things", scope: "play", chatId: props.chatId, op: "use", entity: props.item.id }, props.state);
+  const use = read.status === "read" ? (read.value.use ?? []) : read.status;
+  return <OwnerUseSheet chatId={props.chatId} thing={ownerThing(props.item, props.pov, props.view.household, use)} people={props.view.people} loans={props.view.loans} household={props.view.household} onClose={props.onClose} />;
 }
 
 // ---------------------------------------------------------------- rows
@@ -757,7 +765,7 @@ export function Belongings(props: { chatId: ChatId; state: StateView; view: Gear
       ) : null}
       {sheet?.kind === "move" ? <MoveSheet chatId={chatId} things={sheetThings(sheet.ids).map(moveThing)} choices={where.choices} at={where.at} kept={sheet.ids.length === 1 ? (itemOf(sheet.ids[0] ?? "")?.kept ?? null) : null} blocked={where.blocked} atOnce={atOnce} onClose={close} onMoved={done} /> : null}
       {sheet?.kind === "put" && one ? <MoveSheet chatId={chatId} title={`Put ${one.name} in`} things={[moveThing(one)]} choices={where.choices.filter((c) => c.is === "thing")} at={{ pov: null, here: null, home: null }} blocked={where.blocked} atOnce={atOnce} onClose={close} /> : null}
-      {sheet?.kind === "owner" && one ? <OwnerUseSheet chatId={chatId} thing={ownerThing(one, pov, view.household)} people={view.people} loans={view.loans} household={view.household} onClose={close} /> : null}
+      {sheet?.kind === "owner" && one ? <GearOwnerSheet chatId={chatId} item={one} pov={pov} view={view} state={props.state} onClose={close} /> : null}
       {sheet?.kind === "rename" && one ? <RenameSheet item={one} busy={atOnce.busy} onClose={close} onRename={(name) => atOnce.send(thingsFix(chatId, [{ do: "label", item: one.id, name }], renamed(one, name)), renamed(one, name), close)} /> : null}
       {sheet?.kind === "size" ? (
         <SizeSheet

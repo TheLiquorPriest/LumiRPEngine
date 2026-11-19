@@ -49,6 +49,8 @@ import type { FixOp, LedgerEvent, MarkerBody } from "../shared/ledger";
 import { OFFSTAGE_ORIGIN, ORIGIN_FIELD, playsOffstage } from "../shared/offstage";
 import type { ErrorCode } from "../shared/protocol";
 import { ORGS_ORG_PANEL, type OrgView } from "../shared/org-view";
+import type { AccessChip } from "../shared/thing-view";
+import { GEAR_USE_PANEL } from "../packs/gear/core/view";
 import type { StateView } from "../shared/state-view";
 import type { MapConfig } from "../shared/map-config";
 import { type ItemFix, parseItemFix } from "../shared/things";
@@ -363,12 +365,21 @@ export class PlayService {
 
   /**
    * One organization's page at the chat's head as the player character may see it, for Orgs' page of it, its tabs and editors (the view
-   * carries only each page's summary): built from the state the view is built from and kept with it (`chatViewItem`); null where they
-   * know of no such organization, or the chat plays no world.
+   * carries only each page's summary); null where they know of no such organization, or the chat plays no world.
    */
   async orgPage(user: string, chat: string, org: string): Promise<OrgView | null> {
+    return (await this.viewItem(user, chat, ORGS_ORG_PANEL, org)) as unknown as OrgView | null;
+  }
+
+  /** Who may use a thing of the player character's beyond a grant, ground by ground, among the people it knows, for Owner & use (no part of the view); none on a thing not theirs. */
+  async thingUse(user: string, chat: string, thing: string): Promise<AccessChip[]> {
+    return ((await this.viewItem(user, chat, GEAR_USE_PANEL, thing)) as unknown as AccessChip[] | null) ?? [];
+  }
+
+  /** An item of a panel read apart at the chat's head, built from the state the view is built from and kept with it (`chatViewItem`). */
+  private async viewItem(user: string, chat: string, panel: string, id: string): Promise<JsonValue | null> {
     const { taps, map } = await this.deps.settings(user, chat);
-    return chatViewItem({ store: this.deps.store, user, chat, turn: null, offstage: taps.tell, map, knowledge: knowledgeOf(taps) }, ORGS_ORG_PANEL, org) as unknown as OrgView | null;
+    return chatViewItem({ store: this.deps.store, user, chat, turn: null, offstage: taps.tell, map, knowledge: knowledgeOf(taps) }, panel, id);
   }
 
   /** What `turn`'s time brought due, or the chat's newest turn's where none is named (`due.ts`); a chat RPE does not hold has no turn yet. */
