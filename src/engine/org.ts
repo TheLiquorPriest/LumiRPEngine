@@ -146,14 +146,21 @@ function employerOf(ctx: OrgContext, employer: JsonValue | undefined): EntityId 
 
 /** The jobs in force whose employer is `org` (by id, or a place it trades at), in id order. */
 export function jobsAt(ctx: OrgContext, org: EntityId): EntityId[] {
-  return passMemo([ctx.state, ctx.state.entities, ctx.world], `orgs.jobs:${org}`, () =>
-    Object.keys(ctx.state.entities)
-      .sort()
-      .filter((id) => {
-        const e = own(ctx.state.entities, id);
-        return !!e && kindIs(ctx.registry, ctx.world, e.kind, "job") && !isGone(ctx.state, id) && jobInForce(ctx, e.fields) && employerOf(ctx, e.fields.employer) === org;
-      }),
-  );
+  // Every employer's jobs from one walk of the entities, kept for the read pass, which asks it for each organization.
+  const byEmployer = passMemo([ctx.state, ctx.state.entities, ctx.world], "orgs.jobs", () => {
+    const out = new Map<EntityId, EntityId[]>();
+    for (const id of Object.keys(ctx.state.entities).sort()) {
+      const e = own(ctx.state.entities, id);
+      if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "job") || isGone(ctx.state, id) || !jobInForce(ctx, e.fields)) continue;
+      const employer = employerOf(ctx, e.fields.employer);
+      if (employer === null) continue;
+      const jobs = out.get(employer);
+      if (jobs) jobs.push(id);
+      else out.set(employer, [id]);
+    }
+    return out;
+  });
+  return byEmployer.get(org) ?? [];
 }
 
 /**

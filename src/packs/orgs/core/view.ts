@@ -323,8 +323,12 @@ function candidatesOf(ctx: ReadContext, subject: Subject, viewer: EntityId | nul
  * needs its entity.
  */
 function sectionOf(ctx: ReadContext, subject: Subject, viewer: EntityId | null, def: OrgSectionDef): JsonValue | null {
-  if (def.power !== undefined && (!subject.exists || (viewer !== null && orgPower(ctx, viewer, subject.id, def.power) === null))) return null;
-  return def.build(ctx, subject.id, viewer);
+  return sectionAllowed(ctx, subject, viewer, def) ? def.build(ctx, subject.id, viewer) : null;
+}
+
+/** Whether `viewer` may see a section of the page at all: one a power guards needs the organization's entity and that power there. */
+function sectionAllowed(ctx: ReadContext, subject: Subject, viewer: EntityId | null, def: OrgSectionDef): boolean {
+  return def.power === undefined || (subject.exists && (viewer === null || orgPower(ctx, viewer, subject.id, def.power) !== null));
 }
 
 /** One organization's page as `viewer` may see it; null for an id that is no organization. */
@@ -395,16 +399,23 @@ const OWNERSHIP_SECTION = "ownership";
 
 /**
  * What the state view carries of one organization's page as `viewer` may see it (`OrgSummary`), each part as `buildOrgView` builds it
- * and nothing the page alone draws; null for an id that is no organization. Its Ownership is built only to tell whether the Chart offers
- * a stake it holds: where it holds a stake in a company and the reader holds `shares.manage` there.
+ * and nothing the page alone draws; null for an id that is no organization. Its Ownership is not built, only asked whether it is shown
+ * (`OrgSectionDef.shown`), to tell whether the Chart offers a stake it holds: where it holds a stake in a company and the reader holds
+ * `shares.manage` there.
  */
 export function buildOrgSummary(ctx: ReadContext, id: EntityId, viewer: EntityId): OrgSummary | null {
   const subject = subjectOf(ctx, id);
   if (!subject) return null;
   const page = new Page(ctx, subject, viewer);
+  const defOf = (sid: string): OrgSectionDef | undefined => ctx.registry.orgSections.find((d) => d.id === sid);
   const section = (sid: string): JsonValue | null => {
-    const def = ctx.registry.orgSections.find((d) => d.id === sid);
+    const def = defOf(sid);
     return def === undefined ? null : sectionOf(ctx, subject, viewer, def);
+  };
+  const shown = (sid: string): boolean => {
+    const def = defOf(sid);
+    if (def === undefined || !sectionAllowed(ctx, subject, viewer, def)) return false;
+    return def.shown === undefined ? def.build(ctx, subject.id, viewer) !== null : def.shown(ctx, subject.id, viewer);
   };
   const { name, badge } = header(ctx, subject);
   const mine = subject.rows.filter((r) => r.who === viewer);
@@ -415,7 +426,7 @@ export function buildOrgSummary(ctx: ReadContext, id: EntityId, viewer: EntityId
   const alerts = section(ALERTS_SECTION);
   const above = subject.exists ? linksOf(page, holdersOf(ctx, subject.id), (h) => h.holder) : { links: [], hidden: 0 };
   const below = subject.exists ? linksOf(page, holdsOf(ctx, subject.id), (h) => h.org) : { links: [], hidden: 0 };
-  const stakes = below.links.some((l) => l.type === "company" && l.share !== null && l.share > 0) && page.powersOf(viewer).some((p) => powerCovers(p.power, "shares.manage")) && section(OWNERSHIP_SECTION) !== null;
+  const stakes = below.links.some((l) => l.type === "company" && l.share !== null && l.share > 0) && page.powersOf(viewer).some((p) => powerCovers(p.power, "shares.manage")) && shown(OWNERSHIP_SECTION);
   return {
     id: subject.id,
     name,

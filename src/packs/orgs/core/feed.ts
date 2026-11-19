@@ -101,11 +101,22 @@ function paydaysMissed(ctx: ReadContext, job: EntityId): number {
   return Math.min(run.missed, Math.round((run.last - paid) / period));
 }
 
-/** The accounts an organization holds in its own name. */
+/** The accounts an organization holds in its own name, in id order: every owner's from one walk of the entities, kept for the read pass, which asks it for each organization. */
 function accountsOf(ctx: ReadContext, org: EntityId): EntityId[] {
-  return Object.keys(ctx.state.entities)
-    .sort()
-    .filter((id) => !isGone(ctx.state, id) && kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "account") && ownersIn(own(ctx.state.entities, id)?.fields ?? {}).some((o) => o.party === org));
+  const byOwner = passMemo([ctx.state, ctx.state.entities, ctx.world], "orgs.accounts", () => {
+    const out = new Map<EntityId, EntityId[]>();
+    for (const id of Object.keys(ctx.state.entities).sort()) {
+      const e = own(ctx.state.entities, id);
+      if (!e || isGone(ctx.state, id) || !kindIs(ctx.registry, ctx.world, e.kind, "account")) continue;
+      for (const party of new Set(ownersIn(e.fields).map((o) => o.party))) {
+        const held = out.get(party);
+        if (held) held.push(id);
+        else out.set(party, [id]);
+      }
+    }
+    return out;
+  });
+  return byOwner.get(org) ?? [];
 }
 
 /** Its net worth at the end of last month: today's, less what its accounts' journals moved since. */

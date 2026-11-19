@@ -410,6 +410,11 @@ export interface OrgSectionDef {
   power?: OrgPower;
   /** `viewer` is the player character, or null for the GM, who sees every name. */
   build(ctx: ReadContext, org: EntityId, viewer: EntityId | null): JsonValue | null;
+  /**
+   * Whether `build` gives anything for the organization, told without building it (the state view's summary of an organization asks
+   * it of a section it does not carry); where it is not given, `build` is asked.
+   */
+  shown?(ctx: ReadContext, org: EntityId, viewer: EntityId | null): boolean;
 }
 
 export interface CoreRegistry {

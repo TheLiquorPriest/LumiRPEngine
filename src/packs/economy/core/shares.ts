@@ -570,10 +570,12 @@ export function registerShares(r: FinanceRegistry): void {
     observable: "does some paperwork",
   });
   // Ownership on a company's page (§4.4), from Money 1, behind `money.view`.
+  const ownershipShown = (ctx: ReadContext, org: EntityId): boolean => isBusiness(ctx, org) && ctx.levelOf(org, "money") >= 1;
   core.orgSection({
     id: "ownership",
     label: "Ownership",
     power: "money.view",
-    build: (ctx, org, viewer) => (isBusiness(ctx, org) && ctx.levelOf(org, "money") >= 1 ? (ownershipView(api, ctx, org, viewer) as unknown as JsonValue) : null),
+    shown: ownershipShown,
+    build: (ctx, org, viewer) => (ownershipShown(ctx, org) ? (ownershipView(api, ctx, org, viewer) as unknown as JsonValue) : null),
   });
 }
