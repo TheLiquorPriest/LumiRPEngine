@@ -27,8 +27,23 @@ function atWordEdges(text: string, first: number, last: number): boolean {
   return isWordChar(text.charCodeAt(first)) !== before && isWordChar(text.charCodeAt(last)) !== after;
 }
 
-/** Lumiverse's `foldWithOriginalOffsets`: the text lower-cased one code point at a time, with where each folded character came from. */
-function fold(value: string): { text: string; start: number[]; end: number[] } {
+/**
+ * Lumiverse's `foldWithOriginalOffsets`: the text lower-cased one code point at a time, with where each folded character came from
+ * (null where each comes from its own place).
+ */
+interface Folded {
+  text: string;
+  start: number[] | null;
+  end: number[] | null;
+}
+
+/**
+ * Lumiverse's `foldWithOriginalOffsets`. Where no character's lower case is longer than it, none is half of a pair and none is a capital
+ * sigma (the one whose lower case depends on what stands beside it), the text lower-cased whole is the same, each character in its place.
+ */
+function fold(value: string): Folded {
+  const whole = value.toLowerCase();
+  if (whole.length === value.length && !/[\uD800-\uDFFF\u03A3]/.test(value)) return { text: whole, start: null, end: null };
   let text = "";
   const start: number[] = [];
   const end: number[] = [];
@@ -61,8 +76,8 @@ export function keysIn(messages: readonly string[], how: KeyMatching): (key: str
     const hay = folded === null ? raw : folded.text;
     for (let at = hay.indexOf(needle); at >= 0; at = hay.indexOf(needle, at + 1)) {
       if (!how.wholeWords) return true;
-      const first = folded === null ? at : (folded.start[at] ?? 0);
-      const last = folded === null ? at + needle.length - 1 : (folded.end[at + needle.length - 1] ?? 0) - 1;
+      const first = folded === null ? at : (folded.start?.[at] ?? at);
+      const last = folded === null ? at + needle.length - 1 : (folded.end?.[at + needle.length - 1] ?? at + needle.length) - 1;
       if (atWordEdges(raw, first, last)) return true;
     }
     return false;
@@ -70,22 +85,21 @@ export function keysIn(messages: readonly string[], how: KeyMatching): (key: str
 }
 
 /**
- * Which of `keys` come up in `messages`, all of them at once as Lumiverse's matcher goes: the messages are folded once and gone over
- * once, message by message (a match never crosses one), however many keys there are. A key is found where `keysIn` finds it.
+ * Which of `keys` come up in one message's text, as Lumiverse's matcher goes (a match never crosses from one message to another): the
+ * needles are made once, in one trie whose failure links let one pass over a text find them all, and each text is folded and gone over
+ * once, however many keys there are. A key is found where `keysIn` finds it; each found is given once.
  */
-export function keysFound(messages: readonly string[], how: KeyMatching, keys: readonly string[]): Set<string> {
-  const found = new Set<string>();
-  const raw = messages.join(BETWEEN);
-  const folded = how.caseSensitive ? null : fold(raw);
-  const hay = folded === null ? raw : folded.text;
-  // The needles, each with the keys that read as it, in one trie whose failure links let one pass over the text find them all.
+export function keyMatcher(how: KeyMatching, keys: Iterable<string>): (text: string) => string[] {
+  // The needles, each with the keys that read as it.
   const needles = new Map<string, string[]>();
   for (const key of keys) {
     if (key === "" || key.includes(BETWEEN)) continue;
     const needle = how.caseSensitive ? key : fold(key).text;
-    needles.set(needle, [...(needles.get(needle) ?? []), key]);
+    const same = needles.get(needle);
+    if (same === undefined) needles.set(needle, [key]);
+    else if (!same.includes(key)) same.push(key);
   }
-  if (needles.size === 0) return found;
+  if (needles.size === 0) return () => [];
   const next: Map<number, number>[] = [new Map()];
   const ends: string[][] = [[]];
   for (const needle of needles.keys()) {
@@ -116,25 +130,30 @@ export function keysFound(messages: readonly string[], how: KeyMatching, keys: r
       queue.push(child);
     }
   }
-  const done = new Set<string>();
-  let node = 0;
-  for (let at = 0; at < hay.length; at++) {
-    const code = hay.charCodeAt(at);
-    while (node !== 0 && next[node]?.get(code) === undefined) node = fail[node] ?? 0;
-    node = next[node]?.get(code) ?? 0;
-    for (const needle of ends[node] ?? []) {
-      if (done.has(needle)) continue;
-      if (how.wholeWords) {
-        const from = at - needle.length + 1;
-        const first = folded === null ? from : (folded.start[from] ?? 0);
-        const last = folded === null ? at : (folded.end[at] ?? 0) - 1;
-        if (!atWordEdges(raw, first, last)) continue;
+  return (raw) => {
+    const found: string[] = [];
+    const folded = how.caseSensitive ? null : fold(raw);
+    const hay = folded === null ? raw : folded.text;
+    const done = new Set<string>();
+    let node = 0;
+    for (let at = 0; at < hay.length; at++) {
+      const code = hay.charCodeAt(at);
+      while (node !== 0 && next[node]?.get(code) === undefined) node = fail[node] ?? 0;
+      node = next[node]?.get(code) ?? 0;
+      for (const needle of ends[node] ?? []) {
+        if (done.has(needle)) continue;
+        if (how.wholeWords) {
+          const from = at - needle.length + 1;
+          const first = folded === null ? from : (folded.start?.[from] ?? from);
+          const last = folded === null ? at : (folded.end?.[at] ?? at + 1) - 1;
+          if (!atWordEdges(raw, first, last)) continue;
+        }
+        done.add(needle);
+        found.push(...(needles.get(needle) ?? []));
       }
-      done.add(needle);
-      for (const key of needles.get(needle) ?? []) found.add(key);
     }
-  }
-  return found;
+    return found;
+  };
 }
 
 /**

@@ -15,7 +15,7 @@
 // the file (an entry changed in Lumiverse, or a run in another chat that changed lines this chat shares).
 
 import type { Database } from "bun:sqlite";
-import { mkdir } from "node:fs/promises";
+import { mkdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { LinesPart } from "../app/guidance";
 import type { ActivatedLore, FactDef, FactValue, LoreEntry, Log, Scope } from "rp-harness/contract";
@@ -30,7 +30,7 @@ import { loreLine } from "./tools";
 import type { LoreMap, LoreMapLine } from "./map";
 import { type OverlayRow, overlayNoted } from "./overlays";
 import type { HeldSecret } from "./secrets/character";
-import type { LoreBookListing, LorePath } from "./sources";
+import type { LoreBookListing, LorePath, WorldAt } from "./sources";
 import type { WorldDoc } from "../shared/world";
 
 /** Every fixed value of the index, each a setting with this default. */
@@ -192,6 +192,18 @@ interface Bound {
   owned: boolean;
 }
 
+/** Whether every entry is bound alike in both: the same links (record, linked, aspect, by), the same names they read as, and the same owner's stand. */
+function sameBound(a: ReadonlyMap<string, Bound>, b: ReadonlyMap<string, Bound>): boolean {
+  if (a.size !== b.size) return false;
+  for (const [id, x] of a) {
+    const y = b.get(id);
+    if (y === undefined || x.owned !== y.owned || x.links.length !== y.links.length || x.defines.length !== y.defines.length) return false;
+    if (x.links.some((l, i) => l.record !== y.links[i]?.record || l.linked !== y.links[i]?.linked || l.aspect !== y.links[i]?.aspect || l.by !== y.links[i]?.by)) return false;
+    if (x.defines.some((d, i) => d.what !== y.defines[i]?.what || d.aspect !== y.defines[i]?.aspect)) return false;
+  }
+  return true;
+}
+
 /** An entry with its lines, the user's own over the run's; the run's at its revision as it stands now, else at the newest earlier one. */
 function joined(entry: LoreCatalogEntry, held: Held | undefined, bound: Bound | undefined): IndexedEntry {
   const own = { kind: held?.own?.own_kind ?? null, line: held?.own?.own_line ?? null, related: idsOf(held?.own?.own_related ?? null) };
@@ -250,6 +262,18 @@ export class LoreIndex {
   readonly #kept = new Map<string, { user: string; chat: string }>();
   /** Entries handed to an indexing job, by where each is kept and its revision: the job's until it writes lines for them or ends. */
   readonly #claims = new Map<string, string>();
+  /** How many times this index has written lines (a run's or the user's own): the index's lines read before the last write are its lines no longer. */
+  #linesWritten = 0;
+  /**
+   * By user and chat: the chat's entries as last joined, with what they were joined from: the catalogue's entries (the same objects
+   * while its lore stands), the index's lines as read after its last write, and what each entry is bound to as it read then.
+   */
+  readonly #joined = new Map<string, { catalog: readonly LoreCatalogEntry[]; written: number; held: Map<string, Held>; bound: Map<string, Bound>; entries: readonly IndexedEntry[] }>();
+  /**
+   * By user and chat: the readable index as last kept, with what its text was made from (the entries, the lines in force and his own
+   * entry's text) and the file as it stood after (its size and when it was last written).
+   */
+  readonly #files = new Map<string, { path: string; entries: readonly IndexedEntry[]; lines: string | null; head: string | null; size: number; written: number }>();
 
   constructor(private readonly deps: LoreIndexDeps) {
     this.settings = Object.freeze({ ...LORE_INDEX_DEFAULTS, ...deps.settings });
@@ -334,7 +358,7 @@ export class LoreIndex {
 
     const at = this.deps.lore.worldAt(ask);
     const shown = new Set([...first1, ...first3].map((l) => l.id));
-    const persons = this.personsOf(ask, entries);
+    const persons = this.personsOf(ask, entries, at);
     const boundTo = new Map<string, string[]>();
     for (const record of at === null ? [] : horizonRecords(at)) {
       // A pin to a place holds for the places inside it.
@@ -370,12 +394,22 @@ export class LoreIndex {
     return { inPrompt, world, changed, bound, leftOut: Math.max(0, order.length - set.bound), notIndexed: entries.filter((e) => !e.indexed).length, activated };
   }
 
-  /** Every entry of the chat's lore, in the catalog's order, with its index lines and what it is bound to. */
+  /**
+   * Every entry of the chat's lore, in the catalog's order, with its index lines and what it is bound to. While the catalogue's entries
+   * are the same, no lines were written and every entry is bound as before, the entries joined before are given again.
+   */
   async entries(at: LoreAt): Promise<IndexedEntry[]> {
+    const written = this.#linesWritten;
     const catalog = await this.deps.lore.catalog(at);
-    const held = this.rows(at.user, catalog);
+    const chat = `${at.user}\u0000${at.chat}`;
+    const kept = this.#joined.get(chat);
+    const same = kept !== undefined && kept.catalog.length === catalog.length && kept.catalog.every((e, i) => e === catalog[i]);
+    const held = same && kept.written === written ? kept.held : this.rows(at.user, catalog);
     const bound = this.bindings(at, catalog);
-    return catalog.map((entry) => joined(entry, held.get(placeOf(entry)), bound.get(entry.id)));
+    if (same && held === kept.held && sameBound(kept.bound, bound)) return [...kept.entries];
+    const entries = catalog.map((entry) => joined(entry, held.get(placeOf(entry)), bound.get(entry.id)));
+    this.#joined.set(chat, { catalog, written, held, bound, entries });
+    return [...entries];
   }
 
   /**
@@ -403,10 +437,16 @@ export class LoreIndex {
   private bindings(at: LoreAt, catalog: readonly LoreCatalogEntry[]): Map<string, Bound> {
     const world = this.deps.lore.worldAt(at);
     const stored = storedBindings(this.deps.db, at.user);
+    // Each record's name, read once however many entries are bound to it.
+    const names = new Map<string, { what: string; linked: boolean }>();
     const read = (r: BindingRow): { what: string; linked: boolean } => {
       if (!r.linked || r.record.startsWith("quest:")) return { what: r.record, linked: r.linked };
+      const known = names.get(r.record);
+      if (known !== undefined) return known;
       const name = r.record.startsWith("cast:") ? this.deps.lore.castName(at, r.record.slice("cast:".length)) : recordName(world, r.record);
-      return { what: name ?? r.record, linked: name !== null };
+      const named = { what: name ?? r.record, linked: name !== null };
+      names.set(r.record, named);
+      return named;
     };
     return new Map(
       catalog.map((entry): [string, Bound] => {
@@ -417,13 +457,16 @@ export class LoreIndex {
     );
   }
 
-  /** The world person each cast character the entries are bound to is, as `entity:<id>`: the cast and the world meet by the character's id or name (`Lore.personPlayed`). */
-  private personsOf(at: LoreAt, entries: readonly IndexedEntry[]): Map<string, string> {
+  /**
+   * The world person each cast character the entries are bound to is, as `entity:<id>`: the cast and the world meet by the character's
+   * id or name (`Lore.personPlayed`), in `world`, the chat's world at `at` where the caller has read it.
+   */
+  private personsOf(at: LoreAt, entries: readonly IndexedEntry[], world: WorldAt | null = this.deps.lore.worldAt(at)): Map<string, string> {
     const out = new Map<string, string>();
     for (const e of entries) {
       for (const l of e.links) {
         if (!l.linked || !l.record.startsWith("cast:") || out.has(l.record)) continue;
-        const person = this.deps.lore.personPlayed(at, l.record.slice("cast:".length));
+        const person = this.deps.lore.personPlayed(at, l.record.slice("cast:".length), world);
         if (person !== null) out.set(l.record, `entity:${person.id}`);
       }
     }
@@ -539,6 +582,7 @@ export class LoreIndex {
         putBindings(db, at.user, entry.id, "run", l.defines.map((b) => ({ ...resolveRecord(world, b.what), aspect: b.aspect })), l.revision, now);
       }
     }, "keeping lore index lines");
+    this.#linesWritten++;
     // What was written is no longer held for the job that was handed it.
     if (job !== undefined) for (const { entry, lines: l } of kept) this.#claims.delete(claimOf(at.user, { ...entry, revision: l.revision }));
     await this.keepFiles(at);
@@ -570,6 +614,7 @@ export class LoreIndex {
       // His own bindings stand over a run's and outlive a run that redoes the entry; null takes them off, and the run's show again.
       if ("defines" in edit) putBindings(db, at.user, entry.id, "owner", (edit.defines ?? []).map((b) => ({ ...resolveRecord(world, b.what), aspect: b.aspect })), null, now);
     }, "keeping your edit of the lore index");
+    this.#linesWritten++;
     await this.keepFiles(at);
     return joined(entry, this.rows(at.user, [entry]).get(placeOf(entry)), this.bindings(at, [entry]).get(entry.id));
   }
@@ -597,22 +642,33 @@ export class LoreIndex {
 
   /**
    * The chat's readable index kept as `entries` show it: the text of his own index entry where he has one, then the
-   * lines in force. Written only when it differs from the file. A file that cannot be kept never stops what called for it.
+   * lines in force. Written only when it differs from the file. While the entries, the lines and his own entry's text
+   * are those it was last kept from and the file stands as it was left then, it is not made or read again. A file that
+   * cannot be kept never stops what called for it.
    */
   private async keepFile(at: LoreAt, entries: readonly IndexedEntry[]): Promise<boolean> {
     const file = this.deps.file;
     const folder = file?.folder(at.user, at.chat) ?? null;
     if (file === undefined || folder === null) return false;
+    const chat = `${at.user}\u0000${at.chat}`;
     try {
       const id = (await this.deps.settingsFor?.(at))?.indexEntry ?? null;
       const [lines, head] = await Promise.all([file.lines(at), id === null ? null : this.deps.lore.bookText(at, id)]);
-      const text = `${loreIndexText(lines, entries, head)}\n`;
       const path = join(folder, LORE_INDEX_FILE);
-      if ((await readText(path)) !== text) {
-        await mkdir(folder, { recursive: true });
-        await writeWhole(path, text);
+      const worded = lines === undefined ? null : JSON.stringify([lines.header, lines.text]);
+      const kept = this.#files.get(chat);
+      const now = kept === undefined ? null : await stat(path).catch(() => null);
+      const same = kept !== undefined && now !== null && kept.path === path && kept.lines === worded && kept.head === head && now.size === kept.size && now.mtimeMs === kept.written;
+      if (!same || kept.entries.length !== entries.length || kept.entries.some((e, i) => e !== entries[i])) {
+        const text = `${loreIndexText(lines, entries, head)}\n`;
+        if ((await readText(path)) !== text) {
+          await mkdir(folder, { recursive: true });
+          await writeWhole(path, text);
+        }
+        const after = await stat(path);
+        this.#files.set(chat, { path, entries, lines: worded, head, size: after.size, written: after.mtimeMs });
       }
-      this.#kept.set(`${at.user}\u0000${at.chat}`, { user: at.user, chat: at.chat });
+      this.#kept.set(chat, { user: at.user, chat: at.chat });
       return true;
     } catch (error) {
       this.deps.log?.warn("A chat's readable lore index could not be kept.", { chat: at.chat, error: error instanceof Error ? error.message : String(error) });

@@ -1,6 +1,7 @@
 export { bookEntryId, type CarriedLoreId, EntryNumbers, type LoreRef, loreRefOf, type LoreWrites, putCarriedLoreIds, worldEntryId } from "./ids";
 export { LORE_MIGRATIONS } from "./schema";
 export { foldName, type KeyMatching, keysIn, LUMIVERSE_KEY_MATCHING } from "./keys";
+export { type ScannedMessage, type ScannedTexts, scanMark } from "./said";
 export { Lore, type LoreActivation, type LoreAt, type LoreCatalogEntry, LORE_DEFAULTS, type LoreMapAsk, type LoreMeaning, type LoreOptions, type LoreSettings } from "./lore";
 export { type IndexedEntry, type LoreBinding, LORE_INDEX_DEFAULTS, LORE_INDEX_FIELDS, LoreIndex, type LoreIndexDeps, type LoreIndexEdit, type LoreIndexField, type LoreIndexInput, type LoreIndexLines, type LoreIndexOutcome, type LoreIndexSettings, type LoreNamedFields, type LoreNamedValue } from "./indexing";
 export { LORE_INDEX_ENTRY_DEF, LORE_INDEX_SETTING_DEFS, LORE_SETTING_DEFS, LORE_SETTINGS, SECRETS_NARRATOR_KNOWLEDGE_DEF, SECRETS_NARRATOR_SECRETS_DEF, SECRETS_SETTINGS, SECRETS_THRESHOLD_DEF, SECRETS_TRACKED_DEF } from "./settings";

@@ -70,6 +70,8 @@ describe("what Lumiverse scans for lore", () => {
     expect(asks).toHaveLength(1);
     expect(asks[0]!.matching).toEqual({ caseSensitive: true, wholeWords: true });
     // The latest two messages, a hidden one scanned like any (it is older than the depth reaches here), not the reply being written.
-    expect(asks[0]!.messages).toEqual(["Wren winds the clockwork.", `I ask about the ${" ".repeat("<wi-exclude>smuggler's</wi-exclude>".length)} lamp.`]);
+    const ask = asks[0]!;
+    const texts = await ask.texts(ask.messages.map((m) => m.id));
+    expect(ask.messages.map((m) => texts.get(m.id))).toEqual(["Wren winds the clockwork.", `I ask about the ${" ".repeat("<wi-exclude>smuggler's</wi-exclude>".length)} lamp.`]);
   });
 });

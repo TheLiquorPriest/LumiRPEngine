@@ -14,13 +14,18 @@ import { defaultTiers } from "../../src/shared/tiers";
 import { DEFAULT_CURRENCY, type LoreEntryDef, WORLD_FORMAT, type WorldDoc } from "../../src/shared/world";
 import { ALL_PACKS, defaultTables } from "../../src/packs/index";
 import { giveWorldNumbers } from "../../src/lore/ids";
-import { type ActivatedEntry, EntryNumbers, LORE_MIGRATIONS, type LoreBook, type LoreBookEntry, type LoreBooks, type LoreTurns, type LoreWorlds, type LoreWrites } from "../../src/lore/index";
+import { type ActivatedEntry, EntryNumbers, LORE_MIGRATIONS, type LoreBook, type LoreBookEntry, type LoreBooks, type LoreMapAsk, type LoreTurns, type LoreWorlds, type LoreWrites } from "../../src/lore/index";
 import { STORE_MIGRATIONS } from "../../src/store";
 
 export const USER = "user-coast";
 export const OTHER_USER = "user-inland";
 export const CHAT = "chat-reed";
 export const POV = "nell";
+
+/** Messages Lumiverse scans, as a lore map is given them: each text its own message, marked by its text. */
+export function scanned(texts: readonly string[]): Pick<LoreMapAsk, "messages" | "texts"> {
+  return { messages: texts.map((text, i) => ({ id: `message-${i}`, mark: text })), texts: async (ids) => new Map(ids.map((id) => [id, texts[Number(id.slice("message-".length))] ?? ""])) };
+}
 
 let shared: Registry | null = null;
 /** The shipped packs' registry, built once per test file. */

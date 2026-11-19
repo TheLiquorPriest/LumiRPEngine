@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { keysIn, Lore, loreMapFields, LUMIVERSE_KEY_MATCHING } from "../../src/lore/index";
-import { ATLAS, CHAT, dbFile, type LoreDb, loreDb, Shelf, SONGS, startingWorlds, Tags, USER, W } from "./fixtures";
+import { ATLAS, CHAT, dbFile, type LoreDb, loreDb, scanned, Shelf, SONGS, startingWorlds, Tags, USER, W } from "./fixtures";
 
 const AT = { user: USER, chat: CHAT };
 const WHOLE_WORDS = { caseSensitive: false, wholeWords: true };
@@ -39,7 +39,7 @@ describe("the lore map", () => {
       "Orrin will not speak of the crown, nor of the lighthouse keeper.",
       "A gull screams over the cove.",
     ];
-    const map = await lore.loreMap({ ...AT, turn: "turn-1", messages });
+    const map = await lore.loreMap({ ...AT, turn: "turn-1", ...scanned(messages) });
     const [lamp, gull] = await lore.activated({ ...AT, turn: "turn-1" });
     const gullTitle = "Gulls nest on the harbor wall every spring…";
     expect(map).toEqual({
@@ -62,18 +62,18 @@ describe("the lore map", () => {
   });
 
   test("a part with nothing in it is left out of the layout's fields", async () => {
-    const quiet = await lore.loreMap({ ...AT, turn: "turn-no-tag", messages: ["Nothing of note happens."] });
+    const quiet = await lore.loreMap({ ...AT, turn: "turn-no-tag", ...scanned(["Nothing of note happens."]) });
     expect(quiet).toEqual({ inPrompt: [], world: [] });
     expect(loreMapFields(quiet)).toEqual({});
-    const prompted = await lore.loreMap({ ...AT, turn: "turn-1", messages: [] });
+    const prompted = await lore.loreMap({ ...AT, turn: "turn-1", ...scanned([]) });
     expect(Object.keys(loreMapFields(prompted))).toEqual(["in_prompt"]);
   });
 
   test("the user's own key matching in Lumiverse is followed", async () => {
     const messages = ["The crowned heron stands in the shallows."];
-    expect((await lore.loreMap({ ...AT, turn: "turn-no-tag", messages })).world.map((l) => l.id)).toEqual([W.drowned_crown]);
-    expect((await lore.loreMap({ ...AT, turn: "turn-no-tag", messages, matching: WHOLE_WORDS })).world).toEqual([]);
-    expect((await lore.loreMap({ ...AT, turn: "turn-no-tag", messages: ["Pay the Tithe."], matching: CASED })).world).toEqual([]);
+    expect((await lore.loreMap({ ...AT, turn: "turn-no-tag", ...scanned(messages) })).world.map((l) => l.id)).toEqual([W.drowned_crown]);
+    expect((await lore.loreMap({ ...AT, turn: "turn-no-tag", ...scanned(messages), matching: WHOLE_WORDS })).world).toEqual([]);
+    expect((await lore.loreMap({ ...AT, turn: "turn-no-tag", ...scanned(["Pay the Tithe."]), matching: CASED })).world).toEqual([]);
   });
 
   test("keys are found as Lumiverse finds them: within one message, case folded unless asked, at word edges only when asked", () => {

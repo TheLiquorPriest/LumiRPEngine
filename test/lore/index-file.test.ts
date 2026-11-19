@@ -6,7 +6,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Lore, LoreIndex, loreLines } from "../../src/lore/index";
-import { CHAT, dbFile, type LoreDb, loreDb, Shelf, startingWorlds, Tags, USER, W } from "./fixtures";
+import { CHAT, dbFile, type LoreDb, loreDb, scanned, Shelf, startingWorlds, Tags, USER, W } from "./fixtures";
 import { type LoreGuidance, shippedGuidance } from "./shipped";
 
 const AT = { user: USER, chat: CHAT };
@@ -41,7 +41,7 @@ describe("LORE-INDEX.md", () => {
   test("is there at the chat's first briefing, before any run, and is written again when a run keeps lines or the user edits them", async () => {
     const path = join(folder(), "LORE-INDEX.md");
     expect(existsSync(path)).toBe(false);
-    await index.loreMap({ ...AT, turn: "turn-1", messages: [] });
+    await index.loreMap({ ...AT, turn: "turn-1", ...scanned([]) });
     expect(existsSync(path)).toBe(true);
     const entries = await index.entries(AT);
     const lamp = entries.find((e) => e.title === "The lamp room");

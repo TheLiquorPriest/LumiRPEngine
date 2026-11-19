@@ -35,8 +35,9 @@ import { hasSecretMarks, publicText, unreadableMarks } from "../shared/secret-ma
 import type { LoreEntryDef, StepPurpose, WorldDoc } from "../shared/world";
 import type { LoreScope, LoreSettingsFor } from "./chat-settings";
 import { bookEntryId, type EntryNumbers, worldEntryId } from "./ids";
-import { foldName, type KeyMatching, keysFound, LUMIVERSE_KEY_MATCHING } from "./keys";
+import { foldName, type KeyMatching, LUMIVERSE_KEY_MATCHING } from "./keys";
 import type { LoreMap, LoreMapLine } from "./map";
+import { KeysSaid, type ScannedMessage, type ScannedTexts } from "./said";
 import { AS_CHARACTER, CharacterReads, type HeldSecret, worldWithBooks } from "./secrets/character";
 import { HoldersAt, peopleOf } from "./secrets/holders";
 import { bookRead, type SecretWords, secretWords } from "./secrets/shown";
@@ -104,11 +105,13 @@ export interface LoreAt {
   turn?: string;
 }
 
-/** What a lore map is built from: the turn, whose tag says what activated, and the recent messages. */
+/** What a lore map is built from: the turn, whose tag says what activated, and the messages Lumiverse scans for lore. */
 export interface LoreMapAsk extends LoreAt {
   turn: string;
-  /** Each recent message's text, as Lumiverse scans it for keys. */
-  messages: readonly string[];
+  /** The messages Lumiverse scans for keys, in the path's order, each by id with its marks. */
+  messages: readonly ScannedMessage[];
+  /** Their texts as Lumiverse scans them: read only for the messages whose keys are not kept at their marks. */
+  texts: ScannedTexts;
   /** How the user's Lumiverse matches keys; its defaults when absent. */
   matching?: KeyMatching;
 }
@@ -254,6 +257,18 @@ type Gathered = { kind: "world"; key: string; entry: LoreEntryDef; source: strin
 /** An entry of the chat's lore as it is held, before its title and the text any reader may read of it are worked out. */
 type Raw = { kind: "world"; key: string; entry: LoreEntryDef; source: string } | { kind: "book"; book: LoreBook; row: LoreBookEntry };
 
+/** Whether two gatherings hold the same entries in the same order: each world entry the same of its document, each book entry the same row of the same book. */
+function sameRaw(a: readonly Raw[], b: readonly Raw[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every((x, i) => {
+      const y = b[i];
+      if (x.kind === "world") return y?.kind === "world" && y.key === x.key && y.entry === x.entry && y.source === x.source;
+      return y?.kind === "book" && y.row === x.row && y.book.id === x.book.id && y.book.name === x.book.name;
+    })
+  );
+}
+
 /**
  * How an entry comes into play by itself: a book entry by Lumiverse's ways (always, by its keys, by
  * meaning); a world entry by its keys, in the lore map. None for one that never does (switched off,
@@ -341,6 +356,14 @@ export class Lore {
   private readonly away: LoreOptions["away"];
   private readonly meaning: LoreOptions["meaning"];
   private blank: WorldAt | null = null;
+  /** The world's keys found in each chat's scanned messages, message by message. */
+  readonly #said = new KeysSaid();
+  /**
+   * By user and chat: the chat's last catalogue, with what it was made from: its world, the words that title an entry, and every entry
+   * as it was gathered (a world entry of the world's document, a book entry the same row the host gave). The host gives the same row
+   * while its book stands as it was read, so the same rows say truly that the catalogue would be made the same again.
+   */
+  readonly #catalogues = new Map<string, { world: string; titleWords: number; from: readonly Raw[]; catalogue: readonly LoreCatalogEntry[] }>();
 
   constructor(options: LoreOptions) {
     this.books = options.books;
@@ -391,9 +414,9 @@ export class Lore {
    * The world's person a reader plays, by `plays` as the agent was started, found as the cast finds a
    * secret's holder: the person of the chat's world it names by id or by name; else the one named as
    * the cast's character it names is (`LoreWorlds.castName`). Null when it names no one there, or several.
+   * `world` is the chat's world at `at`, where the caller has read it already.
    */
-  personPlayed(at: LoreAt, plays: string): { id: EntityId; name: string } | null {
-    const world = this.worlds.at(at.user, at.chat, at.turn);
+  personPlayed(at: LoreAt, plays: string, world: WorldAt | null = this.worlds.at(at.user, at.chat, at.turn)): { id: EntityId; name: string } | null {
     return world === null ? null : this.personIn(at, world, plays);
   }
 
@@ -428,9 +451,10 @@ export class Lore {
     const inPrompt = (await this.named(ask.user, activated, (await this.settingsOf(ask)).lore.titleWords)).map(({ id, title, source, how }): LoreMapLine => ({ id, title, source, ...(how !== undefined ? { how } : {}) }));
     const at = this.worlds.at(ask.user, ask.chat, ask.turn);
     if (at === null) return { inPrompt, world: [] };
-    // Every world key at once, over the messages once, as Lumiverse's matcher goes.
+    // Every world key, looked for in each message once: what was found in a message is kept at its marks, and only the messages new
+    // since, and the keys gained, are looked through again.
     const candidates = Object.entries(at.world.lore).filter(([key, entry]) => hasOwn(at.world.lore, key) && !isCopy(entry));
-    const said = keysFound(ask.messages, ask.matching ?? LUMIVERSE_KEY_MATCHING, candidates.flatMap(([, entry]) => keysOf(entry)));
+    const said = await this.#said.found(`${ask.user}\u0000${ask.chat}`, ask.messages, ask.texts, ask.matching ?? LUMIVERSE_KEY_MATCHING, candidates.flatMap(([, entry]) => keysOf(entry)));
     const matched = candidates.filter(([, entry]) => keysOf(entry).some((k) => said.has(k)));
     const numbers = await this.numbers.ofWorld(ask.user, at.world.id, matched.map(([key]) => key));
     const world = matched.flatMap(([key, entry]): LoreMapLine[] => {
@@ -471,8 +495,9 @@ export class Lore {
     const as = plays === undefined || world === null ? undefined : this.personIn(at, world, plays)?.id;
     if (plays !== undefined && as === undefined) return [];
     const open = world === null ? null : loreGateReader(world.registry, world.world, world.state);
-    // A book entry is read only from a book the chat reads, as its search reads them.
-    let books: Promise<Set<string>> | null = null;
+    // A book entry is read only from a book the chat reads, as its search reads them: the chat's books are read once a call, each with
+    // its entries (as the host holds them while the book stands), and an entry is found among them by its id.
+    let read: Promise<{ books: Map<string, LoreBook>; rows: Map<string, LoreBookEntry> }> | null = null;
     let people: EntityId[] | null = null;
     // What a character reads: the world's own entries as it may know them, and its books' as lore.
     let holders: HoldersAt | null | undefined;
@@ -498,11 +523,14 @@ export class Lore {
         }
       } else if (ref?.kind === "book") {
         const id = this.numbers.entry(at.user, ref.n);
-        const row = id === null ? null : await this.books.entry(at.user, id);
-        books ??= this.booksOf(at, world, s.books).then((read) => new Set(read.map((b) => b.id)));
-        if (row === null || !(await books).has(row.book)) continue;
-        const book = await this.books.book(at.user, row.book);
-        if (book === null) continue;
+        read ??= this.booksOf(at, world, s.books).then(async (list) => {
+          const rows = await Promise.all(list.map((b) => this.books.entries(at.user, b.id)));
+          return { books: new Map(list.map((b) => [b.id, b])), rows: new Map(rows.flat().map((r) => [r.id, r])) };
+        });
+        const chat = await read;
+        const row = id === null ? undefined : chat.rows.get(id);
+        const book = row === undefined ? undefined : chat.books.get(row.book);
+        if (row === undefined || book === undefined) continue;
         if (as !== undefined) {
           if (world === null) continue;
           holders ??= new HoldersAt(world);
@@ -589,12 +617,17 @@ export class Lore {
   /**
    * Every entry of the chat's lore as the database holds it now (plan §9.1), as search reads it: the
    * world's own entries, then those of the books the chat reads. A book entry is numbered the first
-   * time it is seen.
+   * time it is seen. While the chat's world, its books and every entry of them are as at the last
+   * catalogue, that catalogue is given again: a number once given is never given again.
    */
   async catalog(at: LoreAt): Promise<LoreCatalogEntry[]> {
     const world = this.worlds.at(at.user, at.chat, at.turn);
     const s = await this.settingsOf(at);
     const gathered = await this.gatherRaw(at, world, () => true, s);
+    const chat = `${at.user}\u0000${at.chat}`;
+    const kept = this.#catalogues.get(chat);
+    const worldId = world?.world.id ?? "";
+    if (kept !== undefined && kept.world === worldId && kept.titleWords === s.lore.titleWords && sameRaw(kept.from, gathered)) return [...kept.catalogue];
     const numbers = await this.numbers.of(at.user, gathered.flatMap((g) => (g.kind === "book" ? [g.row.id] : [])));
     const worldNumbers = world === null ? new Map<string, number>() : await this.numbers.ofWorld(at.user, world.world.id, gathered.flatMap((g) => (g.kind === "world" ? [g.key] : [])));
     const entries = gathered.flatMap((g): CatalogueRow[] => {
@@ -602,14 +635,19 @@ export class Lore {
       if (n === undefined) return [];
       return [g.kind === "world" ? { kind: "world", n, key: g.key, entry: g.entry, source: g.source } : { kind: "book", n, book: { id: g.book.id, name: g.book.name }, row: g.row }];
     });
-    const input: CatalogueInput = { world: world?.world.id ?? "", titleWords: s.lore.titleWords, entries };
-    if (this.away === undefined || entries.length <= s.lore.workerCatalogueAt) return catalogueOf(input);
-    try {
-      return await this.away(input);
-    } catch {
-      // A thread that failed has told the log; the catalogue is made here, as it always was.
-      return catalogueOf(input);
+    const input: CatalogueInput = { world: worldId, titleWords: s.lore.titleWords, entries };
+    let catalogue: LoreCatalogEntry[];
+    if (this.away === undefined || entries.length <= s.lore.workerCatalogueAt) catalogue = catalogueOf(input);
+    else {
+      try {
+        catalogue = await this.away(input);
+      } catch {
+        // A thread that failed has told the log; the catalogue is made here, as it always was.
+        catalogue = catalogueOf(input);
+      }
     }
+    this.#catalogues.set(chat, { world: worldId, titleWords: s.lore.titleWords, from: gathered, catalogue });
+    return [...catalogue];
   }
 
   /**

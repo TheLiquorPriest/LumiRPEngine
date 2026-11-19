@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Lore, LoreIndex } from "../../src/lore/index";
-import { CHAT, coastWorld, dbFile, type LoreDb, loreDb, Shelf, startingWorlds, Tags, USER, W } from "./fixtures";
+import { CHAT, coastWorld, dbFile, type LoreDb, loreDb, scanned, Shelf, startingWorlds, Tags, USER, W } from "./fixtures";
 
 const AT = { user: USER, chat: CHAT };
 
@@ -32,7 +32,7 @@ describe("bindings", () => {
   });
 
   const tide = async () => (await index.entries(AT)).find((e) => e.title === "The tide bell");
-  const bound = async () => (await index.loreMap({ ...AT, turn: "turn-1", messages: [] })).bound?.map((l) => [l.title, l.bound]);
+  const bound = async () => (await index.loreMap({ ...AT, turn: "turn-1", ...scanned([]) })).bound?.map((l) => [l.title, l.bound]);
 
   test("a run proposes them, the user's edit stands over the run's, and a run that redoes the entry leaves the edit alone", async () => {
     const first = await tide();
@@ -46,10 +46,12 @@ describe("bindings", () => {
     expect([(await tide())?.kind, (await tide())?.defines, (await tide())?.edited]).toEqual(["rule", [{ what: "Tobin Reed", aspect: "duty" }], ["kind", "defines"]]);
     expect(await bound()).toEqual([["The tide bell", ["Tobin Reed"]]]);
 
-    // The entry changes in Lumiverse and a run redoes it with bindings of its own: the user's stand.
-    const row = shelf.users.get(USER)?.entries.find((e) => e.id === "entry-tide");
-    if (row === undefined) throw new Error("the tide bell is on the shelf");
-    Object.assign(row, { content: "The bell rings at every tide now.", revision: 2 });
+    // The entry changes in Lumiverse (the host gives a new row for it) and a run redoes it with bindings of its own: the user's stand.
+    const entries = shelf.users.get(USER)?.entries;
+    const at = entries?.findIndex((e) => e.id === "entry-tide") ?? -1;
+    const row = entries?.[at];
+    if (entries === undefined || row === undefined) throw new Error("the tide bell is on the shelf");
+    entries[at] = { ...row, content: "The bell rings at every tide now.", revision: 2 };
     const changed = (await index.batch(AT)).entries.find((e) => e.id === id);
     expect(changed?.revision).toBe("2");
     await index.write(AT, [{ id, revision: changed?.revision ?? "", kind: "item", line: "The bell that rings every tide.", defines: [{ what: "The Lighthouse", aspect: "sound" }], related: [] }], "indexer");
@@ -73,7 +75,7 @@ describe("bindings", () => {
       d.run("INSERT INTO lore_binding (user, entry, record, linked, aspect, by, created) VALUES (?, ?, 'cast:c-1', 1, 'background', 'casting', 1)", [USER, W.cove_route]);
       d.run("INSERT INTO lore_binding (user, entry, record, linked, aspect, by, created) VALUES (?, ?, 'Tobin Reed', 0, '', 'run', 1)", [USER, W.tithe_law]);
     });
-    const map = await idx.loreMap({ ...AT, turn: "turn-1", messages: [] });
+    const map = await idx.loreMap({ ...AT, turn: "turn-1", ...scanned([]) });
     expect(map.bound?.map((l) => [l.id, l.bound])).toEqual([
       [W.keeper_log, ["Nell Harrow"]],
       [W.cove_route, ["Sefa Moor"]],

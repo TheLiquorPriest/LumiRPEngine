@@ -35,7 +35,7 @@ import { CAST_VIEWS, castPresentViews, castViews, type CastViewName, chatLine, f
 import { calendarOf, formatClock } from "../engine/calendar";
 import { placeOfEntity } from "../engine/scope";
 import { mapView, mapWording } from "../iface";
-import { knowledgeChange, type Lore, type LoreIndex, loreLines, loreMapFields, type LoreProjection, type SecretSettingsFor } from "../lore";
+import { knowledgeChange, type Lore, type LoreIndex, loreLines, loreMapFields, type LoreProjection, scanMark, type SecretSettingsFor } from "../lore";
 import { placeLinesAt } from "../places";
 import { tidyHolds } from "../play/path-events";
 import type { ActivatedRead } from "../lore/indexing";
@@ -1606,15 +1606,20 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     }
     // The world's own keys are looked for in what Lumiverse scans of the chat for lore, by the user's own scan settings (`scan.ts`):
     // the visible messages but the one being written, the latest of them to the scan depth, the markup hidden from its scan blanked.
-    // A chat with no world has no keys of its own to look for, so nothing is read for it.
+    // Each is given by its marks on the path: the lore keeps what it found in a message at its marks, and reads by id only the
+    // messages new or changed since. A chat with no world has no keys of its own to look for, so nothing is read for it.
     const world = this.#d.store.user(scope.user).chat(scope.chat)?.revision ?? null;
     const scan = world === null ? null : scanSettingsOf((await reads.setting(SCAN_SETTING))?.value);
     const writing = new Set(at.writing === null ? [] : [at.writing]);
     const scanned = scan === null ? [] : scannedSteps(steps, writing, scan.depth);
-    const first = scanned[0] === undefined ? -1 : steps.indexOf(scanned[0]);
-    const ids = new Set(scanned.map((s) => s.id));
-    const texts = first < 0 ? [] : (await reads.messages(scope.chat, { from: first, to: steps.length })).filter((m) => ids.has(m.id)).map((m) => maskWorldInfoScanExclusions(m.text));
-    const map = await this.#d.loreIndex.loreMap({ user: scope.user, chat: scope.chat, turn: scope.turn, messages: texts, ...(scan !== null ? { matching: scan.matching } : {}) });
+    const map = await this.#d.loreIndex.loreMap({
+      user: scope.user,
+      chat: scope.chat,
+      turn: scope.turn,
+      messages: scanned.map((s) => ({ id: s.id, mark: scanMark(s) })),
+      texts: async (ids) => new Map((await reads.messagesById(scope.chat, ids)).map((m) => [m.id, maskWorldInfoScanExclusions(m.text)] as const)),
+      ...(scan !== null ? { matching: scan.matching } : {}),
+    });
     if (mapPart?.format === "template") {
       const laid = mapPart.render({ ...loreMapFields(map, await loreLines(guidance)) }).text;
       if (laid.trim() !== "") blocks.push({ name: BLOCKS.loreMap, text: laid.trimEnd() });

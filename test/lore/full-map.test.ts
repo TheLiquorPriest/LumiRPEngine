@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Lore, LoreIndex, loreLines, loreMapFields, type LoreWorlds } from "../../src/lore/index";
 import type { TurnLoreMap } from "../../src/lore/indexing";
-import { ATLAS, CHAT, coastWorld, dbFile, type LoreDb, loreDb, Shelf, startingWorlds, Tags, USER, W } from "./fixtures";
+import { ATLAS, CHAT, coastWorld, dbFile, type LoreDb, loreDb, scanned, Shelf, startingWorlds, Tags, USER, W } from "./fixtures";
 import { type LoreGuidance, shippedGuidance } from "./shipped";
 
 const AT = { user: USER, chat: CHAT };
@@ -63,7 +63,7 @@ describe("the lore map in full", () => {
       "indexer",
     );
     horizon = ["fishmarket", "lighthouse", "sefa"];
-    map = await index.loreMap({ ...AT, turn: "turn-1", messages: ["Nell counts out the TITHE on the harbor steps."] });
+    map = await index.loreMap({ ...AT, turn: "turn-1", ...scanned(["Nell counts out the TITHE on the harbor steps."]) });
   });
   afterAll(async () => {
     await db.close();
@@ -138,10 +138,10 @@ describe("the lore map in full", () => {
 
   test("follows the horizon as the Author moves it; the player's character is always at hand", async () => {
     horizon = [];
-    const none = await index.loreMap({ ...AT, turn: "turn-1", messages: [] });
+    const none = await index.loreMap({ ...AT, turn: "turn-1", ...scanned([]) });
     expect(none.bound?.map((l) => [l.id, l.bound])).toEqual([["e-1", ["Nell Harrow"]]]);
     horizon = ["net_lofts"];
-    const lofts = await index.loreMap({ ...AT, turn: "turn-1", messages: [] });
+    const lofts = await index.loreMap({ ...AT, turn: "turn-1", ...scanned([]) });
     // Nell's song, then the ferry bound to Tobin, who is in the lofts; the tithe, out of the world part now, is bound to Orrin, who is not.
     expect(lofts.bound?.map((l) => [l.id, l.bound])).toEqual([
       ["e-1", ["Nell Harrow"]],

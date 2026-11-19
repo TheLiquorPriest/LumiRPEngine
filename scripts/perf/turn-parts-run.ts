@@ -27,6 +27,7 @@ import { CAST_VIEWS, castPresentViews, castViews, type CastViewName, MemorySearc
 import { charactersOf } from "../../src/cast/record";
 import { ROW_PARTS } from "../../src/cast/fold";
 import { mapView, mapWording } from "../../src/iface";
+import { scanMark } from "../../src/lore";
 import { placeLinesAt } from "../../src/places";
 import { tidyHolds } from "../../src/play/path-events";
 import type { JsonObject, JsonValue } from "../../src/shared/json";
@@ -267,26 +268,24 @@ else {
   const reads = composition.door.lumiverse()?.reads;
   if (reads !== undefined) {
     // The lore map by its parts, each read cold as a turn's start after a start finds it, then the map whole at the same turn, which
-    // finds them held: the chat's path (the intake reads it before its briefing), the messages Lumiverse scans for lore, what activated
-    // and the world's entries over no messages and over those (the world's keys looked for in them), the lore's catalogue (its books read
-    // from Lumiverse, each entry numbered and worked out) cold and again, and every entry with its index lines and bindings.
+    // finds them held: the chat's path (the intake reads it before its briefing); what activated and the world's entries over no
+    // messages; over the messages Lumiverse scans for lore, read by id and each looked through for the world's keys, then again with
+    // each message's keys kept; the lore's catalogue (its books read from Lumiverse, each entry numbered and worked out) cold and again;
+    // and every entry with its index lines and bindings.
     const at = { user: owner, chat, turn: newestTurn };
     const path = await timed("a briefing's lore map, cold: the scan's setting and the chat's path", async () => ({ scan: scanSettingsOf((await reads.setting(SCAN_SETTING))?.value), steps: (await reads.path(chat)) ?? [] }));
     if (path !== undefined) {
       const { scan, steps } = path;
-      const messages = await timed(
-        "a briefing's lore map, cold: the messages it scans, read and masked",
-        async () => {
-          const scanned = scannedSteps(steps, new Set(), scan.depth);
-          const first = scanned[0] === undefined ? -1 : steps.indexOf(scanned[0]);
-          const ids = new Set(scanned.map((m) => m.id));
-          return first < 0 ? [] : (await reads.messages(chat, { from: first, to: steps.length })).filter((m) => ids.has(m.id)).map((m) => maskWorldInfoScanExclusions(m.text));
-        },
-        (o) => o.join("").length,
-      );
-      const ask = { ...at, messages: messages ?? [], matching: scan.matching };
+      // The messages it scans, as the briefing gives them: each by its marks, its text read by id only where its keys are not kept.
+      const ask = {
+        ...at,
+        messages: scannedSteps(steps, new Set(), scan.depth).map((m) => ({ id: m.id, mark: scanMark(m) })),
+        texts: async (ids: readonly string[]) => new Map((await reads.messagesById(chat, ids)).map((m) => [m.id, maskWorldInfoScanExclusions(m.text)] as const)),
+        matching: scan.matching,
+      };
       await timed("a briefing's lore map, cold: its first form over no messages (what activated, the world's entries)", () => turns.lore.loreMap({ ...ask, messages: [] }), size);
-      await timed("a briefing's lore map: its first form (the world's keys looked for in the messages it scans)", () => turns.lore.loreMap(ask), size);
+      await timed("a briefing's lore map, cold: its first form (the messages it scans read, each looked through for the world's keys)", () => turns.lore.loreMap(ask), size);
+      await timed("a briefing's lore map: its first form again (each message's keys kept)", () => turns.lore.loreMap(ask), size);
       await timed("a briefing's lore map, cold: the lore's catalogue (its books read from Lumiverse, numbered, worked out)", () => turns.lore.catalog(at), size);
       await timed("a briefing's lore map: the lore's catalogue again (its books held as read)", () => turns.lore.catalog(at), size);
       await timed("a briefing's lore map: every entry with its index lines and bindings", () => turns.loreIndex.entries(at), size);

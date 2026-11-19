@@ -61,6 +61,8 @@ export interface LinesPart extends PartBase {
   format: "lines";
   /** The lines' names, in the file's order. */
   names: string[];
+  /** The lines as written (the file's body): what a keeper of text made from them compares, with the header, to know the lines changed. */
+  text: string;
   /** One line filled in; undefined when the file holds no line of that name, which means it is not shown. */
   line(name: string, fields?: Fields): string | undefined;
 }
@@ -113,7 +115,7 @@ function partOf(text: string, name: string, kind: "prompts" | "tools", source: P
       const m = LINE.exec(line);
       if (m?.[1] !== undefined && !lines.has(m[1])) lines.set(m[1], (m[2] ?? "").trimEnd());
     }
-    return { ...base, format: "lines", names: [...lines.keys()], line: (line, fields) => {
+    return { ...base, format: "lines", names: [...lines.keys()], text: split.body, line: (line, fields) => {
       const said = lines.get(line);
       return said === undefined ? undefined : (filled(said, header, fields, source.path)?.text ?? undefined);
     } };

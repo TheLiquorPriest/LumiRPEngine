@@ -19,7 +19,7 @@ import { hasOwn } from "../shared/json";
 import { lorePinKey, lorePinsOf } from "../shared/lore";
 import type { LoreCatalogEntry } from "./lore";
 import { foldName } from "./keys";
-import type { LorePin } from "../shared/world";
+import type { LorePin, LorePins, WorldDoc } from "../shared/world";
 import type { WorldAt } from "./sources";
 
 /** Who proposed a binding: an indexing run, casting, bootstrap, or the owner (whose stand over a run's). */
@@ -49,9 +49,19 @@ export interface LoreLink {
 /** A record the lore map can name: a kind and its id. */
 const TYPED = /^(entity|place|quest|cast):(.+)$/;
 
+type Places = Readonly<Record<string, { name: string; parent?: string }>>;
+
+/** The places of the world as each frozen state plays it, worked out once for the state: every binding and pin read at a point asks them. */
+const played = new WeakMap<object, { world: WorldDoc; registry: WorldAt["registry"]; places: Places }>();
+
 /** The world as the chat plays it: its own places, and those play made or changed. */
-function placesOf(at: WorldAt): Readonly<Record<string, { name: string; parent?: string }>> {
-  return at.registry.context(at.world, at.state).world.places as Readonly<Record<string, { name: string; parent?: string }>>;
+function placesOf(at: WorldAt): Places {
+  const kept = played.get(at.state);
+  if (kept?.world === at.world && kept.registry === at.registry) return kept.places;
+  const places = at.registry.context(at.world, at.state).world.places as Places;
+  // A state that may still change (a working's) is read again at each ask.
+  if (Object.isFrozen(at.state)) played.set(at.state, { world: at.world, registry: at.registry, places });
+  return places;
 }
 
 function livePerson(at: WorldAt, id: string): boolean {
@@ -150,15 +160,34 @@ export function putBindings(db: Database, user: string, entry: string, by: Bindi
 export function pinLinks(at: WorldAt, entry: Pick<LoreCatalogEntry, "key" | "book" | "lumiverse">): LoreLink[] {
   const keys = new Set([...(entry.key === null ? [] : [`lore:${entry.key}`]), ...(entry.book === null ? [] : [`book:${entry.book}`, ...(entry.lumiverse === null ? [] : [`book:${entry.book}/${entry.lumiverse}`])])]);
   if (keys.size === 0) return [];
-  const pins = lorePinsOf(at.world);
-  const out: LoreLink[] = [];
+  const index = pinnedBy(lorePinsOf(at.world));
+  const found = new Map<number, string>();
+  for (const key of keys) for (const pinned of index.get(key) ?? []) found.set(pinned.at, pinned.record);
+  return [...found].sort(([a], [b]) => a - b).map(([, record]) => ({ record, linked: resolveRecord(at, record).linked, aspect: "", by: "pin" }));
+}
+
+/** By the pins read of a world: each pin's key with the records it pins, each with its place in the world's order (its characters', then its places'). */
+const pinIndexes = new WeakMap<LorePins, Map<string, { at: number; record: string }[]>>();
+
+/** The records each pin of `pins` pins, made once for the pins read: a lore map asks it for every entry of the chat's lore. */
+function pinnedBy(pins: LorePins): Map<string, { at: number; record: string }[]> {
+  const kept = pinIndexes.get(pins);
+  if (kept !== undefined) return kept;
+  const index = new Map<string, { at: number; record: string }[]>();
+  let at = 0;
   const read = (record: Readonly<Record<string, readonly LorePin[] | undefined>>, ref: (id: string) => string): void => {
     for (const [id, list] of Object.entries(record)) {
-      if (list?.some((pin) => keys.has(lorePinKey(pin))) !== true) continue;
-      out.push({ record: ref(id), linked: true, aspect: "", by: "pin" });
+      const pinned = { at: at++, record: ref(id) };
+      for (const pin of list ?? []) {
+        const key = lorePinKey(pin);
+        const has = index.get(key);
+        if (has === undefined) index.set(key, [pinned]);
+        else if (!has.includes(pinned)) has.push(pinned);
+      }
     }
   };
   read(pins.characters, (id) => `entity:${id}`);
   read(pins.places, (id) => `place:${id}`);
-  return out.map((l) => ({ ...l, linked: resolveRecord(at, l.record).linked }));
+  pinIndexes.set(pins, index);
+  return index;
 }
