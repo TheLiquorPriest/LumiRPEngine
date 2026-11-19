@@ -72,13 +72,29 @@ function notesOf(store: Store, s: UserStore, entry: PathEntry, words: JournalWor
   }
 }
 
+/** Whether a turn's notes are to be worked out (`notesOf`): not kept under its state and the words; a joined turn has none to work out. */
+function unkept(s: UserStore, entry: PathEntry, words: JournalWords): boolean {
+  if (entry.turn === null) return false;
+  try {
+    return !kept.has(`${s.foldKey(entry.turn)}\u0000${entry.message}\u0000${words.key}`);
+  } catch (error) {
+    if (!(error instanceof JoinedTurnError)) throw error;
+    return false;
+  }
+}
+
 /** The Journal's notes for the newest `most` turns of the chat's path, oldest first, worded in `words`. */
 export async function journalNotes(store: Store, user: string, chat: string, most: number, words: JournalWords): Promise<JournalNote[]> {
   const s = store.user(user);
   if (s.chat(chat) === null) return [];
   const turns = s.path(chat).filter((entry) => !entry.user && entry.turn !== null);
   const lines = linesOf(words.texts);
+  const asked = turns.slice(-Math.max(1, most));
+  // The first state a note not kept reads is folded where a long fold runs on a worker thread (`Store.afar`): after a restart or an
+  // update no state is held, and its fold reads a snapshot whole.
+  const cold = asked.find((entry) => unkept(s, entry, words))?.turn ?? null;
+  if (cold !== null) await store.afar(() => s.stateAt(cold));
   // Oldest first, so each turn's state folds on from the one before it.
-  const notes = await inStretches(turns.slice(-Math.max(1, most)), (entry) => notesOf(store, s, entry, words), (stretch) => withLines(lines, stretch));
+  const notes = await inStretches(asked, (entry) => notesOf(store, s, entry, words), (stretch) => withLines(lines, stretch));
   return notes.flat();
 }

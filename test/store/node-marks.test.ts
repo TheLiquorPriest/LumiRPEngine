@@ -310,6 +310,74 @@ describe("branches that share history", () => {
     expect(fresh.headState("branch").state.world.entities[POV]?.fields.place).toBe("market");
     expect(JSON.parse(JSON.stringify(s.headState("branch").state))).toEqual(JSON.parse(JSON.stringify(fresh.headState("branch").state)));
   });
+
+  test("his own change written again before a shared turn renews a branch's turn made after it, and the branch's reading of its head", () => {
+    const { s, store, worlds, t2 } = forked();
+    const u3 = play(s, "branch", "b-m3", "Up to the roof.", 4, engine(tick(5)));
+    s.sync("branch", shown(["b-u1", "in"], ["b-m1", "Into the inn.", 1], ["b-u2", "down"], ["b-m2", "Down the stairs.", 2], ["b-u3", "up"], ["b-m3", "Up to the roof.", 4]));
+    expect(s.stateAt(u3.id).state.world.entities.coin).toBeUndefined();
+    expect(s.headState("branch").state.world.entities.coin).toBeUndefined();
+    // Written again as an import's re-run writes his kept changes: just before the source's second turn, which the branch shares.
+    const [coin] = engine(make("coin", "Coin", POV));
+    if (coin === undefined) throw new Error("no change");
+    const { placed } = s.restoreOwn([{ chat: "source", lane: coin.lane, op: coin.op, value: coin.value, by: "player", handle: null, standing: null, precision: null, source: "player", cite: null, job: null, applied: true, reports: [], told: [], created: 0, at: 0, ended: null, before: { message: "m2", hash: hashOf("Down the stairs."), date: 2 } }]);
+    expect(placed).toBe(1);
+    expect(s.stateAt(t2.id).state.world.entities.coin).toBeDefined();
+    expect(s.stateAt(u3.id).state.world.entities.coin).toBeDefined();
+    sameAsAfresh(s, store.db, [t2, u3], (r) => worlds.get(r));
+    const fresh = openStore({ areas: [STORY_STORE_AREA], db: store.db, registry: registry(), worlds: (r) => worlds.get(r) }).user(USER);
+    expect(JSON.parse(JSON.stringify(s.headState("branch").state))).toEqual(JSON.parse(JSON.stringify(fresh.headState("branch").state)));
+  });
+
+  test("a change on a source's swipe that a branch's question shows, on a path no comparison stored, renews that question's answer", () => {
+    let at = 0;
+    const { s, store, revision, worlds } = testStore({ now: () => ++at });
+    s.createChat({ id: "source", revision });
+    play(s, "source", "m1", "Into the inn.", 1, engine(tick(15)));
+    play(s, "source", "m2", "Down the stairs.", 2, engine(goTo(POV, "cellar")));
+    s.sync("source", shown(["u1", "in"], ["m1", "Into the inn.", 1], ["u2", "down"], ["m2", "Down the stairs.", 2]));
+    // Another swipe of the first reply, played on the source after its second turn; the source still shows the first.
+    const hall = play(s, "source", "m1", "Into the hall.", 11, engine(make("coin", "Coin", POV)), { target: "m1" });
+    s.branchChat({ id: "branch", from: "source", map: { u1: "b-u1", m1: "b-m1", u2: "b-u2", m2: "b-m2" } });
+    play(s, "branch", "b-m3", "Up to the roof.", 3, engine(make("rope", "Rope", POV)));
+    s.sync("branch", shown(["b-u1", "in"], ["b-m1", "Into the inn.", 1], ["b-u2", "down"], ["b-m2", "Down the stairs.", 2], ["b-u3", "up"], ["b-m3", "Up to the roof.", 3]));
+    // The branch's prompt shows the other swipe of the first reply: the later turns stand rebased, on nodes no comparison has stored.
+    const lines: SeenMessage[] = [["b-u1", "in"], ["b-m1", "Into the hall."], ["b-u2", "down"], ["b-m2", "Down the stairs."], ["b-u3", "up"], ["b-m3", "Up to the roof."]].map(([id, text], index) => ({ id: id as string, user: index % 2 === 0, index, swipe: 0, hash: hashOf(text as string) }));
+    const ask = () => s.turnStart("branch", lines, { follows: "b-m3" });
+    const before = ask();
+    expect(before.state.world.entities.coin).toBeDefined();
+    expect(before.state.world.entities.lamp).toBeUndefined();
+    // A change lands on the source's swipe, which neither the branch's turns nor its stored path go through.
+    s.addChanges(hall.id, engine(make("lamp", "Lamp", POV)));
+    const after = ask();
+    expect(after.state.world.entities.lamp).toBeDefined();
+    const fresh = openStore({ areas: [STORY_STORE_AREA], db: store.db, registry: registry(), worlds: (r) => worlds.get(r) }).user(USER);
+    expect(JSON.parse(JSON.stringify(after.state))).toEqual(JSON.parse(JSON.stringify(fresh.turnStart("branch", lines, { follows: "b-m3" }).state)));
+  });
+
+  test("a question on a path no comparison stored starts with a job's change pending and his own after the head, as once the path is stored", () => {
+    let at = 0;
+    const { s, store, revision, worlds } = testStore({ now: () => ++at });
+    s.createChat({ id: "c", revision });
+    play(s, "c", "m1", "Into the inn.", 1, engine(tick(15)));
+    play(s, "c", "m1", "Into the hall.", 11, engine(make("coin", "Coin", POV)), { target: "m1" });
+    const t2 = play(s, "c", "m2", "Down the stairs.", 2, engine(goTo(POV, "cellar")));
+    s.sync("c", shown(["u1", "in"], ["m1", "Into the inn.", 1], ["u2", "down"], ["m2", "Down the stairs.", 2]));
+    // A job of the newest turn ends after it began, and he makes a change of his own: both stand after the head.
+    s.addChanges(t2.id, engine(make("note", "Note", POV)).map((c) => ({ ...c, job: "job-1" })));
+    s.endJob("job-1");
+    s.addOwnerChanges("c", engine(make("map", "Folded map", POV)));
+    // The prompt shows the other swipe of the first reply: the second turn stands rebased, on a node no comparison has stored.
+    const lines: SeenMessage[] = [["u1", "in"], ["m1", "Into the hall."], ["u2", "down"], ["m2", "Down the stairs."]].map(([id, text], index) => ({ id: id as string, user: index % 2 === 0, index, swipe: 0, hash: hashOf(text as string) }));
+    const asked = s.turnStart("c", lines, { follows: "m2" });
+    expect(asked.state.world.entities.coin).toBeDefined();
+    expect(asked.state.world.entities.note).toBeDefined();
+    expect(asked.state.world.entities.map).toBeDefined();
+    // Once a comparison stores that path, the same question is answered from the stored nodes: the same state.
+    s.sync("c", shown(["u1", "in"], ["m1", "Into the hall.", 11], ["u2", "down"], ["m2", "Down the stairs.", 2]));
+    const stored = openStore({ areas: [STORY_STORE_AREA], db: store.db, registry: registry(), worlds: (r) => worlds.get(r) }).user(USER).turnStart("c", lines, { follows: "m2" });
+    expect(JSON.parse(JSON.stringify(asked.state))).toEqual(JSON.parse(JSON.stringify(stored.state)));
+  });
 });
 
 describe("a thread's fold", () => {

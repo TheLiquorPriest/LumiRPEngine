@@ -454,6 +454,13 @@ export class Store {
    */
   private readonly marksSince = new Map<string, { newest: string; base: string; named: Map<string, string> }>();
   private readonly compared = new Map<string, ComparedPath>();
+  /**
+   * By user and turn (`user\0turn`), the chats under whose marks a question's fold through the turn is held (`UserStore.turnStart`), on
+   * a path no comparison has stored: the chat that asked and the chats of the path's turns, under whose marks its state, the state laid
+   * on it and the snapshots it found wait. No stored node or path leads from the turn to them, so a write of the turn names them as
+   * well (`UserStore.foldsThrough`). Let go with what is held.
+   */
+  private readonly asked = new Map<string, Set<string>>();
   private readonly views = new WeakMap<StoreState, TreeView>();
   private readonly envs = new Map<string, FoldEnv>();
   private readonly handlerFailed: (failure: StoreFailure) => void;
@@ -596,6 +603,22 @@ export class Store {
     this.byChat.clear();
     this.held.clear();
     this.compared.clear();
+    this.asked.clear();
+  }
+
+  /** @internal Notes that a question's fold through each of `turns`, on a path no comparison has stored, is held under `chats`' marks (`asked`). */
+  askedThrough(user: string, turns: Iterable<string>, chats: readonly string[]): void {
+    for (const turn of turns) {
+      const key = `${user}\u0000${turn}`;
+      const had = this.asked.get(key);
+      if (had === undefined) this.asked.set(key, new Set(chats));
+      else for (const chat of chats) had.add(chat);
+    }
+  }
+
+  /** @internal The chats under whose marks a question's fold through `turn` is held (`askedThrough`). */
+  askedOf(user: string, turn: string): readonly string[] {
+    return [...(this.asked.get(`${user}\u0000${turn}`) ?? [])];
   }
 
   /**
@@ -956,9 +979,10 @@ export class UserStore {
    * played a turn standing at one of the turn's nodes or a node after one (`nodesThrough`), whose held states go by that chat's mark,
    * and each whose path holds such a turn, whose own reading of its head does. A branch's turn made on a path through the turn is
    * among them though the branch's path no longer holds the turn (a message deleted, the turn standing rebased): it was made after it.
+   * So is each chat under whose mark a question's fold through the turn is held, on a path no comparison has stored (`Store.askedOf`).
    */
   private foldsThrough(turn: TurnRow): string[] {
-    return this.db
+    const stored = this.db
       .query<{ chat: string }, [string, string, string]>(
         `WITH RECURSIVE down(key) AS (
            SELECT key FROM path_node WHERE user = ?1 AND turn = ?2
@@ -971,6 +995,7 @@ export class UserStore {
       )
       .all(this.id, turn.id, turn.chat)
       .map((r) => r.chat);
+    return [...new Set([...stored, ...this.store.askedOf(this.id, turn.id)])];
   }
 
   /** A chat and every branch of it, and of its branches: all whose paths may run through its turns. */
@@ -1289,7 +1314,7 @@ export class UserStore {
    * change of its chat, in the order kept, with its job's end, just before the turn of that chat now tied to the reply it stood before
    * (`matchTurn` over the reply's swipes; the import's turns share one moment, so it is placed by that turn, not by its moment); one
    * that stood after the path's end takes effect now, at the chat's head. One whose chat or reply is gone is not written: it is
-   * returned in `lost`. The chats' stored snapshots are let go, so every fold sees them.
+   * returned in `lost`. The stored snapshots of the chats and of every branch of them are let go, so every fold sees them.
    */
   restoreOwn(kept: readonly KeptOwn[]): { placed: number; lost: KeptOwn[] } {
     const lost: KeptOwn[] = [];
@@ -1300,7 +1325,8 @@ export class UserStore {
       else put.push({ k, turn });
     }
     if (put.length === 0) return { placed: 0, lost };
-    const chats = [...new Set(put.map((p) => p.k.chat))];
+    // One placed before a turn stands before it in every branch's path through it too, and one at the head in the readings made of it.
+    const chats = [...new Set(put.flatMap((p) => this.withBranches(p.k.chat)))];
     const now = this.store.now();
     this.write(chats, () => {
       const ords = new Map<string, number>();
@@ -2328,7 +2354,27 @@ export class UserStore {
     const at = last === undefined ? null : { message: last.message, turn: last.turn };
     // Every node stored: the state there, as any stored node's. Else the chain from the start, needed only when nothing is held for it.
     const endTurn = fresh.nodes.at(-1)?.[2] ?? "";
-    const folded = end === null ? this.withOwner(chat, null, row?.revision ?? null, true) : fresh.nodes.length === 0 ? this.withOwner(chat, end, row?.revision ?? null, true) : this.foldPath(end, endTurn, () => chainOf(held, null, 0, this.goesOn(chat, held, 0)).nodes);
+    let folded: Folded;
+    if (end === null) folded = this.withOwner(chat, null, row?.revision ?? null, true);
+    else if (fresh.nodes.length === 0) folded = this.withOwner(chat, end, row?.revision ?? null, true);
+    else {
+      let whole: readonly (readonly [key: string, prev: string | null, turn: string, depth: number])[] | undefined;
+      const chain = () => (whole ??= chainOf(held, null, 0, this.goesOn(chat, held, 0)).nodes);
+      // No stored node or path leads from these turns to what is held for this question, so a write of any of them names its chats.
+      const turns = new Map(
+        this.db
+          .query<{ id: string; chat: string; created: number }, [string, string]>("SELECT t.id, t.chat, t.created FROM json_each(?2) j CROSS JOIN turn t ON t.user = ?1 AND t.id = j.value")
+          .all(this.id, JSON.stringify(held.map((h) => h.turn)))
+          .map((t) => [t.id, t]),
+      );
+      this.store.askedThrough(this.id, turns.keys(), [chat, ...[...turns.values()].map((t) => t.chat)]);
+      const run = () =>
+        chain().flatMap(([key, , turn, depth]) => {
+          const t = turns.get(turn);
+          return t === undefined ? [] : [{ key, turn, depth, chat: t.chat, created: t.created }];
+        });
+      folded = this.laidOn(chat, end, endTurn, this.foldPath(end, endTurn, chain), true, run);
+    }
     return { ...folded, messages, at, known: row !== null };
   }
 
@@ -2347,27 +2393,37 @@ export class UserStore {
    */
   private withOwner(chat: string, node: string | null, revision: string | null, jobs = false): Folded {
     const base = node === null ? this.initial(revision) : this.foldNode(node).folded;
-    // A chat none of whose line holds a change of his, and with no job ended since its node's turn began, is its node's state.
+    const turn = jobs && node !== null ? (this.db.query<{ turn: string }, [string, string]>("SELECT turn FROM path_node WHERE user = ? AND key = ?").get(this.id, node)?.turn ?? null) : null;
+    return this.laidOn(chat, node, turn, base, jobs, () => (node === null ? [] : this.chainRows(node)));
+  }
+
+  /**
+   * `base`, the state at the end of a path (`end`, a node stored or not, whose turn is `turn`; null: the chat's start), with his own
+   * changes of `chat` that stand after it, and, when `jobs`, the ended jobs' changes no turn there began after. `path` gives the path's
+   * nodes, oldest first, each with its turn, the turn's chat and when it began: read only where one of those may stand. Held for the chat.
+   */
+  private laidOn(chat: string, end: string | null, turn: string | null, base: Folded, jobs: boolean, path: () => readonly { key: string; turn: string; depth: number; chat: string; created: number }[]): Folded {
+    // A chat none of whose line holds a change of his, and with no job ended since its end's turn began, is its end's state.
     const owner = this.ownerIn(chat);
-    const due = jobs && node !== null && this.jobEndedSince(node);
+    const due = jobs && turn !== null && this.jobEndedSince(turn);
     if (!owner && !due) return base;
     const mark = this.store.markOf(this.id, chat);
-    const key = `${this.cacheKey(node ?? "~")}\u0000@${chat}${jobs ? "+jobs" : ""}`;
+    const key = `${this.cacheKey(end ?? "~")}\u0000@${chat}${jobs ? "+jobs" : ""}`;
     const hit = this.store.cached(key, mark);
     if (hit) return hit.folded;
-    const path = node === null ? [] : this.chainRows(node);
-    const after = owner ? this.placeOwner(path, false, chat).after : [];
-    const pending = due ? this.jobsPending(path) : [];
+    const rows = path();
+    const after = owner ? this.placeOwner(rows, false, chat).after : [];
+    const pending = due ? this.jobsPending(rows) : [];
     if (after.length === 0 && pending.length === 0) {
       this.store.keep(key, base, 0, this.id, chat, mark);
       return base;
     }
     const state = draft(base.state);
-    const n = (path.at(-1)?.depth ?? -1) + 2;
+    const n = (rows.at(-1)?.depth ?? -1) + 2;
     const notApplied = [...base.notApplied];
     if (pending.length > 0) {
       const env = this.store.envOf(this.id);
-      foldSteps(env, { state, upto: 0 }, [{ node: node ?? "", turn: "", n, own: true, changes: [], jobs: pending }], (_s, _st, _u, missed) => notApplied.push(...missed));
+      foldSteps(env, { state, upto: 0 }, [{ node: end ?? "", turn: "", n, own: true, changes: [], jobs: pending }], (_s, _st, _u, missed) => notApplied.push(...missed));
     }
     notApplied.push(...applyOwner(this.store.envOf(this.id), state, after, n));
     const folded: Folded = { ...base, state, notApplied };
@@ -2375,15 +2431,9 @@ export class UserStore {
     return folded;
   }
 
-  /** Whether a job has ended since the turn of `node` began: none has, and no job's change is pending after it (`jobsPending`). */
-  private jobEndedSince(node: string): boolean {
-    return (
-      this.db
-        .query<{ any: number }, [string, string]>(
-          "SELECT EXISTS(SELECT 1 FROM job e WHERE e.user = ?1 AND e.ended >= (SELECT t.created FROM path_node n JOIN turn t ON t.user = n.user AND t.id = n.turn WHERE n.user = ?1 AND n.key = ?2)) AS any",
-        )
-        .get(this.id, node)?.any === 1
-    );
+  /** Whether a job has ended since `turn` began: none has, and no job's change is pending after it (`jobsPending`). */
+  private jobEndedSince(turn: string): boolean {
+    return this.db.query<{ any: number }, [string, string]>("SELECT EXISTS(SELECT 1 FROM job e WHERE e.user = ?1 AND e.ended >= (SELECT created FROM turn WHERE user = ?1 AND id = ?2)) AS any").get(this.id, turn)?.any === 1;
   }
 
   /** Whether the chat, or a chat it was branched from, holds a change of his own. */
