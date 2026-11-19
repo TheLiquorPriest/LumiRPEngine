@@ -12,7 +12,7 @@
 // not a world's.
 
 import { playedWorld } from "../engine/places-in-play";
-import { passInStretches, readPass } from "../engine/read-pass";
+import { passInStretches, readPass, type PassInStretches } from "../engine/read-pass";
 import { placeOfEntity } from "../engine/scope";
 import type { ReadContext } from "../engine/registry";
 import type { WorldState } from "../engine/state";
@@ -99,6 +99,12 @@ interface Built extends ViewParts {
   revision: string;
   lag: ReturnType<typeof definitionsLag>;
   place: string | null;
+  /**
+   * The read pass the parts were built in, which an item read apart of the same state reads in (`chatViewItem`), so what the parts
+   * worked out (a company's valuation, the money's flows) it finds and works out nothing again: kept under the very state and world
+   * objects they were read from, so a state the store folds again is read afresh.
+   */
+  pass: PassInStretches;
 }
 
 interface ViewParts {
@@ -124,7 +130,7 @@ const VIEWS_KEPT = 4;
  * pass, so what one panel reads the others find): a panel a stretch, and a panel of many pages alike (`PanelViewDef.items`) a page at a
  * time; then the quests' trails, the scene, the HUD (which reads the panels), the palette and the controls.
  */
-async function buildParts(input: ChatViewInput, s: UserStore, folded: Folded, world: WorldDoc, state: WorldState, elapsed: number): Promise<ViewParts> {
+async function buildParts(input: ChatViewInput, s: UserStore, folded: Folded, world: WorldDoc, state: WorldState, elapsed: number): Promise<ViewParts & { pass: PassInStretches }> {
   const registry = input.store.env.registry;
   const pass = passInStretches();
   const ctx: ReadContext = registry.context(world, state);
@@ -194,7 +200,7 @@ async function buildParts(input: ChatViewInput, s: UserStore, folded: Folded, wo
   // Each step is taken when it is reached, so the pages a panel's first step adds run in their place.
   await inStretches(steps, (step) => step(), (stretch) => pass.run(stretch));
   if (shown === null || parts.hud === undefined || parts.palette === undefined || parts.controls === undefined) throw new Error("the state view's parts were not all built");
-  return { panels, scene: shown, hud: parts.hud, palette: parts.palette, controls: parts.controls };
+  return { panels, scene: shown, hud: parts.hud, palette: parts.palette, controls: parts.controls, pass };
 }
 
 export async function chatView(input: ChatViewInput): Promise<StateView> {
@@ -274,8 +280,9 @@ const itemsKept = new Map<string, Map<string, JsonValue | null>>();
 
 /**
  * One item of a panel the state view does not carry (`PanelViewDef.apart`: an organization's page), as a page reads it when it opens it:
- * built in a read pass of its own from the state the chat's view at the same key is built from, and kept under that key, so a second open
- * builds nothing and a change to the state builds it again. Null where the panel has no such item, or the chat plays no world.
+ * built from the state the chat's view at the same key is built from, in that view's read pass where it is kept (so what the view's
+ * parts worked out is not worked out again), else in a pass of its own, and kept under that key, so a second open builds nothing and a
+ * change to the state builds it again. Null where the panel has no such item, or the chat plays no world.
  */
 export function chatViewItem(input: ViewKeyInput, panel: PanelId, id: string): JsonValue | null {
   const { store, chat } = input;
@@ -293,10 +300,16 @@ export function chatViewItem(input: ViewKeyInput, panel: PanelId, id: string): J
     if (kept.has(at)) return kept.get(at) ?? null;
   }
   const state = (input.turn === null ? s.headState(chat) : s.stateAt(input.turn)).state.world;
-  const doc = store.env.worlds(state.revision) ?? (row.revision === null ? undefined : store.env.worlds(row.revision));
-  if (doc === undefined) return null;
-  const world = playedWorld(doc, state);
-  const item = readPass(() => items.build(store.env.registry.context(world, state), { mapDisplay: null, mapConfig: input.map }, id));
+  const view = built.get(key);
+  let world = view?.world;
+  if (world === undefined) {
+    const doc = store.env.worlds(state.revision) ?? (row.revision === null ? undefined : store.env.worlds(row.revision));
+    if (doc === undefined) return null;
+    world = playedWorld(doc, state);
+  }
+  const ctx = store.env.registry.context(world, state);
+  const read = (): JsonValue | null => items.build(ctx, { mapDisplay: null, mapConfig: input.map }, id);
+  const item = view === undefined ? readPass(read) : view.pass.run(read);
   // An item worded with lines given again while it was built is answered once and not kept, as a view is.
   if (linesGiven() === lines) {
     const into = kept ?? new Map<string, JsonValue | null>();
