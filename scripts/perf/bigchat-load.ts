@@ -1,7 +1,8 @@
 // Loads a chat bundle made by `long-chat.ts bundle` into a Lumiverse instance as the previous build left its chats: the chat's rows
 // in Lumiverse's database (a narrator, the chat, every message with its swipes and the engine's records on them) and the extension's
-// files in the user's storage (the world's revisions, the chat's journal). It imports nothing of this repository, so it runs on a
-// server that has only Bun. Everything in the bundle is invented. It refuses a chat that is already there.
+// files in the user's storage (the world's revisions, the chat's journal, and every file under the bundle's `storage/` at its own
+// path: the harness texts its records name). It imports nothing of this repository, so it runs on a server that has only Bun.
+// Everything in the bundle is invented. It refuses a chat that is already there.
 // Usage: bun bigchat-load.ts <bundle folder> --lumiverse <Lumiverse's data folder> --user <user id> [--extension lumi_rp_engine]
 
 import { Database } from "bun:sqlite";
@@ -65,6 +66,8 @@ export async function loadBundle(folder: string, lumiverse: string, user: string
   await put(`worlds/${world.id}/index.json`, JSON.stringify(world.index));
   await put(`worlds/${world.id}/history.json`, JSON.stringify(world.history));
   for (const [path, text] of Object.entries(bundle.files)) await put(path, text);
+  const kept = join(folder, "storage");
+  if (existsSync(kept)) for (const path of new Bun.Glob("**/*").scanSync({ cwd: kept })) await put(path, readFileSync(join(kept, path), "utf8"));
   return { chat: bundle.chat.id, messages: bundle.messages.length, revisions: world.edits.length };
 }
 
