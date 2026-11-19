@@ -26,8 +26,12 @@ function useReplies(env: FrameEnv, message: string): { line: ReplyLine | undefin
   useEffect(() => {
     if (replies === null) return undefined;
     setState(replies.get());
-    replies.want(message);
-    return (replies as Readable<RepliesState>).subscribe(setState);
+    const unwant = replies.want(message);
+    const unsubscribe = (replies as Readable<RepliesState>).subscribe(setState);
+    return () => {
+      unwant();
+      unsubscribe();
+    };
   }, [replies, message]);
   return { line: state?.lines.get(message), failed: state?.failed ?? null };
 }
