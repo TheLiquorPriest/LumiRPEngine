@@ -2011,12 +2011,12 @@ export class UserStore {
     const items: Item[] = inputs.map((c) => ({ op: c.op, value: structuredClone(c.value), turn: "", n, by: c.by ?? null, cite: c.cite ?? null, precision: c.precision ?? null, standing: c.standing ?? null, source: c.source ?? null }));
     const outcomes = applyChecked(env, state, items, new Set());
     const now = this.store.now();
-    // His change stands before the first turn on a path begun after it (`placeOwner`): one made now, after every turn begun, stands in
-    // no turn's fold, only in the chat's own reading of its head, which the chat's mark names; so the write names no node. Where a turn
-    // was begun at this moment or later (a clock set back), the change could stand before it: every node is renewed, as for any write.
-    const latest = this.db.query<{ at: number | null }, [string]>("SELECT max(created) AS at FROM turn WHERE user = ?").get(this.id)?.at ?? null;
-    const nodes = latest !== null && latest >= now ? undefined : new Set<string>();
-    const ids = this.write([chat], () => {
+    // His change stands before the first turn on a path begun after it, and in a branch made after it (`placeOwner`): made now, with
+    // neither begun or made since, it stands in no node's fold, only in the chat's own reading of its head, which the chat's mark names;
+    // so the write names no node. Otherwise (a clock set back, the same moment) every node is renewed, as for any write, and the chat's
+    // branches are named too, since one made at its moment or after reads it at its head, under its own mark.
+    const later = this.begunOrMadeFrom(now);
+    const ids = this.write(later ? this.withBranches(chat) : [chat], () => {
       let ord = (this.db.query<{ ord: number | null }, [string, string]>("SELECT max(ord) AS ord FROM change WHERE user = ? AND chat = ?").get(this.id, chat)?.ord ?? -1) + 1;
       const put = this.db.query("INSERT INTO change (user, turn, chat, ord, lane, op, value, by, handle, standing, precision, source, cite, job, applied, reports, told, created) VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
       return inputs.map((c, i) => {
@@ -2024,7 +2024,7 @@ export class UserStore {
         const cite = c.cite === undefined || c.cite === null ? null : JSON.stringify(c.cite);
         return Number(put.run(this.id, chat, ord++, c.lane, c.op, JSON.stringify(c.value), c.by ?? null, c.handle ?? null, c.standing ?? null, c.precision ?? null, c.source ?? null, cite, job, o.applied ? 1 : 0, o.reports.length > 0 ? JSON.stringify(o.reports) : null, toldOf(c), now).lastInsertRowid);
       });
-    }, nodes);
+    }, later ? undefined : new Set<string>());
     const rows = this.db.query<ChangeDb, [string, string]>("SELECT * FROM change WHERE user = ?1 AND id IN (SELECT value FROM json_each(?2)) ORDER BY ord").all(this.id, JSON.stringify(ids)).map(changeOf);
     return { changes: rows, state };
   }
@@ -2095,7 +2095,8 @@ export class UserStore {
     const own = this.changes(into);
     const outcomes = this.landing(to, own, moved);
     const next = (own.at(-1)?.ord ?? -1) + 1;
-    // The changes leave the held turn's folds and join the turn's: the chats of both are renewed.
+    // The changes leave the held turn's folds and join the turn's: the chats of both are renewed, and the nodes at either turn and after
+    // (`nodesThrough`). A job's change moved with them stands, as before, before a turn after the one it is recorded with, or at a head.
     this.write([...new Set([...this.foldsThrough(from), ...this.foldsThrough(to)])], () => {
       const put = this.db.query("UPDATE change SET turn = ?, ord = ?, applied = ?, reports = ? WHERE user = ? AND id = ?");
       moved.forEach((c, i) => {
@@ -2107,7 +2108,7 @@ export class UserStore {
       this.db.run("DELETE FROM snapshot WHERE user = ?1 AND node IN (SELECT key FROM path_node WHERE user = ?1 AND turn = ?2)", [this.id, held]);
       this.db.run("UPDATE turn SET status = 'joined', joined = ? WHERE user = ? AND id = ?", [into, this.id, held]);
       this.dropSnapshotsThrough(into);
-    });
+    }, new Set([...this.nodesThrough(from.id), ...this.nodesThrough(to.id)]));
     const ids = new Set(moved.map((c) => c.id));
     return this.changes(into).filter((c) => ids.has(c.id));
   }
@@ -2172,6 +2173,15 @@ export class UserStore {
         .all(this.id, turn)
         .map((r) => r.key),
     );
+  }
+
+  /**
+   * Whether a turn was begun, or a chat made (a branch), at `at` or later (a clock set back, or the same moment). A change that takes
+   * effect at `at` (his own, a job's when the job ends) stands before the first turn on a path begun after that, and in a branch made
+   * after it: with neither, it stands in no node's fold, only in its chats' readings of their heads, which their own marks name.
+   */
+  private begunOrMadeFrom(at: number): boolean {
+    return this.db.query<{ any: number }, [string, number]>("SELECT EXISTS(SELECT 1 FROM turn WHERE user = ?1 AND created >= ?2) OR EXISTS(SELECT 1 FROM chat WHERE user = ?1 AND created >= ?2) AS any").get(this.id, at)?.any === 1;
   }
 
   // ------------------------------------------------------------ state
@@ -2848,7 +2858,10 @@ export class UserStore {
       const turn = r.chat === null ? this.turn(r.turn) : null;
       for (const chat of r.chat !== null ? this.withBranches(r.chat) : turn === null ? [] : this.foldsThrough(turn)) chats.add(chat);
     }
-    this.write([...chats], () => this.db.run("INSERT INTO job (user, id, ended) VALUES (?, ?, ?) ON CONFLICT (user, id) DO UPDATE SET ended = COALESCE(job.ended, excluded.ended)", [this.id, job, this.store.now()]));
+    // Its changes take effect now, before the first turn begun after this (`jobsAlong`, `ownerOf`): with none begun and no branch made
+    // since, they stand in no node's fold, only in the readings of the heads of the chats named, so the write names no node.
+    const now = this.store.now();
+    this.write([...chats], () => this.db.run("INSERT INTO job (user, id, ended) VALUES (?, ?, ?) ON CONFLICT (user, id) DO UPDATE SET ended = COALESCE(job.ended, excluded.ended)", [this.id, job, now]), this.begunOrMadeFrom(now) ? undefined : new Set<string>());
   }
 
   /**

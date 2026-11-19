@@ -382,15 +382,21 @@ if (swipe !== undefined) {
   await timed("a swipe: its changes recorded", () => app.writes.run(() => s.addChanges(swipe.id, invented(2)), "the probe's swipe's changes"));
   await timed("a swipe: tied to its reply", () => app.writes.run(() => s.tieTurn(swipe.id, { message: reply, hash: textHash("Another invented reply, the probe's."), date: Date.now() }), "the probe's swipe's tie"));
   await afterReads("after a swipe");
+  // A job of the swipe's turn, with one invented change, ended as a job ends when it settles: what it changed takes effect at once.
+  await timed("a job of the swipe: its change recorded", () => app.writes.run(() => s.addChanges(swipe.id, invented(3).slice(1, 2).map((c) => ({ ...c, job: "probe-job" }))), "the probe's job's change"));
+  await timed("a job of the swipe: ended", () => app.writes.run(() => s.endJob("probe-job"), "the probe's job's end"));
+  await afterReads("after a job's end");
 }
 
-// An Undo: of the newest of his own edits of the chat that stands; with none, of a change of the probe's swipe.
-const his = s.ownerChanges(chat).filter((c) => c.source === "player" && c.applied);
-const undone = his.at(-1)?.id ?? (swipe === undefined ? undefined : s.changes(swipe.id).find((c) => c.op === "set")?.id);
-if (his.length === 0) notMade.push("an Undo of his own edit (the chat holds none: a change of the probe's swipe is undone)");
-if (undone !== undefined) {
-  await timed("an Undo", () => app.writes.run(() => s.undo(undone), "the probe's undo"));
-  await afterReads("after an Undo");
+// An edit of his own (invented, as the page writes one), then its Undo, with the same reads after each.
+const edit = await timed("an edit of his own", () => app.writes.run(() => s.addOwnerChanges(chat, [{ lane: "engine", op: "set", value: { type: "set", entity: someone, field: "probe_mark", value: 99 }, by: "player", source: "player" }]), "the probe's edit"));
+if (edit !== undefined) {
+  await afterReads("after an edit of his own");
+  const undone = edit.changes[0]?.id;
+  if (undone !== undefined) {
+    await timed("an Undo of his edit", () => app.writes.run(() => s.undo(undone), "the probe's undo"));
+    await afterReads("after an Undo of his edit");
+  }
 }
 
 clearInterval(ticker);

@@ -146,12 +146,45 @@ describe("node marks", () => {
     expect(moved(before, readings(s, turns))).toEqual(turns.map((t) => t.id));
   });
 
-  test("a job's end renews every turn's key", () => {
+  test("a job's end renews no turn's key where no turn was begun since: the next turn begun has its change, and every state is a fresh store's", () => {
     const { s, store, turns, worlds } = fourTurns();
-    s.addChanges((turns[3] as TurnRow).id, engine(make("note", "Note", POV)).map((c) => ({ ...c, job: "job-1" })));
+    // A job of the second turn, ended after every turn was begun: its change stands before the next turn to begin.
+    s.addChanges((turns[1] as TurnRow).id, engine(make("note", "Note", POV)).map((c) => ({ ...c, job: "job-1" })));
     const before = readings(s, turns);
     s.endJob("job-1");
+    expect(moved(before, readings(s, turns))).toEqual([]);
+    for (const t of turns) expect(s.stateAt(t.id).state.world.entities.note).toBeUndefined();
+    const next = play(s, "c", "m5", "Night.", 5, engine(tick(60)));
+    expect(s.stateAt(next.id).state.world.entities.note).toBeDefined();
+    sameAsAfresh(s, store.db, [...turns, next], (r) => worlds.get(r));
+  });
+
+  test("a job's end where a turn was begun at its moment or after (a clock set back) renews every turn's key", () => {
+    let at = 1000;
+    const { s, store, revision, worlds } = testStore({ now: () => at++ });
+    s.createChat({ id: "c", revision });
+    const turns = [play(s, "c", "m1", "Morning.", 1, engine(tick(10))), play(s, "c", "m2", "To the cellar.", 2, engine(goTo(POV, "cellar")))];
+    s.addChanges((turns[0] as TurnRow).id, engine(make("note", "Note", POV)).map((c) => ({ ...c, job: "job-1" })));
+    const before = readings(s, turns);
+    // The clock is set back past the second turn's beginning: the job's change now stands before it.
+    at = 10;
+    s.endJob("job-1");
+    expect(s.stateAt((turns[1] as TurnRow).id).state.world.entities.note).toBeDefined();
+    sameAsAfresh(s, store.db, turns, (r) => worlds.get(r));
     expect(moved(before, readings(s, turns))).toEqual(turns.map((t) => t.id));
+  });
+
+  test("a continue joined to its turn renews that turn's key and every later one's, none before it, and each state read after is a fresh store's", () => {
+    const { s, store, turns, worlds } = fourTurns();
+    const [t1, t2] = turns as [TurnRow, TurnRow, TurnRow, TurnRow];
+    const held = s.beginTurn({ chat: "c", kind: "continue", on: (turns[3] as TurnRow).node });
+    s.addChanges(held.id, engine(make("rope", "Rope", POV)));
+    s.addChanges(held.id, engine(make("knot", "Knot", POV)).map((c) => ({ ...c, job: "job-2" })));
+    const before = readings(s, turns);
+    s.joinTurn(held.id, t2.id);
+    expect(moved(before, readings(s, turns))).toEqual(turns.slice(1).map((t) => t.id));
+    expect(s.foldKey(t1.id)).toBe(before.get(t1.id)?.key ?? "");
+    for (const t of turns.slice(1)) expect(s.stateAt(t.id).state.world.entities.rope).toBeDefined();
     sameAsAfresh(s, store.db, turns, (r) => worlds.get(r));
   });
 
@@ -257,6 +290,25 @@ describe("branches that share history", () => {
     const fresh = openStore({ areas: [STORY_STORE_AREA], db: store.db, registry: registry(), worlds: (r) => worlds.get(r) }).user(USER);
     const afresh = fresh.turnStart("branch", lines, { follows: "b-m2" });
     expect(JSON.parse(JSON.stringify(after.state))).toEqual(JSON.parse(JSON.stringify(afresh.state)));
+  });
+
+  test("a change of his own on the source, at or before the moment a branch was made (a clock set back), renews the branch's reading of its head", () => {
+    let at = 0;
+    const { s, store, revision, worlds } = testStore({ now: () => ++at });
+    s.createChat({ id: "source", revision });
+    play(s, "source", "m1", "Into the inn.", 1, engine(tick(15)));
+    s.sync("source", shown(["u1", "in"], ["m1", "Into the inn.", 1]));
+    s.branchChat({ id: "branch", from: "source", map: { u1: "b-u1", m1: "b-m1" } });
+    const made = at;
+    // A change of his own on the branch: its reading of its head is held under the branch's mark.
+    s.addOwnerChanges("branch", engine(make("map", "Folded map", POV)));
+    expect(s.headState("branch").state.world.entities[POV]?.fields.place).not.toBe("market");
+    // The clock is set back to the branch's making: his change on the source is one the branch was made with.
+    at = made - 1;
+    s.addOwnerChanges("source", engine(goTo(POV, "market")));
+    const fresh = openStore({ areas: [STORY_STORE_AREA], db: store.db, registry: registry(), worlds: (r) => worlds.get(r) }).user(USER);
+    expect(fresh.headState("branch").state.world.entities[POV]?.fields.place).toBe("market");
+    expect(JSON.parse(JSON.stringify(s.headState("branch").state))).toEqual(JSON.parse(JSON.stringify(fresh.headState("branch").state)));
   });
 });
 
