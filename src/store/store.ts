@@ -274,6 +274,15 @@ interface HeldRow {
   mark: string;
 }
 
+/** A stored node on a path as a walk reads it (`UserStore.chainRows`): its key, turn and depth, with the turn's chat and when it began. */
+interface ChainRow {
+  key: string;
+  turn: string;
+  depth: number;
+  chat: string;
+  created: number;
+}
+
 /** A chat's path as its last comparison took it, read from the text its row keeps, with its entries by message id. */
 interface ComparedPath {
   text: string;
@@ -461,6 +470,12 @@ export class Store {
    * well (`UserStore.foldsThrough`). Let go with what is held.
    */
   private readonly asked = new Map<string, Set<string>>();
+  /**
+   * By user and node (`user\0node`), the stored path from its start to the node (`UserStore.chainRows`): rows that only a write that
+   * removes them changes, so every write of the store's lets them all go (`dropChains`). As many as the states held, and `statesPerChat`
+   * more, the least recently made going first.
+   */
+  private readonly chains = new Map<string, readonly ChainRow[]>();
   private readonly views = new WeakMap<StoreState, TreeView>();
   private readonly envs = new Map<string, FoldEnv>();
   private readonly handlerFailed: (failure: StoreFailure) => void;
@@ -604,6 +619,7 @@ export class Store {
     this.held.clear();
     this.compared.clear();
     this.asked.clear();
+    this.chains.clear();
   }
 
   /** @internal Notes that a question's fold through each of `turns`, on a path no comparison has stored, is held under `chats`' marks (`asked`). */
@@ -619,6 +635,27 @@ export class Store {
   /** @internal The chats under whose marks a question's fold through `turn` is held (`askedThrough`). */
   askedOf(user: string, turn: string): readonly string[] {
     return [...(this.asked.get(`${user}\u0000${turn}`) ?? [])];
+  }
+
+  /** @internal The stored path to `node`, where it is held (`chains`). */
+  chainHeld(user: string, node: string): readonly ChainRow[] | undefined {
+    return this.chains.get(`${user}\u0000${node}`);
+  }
+
+  /** @internal Holds the stored path to `node` (`chains`), letting the least recently made go past as many as the states held and `statesPerChat`. */
+  holdChain(user: string, node: string, rows: readonly ChainRow[]): void {
+    const key = `${user}\u0000${node}`;
+    this.chains.delete(key);
+    this.chains.set(key, rows);
+    for (const oldest of this.chains.keys()) {
+      if (this.chains.size <= this.folds.size + this.statesPerChat) break;
+      this.chains.delete(oldest);
+    }
+  }
+
+  /** @internal Lets go of every stored path held (`chains`): a write may have removed rows of one. */
+  dropChains(): void {
+    this.chains.clear();
   }
 
   /**
@@ -945,16 +982,23 @@ export class UserStore {
    * undone. Every other chat keeps what it holds. A write of one turn's changes or starting state
    * names the nodes it changes the folds of too (`nodes`, `nodesThrough`): the states held, and the
    * keys given (`foldKey`), for the chats' other nodes, the turns before it, stand (`Store.nodeMark`).
+   * The stored paths held in memory (`Store.dropChains`) are let go before it and after it, done or
+   * undone, since it may remove rows of one.
    */
   private write<T>(chats: readonly string[] | false, fn: () => T, nodes?: ReadonlySet<string>): T {
     return this.db.transaction(() => {
-      this.store.flush(this.id);
-      if (chats !== false) this.store.newMarks(this.id, chats, nodes);
-      const out = fn();
-      if (chats !== false) this.store.newMarks(this.id, chats, nodes);
-      else this.store.flush(this.id);
-      this.store.wrote(this.id, chats === false ? null : chats);
-      return out;
+      this.store.dropChains();
+      try {
+        this.store.flush(this.id);
+        if (chats !== false) this.store.newMarks(this.id, chats, nodes);
+        const out = fn();
+        if (chats !== false) this.store.newMarks(this.id, chats, nodes);
+        else this.store.flush(this.id);
+        this.store.wrote(this.id, chats === false ? null : chats);
+        return out;
+      } finally {
+        this.store.dropChains();
+      }
     })();
   }
 
@@ -2448,16 +2492,34 @@ export class UserStore {
     );
   }
 
-  /** A stored path's nodes, oldest first, from its start to `node`: each with its turn, the turn's chat, and when it began. */
-  private chainRows(node: string): { key: string; turn: string; depth: number; chat: string; created: number }[] {
-    return this.db
-      .query<{ key: string; turn: string; depth: number; chat: string; created: number }, [string, string]>(
-        `WITH RECURSIVE up(key, prev, turn, depth) AS (
-           SELECT key, prev, turn, depth FROM path_node WHERE user = ?1 AND key = ?2
-           UNION ALL SELECT n.key, n.prev, n.turn, n.depth FROM path_node n JOIN up ON n.user = ?1 AND n.key = up.prev)
-         SELECT up.key, up.turn, up.depth, t.chat, t.created FROM up JOIN turn t ON t.user = ?1 AND t.id = up.turn ORDER BY up.depth`,
+  /**
+   * A stored path's nodes, oldest first, from its start to `node`: each with its turn, the turn's chat, and when it began. Held in
+   * memory (`Store.chainHeld`), and made from the chain of the node before it where that is held, so a walk along a path reads one row a
+   * step and not the whole path again.
+   */
+  private chainRows(node: string): readonly ChainRow[] {
+    const held = this.store.chainHeld(this.id, node);
+    if (held !== undefined) return held;
+    const own = this.db
+      .query<{ prev: string | null; turn: string; depth: number; chat: string | null; created: number | null }, [string, string]>(
+        "SELECT n.prev, n.turn, n.depth, t.chat, t.created FROM path_node n LEFT JOIN turn t ON t.user = n.user AND t.id = n.turn WHERE n.user = ?1 AND n.key = ?2",
       )
-      .all(this.id, node);
+      .get(this.id, node);
+    if (own === null) return [];
+    const before = own.prev === null ? [] : this.store.chainHeld(this.id, own.prev);
+    const chain =
+      before !== undefined
+        ? [...before, ...(own.chat === null || own.created === null ? [] : [{ key: node, turn: own.turn, depth: own.depth, chat: own.chat, created: own.created }])]
+        : this.db
+            .query<ChainRow, [string, string]>(
+              `WITH RECURSIVE up(key, prev, turn, depth) AS (
+                 SELECT key, prev, turn, depth FROM path_node WHERE user = ?1 AND key = ?2
+                 UNION ALL SELECT n.key, n.prev, n.turn, n.depth FROM path_node n JOIN up ON n.user = ?1 AND n.key = up.prev)
+               SELECT up.key, up.turn, up.depth, t.chat, t.created FROM up JOIN turn t ON t.user = ?1 AND t.id = up.turn ORDER BY up.depth`,
+            )
+            .all(this.id, node);
+    this.store.holdChain(this.id, node, chain);
+    return chain;
   }
 
   /**
@@ -2893,15 +2955,7 @@ export class UserStore {
 
   /** Jobs' changes along the stored path ending at `node`, placed as `jobsAlong` places them. */
   private jobsPlaced(node: string): Map<string, JobChange[]> {
-    const path = this.db
-      .query<{ key: string; turn: string; depth: number; created: number }, [string, string]>(
-        `WITH RECURSIVE up(key, prev, turn, depth) AS (
-           SELECT key, prev, turn, depth FROM path_node WHERE user = ?1 AND key = ?2
-           UNION ALL SELECT n.key, n.prev, n.turn, n.depth FROM path_node n JOIN up ON n.user = ?1 AND n.key = up.prev)
-         SELECT up.key, up.turn, up.depth, t.created FROM up JOIN turn t ON t.user = ?1 AND t.id = up.turn ORDER BY up.depth`,
-      )
-      .all(this.id, node);
-    return this.jobsAlong(path).placed;
+    return this.jobsAlong(this.chainRows(node)).placed;
   }
 
   /**
