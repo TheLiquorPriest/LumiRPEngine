@@ -1,9 +1,10 @@
 // Following one job a page started (plan §13.5): how it stands, what its run has spent so far, and how it ended, as the pages already hear of
-// jobs. A job's own words come on `~jobs` (as the Jobs page reads them); its run's records come on the chat's stream, or on `~jobs` for a job
-// of no chat (as the Live page reads them), folded by the live model; and the job is read once from its route (as the Jobs page reads it) at
-// the start, after a hole or a lost word, and when it ends failed, so that what a failed job's last call said is known. Nothing polls.
+// jobs. A job's own words come on `~jobs`, each with the job's row (as the Jobs page reads them); its run's records come on the chat's stream,
+// or on `~jobs` for a job of no chat (as the Live page reads them), folded by the live model; and the job is read once from its route (as the
+// Jobs page reads it) at the start, after a hole or a lost word, and when it ends failed, so that what a failed job's last call said is
+// known. Nothing polls.
 
-import { type JobState, type JobView, LIVE_JOBS, type LiveEvent, type Usage } from "../shared/api";
+import { type JobRow, type JobState, type JobView, LIVE_JOBS, type LiveEvent, type Usage } from "../shared/api";
 import type { RpeClient } from "./client";
 import { applyRecord, EMPTY_LIVE, holeIn, type LiveModel, readTrace, type RunNode, runOf, runTotals } from "./live-model";
 import { errorWords } from "./words";
@@ -17,8 +18,8 @@ export interface JobRef {
 
 /** What a page knows of a job it started, as it goes. */
 export interface JobWatched {
-  /** The job as the page last heard of it; null until RPE's word of it is in. */
-  job: JobView | null;
+  /** The job as the page last heard of it, by its row (or whole, as read or as the start answered); null until RPE's word of it is in. */
+  job: JobRow | null;
   /** What its run has spent so far, and in all once it ended; null before anything says. */
   spent: Usage | null;
   /** For a job that failed: what its last model call said went wrong, where its records say. */
@@ -44,7 +45,7 @@ function lastCallError(run: RunNode): string | null {
 /** Follows `ref` until the returned function is called; `onChange` is told at once and at every word of the job. */
 export function watchJob(client: RpeClient, ref: JobRef, onChange: (watched: JobWatched) => void): () => void {
   let model: LiveModel = EMPTY_LIVE;
-  let job: JobView | null = ref.view ?? null;
+  let job: JobRow | null = ref.view ?? null;
   let problem: string | null = null;
   let alive = true;
   let reading = false;

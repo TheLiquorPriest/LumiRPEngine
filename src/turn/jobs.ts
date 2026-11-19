@@ -6,11 +6,41 @@
 
 import type { Database } from "bun:sqlite";
 import type { JobState, JobView } from "rp-harness/contract";
-import { jobView, liveKind, shape } from "../app";
+import { type Infer, jobRow, liveKind, shape } from "../app";
+import type { ConfigRead } from "../app/config-read";
+import { PAGE_SETTINGS } from "../app/page-settings";
+import { PAGE_SETTING_DEFS } from "../shared/page-settings";
 import { placeIn, placeOf } from "./kv";
 
-/** A job's change of state (started, held, paused, carried on, ended, stopped at a limit), told to every page that follows his jobs (`LIVE_JOBS`), in every chat. */
-export const JOB_KIND = liveKind("job", { data: shape.object({ job: jobView }), does: "One of his jobs changed: the job as RPH keeps it now." });
+/** A job's change of state (started, held, paused, carried on, ended, stopped at a limit), told to every page that follows his jobs (`LIVE_JOBS`), in every chat, by its row: a page that has the job open reads it whole by its id. */
+export const JOB_KIND = liveKind("job", { data: shape.object({ job: jobRow }), does: "One of his jobs changed: its row as a list shows it now; its whole is read by its id." });
+
+/** The characters of a job's brief the Jobs list shows (`pages.briefChars`), as the shared levels set it. */
+const BRIEF_CHARS = PAGE_SETTINGS.find((s) => s.key === PAGE_SETTING_DEFS.briefChars.key);
+
+/**
+ * A job as a list shows it, and no more (`jobRow`), for the jobs list and the word of a job's change: its brief's first characters, one
+ * past those the Jobs list shows at the shared levels (`shared`) so a page marks a brief it cut; none of its report, what it wrote or what
+ * its start was not given, which a page reads with the job whole.
+ */
+export function jobRowOf(job: JobView, shared: ConfigRead): Infer<typeof jobRow> {
+  const briefChars = BRIEF_CHARS === undefined ? PAGE_SETTING_DEFS.briefChars.default : (shared.value(BRIEF_CHARS) as number);
+  return {
+    id: job.id,
+    agent: job.agent,
+    brief: job.brief.slice(0, briefChars + 1),
+    state: job.state,
+    scope: job.scope,
+    startedBy: job.startedBy,
+    started: job.started,
+    ...(job.ended !== undefined ? { ended: job.ended } : {}),
+    usage: job.usage,
+    ...(job.limit !== undefined ? { limit: job.limit } : {}),
+    ...(job.stoppedBy !== undefined ? { stoppedBy: job.stoppedBy } : {}),
+    ...(job.attach !== undefined ? { attach: job.attach } : {}),
+    ...(job.limits !== undefined ? { limits: job.limits } : {}),
+  };
+}
 
 /** A job that has ended: its view as RPH last kept it, and when the store recorded its end. */
 export interface EndedJob {

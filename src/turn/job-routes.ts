@@ -17,44 +17,18 @@ import type { JobLimits, JobRefusal, JobState, JobView, RunScope, Scope, Usage, 
 import { loadGuidance } from "../app/guidance";
 import { agentRef, type Exactly, type Holds, type Infer, jobRow, jobView, route, RouteError, shape, traceRecord, usage } from "../app";
 import { type ConfigRead, portTexts, readConfig } from "../app/config-read";
-import { PAGE_SETTINGS } from "../app/page-settings";
 import { harnessSettings } from "../app/setting-list";
-import { PAGE_SETTING_DEFS } from "../shared/page-settings";
 import { toldRows } from "./events";
+import { jobRowOf } from "./jobs";
 import type { Turns } from "./lane";
 import { ownerJobRoutes } from "./owner-jobs";
-import { jobToldReply } from "./shapes";
 import { jobsPage } from "./settings";
+import { jobToldReply } from "./shapes";
 import { NO_SESSION } from "./turns";
 
 const T = shape.text();
 const N = shape.number();
 const opt = shape.optional;
-
-/** The characters of a job's brief the Jobs list shows (`pages.briefChars`), as the shared levels set it. */
-const BRIEF_CHARS = PAGE_SETTINGS.find((s) => s.key === PAGE_SETTING_DEFS.briefChars.key);
-
-/**
- * A job as a list shows it, and no more (`jobRow`): its brief's first characters, one past those the Jobs list shows so a page marks a
- * brief it cut; none of its report, what it wrote or what its start was not given, which a page reads with the job whole.
- */
-function rowOf(job: JobView, briefChars: number): Infer<typeof jobRow> {
-  return {
-    id: job.id,
-    agent: job.agent,
-    brief: job.brief.slice(0, briefChars + 1),
-    state: job.state,
-    scope: job.scope,
-    startedBy: job.startedBy,
-    started: job.started,
-    ...(job.ended !== undefined ? { ended: job.ended } : {}),
-    usage: job.usage,
-    ...(job.limit !== undefined ? { limit: job.limit } : {}),
-    ...(job.stoppedBy !== undefined ? { stoppedBy: job.stoppedBy } : {}),
-    ...(job.attach !== undefined ? { attach: job.attach } : {}),
-    ...(job.limits !== undefined ? { limits: job.limits } : {}),
-  };
-}
 
 /** A job whole as RPH keeps it, without what RPE keeps beside a carried job's record and no page reads: the earlier build's transcript and the mark. */
 function wholeOf(job: JobView): JobView {
@@ -243,6 +217,7 @@ export function jobRoutes(deps: JobRoutesDeps) {
       reply: shape.page(jobRow),
       paged: { sizes: () => jobsPage(deps.shared()) },
       handle: async ({ user, query }) => {
+        const shared = deps.shared();
         const states = query.state === undefined ? undefined : statesIn(query.state);
         const page = await jobs.list({
           user,
@@ -251,8 +226,7 @@ export function jobRoutes(deps: JobRoutesDeps) {
           limit: query.limit,
           ...(query.after !== undefined ? { cursor: query.after } : {}),
         });
-        const briefChars = BRIEF_CHARS === undefined ? PAGE_SETTING_DEFS.briefChars.default : (deps.shared().value(BRIEF_CHARS) as number);
-        return { items: page.jobs.map((job) => rowOf(job, briefChars)), next: page.next ?? null };
+        return { items: page.jobs.map((job) => jobRowOf(job, shared)), next: page.next ?? null };
       },
     }),
     route({

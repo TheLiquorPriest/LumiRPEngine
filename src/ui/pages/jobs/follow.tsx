@@ -3,7 +3,7 @@
 // with the way to the job's page kept. One piece for every place a page starts a job; what it hears is `job-watch.ts`'s.
 
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { JobState, JobView } from "../../../shared/api";
+import type { JobRow, JobState } from "../../../shared/api";
 import { Button } from "../../../frontend/components";
 import { useApp } from "../../app";
 import { type JobRef, jobEnded, type JobWatched, watchJob } from "../../job-watch";
@@ -12,8 +12,8 @@ import { logAt } from "../runtime/logs";
 
 export type { JobRef } from "../../job-watch";
 
-/** Follows `ref`, null while none is started; `onEnded` is told once, with the job as it ended (also for a job already ended when first heard of). */
-export function useJobFollow(ref: JobRef | null, onEnded?: (job: JobView) => void): JobWatched | null {
+/** Follows `ref`, null while none is started; `onEnded` is told once, with the job's row as it ended (also for a job already ended when first heard of). */
+export function useJobFollow(ref: JobRef | null, onEnded?: (job: JobRow) => void): JobWatched | null {
   const app = useApp();
   const [watched, setWatched] = useState<JobWatched | null>(null);
   const told = useRef<string | null>(null);
@@ -91,7 +91,7 @@ export function JobFollowLine(props: JobFollowProps & { watched: JobWatched | nu
 }
 
 /** A started job followed where it was started: its line, and `onEnded` told once when it has ended, to read the page's own data again. */
-export function JobFollow(props: JobFollowProps & { onEnded?(job: JobView): void }) {
+export function JobFollow(props: JobFollowProps & { onEnded?(job: JobRow): void }) {
   const watched = useJobFollow(props.job, props.onEnded);
   return <JobFollowLine {...props} watched={watched} />;
 }

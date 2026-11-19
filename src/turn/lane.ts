@@ -53,7 +53,7 @@ import { type ChatFolders, chatPlacer, CHATS_FOLDER, GeneratedFiles, NO_CHAT, pr
 import { Approvals } from "./approvals";
 import { type EventsDeps, givenViews, toldRows, turnEvents } from "./events";
 import { FactsRegistry, turnFacts } from "./facts";
-import { JOB_KIND } from "./jobs";
+import { JOB_KIND, jobRowOf } from "./jobs";
 import { kvStore, servedUser, storeUsers, type Writes } from "./kv";
 import { PROMPT_MAP_FILE, PROMPT_MAP_FILENAME, type TurnPrompts, turnPrompts } from "./prompt";
 import { TurnMarks } from "./marks";
@@ -617,8 +617,9 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   };
   const lorePorts = lorePort(lore, loreIndex);
   // A job's end is told through `events.job`, which records it; the lane, made below, brings the sessions of its turn up to date. Each
-  // change of a job's state is told to every page that follows his jobs.
-  const eventsDeps: EventsDeps = { db: app.db, writes: app.writes, store, runs, files, sources, search: memorySearch, loreIndex, notes, suggestions, proposals: options.proposals, due, ...(options.views !== undefined ? { views: options.views } : {}), now: () => clock.now(), jobEnded: (user, chat, turn) => lane.sessionsAfter(user, chat, turn), jobTold: (job) => JOB_KIND.publish(app.live, LIVE_JOBS, { job }), log: app.log };
+  // change of a job's state is told to every page that follows his jobs, by the job's row, its brief cut as the shared levels say now: a
+  // page that has the job open reads it whole by its id.
+  const eventsDeps: EventsDeps = { db: app.db, writes: app.writes, store, runs, files, sources, search: memorySearch, loreIndex, notes, suggestions, proposals: options.proposals, due, ...(options.views !== undefined ? { views: options.views } : {}), now: () => clock.now(), jobEnded: (user, chat, turn) => lane.sessionsAfter(user, chat, turn), jobTold: (job) => JOB_KIND.publish(app.live, LIVE_JOBS, { job: jobRowOf(job, globalConfig(app.paths.files, app.log)) }), log: app.log };
   const events = turnEvents(eventsDeps);
   const env: Environment = {
     id: "rpe",
