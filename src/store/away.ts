@@ -1,5 +1,6 @@
 // A long fold, handed to a worker thread (plan §4.1 l.199: "so one turn never stalls another"). A fold over more changes than
-// `store.workerFoldAt` is not run where the caller stands when the caller can wait for a thread (`Store.afar`): the store throws
+// `store.workerFoldAt`, or one with no state held on its path (a stored snapshot read whole, or the chat's start made), is not run
+// where the caller stands when the caller can wait for a thread (`Store.afar`): the store throws
 // `FoldAway` naming the fold, a thread opens the database to read, folds as the store does with the same packs and areas, and gives
 // back the states it held and the snapshots it found worth storing, which the store takes as its own and then answers the read from
 // memory. The store knows nothing of threads: the application gives it a `StoreAway` that runs a job somewhere.

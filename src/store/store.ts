@@ -33,6 +33,7 @@ import { UserWorlds, type WorldChange, type WorldRevisionRow } from "./worlds";
 import { migrateStore, missingStoreTables } from "./schema";
 import { FoldAway, type AwayFold, type AwayHeld, type FoldJob, type StoreAway, type StoreBrief } from "./away";
 import { TreeView } from "./view";
+import { letGo, STRETCH_MS } from "./prepare";
 import {
   bySomeone,
   JoinedTurnError,
@@ -401,6 +402,28 @@ export function openStore(options: StoreOptions): Store {
   return new Store(options);
 }
 
+/** Objects frozen between looks at the clock in `freezeInStretches`. */
+const FREEZE_CHECK = 4096;
+
+/**
+ * `deepFreeze` of `value`, letting RPE's thread go every `STRETCH_MS` (`letGo`): every object it holds frozen, the walk stopping at
+ * one frozen already, as `deepFreeze` stops.
+ */
+async function freezeInStretches(value: unknown): Promise<void> {
+  const left: unknown[] = [value];
+  let began = performance.now();
+  for (let n = 1; left.length > 0; n++) {
+    const v = left.pop();
+    if (typeof v !== "object" || v === null || Object.isFrozen(v)) continue;
+    Object.freeze(v);
+    for (const inner of Object.values(v)) left.push(inner);
+    if (n % FREEZE_CHECK === 0 && performance.now() - began >= STRETCH_MS) {
+      await letGo();
+      began = performance.now();
+    }
+  }
+}
+
 export class Store {
   readonly db: Database;
   readonly env: FoldEnv;
@@ -576,10 +599,11 @@ export class Store {
   }
 
   /**
-   * Runs `read`, a call that only reads and may be made again, where a fold over more than `workerFoldAt` changes runs on a worker
-   * thread and not here: the fold is handed over, the states the thread held are held here when it answers, and the read is made
-   * again, now answered from memory. A read with nothing long in it is made once, as it always was; so is every read where no
-   * thread is given, and where a thread's fold fails (the failure is logged).
+   * Runs `read`, a call that only reads and may be made again, where a long fold runs on a worker thread and not here: one over more
+   * than `workerFoldAt` changes, and one with no state held on its path (a stored snapshot read whole, or the chat's start made). The
+   * fold is handed over, the states the thread held are held here when it answers, and the read is made again, now answered from
+   * memory. A read with nothing long in it is made once, as it always was; so is every read where no thread is given, and where a
+   * thread's fold fails (the failure is logged).
    */
   async afar<T>(read: () => T): Promise<T> {
     const away = this.away;
@@ -614,6 +638,8 @@ export class Store {
   private async foldAway(away: StoreAway, job: FoldJob): Promise<void> {
     const before = new Map(this.db.query<{ chat: string; mark: string }, [string]>("SELECT chat, mark FROM fold_mark WHERE user = ?").all(job.user).map((r) => [r.chat, r.mark]));
     const done = await away.run({ path: away.path, ...this.forThreads }, job);
+    // What the thread folded came across as objects all new here: frozen a stretch at a time, so holding them (`keep`) walks none.
+    await freezeInStretches(done.folds.map((f) => f.folded));
     const here = (chat: string, node: string, mark: string): string | null => {
       const read = mark.startsWith(NODE_MARK) ? mark.slice(NODE_MARK.length) : mark;
       const now = this.markOf(job.user, chat);
@@ -2639,6 +2665,9 @@ export class UserStore {
       base = held.folded.state;
       break;
     }
+    // No state held on its path: the fold reads a stored snapshot whole, or makes the chat's start, which on a chat with a large world
+    // holds the thread however few turns follow. A caller that can wait for a thread has it folded there (`Store.afar`).
+    if (!start && this.store.guarding) throw new FoldAway({ user: this.id, node });
     const first = chain[0];
     if (!first) throw new StoreInputError(`no path node ${node}`);
     // The newest change id in the stored snapshot the fold starts from; null when it starts elsewhere.

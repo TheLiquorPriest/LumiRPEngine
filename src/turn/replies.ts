@@ -83,6 +83,19 @@ function keptLanes(store: UserStore, registry: Registry, turn: string, words: st
   return lanes;
 }
 
+/**
+ * The turn whose state a line would be worked out from (`keptLanes`: the turn's own, or, for one joined, the turn it joined), where
+ * the line is not kept; null where it is.
+ */
+function unkept(store: UserStore, turn: string, words: string): string | null {
+  try {
+    return kept.has(`${store.foldKey(turn)}\u0000${words}`) ? null : turn;
+  } catch (error) {
+    if (!(error instanceof JoinedTurnError)) throw error;
+    return unkept(store, error.joined, words);
+  }
+}
+
 /** A turn's line: the time and place at its end, and what each lane did. Throws the store's `JoinedTurnError` for a joined turn. */
 function lanesAt(store: UserStore, registry: Registry, turn: string): Lanes {
   const view = store.viewAt(turn);
@@ -129,7 +142,8 @@ export interface ReplyWords {
 /**
  * The line under each reply of the chat that `ids` names, in the order asked; `errors` words a turn whose record was not finished. The
  * lines are worked out in the order of the chat's path, whatever the order asked, so each turn's state folds on from the one before it,
- * and in stretches that let RPE's thread go (`inStretches`).
+ * and in stretches that let RPE's thread go (`inStretches`). The first state a line not kept reads is folded where a long fold runs on
+ * a worker thread (`Store.afar`): after a restart or an update no state is held, and its fold reads a snapshot whole.
  */
 export async function replyLines(turns: Pick<Turns, "store" | "marks" | "runs">, user: string, chat: string, ids: readonly string[], errors: LinesPart | undefined, words: ReplyWords): Promise<Line[]> {
   const store = turns.store.user(user);
@@ -171,6 +185,11 @@ export async function replyLines(turns: Pick<Turns, "store" | "marks" | "runs">,
   };
   // His own messages, and ids the chat's path does not hold, are left out; each reply once, in the path's order.
   const replies = [...new Set(ids)].filter((id) => path.get(id)?.entry.user === false).sort((a, b) => (path.get(a)?.at ?? 0) - (path.get(b)?.at ?? 0));
+  const cold = replies.reduce<string | null>((found, id) => {
+    const turn = path.get(id)?.entry.turn;
+    return found ?? (turn == null ? null : unkept(store, turn, words.key));
+  }, null);
+  if (cold !== null) await turns.store.afar(() => store.stateAt(cold));
   const lines = wordsOf(words.texts);
   const made = new Map(await inStretches(replies, (message) => [message, lineOf(message)] as const, (stretch) => withLines(lines, stretch)));
   return ids.flatMap((id) => made.get(id) ?? []);
