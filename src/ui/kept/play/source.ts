@@ -10,7 +10,8 @@
 // said in the client's own words until a read succeeds, and the last state read stays shown. The run
 // line (who is at work, the progress line, a failure, an empty reply left standing) is folded from the
 // live trace as it is heard, and, for what was told before the page followed, from the chat's newest
-// turn as the Live view reads it, once following begins and again when events were lost.
+// turn, once following begins and again when events were lost: from its row in the list where that says
+// the line is none (each of its runs ended with its reply out, or owed none), else from the turn read whole.
 
 import type { SyncState } from "../../../frontend/protocol-client";
 import type { LiveEvent } from "../../../shared/api";
@@ -18,7 +19,7 @@ import type { StateView } from "../../../shared/state-view";
 import { createStore, type Readable } from "../../store";
 import { replyOf, type RpeClient } from "../../client";
 import { errorWords } from "../../words";
-import { foldRun, NO_RUN, type RunLine, runOfTurn } from "./activity";
+import { foldRun, NO_RUN, quietRow, type RunLine, runOfTurn } from "./activity";
 
 /** The live kind RPE publishes on a chat once its state changed (`src/play/live.ts`), with no data of its own. */
 export const STATE_CHANGED = "state";
@@ -100,7 +101,10 @@ export function chatState(client: Pick<RpeClient, "call" | "follow">, chat: stri
     };
     void (async (): Promise<RunLine | null> => {
       const newest = replyOf(await client.call("GET /api/v1/chats/:chat/turns", { chat }, { query: { limit: 1 } })).turns[0];
-      return newest === undefined ? null : runOfTurn(chat, replyOf(await client.call("GET /api/v1/chats/:chat/turns/:turn", { chat, turn: newest.id })));
+      if (newest === undefined) return null;
+      // A turn whose runs all ended with their reply out (or owed none) folds to no line: its whole record, often large, is not read for it.
+      if (quietRow(newest)) return NO_RUN;
+      return runOfTurn(chat, replyOf(await client.call("GET /api/v1/chats/:chat/turns/:turn", { chat, turn: newest.id })));
     })().then(
       (told) => {
         const meanwhile = heardMeanwhile;
@@ -127,6 +131,7 @@ export function chatState(client: Pick<RpeClient, "call" | "follow">, chat: stri
       if (missed !== null || events.some((event) => event.kind === STATE_CHANGED || event.kind === REQUESTS_CHANGED)) read();
       if (missed !== null) catchUp();
     },
+    // Following began (the client says so once it has, or at once where it follows already): the first read, and each after events were lost.
     reset() {
       read();
       catchUp();
@@ -135,8 +140,6 @@ export function chatState(client: Pick<RpeClient, "call" | "follow">, chat: stri
       state.update((held) => ({ ...held, failed: words }));
     },
   });
-  read();
-  catchUp();
 
   return {
     get: () => state.get(),

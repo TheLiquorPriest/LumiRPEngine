@@ -4,7 +4,7 @@
 // from the toasts by the request it answers, and the toasts' count and times are the page's settings.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { type RpeClient, RpeError } from "../../../src/ui/client";
+import { type LiveListener, type RpeClient, RpeError } from "../../../src/ui/client";
 import { CHANGE_MADE, chooseShowIds, type Kept, keptApp, showIdsChosen, type ToastSettings } from "../../../src/ui/kept/app";
 import type { CallFile } from "../../../src/ui/kept/client";
 import { webHost } from "../../../src/ui/kept/host";
@@ -20,7 +20,13 @@ afterAll(() => page.close());
 
 const SETTINGS: ToastSettings = { toastsShown: 3, errorToastMs: 6000, toastMs: 3500 };
 const host = (): ReturnType<typeof webHost> => webHost({ revokeMs: () => 1000 });
-const quiet = { follow: () => () => undefined };
+const quiet = {
+  // As the client does once following has begun: read afresh.
+  follow: (_chat: string, listener: LiveListener) => {
+    queueMicrotask(() => listener.reset());
+    return () => undefined;
+  },
+};
 
 /** A call file that serves `lre.world list` from a typed route of its own, and records what it was asked. */
 function worldsFile(asked: unknown[], answer: () => Promise<unknown>): CallFile {

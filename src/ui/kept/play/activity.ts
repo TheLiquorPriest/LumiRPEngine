@@ -9,7 +9,7 @@
 // it left standing. Nothing is read on a timer.
 
 import type { Activity } from "../../../shared/turn-activity";
-import type { LiveEvent, TurnReply } from "../../../shared/api";
+import type { LiveEvent, TurnReply, TurnRow, TurnState } from "../../../shared/api";
 import { endedWords } from "../../trace-view";
 
 /**
@@ -44,6 +44,16 @@ export function toldOfTurn(chat: string, turn: TurnReply): LiveEvent[] {
 export function runOfTurn(chat: string, turn: TurnReply): RunLine {
   const line = foldRun(chat, NO_RUN, toldOfTurn(chat, turn));
   return line.activity?.state === "running" && turn.status !== "running" && turn.status !== "released" ? NO_RUN : line;
+}
+
+/**
+ * Whether a turn's row in the chat's list says its run line is none: the turn and each of its runs ended with their reply out, or owing
+ * none (a Settle now run settled). Such a turn folds to `NO_RUN` whatever its trace holds; any other (one running, stopped, failed or at a
+ * limit, which may have left an empty reply) is read whole for its line.
+ */
+export function quietRow(row: TurnRow): boolean {
+  const ended = (status: TurnState): boolean => status === "released" || status === "no-reply";
+  return ended(row.status) && row.runs.every((run) => ended(run.status));
 }
 
 /** The line of a turn that ended before a word of its reply went out, where no failure of its run was told yet. */
