@@ -2537,8 +2537,11 @@ var TIMELAPSE_REACH_MINUTES = 366 * 1440;
 var depth = 0;
 var kept = null;
 function readPass(read) {
+  return inPass(depth === 0 ? new WeakMap : null, read);
+}
+function inPass(own, read) {
   if (depth === 0)
-    kept = new WeakMap;
+    kept = own ?? new WeakMap;
   depth++;
   try {
     const out = read();
@@ -18122,9 +18125,30 @@ function related(state, a, b, types) {
 function atHome(ctx, at, home) {
   return typeof home === "string" && at !== null && own(ctx.world.places, home) !== undefined && placeWithin(ctx.world, at, home) && together(ctx.world, at, home);
 }
-function shareHousehold2(ctx, who, other) {
-  return Object.keys(ctx.state.entities).some((h) => orgTypeOf(ctx, h) === "household" && !isGone(ctx.state, h) && isMemberOf(ctx, who, h) && isMemberOf(ctx, other, h));
+function households(ctx) {
+  return passMemo([ctx.state, ctx.world], "access.households", () => Object.keys(ctx.state.entities).filter((h) => orgTypeOf(ctx, h) === "household" && !isGone(ctx.state, h)));
 }
+function shareHousehold2(ctx, who, other) {
+  return households(ctx).some((h) => isMemberOf(ctx, who, h) && isMemberOf(ctx, other, h));
+}
+function homeOwnersAt(ctx, place2) {
+  const byPlace = passMemo([ctx.state, ctx.world], "access.home_owners", () => {
+    const out = new Map;
+    for (const p of Object.keys(ctx.state.entities)) {
+      const prop = own(ctx.state.entities, p);
+      const at = prop?.fields.place;
+      if (!prop || typeof at !== "string" || !kindIs(ctx.registry, ctx.world, prop.kind, "property") || isGone(ctx.state, p))
+        continue;
+      const owners = out.get(at) ?? new Set;
+      for (const o of ownersIn(prop.fields))
+        owners.add(o.party);
+      out.set(at, owners);
+    }
+    return out;
+  });
+  return byPlace.get(place2) ?? NO_OWNERS;
+}
+var NO_OWNERS = new Set;
 function permitOf(state, from, who) {
   const r = own(state.entities, from)?.relations.find((x) => x.type === "permits" && x.to === who && (x.until === undefined || x.until >= state.clock));
   if (!r)
@@ -18200,13 +18224,7 @@ function useFor(ctx, who, thing, owners, presumed) {
       return { basis: "household", via: kin, ...presumed };
   }
   if (rules.housemates && typeof mine === "string" && atHome(ctx, at, mine)) {
-    const homeOwners = new Set;
-    for (const p of Object.keys(state.entities)) {
-      const prop = own(state.entities, p);
-      if (prop && prop.fields.place === mine && kindIs(ctx.registry, ctx.world, prop.kind, "property") && !isGone(state, p))
-        for (const o of ownersIn(prop.fields))
-          homeOwners.add(o.party);
-    }
+    const homeOwners = homeOwnersAt(ctx, mine);
     const stated = ownersIn(e.fields).map((o) => o.party);
     if (stated.length === 0 || stated.some((o) => homeOwners.has(o)))
       return { basis: "housemate", ...owners[0] !== undefined ? { via: owners[0] } : {}, ...presumed };
@@ -25959,6 +25977,7 @@ var BUSINESS_FIELDS = {
   valuation_multiple: { type: "number", label: "Valued at this many years of profit, over its books", min: 0, default: VALUATION_MULTIPLE, domain: "money", level: 4 }
 };
 var valuing = new Set;
+var working = [];
 function businessIds2(api, ctx) {
   return passMemo([ctx.state, ctx.state.entities, ctx.world, api], "economy.businesses", () => Object.keys(ctx.state.entities).filter((id) => api.partyKind(ctx, id) === "business").sort());
 }
@@ -25990,19 +26009,44 @@ function bookValuationOf(api, ctx, org) {
   const multiple = trust ? 0 : Math.max(0, numOf(f.valuation_multiple, VALUATION_MULTIPLE));
   if (!trust && typeof f.value === "number" && Number.isFinite(f.value))
     return { value: Math.max(0, Math.round(f.value)), set: true, book: 0, profit: 0, multiple };
-  if (valuing.has(org))
+  const around = working.at(-1);
+  around?.reach.add(org);
+  if (valuing.has(org)) {
+    for (let i = working.findIndex((w) => w.org === org) + 1;i < working.length; i++)
+      working[i].tainted = true;
     return { value: 0, set: false, book: 0, profit: 0, multiple, ...trust ? { trust: true } : {} };
+  }
+  const kept3 = passMemo([ctx.state, ctx.world, api], "economy.valuations", () => new Map);
+  const hit = kept3.get(org);
+  if (hit !== undefined && ![...hit.reach].some((id) => valuing.has(id))) {
+    if (around)
+      for (const id of hit.reach)
+        around.reach.add(id);
+    return hit.valuation;
+  }
+  const frame = { org, reach: new Set([org]), tainted: false };
+  working.push(frame);
   valuing.add(org);
   try {
-    const book = Math.round(api.netWorth(ctx, org));
-    if (trust)
-      return { value: Math.max(0, book), set: false, book, profit: 0, multiple, trust: true, ...book < 0 ? { floored: true } : {} };
-    const books = optionalQuery(ctx, "economy.business_books") ? businessBooks(api, ctx, org, ctx.state.clock - YEAR_MINUTES, ctx.state.clock) : null;
-    const profit = Math.max(0, books?.operating ?? 0);
-    const worked = Math.round(book + profit * multiple);
-    return { value: Math.max(0, worked), set: false, book, profit, multiple, ...worked < 0 ? { floored: true } : {} };
+    const valuation = (() => {
+      const book = Math.round(api.netWorth(ctx, org));
+      if (trust)
+        return { value: Math.max(0, book), set: false, book, profit: 0, multiple, trust: true, ...book < 0 ? { floored: true } : {} };
+      const books = optionalQuery(ctx, "economy.business_books") ? businessBooks(api, ctx, org, ctx.state.clock - YEAR_MINUTES, ctx.state.clock) : null;
+      const profit = Math.max(0, books?.operating ?? 0);
+      const worked = Math.round(book + profit * multiple);
+      return { value: Math.max(0, worked), set: false, book, profit, multiple, ...worked < 0 ? { floored: true } : {} };
+    })();
+    if (!frame.tainted)
+      kept3.set(org, { valuation, reach: frame.reach });
+    return valuation;
   } finally {
     valuing.delete(org);
+    working.pop();
+    if (around) {
+      for (const id of frame.reach)
+        around.reach.add(id);
+    }
   }
 }
 function orgValue(api, ctx, org) {
@@ -31349,8 +31393,8 @@ var REMIT = {
   },
   describe: (e, ctx, viewer) => viewer ? "" : say(e.data.what === "sales_tax" ? "business_remit_tax" : "business_remit_suppliers", { business: labelOf(ctx, str15(e, "business")) })
 };
-function commissions(ctx, business, cents2, working) {
-  const jobs = allJobs(ctx).filter((j) => j.business === business && j.status === "active" && (j.commissionPct > 0 || j.basis === "commission") && working(j));
+function commissions(ctx, business, cents2, working2) {
+  const jobs = allJobs(ctx).filter((j) => j.business === business && j.status === "active" && (j.commissionPct > 0 || j.basis === "commission") && working2(j));
   if (jobs.length === 0 || cents2 <= 0)
     return [];
   const each = Math.floor(cents2 / jobs.length);
@@ -36797,6 +36841,9 @@ function hiddenWords(ctx, id) {
 }
 var WRITTEN_KINDS = { flow: true, job: true, invoice: true };
 function hiddenNames2(ctx, pov) {
+  return passMemo([ctx.state, ctx.world], `economy.hidden_names\x00${pov}`, () => hiddenNamesNow(ctx, pov));
+}
+function hiddenNamesNow(ctx, pov) {
   const viewer = { pov, hidden: NO_HIDDEN };
   const seenNames = new Set;
   const seenWords = new Set;
@@ -41226,7 +41273,8 @@ function orgPlaceAt(ctx, org, at) {
 }
 function useChips(ctx, thing, keep = () => true) {
   const chips = new Map;
-  const people = Object.keys(ctx.state.entities).filter((id) => isPerson4(ctx, id) && !isGone(ctx.state, id) && keep(id)).sort((a, b) => partyOrder(ctx, partyRef(ctx, a), partyRef(ctx, b)));
+  const everyone = passMemo([ctx.state, ctx.world], "things.people_in_order", () => Object.keys(ctx.state.entities).filter((id) => isPerson4(ctx, id) && !isGone(ctx.state, id)).sort((a, b) => partyOrder(ctx, partyRef(ctx, a), partyRef(ctx, b))));
+  const people = everyone.filter(keep);
   for (const who of people) {
     const use = accessFor(ctx, who, thing).use;
     if (!use || use.basis === "grant")
@@ -54095,9 +54143,12 @@ function buildOrgList(ctx) {
     start: startOptions(ctx, pov)
   };
 }
+function orgPageIds(ctx) {
+  return [partyIdOf(ctx).id, ...shownOrgs(ctx).map((o) => o.id)];
+}
 function buildOrgPages(ctx) {
   const out = {};
-  for (const id of [partyIdOf(ctx).id, ...shownOrgs(ctx).map((o) => o.id)]) {
+  for (const id of orgPageIds(ctx)) {
     const view = buildOrgView(ctx, id, ctx.world.pov);
     if (view)
       out[id] = view;
@@ -57331,7 +57382,7 @@ var orgsPack = {
     r.service("orgs.acted", orgsActed);
     r.effect({ type: "orgs.note", args: ["org", "text", "by?", "names?"], gm: true, resolve: (a, ctx) => strOf(a.org) !== "" && strOf(a.text) !== "" ? [orgLog(ctx, strOf(a.org), strOf(a.text), { ...strOf(a.by) !== "" ? { by: strOf(a.by) } : {}, names: Array.isArray(a.names) ? a.names.filter((n) => typeof n === "string" && n !== "") : [] })] : { code: "bad_args", reason: say("why_a_history_line_needs_an_organization_and") } });
     r.view({ panel: ORGS_LIST_PANEL, build: (ctx) => buildOrgList(ctx) });
-    r.view({ panel: ORGS_ORG_PANEL, build: (ctx) => buildOrgPages(ctx) });
+    r.view({ panel: ORGS_ORG_PANEL, build: (ctx) => buildOrgPages(ctx), items: { ids: (ctx) => orgPageIds(ctx), build: (ctx, _prefs, id) => buildOrgView(ctx, id, ctx.world.pov) } });
     r.query("orgs.gm", (ctx, only) => buildOrgsGm(ctx, only));
     registerOrgActions(r);
     registerParty(r);
@@ -103752,7 +103803,7 @@ var package_default = {
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "7fb8b962";
+var BUILD = "e0346cb0";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;

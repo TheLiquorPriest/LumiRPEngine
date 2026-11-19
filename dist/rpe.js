@@ -2622,8 +2622,15 @@ var init_time_reach = __esm(() => {
 
 // src/engine/read-pass.ts
 function readPass(read) {
+  return inPass(depth === 0 ? new WeakMap : null, read);
+}
+function passInStretches() {
+  const mine = new WeakMap;
+  return { run: (read) => inPass(mine, read) };
+}
+function inPass(own2, read) {
   if (depth === 0)
-    kept = new WeakMap;
+    kept = own2 ?? new WeakMap;
   depth++;
   try {
     const out = read();
@@ -21984,8 +21991,28 @@ function related(state, a, b, types) {
 function atHome(ctx, at, home) {
   return typeof home === "string" && at !== null && own2(ctx.world.places, home) !== undefined && placeWithin(ctx.world, at, home) && together(ctx.world, at, home);
 }
+function households(ctx) {
+  return passMemo([ctx.state, ctx.world], "access.households", () => Object.keys(ctx.state.entities).filter((h) => orgTypeOf(ctx, h) === "household" && !isGone(ctx.state, h)));
+}
 function shareHousehold2(ctx, who, other) {
-  return Object.keys(ctx.state.entities).some((h) => orgTypeOf(ctx, h) === "household" && !isGone(ctx.state, h) && isMemberOf(ctx, who, h) && isMemberOf(ctx, other, h));
+  return households(ctx).some((h) => isMemberOf(ctx, who, h) && isMemberOf(ctx, other, h));
+}
+function homeOwnersAt(ctx, place2) {
+  const byPlace = passMemo([ctx.state, ctx.world], "access.home_owners", () => {
+    const out = new Map;
+    for (const p of Object.keys(ctx.state.entities)) {
+      const prop = own2(ctx.state.entities, p);
+      const at = prop?.fields.place;
+      if (!prop || typeof at !== "string" || !kindIs(ctx.registry, ctx.world, prop.kind, "property") || isGone(ctx.state, p))
+        continue;
+      const owners = out.get(at) ?? new Set;
+      for (const o of ownersIn(prop.fields))
+        owners.add(o.party);
+      out.set(at, owners);
+    }
+    return out;
+  });
+  return byPlace.get(place2) ?? NO_OWNERS;
 }
 function permitOf(state, from, who) {
   const r = own2(state.entities, from)?.relations.find((x) => x.type === "permits" && x.to === who && (x.until === undefined || x.until >= state.clock));
@@ -22062,13 +22089,7 @@ function useFor(ctx, who, thing, owners, presumed) {
       return { basis: "household", via: kin, ...presumed };
   }
   if (rules.housemates && typeof mine === "string" && atHome(ctx, at, mine)) {
-    const homeOwners = new Set;
-    for (const p of Object.keys(state.entities)) {
-      const prop = own2(state.entities, p);
-      if (prop && prop.fields.place === mine && kindIs(ctx.registry, ctx.world, prop.kind, "property") && !isGone(state, p))
-        for (const o of ownersIn(prop.fields))
-          homeOwners.add(o.party);
-    }
+    const homeOwners = homeOwnersAt(ctx, mine);
     const stated = ownersIn(e.fields).map((o) => o.party);
     if (stated.length === 0 || stated.some((o) => homeOwners.has(o)))
       return { basis: "housemate", ...owners[0] !== undefined ? { via: owners[0] } : {}, ...presumed };
@@ -22135,7 +22156,7 @@ function reachOf(ctx, who, thing) {
   }
   return { reach: "away", place: place2 };
 }
-var NO_ACCESS;
+var NO_ACCESS, NO_OWNERS;
 var init_access = __esm(() => {
   init_finance();
   init_org();
@@ -22147,6 +22168,7 @@ var init_access = __esm(() => {
   init_selector();
   init_things2();
   NO_ACCESS = { use: null, dispose: null };
+  NO_OWNERS = new Set;
 });
 
 // src/engine/thing-words.ts
@@ -30217,19 +30239,44 @@ function bookValuationOf(api, ctx, org) {
   const multiple = trust ? 0 : Math.max(0, numOf(f.valuation_multiple, VALUATION_MULTIPLE));
   if (!trust && typeof f.value === "number" && Number.isFinite(f.value))
     return { value: Math.max(0, Math.round(f.value)), set: true, book: 0, profit: 0, multiple };
-  if (valuing.has(org))
+  const around = working.at(-1);
+  around?.reach.add(org);
+  if (valuing.has(org)) {
+    for (let i = working.findIndex((w) => w.org === org) + 1;i < working.length; i++)
+      working[i].tainted = true;
     return { value: 0, set: false, book: 0, profit: 0, multiple, ...trust ? { trust: true } : {} };
+  }
+  const kept3 = passMemo([ctx.state, ctx.world, api], "economy.valuations", () => new Map);
+  const hit = kept3.get(org);
+  if (hit !== undefined && ![...hit.reach].some((id2) => valuing.has(id2))) {
+    if (around)
+      for (const id2 of hit.reach)
+        around.reach.add(id2);
+    return hit.valuation;
+  }
+  const frame = { org, reach: new Set([org]), tainted: false };
+  working.push(frame);
   valuing.add(org);
   try {
-    const book = Math.round(api.netWorth(ctx, org));
-    if (trust)
-      return { value: Math.max(0, book), set: false, book, profit: 0, multiple, trust: true, ...book < 0 ? { floored: true } : {} };
-    const books = optionalQuery(ctx, "economy.business_books") ? businessBooks(api, ctx, org, ctx.state.clock - YEAR_MINUTES, ctx.state.clock) : null;
-    const profit = Math.max(0, books?.operating ?? 0);
-    const worked = Math.round(book + profit * multiple);
-    return { value: Math.max(0, worked), set: false, book, profit, multiple, ...worked < 0 ? { floored: true } : {} };
+    const valuation = (() => {
+      const book = Math.round(api.netWorth(ctx, org));
+      if (trust)
+        return { value: Math.max(0, book), set: false, book, profit: 0, multiple, trust: true, ...book < 0 ? { floored: true } : {} };
+      const books = optionalQuery(ctx, "economy.business_books") ? businessBooks(api, ctx, org, ctx.state.clock - YEAR_MINUTES, ctx.state.clock) : null;
+      const profit = Math.max(0, books?.operating ?? 0);
+      const worked = Math.round(book + profit * multiple);
+      return { value: Math.max(0, worked), set: false, book, profit, multiple, ...worked < 0 ? { floored: true } : {} };
+    })();
+    if (!frame.tainted)
+      kept3.set(org, { valuation, reach: frame.reach });
+    return valuation;
   } finally {
     valuing.delete(org);
+    working.pop();
+    if (around) {
+      for (const id2 of frame.reach)
+        around.reach.add(id2);
+    }
   }
 }
 function orgValue(api, ctx, org) {
@@ -30397,7 +30444,7 @@ function registerStakes(r) {
   });
   r.core.formula("business_value", (ctx, id2) => orgValue(r.api, ctx, String(id2 ?? "")));
 }
-var VALUATION_MULTIPLE = 3, BUSINESS_FIELDS, valuing, routeEvent;
+var VALUATION_MULTIPLE = 3, BUSINESS_FIELDS, valuing, working, routeEvent;
 var init_stakes = __esm(() => {
   init_finance();
   init_world();
@@ -30416,6 +30463,7 @@ var init_stakes = __esm(() => {
     valuation_multiple: { type: "number", label: "Valued at this many years of profit, over its books", min: 0, default: VALUATION_MULTIPLE, domain: "money", level: 4 }
   };
   valuing = new Set;
+  working = [];
   routeEvent = {
     type: "economy.stake_route",
     validate: (e, ctx) => own2(ctx.state.entities, str11(e, "business")) && own2(ctx.state.entities, str11(e, "owner")) ? null : reject11("missing_entity", say("why_a_route_names_a_business_and_its")),
@@ -35697,8 +35745,8 @@ function isBusiness(ctx, id2) {
 function marginOf(state, business) {
   return Math.min(100, Math.max(0, numOf(own2(state.entities, business)?.fields.margin_pct, 100)));
 }
-function commissions(ctx, business, cents2, working) {
-  const jobs = allJobs(ctx).filter((j) => j.business === business && j.status === "active" && (j.commissionPct > 0 || j.basis === "commission") && working(j));
+function commissions(ctx, business, cents2, working2) {
+  const jobs = allJobs(ctx).filter((j) => j.business === business && j.status === "active" && (j.commissionPct > 0 || j.basis === "commission") && working2(j));
   if (jobs.length === 0 || cents2 <= 0)
     return [];
   const each = Math.floor(cents2 / jobs.length);
@@ -41359,6 +41407,9 @@ function hiddenWords(ctx, id2) {
   return { first: "Something", within: "something" };
 }
 function hiddenNames2(ctx, pov) {
+  return passMemo([ctx.state, ctx.world], `economy.hidden_names\x00${pov}`, () => hiddenNamesNow(ctx, pov));
+}
+function hiddenNamesNow(ctx, pov) {
   const viewer = { pov, hidden: NO_HIDDEN };
   const seenNames = new Set;
   const seenWords = new Set;
@@ -46214,7 +46265,8 @@ function orgPlaceAt(ctx, org, at) {
 }
 function useChips(ctx, thing, keep = () => true) {
   const chips = new Map;
-  const people = Object.keys(ctx.state.entities).filter((id2) => isPerson4(ctx, id2) && !isGone(ctx.state, id2) && keep(id2)).sort((a, b) => partyOrder(ctx, partyRef(ctx, a), partyRef(ctx, b)));
+  const everyone = passMemo([ctx.state, ctx.world], "things.people_in_order", () => Object.keys(ctx.state.entities).filter((id2) => isPerson4(ctx, id2) && !isGone(ctx.state, id2)).sort((a, b) => partyOrder(ctx, partyRef(ctx, a), partyRef(ctx, b))));
+  const people = everyone.filter(keep);
   for (const who of people) {
     const use = accessFor(ctx, who, thing).use;
     if (!use || use.basis === "grant")
@@ -60442,9 +60494,12 @@ function buildOrgList(ctx) {
     start: startOptions(ctx, pov)
   };
 }
+function orgPageIds(ctx) {
+  return [partyIdOf(ctx).id, ...shownOrgs(ctx).map((o) => o.id)];
+}
 function buildOrgPages(ctx) {
   const out = {};
-  for (const id2 of [partyIdOf(ctx).id, ...shownOrgs(ctx).map((o) => o.id)]) {
+  for (const id2 of orgPageIds(ctx)) {
     const view = buildOrgView(ctx, id2, ctx.world.pov);
     if (view)
       out[id2] = view;
@@ -63885,7 +63940,7 @@ var init_core13 = __esm(() => {
       r.service("orgs.acted", orgsActed);
       r.effect({ type: "orgs.note", args: ["org", "text", "by?", "names?"], gm: true, resolve: (a, ctx) => strOf(a.org) !== "" && strOf(a.text) !== "" ? [orgLog(ctx, strOf(a.org), strOf(a.text), { ...strOf(a.by) !== "" ? { by: strOf(a.by) } : {}, names: Array.isArray(a.names) ? a.names.filter((n) => typeof n === "string" && n !== "") : [] })] : { code: "bad_args", reason: say("why_a_history_line_needs_an_organization_and") } });
       r.view({ panel: ORGS_LIST_PANEL, build: (ctx) => buildOrgList(ctx) });
-      r.view({ panel: ORGS_ORG_PANEL, build: (ctx) => buildOrgPages(ctx) });
+      r.view({ panel: ORGS_ORG_PANEL, build: (ctx) => buildOrgPages(ctx), items: { ids: (ctx) => orgPageIds(ctx), build: (ctx, _prefs, id2) => buildOrgView(ctx, id2, ctx.world.pov) } });
       r.query("orgs.gm", (ctx, only) => buildOrgsGm(ctx, only));
       registerOrgActions(r);
       registerParty(r);
@@ -108416,6 +108471,28 @@ class UserStore {
   changes(turn) {
     return this.db.query("SELECT * FROM change WHERE user = ? AND turn = ? ORDER BY ord").all(this.id, turn).map(changeOf2);
   }
+  ownChanges(turns, naming = null) {
+    const words8 = naming?.map((w) => JSON.stringify(w).slice(1, -1));
+    const out = new Map;
+    if (turns.length === 0 || words8?.length === 0)
+      return out;
+    const rows2 = this.db.query(`SELECT c.* FROM change c WHERE c.user = ?1 AND c.turn IN (SELECT value FROM json_each(?2)) AND c.job IS NULL
+           AND (?3 = 'null' OR EXISTS (SELECT 1 FROM json_each(?3) w WHERE instr(c.value, w.value) > 0)) ORDER BY c.turn, c.ord`).all(this.id, JSON.stringify(turns), JSON.stringify(words8 ?? null));
+    for (const row of rows2) {
+      const c = changeOf2(row);
+      const list2 = out.get(row.turn);
+      if (list2 === undefined)
+        out.set(row.turn, [c]);
+      else
+        list2.push(c);
+    }
+    return out;
+  }
+  anyPlaced(chat) {
+    if (this.ownerIn(chat))
+      return true;
+    return this.db.query("SELECT EXISTS(SELECT 1 FROM change c JOIN job e ON e.user = c.user AND e.id = c.job AND e.ended IS NOT NULL WHERE c.user = ?1 AND c.job IS NOT NULL) AS any").get(this.id)?.any === 1;
+  }
   newestWith(turns, lane) {
     return this.db.query("SELECT j.value AS turn FROM json_each(?2) j WHERE EXISTS (SELECT 1 FROM change c WHERE c.user = ?1 AND c.turn = j.value AND c.lane = ?3 AND c.applied = 1) ORDER BY j.key DESC LIMIT 1").get(this.id, JSON.stringify(turns), lane)?.turn ?? null;
   }
@@ -108633,6 +108710,12 @@ class UserStore {
   foldKey(turnId) {
     const t = this.turnToWrite(turnId);
     return `${this.id}\x00${t.node}\x00${this.store.markOf(this.id, t.chat)}`;
+  }
+  stateKey(chat, turnId) {
+    const row = this.chatRead(chat);
+    const at = turnId ?? (row.head === null ? null : this.db.query("SELECT turn FROM path_node WHERE user = ? AND key = ?").get(this.id, row.head)?.turn ?? null);
+    const mark2 = this.store.markOf(this.id, chat);
+    return at === null ? `${this.id}\x00${chat}\x00~${row.revision ?? ""}\x00${mark2}` : `${this.foldKey(at)}\x00${chat}\x00${turnId === null ? "head" : "turn"}\x00${mark2}`;
   }
   stateFor(turnId, job) {
     const at = this.stateAt(turnId);
@@ -150091,45 +150174,60 @@ function writesOf(env, op, value) {
   }
   return touches3.map((t) => ({ ref: `entity:${t.entity}`, part: "field" in t ? t.field : ("rel" in t) ? t.rel : t.aspect, value }));
 }
-function valueHistory(store, env, chat, ref2, part, turn) {
+function namedBy(ref2) {
+  return ref2.startsWith("track:") ? ref2.slice("track:".length) : null;
+}
+function valueHistories(store, env, chat, asked4, turn) {
+  const outs = asked4.map(() => []);
+  if (asked4.length === 0)
+    return outs;
   const path = store.path(chat).flatMap((e) => e.turn === null ? [] : [e.turn]);
   const open6 = turn !== undefined && !path.includes(turn) && store.turn(turn)?.status === "open" ? store.turn(turn) : undefined;
   const parent = open6?.parent ?? null;
   const end = turn === undefined ? path.length : open6 !== undefined ? parent === null ? 0 : path.includes(parent) ? path.indexOf(parent) + 1 : path.length : path.indexOf(turn) + 1;
-  const out = [];
+  const at3 = new Map(asked4.map((a, i) => [`${a.ref}\x00${a.part}`, i]));
   const seen = new Set;
-  const take = (c, at3, n, applied2) => {
+  const take = (c, t, n, applied2) => {
     seen.add(c.id);
-    for (const w of writesOf(env, c.op, c.value))
-      if (w.ref === ref2 && w.part === part)
-        out.push({ change: c, turn: at3, n, applied: applied2, value: w.value, kind: w.fact ? "fact" : "value", settledBy: null });
+    for (const w of writesOf(env, c.op, c.value)) {
+      const i = at3.get(`${w.ref}\x00${w.part}`);
+      if (i !== undefined)
+        outs[i]?.push({ change: c, turn: t, n, applied: applied2, value: w.value, kind: w.fact ? "fact" : "value", settledBy: null });
+    }
   };
-  for (const [i, t] of path.slice(0, Math.max(end, 0)).entries()) {
-    for (const placed2 of store.changesBefore(t))
-      take(placed2.change, t, i + 1, placed2.applied);
-    for (const c of store.changes(t))
-      if (c.job === null)
-        take(c, t, i + 1, c.applied);
+  const names2 = asked4.map((a) => namedBy(a.ref));
+  const naming = names2.every((n) => n !== null) ? [...new Set(names2)] : null;
+  const walked = path.slice(0, Math.max(end, 0));
+  const placed2 = store.anyPlaced(chat);
+  const own3 = store.ownChanges(walked, naming);
+  for (const [i, t] of walked.entries()) {
+    if (placed2)
+      for (const p of store.changesBefore(t))
+        take(p.change, t, i + 1, p.applied);
+    for (const c of own3.get(t) ?? [])
+      take(c, t, i + 1, c.applied);
   }
   if (open6 !== undefined && turn !== undefined) {
-    for (const placed2 of store.changesBefore(turn))
-      take(placed2.change, turn, end + 1, placed2.applied);
-    for (const c of store.changes(turn))
-      if (c.job === null)
-        take(c, turn, end + 1, c.applied);
+    if (placed2)
+      for (const p of store.changesBefore(turn))
+        take(p.change, turn, end + 1, p.applied);
+    for (const c of store.ownChanges([turn], naming).get(turn) ?? [])
+      take(c, turn, end + 1, c.applied);
   }
   if (turn === undefined) {
     for (const c of store.ownerChanges(chat))
       if (!seen.has(c.id) && c.job === null)
         take(c, null, path.length + 1, c.applied);
   }
-  for (const [i, w] of out.entries()) {
-    if (w.kind !== "fact")
-      continue;
-    const later = out.slice(i + 1).find((x) => x.kind === "value" && x.applied && x.n > w.n && (x.change.precision === null || x.change.precision === "exact"));
-    w.settledBy = later?.turn ?? null;
+  for (const out of outs) {
+    for (const [i, w] of out.entries()) {
+      if (w.kind !== "fact")
+        continue;
+      const later = out.slice(i + 1).find((x) => x.kind === "value" && x.applied && x.n > w.n && (x.change.precision === null || x.change.precision === "exact"));
+      w.settledBy = later?.turn ?? null;
+    }
   }
-  return out;
+  return outs;
 }
 var init_history3 = __esm(() => {
   init_json();
@@ -150140,13 +150238,15 @@ var init_history3 = __esm(() => {
 // src/quests/trail.ts
 function trailsOf(store, env, chat, turn, tracks4, now) {
   const out = {};
-  for (const [id3, def] of Object.entries(tracks4)) {
+  const moved3 = Object.entries(tracks4).filter(([id3, def]) => {
     const at3 = Object.hasOwn(now, id3) ? now[id3] : undefined;
-    if (at3 === undefined || at3.stage === def.start && at3.since === 0)
-      continue;
+    return at3 !== undefined && !(at3.stage === def.start && at3.since === 0);
+  });
+  const histories = valueHistories(store, env, chat, moved3.map(([id3]) => ({ ref: `track:${id3}`, part: "stage" })), turn ?? undefined);
+  for (const [k, [id3, def]] of moved3.entries()) {
     const moves = [];
     let standing4 = def.start;
-    for (const w of valueHistory(store, env, chat, `track:${id3}`, "stage", turn ?? undefined)) {
+    for (const w of histories[k] ?? []) {
       const v = w.change.value;
       if (!w.applied || !isRecord(v) || typeof v.to !== "string")
         continue;
@@ -153442,11 +153542,11 @@ var init_apply = __esm(() => {
 });
 
 // src/iface/map/keep.ts
-function heldBy3(working, edit) {
-  return "part" in edit ? working[edit.part] : own2(working[edit.collection], edit.id);
+function heldBy3(working2, edit) {
+  return "part" in edit ? working2[edit.part] : own2(working2[edit.collection], edit.id);
 }
-function alreadyIn(working, edit) {
-  const held3 = heldBy3(working, edit);
+function alreadyIn(working2, edit) {
+  const held3 = heldBy3(working2, edit);
   return "value" in edit ? held3 !== undefined && hashJson(held3) === hashJson(edit.value) : held3 === undefined;
 }
 function keepable(base, state2) {
@@ -153477,8 +153577,8 @@ function keepable(base, state2) {
       kind: "map",
       id: id3,
       name: typeof title === "string" ? title : null,
-      edit(working) {
-        const map = own2(working.maps, id3);
+      edit(working2) {
+        const map = own2(working2.maps, id3);
         return map === undefined ? null : { collection: "maps", id: id3, value: editedMap(map, edits) };
       }
     });
@@ -153512,17 +153612,17 @@ function keepInDraft(worlds, base, state2, pick3) {
   ];
   for (let attempt2 = 0;attempt2 < KEEP_TRIES; attempt2++) {
     const read = worlds.draft(base.id);
-    const working = workingOf(worlds, read, index);
-    if (working === null)
+    const working2 = workingOf(worlds, read, index);
+    if (working2 === null)
       return { failed: "unreadable" };
     const kept4 = { maps: [], places: [], paths: [], settings: false };
     const skipped = [];
     const edits = [];
     const take = (c) => {
-      const edit = c.edit(working.doc);
+      const edit = c.edit(working2.doc);
       if (edit === null)
         skipped.push({ id: c.id, code: "no_map" });
-      else if (alreadyIn(working.doc, edit))
+      else if (alreadyIn(working2.doc, edit))
         skipped.push({ id: c.id, code: "in_draft_already" });
       else {
         edits.push(edit);
@@ -153550,8 +153650,8 @@ function keepInDraft(worlds, base, state2, pick3) {
     }
     if (edits.length === 0)
       return { kept: kept4, skipped, version: read.version, written: false };
-    const doc = keptWorld(working.doc, edits);
-    const out = worlds.writeDraft(base.id, JSON.stringify({ base: working.base, doc, version: read.version + 1 }), read.version);
+    const doc = keptWorld(working2.doc, edits);
+    const out = worlds.writeDraft(base.id, JSON.stringify({ base: working2.base, doc, version: read.version + 1 }), read.version);
     if (out.done)
       return { kept: kept4, skipped, version: out.version, written: true };
   }
@@ -164407,9 +164507,8 @@ function chipsOf(db, s, user, chat) {
   }
   return out;
 }
-function replyClocks(s, chat, world, state2, most) {
+function replyClocks(s, chat, world, place3, most) {
   const cal = calendarOf(world);
-  const place3 = placeOfEntity(state2, world.pov);
   const out = {};
   for (const entry of s.path(chat).filter((e) => !e.user && e.turn !== null).slice(-Math.max(1, most))) {
     const minutes2 = entry.turn === null ? null : s.turn(entry.turn)?.storyTime ?? null;
@@ -164426,7 +164525,6 @@ function pendingOf(db, s, user, chat) {
 }
 var init_panel_reads = __esm(() => {
   init_calendar();
-  init_scope();
   init_json();
 });
 
@@ -164738,9 +164836,9 @@ function ownerOf3(registry2, world, state2, id3) {
   return optionalQuery(ctx, "economy.payee_of")?.(ctx, id3) ?? null;
 }
 function namesOf6(registry2, world, state2, def, value, mayKnow) {
-  return hasOwn(state2.entities, value) || hasOwn(world.places, value) ? value : namedBy(registry2, world, state2, def, value, mayKnow);
+  return hasOwn(state2.entities, value) || hasOwn(world.places, value) ? value : namedBy2(registry2, world, state2, def, value, mayKnow);
 }
-function namedBy(registry2, world, state2, def, words13, mayKnow) {
+function namedBy2(registry2, world, state2, def, words13, mayKnow) {
   const plain8 = (text15) => text15.toLowerCase().replace(/[_\s]+/g, " ").trim().replace(/^the /, "");
   const said5 = plain8(words13);
   if (said5 === "")
@@ -164953,68 +165051,137 @@ function headTurn(s, chat) {
     return null;
   return s.path(chat).findLast((e) => e.node === row.head)?.turn ?? null;
 }
-function chatView(input) {
+async function buildParts(input, s, folded, world, state2, elapsed) {
+  const registry2 = input.store.env.registry;
+  const pass = passInStretches();
+  const ctx = registry2.context(world, state2);
+  const panels = {};
+  const prefs = { mapDisplay: null, mapConfig: input.map };
+  const failed2 = (error) => ({ error: error instanceof Error ? error.message : String(error) });
+  const steps = [];
+  for (const view2 of registry2.views) {
+    const items = view2.items;
+    if (items === undefined) {
+      steps.push(() => {
+        try {
+          panels[view2.panel] = view2.build(ctx, prefs);
+        } catch (error) {
+          panels[view2.panel] = failed2(error);
+        }
+      });
+      continue;
+    }
+    const record5 = {};
+    let broken = false;
+    const page = (id3) => () => {
+      if (broken)
+        return;
+      try {
+        const built3 = items.build(ctx, prefs, id3);
+        if (built3 !== null)
+          record5[id3] = built3;
+      } catch (error) {
+        broken = true;
+        panels[view2.panel] = failed2(error);
+      }
+    };
+    const pages = () => {
+      let ids3;
+      try {
+        ids3 = items.ids(ctx);
+      } catch (error) {
+        panels[view2.panel] = failed2(error);
+        return;
+      }
+      panels[view2.panel] = record5;
+      steps.splice(steps.indexOf(pages) + 1, 0, ...ids3.map(page));
+    };
+    steps.push(pages);
+  }
+  let shown5 = null;
+  const parts = {};
+  steps.push(() => {
+    const log = panels["story.quests"];
+    if (log !== undefined)
+      panels["story.quests"] = withPast(log, withTrails(questViews(world.tracks, questSliceOf(folded.state)), world.tracks, trailsOf(s, input.store.env, input.chat, input.turn, world.tracks, state2.tracks)));
+  });
+  steps.push(() => {
+    shown5 = scene(world, state2, elapsed, registry2);
+    parts.hud = hud(world, state2, panels, ctx);
+  });
+  steps.push(() => {
+    parts.palette = palette(world, state2, registry2);
+  });
+  steps.push(() => {
+    parts.controls = controls(world, state2, shown5?.sceneType ?? "", registry2, input.knowledge, input.offstage);
+  });
+  await inStretches(steps, (step2) => step2(), (stretch) => pass.run(stretch));
+  if (shown5 === null || parts.hud === undefined || parts.palette === undefined || parts.controls === undefined)
+    throw new Error("the state view's parts were not all built");
+  return { panels, scene: shown5, hud: parts.hud, palette: parts.palette, controls: parts.controls };
+}
+async function chatView(input) {
   const { store: store2, chat } = input;
   const s = store2.user(input.user);
   const row = s.chat(chat);
   if (row === null || row.world === null)
     return notWorldView(chat);
-  const folded = input.turn === null ? s.headState(chat) : s.stateAt(input.turn);
-  const state2 = folded.state.world;
-  const doc = store2.env.worlds(state2.revision) ?? (row.revision === null ? undefined : store2.env.worlds(row.revision));
-  if (doc === undefined)
-    return notWorldView(chat);
-  const world = playedWorld(doc, state2);
   const registry2 = store2.env.registry;
-  const at3 = input.turn ?? headTurn(s, chat);
-  const elapsed = at3 === null ? 0 : state2.clock - s.startOf(at3).state.world.clock;
-  return readPass(() => {
-    const ctx = registry2.context(world, state2);
-    const panels = {};
-    const prefs = { mapDisplay: null, mapConfig: input.map };
-    for (const view2 of registry2.views) {
-      try {
-        panels[view2.panel] = view2.build(ctx, prefs);
-      } catch (error) {
-        panels[view2.panel] = { error: error instanceof Error ? error.message : String(error) };
-      }
+  const key2 = JSON.stringify([s.stateKey(chat, input.turn), row.head, input.map, input.knowledge, input.offstage]);
+  let kept5 = built2.get(key2);
+  if (kept5 !== undefined) {
+    built2.delete(key2);
+    built2.set(key2, kept5);
+  } else {
+    const folded = input.turn === null ? s.headState(chat) : s.stateAt(input.turn);
+    const state2 = folded.state.world;
+    const doc = store2.env.worlds(state2.revision) ?? (row.revision === null ? undefined : store2.env.worlds(row.revision));
+    if (doc === undefined)
+      return notWorldView(chat);
+    const world = playedWorld(doc, state2);
+    const at3 = input.turn ?? headTurn(s, chat);
+    const elapsed = at3 === null ? 0 : state2.clock - s.startOf(at3).state.world.clock;
+    kept5 = { ...await buildParts(input, s, folded, world, state2, elapsed), world, revision: state2.revision, lag: definitionsLag(state2), place: placeOfEntity(state2, world.pov) };
+    built2.set(key2, kept5);
+    for (const old of built2.keys()) {
+      if (built2.size <= VIEWS_KEPT)
+        break;
+      built2.delete(old);
     }
-    const log = panels["story.quests"];
-    if (log !== undefined)
-      panels["story.quests"] = withPast(log, withTrails(questViews(world.tracks, questSliceOf(folded.state)), world.tracks, trailsOf(s, store2.env, chat, input.turn, world.tracks, state2.tracks)));
-    const shown5 = scene(world, state2, elapsed, registry2);
-    const packs = {};
-    for (const pack of registry2.packs)
-      packs[pack.id] = pack.version;
-    const lag = definitionsLag(state2);
-    return {
-      v: 1,
-      chatId: chat,
-      worldId: row.world,
-      revision: state2.revision,
-      ...lag !== null ? { definitionsFrom: lag } : {},
-      status: input.turning ? "in_flight" : "idle",
-      hud: hud(world, state2, panels, ctx),
-      scene: shown5,
-      chips: input.chips,
-      replyClocks: replyClocks(s, chat, world, state2, input.clocksMost),
-      journal: input.journal,
-      keepReport: [],
-      pending: input.pending,
-      staged: input.staged,
-      notCarried: input.notCarried,
-      panels,
-      palette: palette(world, state2, registry2),
-      controls: controls(world, state2, shown5.sceneType, registry2, input.knowledge, input.offstage),
-      meter: input.meter,
-      packs,
-      currency: world.currency
-    };
-  });
+  }
+  const packs = {};
+  for (const pack of registry2.packs)
+    packs[pack.id] = pack.version;
+  return {
+    v: 1,
+    chatId: chat,
+    worldId: row.world,
+    revision: kept5.revision,
+    ...kept5.lag !== null ? { definitionsFrom: kept5.lag } : {},
+    status: input.turning ? "in_flight" : "idle",
+    hud: kept5.hud,
+    scene: kept5.scene,
+    chips: input.chips,
+    replyClocks: replyClocks(s, chat, kept5.world, kept5.place, input.clocksMost),
+    journal: input.journal,
+    keepReport: [],
+    pending: input.pending,
+    staged: input.staged,
+    notCarried: input.notCarried,
+    panels: kept5.panels,
+    palette: kept5.palette,
+    controls: kept5.controls,
+    meter: input.meter,
+    packs,
+    currency: kept5.world.currency
+  };
 }
+var built2, VIEWS_KEPT = 4;
 var init_view11 = __esm(() => {
   init_places_in_play();
+  init_scope();
   init_upgrade();
+  init_store2();
   init_record();
   init_trail();
   init_panel_reads();
@@ -165022,6 +165189,7 @@ var init_view11 = __esm(() => {
   init_hud();
   init_palette();
   init_scene();
+  built2 = new Map;
 });
 
 // src/play/service.ts
@@ -165114,6 +165282,21 @@ class PlayService {
       throw new RouteError(404, `Chat ${chat} has no turn ${turn}.`);
     if (turn !== null && row?.joined != null)
       throw new JoinedTurnError(turn, row.joined);
+    const key2 = s.stateKey(chat, turn);
+    const going = this.building.get(key2);
+    if (going !== undefined)
+      return await going;
+    const work = this.stateView(user, chat, turn);
+    this.building.set(key2, work);
+    try {
+      return await work;
+    } finally {
+      this.building.delete(key2);
+    }
+  }
+  building = new Map;
+  async stateView(user, chat, turn) {
+    const s = this.deps.store.user(user);
     const { taps, map } = await this.deps.settings(user, chat);
     const keys = (await this.part()).keys;
     const texts4 = await historyTexts(this.deps.texts(user, chat));
@@ -194110,13 +194293,13 @@ var claudeCodeVersion = "2.1.322", claudeCodeTools, ccToolLookup, toClaudeCodeNa
       let thread;
       for (;; ) {
         options?.signal?.throwIfAborted();
-        const built2 = buildParams(model2, normalizedContext, isOAuth, options, {
+        const built3 = buildParams(model2, normalizedContext, isOAuth, options, {
           disablePreferredStrictTools,
           messageThreads: threadSessionId !== undefined
         });
-        if (built2.providerThinkingLevel)
-          output.providerThinkingLevel = built2.providerThinkingLevel;
-        params = built2.params;
+        if (built3.providerThinkingLevel)
+          output.providerThinkingLevel = built3.providerThinkingLevel;
+        params = built3.params;
         const nextParams = await options?.onPayload?.(params, model2);
         if (nextParams !== undefined) {
           params = { ...nextParams, stream: true };
@@ -194128,7 +194311,7 @@ var claudeCodeVersion = "2.1.322", claudeCodeTools, ccToolLookup, toClaudeCodeNa
           thread = sent.thread;
           break;
         } catch (error2) {
-          if (options?.signal?.aborted || disablePreferredStrictTools || !built2.hasPreferredStrictTools || !(error2 instanceof Anthropic.APIError) || error2.status !== 400 || error2.type !== "invalid_request_error" || !isStrictToolLimitErrorMessage(error2.message)) {
+          if (options?.signal?.aborted || disablePreferredStrictTools || !built3.hasPreferredStrictTools || !(error2 instanceof Anthropic.APIError) || error2.status !== 400 || error2.type !== "invalid_request_error" || !isStrictToolLimitErrorMessage(error2.message)) {
             throw error2;
           }
           disablePreferredStrictTools = true;
@@ -209532,41 +209715,41 @@ https://help.openai.com/en/articles/5112595-best-practices-for-api-key-safety
     x509Authentication?.beginRequestPreparation();
     await this.prepareOptions(options);
     x509Authentication?.beginRequestPlanning();
-    let built2;
+    let built3;
     try {
       const candidate = await this.buildRequest(options, {
         retryCount: maxRetries - retriesRemaining
       });
-      built2 = { req: candidate.req, url: candidate.url, timeout: candidate.timeout };
+      built3 = { req: candidate.req, url: candidate.url, timeout: candidate.timeout };
       if (x509Authentication) {
-        validatePositiveInteger2("timeout", built2.timeout);
-        x509Authentication.authorizePlannedRequest(built2.url, built2.req, built2.timeout);
-        if (X509WorkloadIdentityAuth.isStreamingRequestBody(built2.req.body)) {
+        validatePositiveInteger2("timeout", built3.timeout);
+        x509Authentication.authorizePlannedRequest(built3.url, built3.req, built3.timeout);
+        if (X509WorkloadIdentityAuth.isStreamingRequestBody(built3.req.body)) {
           options.__metadata = { ...options.__metadata, hasStreamingBody: true };
         }
-        await this.prepareRequest(built2.req, { url: built2.url, options });
-        await this._provider?.prepareRequest?.(built2.req, { url: built2.url, options });
+        await this.prepareRequest(built3.req, { url: built3.url, options });
+        await this._provider?.prepareRequest?.(built3.req, { url: built3.url, options });
         x509Authentication.beginRequestPlanning();
-        x509Authentication.authorizePlannedRequest(built2.url, built2.req, built2.timeout, true);
-        if (X509WorkloadIdentityAuth.isStreamingRequestBody(built2.req.body)) {
+        x509Authentication.authorizePlannedRequest(built3.url, built3.req, built3.timeout, true);
+        if (X509WorkloadIdentityAuth.isStreamingRequestBody(built3.req.body)) {
           options.__metadata = { ...options.__metadata, hasStreamingBody: true };
         }
         const callerSignal2 = x509Authentication.requestSnapshot().signal;
-        if (callerSignal2?.aborted || built2.req.signal?.aborted) {
-          throw this._makeUserAbortError(callerSignal2?.aborted ? callerSignal2 : built2.req.signal);
+        if (callerSignal2?.aborted || built3.req.signal?.aborted) {
+          throw this._makeUserAbortError(callerSignal2?.aborted ? callerSignal2 : built3.req.signal);
         }
-        x509Authentication.setEffectiveSignal(built2.req.signal || callerSignal2 ? createRequestController(built2.req.signal ?? callerSignal2, callerSignal2).signal : undefined);
+        x509Authentication.setEffectiveSignal(built3.req.signal || callerSignal2 ? createRequestController(built3.req.signal ?? callerSignal2, callerSignal2).signal : undefined);
         x509Authentication.beginRequestNetwork();
         const security2 = options.__security ?? { bearerAuth: true };
         const authenticationHeaders = await this.authHeaders(options, security2);
         const suppliedHeaders = x509Authentication.headerSnapshots();
         const supplied = buildHeaders2([suppliedHeaders.defaultHeaders, suppliedHeaders.requestHeaders]);
         for (const [name, value] of authenticationHeaders?.values ?? []) {
-          if (!supplied.nulls.has(name) && !built2.req.headers.has(name)) {
-            built2.req.headers.set(name, value);
+          if (!supplied.nulls.has(name) && !built3.req.headers.has(name)) {
+            built3.req.headers.set(name, value);
           }
         }
-        this.validateHeaders(buildHeaders2([supplied, built2.req.headers]), security2);
+        this.validateHeaders(buildHeaders2([supplied, built3.req.headers]), security2);
       }
     } catch (error3) {
       x509Authentication?.retireRequestBody();
@@ -209575,8 +209758,8 @@ https://help.openai.com/en/articles/5112595-best-practices-for-api-key-safety
       }
       throw error3;
     }
-    const { req, url: url2 } = built2;
-    const timeout = x509Authentication ? Math.min(built2.timeout, x509Authentication.requestSnapshot().timeout) : built2.timeout;
+    const { req, url: url2 } = built3;
+    const timeout = x509Authentication ? Math.min(built3.timeout, x509Authentication.requestSnapshot().timeout) : built3.timeout;
     x509Authentication?.bindRequest(options, req, this.adminAPIKey);
     let hasStreamingBody = options.__metadata?.["hasStreamingBody"] === true;
     if (!x509Authentication) {
@@ -209882,9 +210065,9 @@ https://help.openai.com/en/articles/5112595-best-practices-for-api-key-safety
     if (__classPrivateFieldGet2(this, _OpenAI_x509Authentication, "f") && !__classPrivateFieldGet2(this, _OpenAI_x509Authentication, "f").inRequest(this)) {
       const authentication = __classPrivateFieldGet2(this, _OpenAI_x509Authentication, "f");
       return await authentication.runRequest(async () => {
-        const built2 = await _a4.prototype.buildRequest.call(this, inputOptions, { retryCount });
-        authentication.releaseRequestBody(built2.req.body);
-        return built2;
+        const built3 = await _a4.prototype.buildRequest.call(this, inputOptions, { retryCount });
+        authentication.releaseRequestBody(built3.req.body);
+        return built3;
       }, this);
     }
     const options = { ...inputOptions };
@@ -254940,9 +255123,9 @@ class Team {
     d.session?.(member.ref, "agent", parent);
     d.gauge?.(member.ref, made2.limits);
     d.progress?.("delegate", {}, member.ref);
-    const working = [...this.#members.values()].filter((other) => other.runner.working).length + 1;
-    if (working > 1)
-      d.progress?.("agents", { count: working });
+    const working2 = [...this.#members.values()].filter((other) => other.runner.working).length + 1;
+    if (working2 > 1)
+      d.progress?.("agents", { count: working2 });
     const work = this.#begin(member, { messages: [] }, { parent: member.parent, given: made2.given }, ctx.signal, free);
     return this.#hold(this.#end(member, work, ctx.signal, made2.missing, loaded));
   }
@@ -257115,7 +257298,7 @@ async function prepareJob(core, ask) {
   const rules = await guidance.ruleRun({
     facts: createFacts(env4.facts, (_scope, agent2) => {
       const open9 = todos.get(agent2.id).filter((item) => !item.done);
-      const left2 = leftFact([...working].find((entry) => entry.runner.agent.id === agent2.id)?.runner.left() ?? {}, budget.left());
+      const left2 = leftFact([...working2].find((entry) => entry.runner.agent.id === agent2.id)?.runner.left() ?? {}, budget.left());
       return { "todo.open": { count: open9.length, names: open9.map((item) => item.text) }, ...left2 !== undefined ? { "limits.left": left2 } : {} };
     }),
     ...settings.ruleWindow !== undefined ? { window: settings.ruleWindow } : {},
@@ -257154,7 +257337,7 @@ async function prepareJob(core, ask) {
   const everyAgent = new Budget("day", settings.day.tokens !== undefined ? { tokens: settings.day.tokens } : {}, undefined, { spent: ask.spend.all, cachedWeight: settings.cachedWeight });
   const day3 = new Budget("day", settings.jobs.tokensPerDay !== undefined ? { tokens: settings.jobs.tokensPerDay } : {}, everyAgent, { spent: ask.spend.jobs, cachedWeight: settings.cachedWeight });
   const budget = new Budget("job", { ...calls !== undefined ? { calls } : {}, ...tokensIn !== undefined ? { tokensIn } : {}, ...tokensOut !== undefined ? { tokensOut } : {}, ...tokens4 !== undefined ? { tokens: tokens4 } : {} }, ask.over ?? day3, { cachedWeight: settings.cachedWeight, ...ask.goOn !== undefined ? { used: { ...ask.goOn.used } } : {} });
-  const working = new Set;
+  const working2 = new Set;
   let registry3;
   let heard;
   const pending2 = new Set;
@@ -257198,8 +257381,8 @@ async function prepareJob(core, ask) {
     budget,
     author: async (agent2) => connectionOf2(core.connections, scope2, await guidance.definition(settings.lead ?? agent2.definition) ?? {}, env4.log, settings),
     track: (entry) => {
-      working.add(entry);
-      return () => working.delete(entry);
+      working2.add(entry);
+      return () => working2.delete(entry);
     },
     keep: (agent2) => runs3.keep(agent2),
     late: (agent2, judged) => env4.log.info("A rule's question was answered yes after its agent's work had ended; its text went to no agent.", { job: ask.id, agent: agent2.id, rule: judged.fired.firing.rule })
@@ -257228,8 +257411,8 @@ async function prepareJob(core, ask) {
     terms: (definition2) => callTerms(settings, definition2),
     limits: (definition2) => agentLimits(settings, definition2),
     track: (entry) => {
-      working.add(entry);
-      return () => working.delete(entry);
+      working2.add(entry);
+      return () => working2.delete(entry);
     },
     gauge: (agent2, limits3) => core.usage.gauge(scope2, ask.id, agent2.id, limits3.contextWindow?.tokens ?? 0, limits3.maxTokens?.tokens ?? 0),
     keep: (agent2, kind) => runs3.keep(agent2, kind),
@@ -257248,7 +257431,7 @@ async function prepareJob(core, ask) {
       own4.set(name, text16);
   }
   const runAs = (tool, args, ctx) => {
-    for (const { runner: runner2 } of working)
+    for (const { runner: runner2 } of working2)
       if (runner2.agent.id === ctx.agent.id)
         return runner2.runAs(tool, args, ctx);
     return Promise.resolve({ content: [], error: true });
@@ -257323,7 +257506,7 @@ async function prepareJob(core, ask) {
         const failure2 = own5?.file.failure;
         if (full === undefined && failure2 !== undefined && core.book.over) {
           full = failure2;
-          for (const entry2 of working)
+          for (const entry2 of working2)
             entry2.work.stop();
         }
         const { event } = record5;
@@ -257347,7 +257530,7 @@ async function prepareJob(core, ask) {
         timer = env4.clock.setTimeout(() => {
           timer = undefined;
           hit = { limit: "time", per: "job", max: time, value: env4.clock.now() - startedAt - heldFor };
-          for (const entry2 of working)
+          for (const entry2 of working2)
             entry2.runner.limit(hit);
         }, Math.max(0, left2));
       };
@@ -257374,7 +257557,7 @@ async function prepareJob(core, ask) {
       else
         arm();
       const stop2 = () => {
-        for (const entry2 of working)
+        for (const entry2 of working2)
           entry2.work.stop();
       };
       let messages = [];
@@ -257389,7 +257572,7 @@ async function prepareJob(core, ask) {
       }
       const work = runner.start({ messages }, { ...ask.parent !== undefined ? { parent: ask.parent } : {}, given: made2.given });
       const entry = { runner, work };
-      working.add(entry);
+      working2.add(entry);
       signal3.addEventListener("abort", stop2, { once: true });
       if (signal3.aborted)
         stop2();
@@ -257411,7 +257594,7 @@ async function prepareJob(core, ask) {
         }
       } finally {
         own5?.release();
-        working.delete(entry);
+        working2.delete(entry);
         signal3.removeEventListener("abort", stop2);
         unwatch();
         if (timer !== undefined)
@@ -262055,17 +262238,17 @@ class UsageBook {
     const book = this.#runs.get(record5.run);
     if (book !== undefined)
       book.user ??= record5.scope.user;
-    const working = JSON.stringify([record5.run, agent2.id]);
+    const working2 = JSON.stringify([record5.run, agent2.id]);
     const kind = agent2.job !== undefined ? "job" : "turn";
     if (event.kind === "agent_started") {
-      this.#ended.set(working, emptyUsage());
+      this.#ended.set(working2, emptyUsage());
       return;
     }
     if (event.kind === "call_ended") {
       const gauge = this.#gauges.get(gaugeKey(record5.scope, agent2.id));
       if (gauge !== undefined && event.usage.input > 0)
         gauge.used = event.usage.input;
-      const ended4 = this.#ended.get(working);
+      const ended4 = this.#ended.get(working2);
       if (ended4 !== undefined)
         addUsage(ended4, event.usage);
       this.#spend(record5.scope.user, { at: record5.at, in: kind, usage: event.usage });
@@ -262079,8 +262262,8 @@ class UsageBook {
       addUsage(entry.usage, event.usage);
       book.agents.set(agent2.id, entry);
     }
-    const ended3 = this.#ended.get(working) ?? emptyUsage();
-    this.#ended.delete(working);
+    const ended3 = this.#ended.get(working2) ?? emptyUsage();
+    this.#ended.delete(working2);
     const rest2 = {
       calls: Math.max(0, event.usage.calls - ended3.calls),
       input: Math.max(0, event.usage.input - ended3.input),
@@ -265240,7 +265423,7 @@ function stateRoutes(turns) {
       handle: async ({ user, params, query: query5 }) => {
         const s = held4(user, params.chat, query5.turn);
         const env4 = turns.store.env;
-        const all3 = valueHistory(s, env4, params.chat, query5.at, query5.part, query5.turn).reverse();
+        const all3 = (valueHistories(s, env4, params.chat, [{ ref: query5.at, part: query5.part }], query5.turn)[0] ?? []).reverse();
         const from = query5.cursor === undefined ? 0 : all3.findIndex((w) => String(w.change.id) === query5.cursor) + 1;
         const items = (query5.limit === undefined ? all3.slice(from) : all3.slice(from, from + query5.limit)).map((w) => {
           const c = w.change;
@@ -280750,5 +280933,5 @@ if (Bun.isMainThread) {
     stopped,
     fetch: (url2, init) => fetch(url2, init),
     invoked: invokedAs2(process.execPath, Bun.main)
-  }, { version: "7fb8b962", areas: compose2().areas, appFile: Bun.main, host: { platform: process.platform, uid: process.getuid?.() ?? null, bun: process.execPath } });
+  }, { version: "e0346cb0", areas: compose2().areas, appFile: Bun.main, host: { platform: process.platform, uid: process.getuid?.() ?? null, bun: process.execPath } });
 }
