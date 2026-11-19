@@ -650,8 +650,14 @@ export function wordPattern(w: string): string {
   return `(?<!${WORD_CHAR})${plural}(?!${WORD_CHAR})`;
 }
 
-/** Whether `words` come in `said` (a text's words joined by spaces) in order, each said as `wordPattern` reads it, each later in the same word as the one before or in the next. */
+/**
+ * Whether `words` come in `said` (a text's words joined by spaces) in order, each said as `wordPattern` reads it, each later in the same
+ * word as the one before or in the next. Each word's stem is in the text wherever the pattern finds it (the word itself, or a "-y"
+ * word without its "y", as its "-ies" plural is), so a text missing one is answered without the pattern: a name check tries every
+ * hidden name and label against each line.
+ */
 function saysInOrder(said: string, words: readonly string[]): boolean {
+  if (words.some((w) => !said.includes(/^[a-z0-9]+$/.test(w) && /[^aeiou]y$/.test(w) ? w.slice(0, -1) : w))) return false;
   return patternOf(words.map(wordPattern).join(`${WORD_CHAR}*(?: ${WORD_CHAR}*)?`)).test(said);
 }
 
