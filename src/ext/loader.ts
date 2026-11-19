@@ -15,7 +15,7 @@ import { pageRoad, type PageRoad } from "./page";
  * gone. What each draws, it draws itself: the loader makes the registration and hands over the element the host gives.
  */
 export type ChatSurface =
-  /** A DOM decorator on one of the host's anchors (the two markers, the line under a reply): `ctx.ui.registerDomDecorator`; its `render` and `update` are the options'. */
+  /** A DOM decorator on one of the host's anchors (the two markers, the line under a reply): `ctx.ui.registerDomDecorator`; its `render` and `update` are the options', given an element of its own in the host's root (`ownRoot`). */
   | { key: string; placement: "dom-decorator"; options: DomDecoratorOptions }
   /** A float widget (the HUD): `ctx.ui.createFloatWidget`, drawn into its root by `render`, which may return what takes the drawing down. Needs `ui_panels`. */
   | { key: string; placement: "float-widget"; options?: FloatWidgetOptions; render(handle: SpindleFloatWidgetHandle): void | (() => void) }
@@ -55,13 +55,46 @@ export type MountShell = (mount: ShellMount) => Mounted;
 /** The drawer tab RPE's pages live in. */
 export const TAB = { id: "rpe", title: "RPE", shortName: "RPE", description: "RPE: the live view, turns, world, cast, story and settings" };
 
+/**
+ * A decorator's own element in the root the host gives it: the host gives every decorator of the extension on one anchor the one root
+ * (`dom-decorator-service.ts` `ensureRoot`, by owner, mount and scope), so each draws into a child of its own, by its key, and none
+ * replaces what another drew there (the line under a reply, the window's marker and the working marker share a reply's anchor).
+ */
+function ownRoot(root: HTMLElement, key: string): HTMLElement {
+  const held = root.querySelector(`:scope > [data-rpe-surface="${CSS.escape(key)}"]`);
+  if (held instanceof HTMLElement) return held;
+  const own = document.createElement("div");
+  own.setAttribute("data-rpe-surface", key);
+  own.style.display = "contents";
+  root.appendChild(own);
+  return own;
+}
+
 /** One surface registered through the host's frontend API; what takes it off. */
 function register(ctx: SpindleFrontendContext, surface: ChatSurface): () => void {
   const ui = ctx.ui as unknown as HostUi;
   switch (surface.placement) {
-    case "dom-decorator":
+    case "dom-decorator": {
+      const { key } = surface;
+      const { render, update } = surface.options;
       // Under `ctx.ui` and returning its remover: the host has no such member at the context's top level.
-      return ui.registerDomDecorator(surface.options);
+      return ui.registerDomDecorator({
+        ...surface.options,
+        ...(render === undefined
+          ? {}
+          : {
+              render: (root, at) => {
+                const own = ownRoot(root, key);
+                const drawn = render(own, at);
+                return () => {
+                  if (typeof drawn === "function") drawn();
+                  own.remove();
+                };
+              },
+            }),
+        ...(update === undefined ? {} : { update: (root, at) => update(ownRoot(root, key), at) }),
+      });
+    }
     case "float-widget": {
       const handle = ui.createFloatWidget(surface.options);
       const drawn = surface.render(handle);
