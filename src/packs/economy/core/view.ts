@@ -84,6 +84,11 @@ const WRITTEN_KINDS: Record<string, true> = { flow: true, job: true, invoice: tr
  * one hidden. A whole name shorter than three letters is too likely a word.
  */
 function hiddenNames(ctx: ReadContext, pov: EntityId): HiddenNames {
+  // Made once a read pass for each viewer: every party's money view on a page asks it, and its pattern is compiled from the world's names.
+  return passMemo([ctx.state, ctx.world], `economy.hidden_names\u0000${pov}`, () => hiddenNamesNow(ctx, pov));
+}
+
+function hiddenNamesNow(ctx: ReadContext, pov: EntityId): HiddenNames {
   const viewer: Viewer = { pov, hidden: NO_HIDDEN };
   const seenNames = new Set<string>();
   const seenWords = new Set<string>();
