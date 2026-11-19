@@ -121,6 +121,31 @@ export function providersOf(reg: Registry, world: WorldDoc, kind: string): { kin
 }
 
 /**
+ * The entities that bring ties other than `member_of` links (a provider up their kind's chain but `linkRows`), not removed, in id
+ * order, each with those providers and whether it is a company: one walk of the entities a read pass, which every group's `tiedTo`
+ * reads (a walk a group made a long-played chat's sixty organizations walk every entity's kind chain sixty times).
+ */
+function tieHolders(ctx: MembershipContext): readonly { id: EntityId; ties: readonly MembershipProvider[]; company: boolean }[] {
+  return passMemo([ctx.state, ctx.state.entities, ctx.world], "orgs.tie_holders", () => {
+    const byKind = new Map<string, MembershipProvider[]>();
+    const out: { id: EntityId; ties: readonly MembershipProvider[]; company: boolean }[] = [];
+    for (const id of Object.keys(ctx.state.entities).sort()) {
+      const e = ctx.state.entities[id];
+      if (!e || isGone(ctx.state, id)) continue;
+      let ties = byKind.get(e.kind);
+      if (ties === undefined) {
+        ties = providersOf(ctx.registry, ctx.world, e.kind)
+          .filter((p) => p.provider !== linkRows)
+          .map((p) => p.provider);
+        byKind.set(e.kind, ties);
+      }
+      if (ties.length > 0) out.push({ id, ties, company: kindIs(ctx.registry, ctx.world, e.kind, COMPANY_KIND) });
+    }
+    return out;
+  });
+}
+
+/**
  * Everyone who belongs to `group` by a tie other than a `member_of` link: a row the providers give an
  * organization that is `group`, or a member of it by links (a business in a family brings its owners
  * and staff; only member groups nest), but for staff of anything other than a company, who work for
@@ -129,13 +154,9 @@ export function providersOf(reg: Registry, world: WorldDoc, kind: string): { kin
 function tiedTo(ctx: MembershipContext, group: EntityId): ReadonlySet<EntityId> {
   return passMemo([ctx.state, ctx.state.entities, ctx.world], `orgs.tied:${group}`, () => {
     const out = new Set<EntityId>();
-    for (const id of Object.keys(ctx.state.entities).sort()) {
-      const e = ctx.state.entities[id];
-      if (!e || isGone(ctx.state, id)) continue;
-      const ties = providersOf(ctx.registry, ctx.world, e.kind).filter((p) => p.provider !== linkRows);
-      if (ties.length === 0 || (id !== group && !linkedMemberOf(ctx.state, id, group))) continue;
-      const company = kindIs(ctx.registry, ctx.world, e.kind, COMPANY_KIND);
-      for (const { provider } of ties) for (const row of provider(ctx, id)) if (row.how !== "member" && (row.how !== "staff" || company)) out.add(row.who);
+    for (const { id, ties, company } of tieHolders(ctx)) {
+      if (id !== group && !linkedMemberOf(ctx.state, id, group)) continue;
+      for (const provider of ties) for (const row of provider(ctx, id)) if (row.how !== "member" && (row.how !== "staff" || company)) out.add(row.who);
     }
     return out;
   });
