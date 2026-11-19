@@ -2,7 +2,7 @@
 // it waits for RPE's addresses and the extension, when it renews its token, how it tries a closed socket
 // again, how it follows a long request, and the page's own counts and ticks. RPE holds them: the
 // extension hands the whole group with its start-up facts (the page cannot call RPE before it has a
-// road), and once the page is connected it reads them from the settings route, again whenever a
+// road), and once the page is connected it reads them, the group's values alone (`GET /api/v1/settings/values`), again whenever a
 // setting is saved. Until it has them a page uses the defaults, except for the start wait, which
 // governs the wait for the very facts that carry the group: that one the browser keeps from the last
 // time RPE gave it.
@@ -80,10 +80,10 @@ export function createUiSettings(storage: Keeping): UiSettings {
         const { phase } = client.state.get();
         if (phase !== "direct" && phase !== "relay") return;
         const mine = ++asked;
-        client.call("GET /api/v1/settings", {}).then(
+        client.call("GET /api/v1/settings/values", {}, { query: { under: PAGE_KEY_PREFIX } }).then(
           (reply) => {
             if (mine !== asked) return;
-            take(Object.fromEntries(reply.settings.filter((s) => s.key.startsWith(PAGE_KEY_PREFIX)).map((s) => [s.key, s.value])));
+            take(reply.values);
             const address = reply.facts.find((fact) => fact.key === "lumiverse.url")?.value;
             lumiverse.set(typeof address === "string" ? address : null);
           },

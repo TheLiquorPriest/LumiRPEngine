@@ -2851,6 +2851,19 @@ Writes one setting into one level's config file, as the user would write it, and
 | Body | [`SettingsWrite`](#settingswrite) |
 | Reply | [`SettingsReply`](#settingsreply) |
 
+### `GET /api/v1/settings/values`
+
+The values in force of the settings whose keys begin with `under` (a page's own: `pages.`), for a chat or for every chat, and the install's facts: what a page reads of its own settings at its start, without each setting's words, levels and advice.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | none |
+| Query | `under`: `string`, The start of the keys whose values are given, such as `pages.`<br>`chat` (may be left out): `string`, The chat whose levels are read; left out or empty, the levels every chat shares |
+| Body | none |
+| Reply | [`SettingsValues`](#settingsvalues) |
+
 ## Worlds
 
 ### `GET /api/v1/build/jobs`
@@ -8750,6 +8763,17 @@ export interface SettingsReply {
   sections: { title: string; about: string }[];
   files: ({ level: LayerLevel; file: string; problem: string | null })[];
   settings: SettingView[];
+  facts: InstallFact[];
+}
+```
+
+### `SettingsValues`
+
+The values in force of the settings whose keys begin with what was asked, by key, and the install's facts: what a page reads of its own settings, without the rest of each setting.
+
+```ts
+export interface SettingsValues {
+  values: { [key: string]: JsonValue };
   facts: InstallFact[];
 }
 ```

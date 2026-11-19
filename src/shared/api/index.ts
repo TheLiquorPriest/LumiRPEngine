@@ -3093,6 +3093,12 @@ export interface SettingsReply {
   facts: InstallFact[];
 }
 
+/** The values in force of the settings whose keys begin with what was asked, by key, and the install's facts: what a page reads of its own settings, without the rest of each setting. */
+export interface SettingsValues {
+  values: { [key: string]: JsonValue };
+  facts: InstallFact[];
+}
+
 /** A key written at a level, a chat's naming the chat (left out or null: no chat): its value, null to take the key away at that level, or `none: true` to set `~`. */
 export interface SettingsWrite {
   level: LayerLevel;
@@ -6635,6 +6641,16 @@ export interface ApiRoutes {
     query: Record<string, never>;
     body: SettingsWrite;
     reply: SettingsReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** The values in force of the settings whose keys begin with `under` (a page's own: `pages.`), for a chat or for every chat, and the install's facts: what a page reads of its own settings at its start, without each setting's words, levels and advice. */
+  "GET /api/v1/settings/values": {
+    params: Record<string, never>;
+    query: { under: string; chat?: string };
+    body: undefined;
+    reply: SettingsValues;
     paged: false;
     long: false;
     joined: false;

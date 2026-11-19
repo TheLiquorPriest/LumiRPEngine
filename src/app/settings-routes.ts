@@ -271,7 +271,21 @@ export async function writeSetting(deps: Pick<SettingsDeps, "settings" | "levels
   });
 }
 
-/** `GET` and `PUT /api/v1/settings`. */
+const settingsValues = shape.named(
+  "SettingsValues",
+  "The values in force of the settings whose keys begin with what was asked, by key, and the install's facts: what a page reads of its own settings, without the rest of each setting.",
+  shape.object({ values: shape.record(shape.json()), facts: shape.list(installFact) }),
+);
+
+/** The values in force of the settings under `under` (a prefix of their keys), each set once for all (none set per connection or per agent), for a chat's levels (null: those every chat shares). */
+async function valuesNow(deps: SettingsDeps, chat: string | null, under: string): Promise<Infer<typeof settingsValues>> {
+  const read = readConfig(await diskTexts(await deps.levels(chat)), null, deps.settings);
+  const values: Record<string, JsonValue> = {};
+  for (const def of deps.settings) if (def.key.startsWith(under) && setFor(def) === null) values[def.key] = read.read(def).value;
+  return { values, facts: deps.facts() };
+}
+
+/** `GET` and `PUT /api/v1/settings`, and `GET /api/v1/settings/values`. */
 export function settingsRoutes(deps: SettingsDeps) {
   return [
     route({
@@ -283,6 +297,19 @@ export function settingsRoutes(deps: SettingsDeps) {
       query: { chat: shape.optional(T, "The chat whose levels are read; left out or empty, the levels every chat shares.") },
       reply: settingsReply,
       handle: ({ user, query }) => settingsNow(deps, user, query.chat || null),
+    }),
+    route({
+      method: "GET",
+      path: `${SETTINGS_PATH}/values`,
+      access: "page",
+      group: "settings",
+      does: "The values in force of the settings whose keys begin with `under` (a page's own: `pages.`), for a chat or for every chat, and the install's facts: what a page reads of its own settings at its start, without each setting's words, levels and advice.",
+      query: {
+        under: shape.field(shape.text({ blank: false }), "The start of the keys whose values are given, such as `pages.`."),
+        chat: shape.optional(T, "The chat whose levels are read; left out or empty, the levels every chat shares."),
+      },
+      reply: settingsValues,
+      handle: ({ query }) => valuesNow(deps, query.chat || null, query.under),
     }),
     route({
       method: "PUT",
