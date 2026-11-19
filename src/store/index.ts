@@ -13,6 +13,7 @@ export { StateIndex, STATE_SEARCH_DEFAULTS, type Found, type FoundKind, type Sta
 export { answers, timeDue } from "./due";
 export {
   worldState,
+  worldStateFolds,
   openScenePlaceOf,
   ownerPlaceOf,
   scenePlaceOf,

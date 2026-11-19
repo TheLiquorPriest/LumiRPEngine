@@ -200,6 +200,19 @@ function said(v: JsonValue): string {
 }
 
 /**
+ * Folds the states a world state at `turn` reads: the turn's own, and the start of the turn before, which its `passed` section (what
+ * fell due since) and its `unsettled` section (what stopped applying) read. Read inside `Store.afar` before `worldState`, so that a
+ * long fold of either (one held no longer, from a snapshot up to `snapshotEvery` turns back) runs on a worker thread, and the world
+ * state finds both held.
+ */
+export function worldStateFolds(store: UserStore, turn: string): void {
+  const t = store.turn(turn);
+  if (t === null) return;
+  store.stateAt(t.id);
+  if (t.parent !== null && store.turn(t.parent) !== null) store.startOf(t.parent);
+}
+
+/**
  * The world state for a chat at the start of a turn: the block the turn lane gives the Author, and
  * each section as lines. Refuses a turn that is not the chat's.
  */
@@ -512,22 +525,23 @@ const READ_THROUGH = 4096;
  * says is not wanted: as many as all of `room` could show at each line's own cost, and one more where the span holds more, with how
  * many more it holds than those (null: more, not counted), and how many items were read to make the lines. The due list is asked for in
  * batches, each twice the last, so what a span costs is what the lines its budget can show cost, however long the span. A layout that
- * words none of the lines asked for shows none, and is asked for no more. With `through`, every item is read, up to that many, whatever the room.
+ * words none of the lines asked for shows none, and is asked for no more. With `through`, every item is read, up to that many, whatever
+ * the room: asked for once, that many, which is the list the batches would end at (each batch reads the whole span again).
  */
 function dueShown(part: Part, source: DueSource, state: StoreState, span: { from: number; to: number }, room: number, line: (d: DueEntry) => ViewLine, at: string | null = null, skip: (d: DueEntry) => boolean = () => false, except: readonly string[] = [], through = 0): { lines: ViewLine[]; items: DueEntry[]; fetched: number; more: number | null } {
-  for (let most = 1; ; most *= 2) {
+  const read = (most: number) => {
     const listing = source.due(state, span, at, most, except);
     const items = listing.items.filter((d) => !skip(d));
-    const lines = items.map(line);
-    const read = { lines, items, fetched: listing.items.length, more: listing.more };
-    if (through > 0) {
-      if (listing.more === 0 || listing.items.length < most || most >= through) return read;
-      continue;
-    }
+    return { lines: items.map(line), items, fetched: listing.items.length, more: listing.more };
+  };
+  if (through > 0) return read(through);
+  for (let most = 1; ; most *= 2) {
+    const got = read(most);
+    const { lines } = got;
     let used = 0;
     let k = 0;
     for (; k < lines.length && used + costOf(part, lines[k] as ViewLine) <= room; k++) used += costOf(part, lines[k] as ViewLine);
-    if (k < lines.length || (used === 0 && lines.length > 0) || listing.more === 0 || listing.items.length < most) return read;
+    if (k < lines.length || (used === 0 && lines.length > 0) || got.more === 0 || got.fetched < most) return got;
   }
 }
 

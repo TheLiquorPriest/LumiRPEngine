@@ -32,7 +32,7 @@ import { playAnswers } from "../../src/play/service";
 import { hashParts } from "../../src/shared/hash";
 import type { JsonObject, JsonValue } from "../../src/shared/json";
 import { own } from "../../src/engine/pack-kit";
-import { type ChangeInput, timeDue, WORLD_STATE_SECTIONS, worldState } from "../../src/store";
+import { type ChangeInput, timeDue, WORLD_STATE_SECTIONS, worldState, worldStateFolds } from "../../src/store";
 import { storyBrief } from "../../src/story";
 import { RPE_GUIDANCE } from "../../src/tree";
 import { maskWorldInfoScanExclusions, SCAN_SETTING, scannedSteps, scanSettingsOf } from "../../src/turn/scan";
@@ -219,6 +219,8 @@ else {
   if (layout?.status === "read") {
     const text = layout.text;
     const inputAt = (turn: string, layoutText: string) => ({ chat, turn, layout: layoutText, map: maps, drawnGiven: {}, placeLines: placeLinesAt(s, turns.store.env, chat, turn, settings.places, settings.map), holds: tidyHolds(turns.store, owner, turn, settings.taps.tidy), due: timeDue(turns.store), settings: settings.worldState, charsPerToken: settings.charsPerToken });
+    // The states it reads, folded first as the briefing folds them (a long fold on a worker thread), then the world state over them.
+    await timed("a briefing's world state's states, folded as the briefing folds them", () => turns.store.afar(() => worldStateFolds(s, newestTurn)));
     await timed("a briefing's world state", () => worldState(s, inputAt(newestTurn, text)), (o) => o.text.length);
     // Its parts, read at the start of the turn before the newest (another state, as cold): the tree over the state, then each section of
     // the layout alone (the layout's own lines, a body of that section only), each on the tree the ones before it read.
@@ -226,6 +228,7 @@ else {
     const closing = text.startsWith("---\n") ? text.indexOf("\n---", 4) : -1;
     if (earlier !== null && s.turn(earlier)?.chat === chat && closing >= 0) {
       const head = text.slice(0, text.indexOf("\n", closing + 1) + 1);
+      await timed("a world state's states, folded as the briefing folds them (the turn before)", () => turns.store.afar(() => worldStateFolds(s, earlier)));
       await timed("a world state's tree over the state (the turn before)", () => s.viewAt(earlier));
       await timed("a world state's holds that cannot be (the turn before)", () => tidyHolds(turns.store, owner, earlier, settings.taps.tidy), size);
       await timed("a world state's place lines, made (the turn before)", () => placeLinesAt(s, turns.store.env, chat, earlier, settings.places, settings.map));

@@ -41,7 +41,7 @@ import { tidyHolds } from "../play/path-events";
 import type { ActivatedRead } from "../lore/indexing";
 import { isRecord, type JsonValue } from "../shared/json";
 import { playAnswers } from "../play/service";
-import { type ChangeRow, clockRecorded, type DueSource, type MapText, type PathReport, type Report, type ShownMessage, type Store, type TreeView, type TurnRow, type UserStore, worldState } from "../store";
+import { type ChangeRow, clockRecorded, type DueSource, type MapText, type PathReport, type Report, type ShownMessage, type Store, type TreeView, type TurnRow, type UserStore, worldState, worldStateFolds } from "../store";
 import { aboutOf } from "../store/fold";
 import { type SceneSession, sceneSession, storyBrief, storyCoverage, storyRecordParts } from "../story";
 import { storyAt } from "../story/path";
@@ -1631,6 +1631,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         // the session was given already is left out; what this block printed is kept for the session's next turn.
         const drawnGiven = await this.#drawnGiven(scope, settings.lead, maps);
         const u = this.#d.store.user(scope.user);
+        // The states it reads are folded first where a long fold of one runs on a worker thread, so the world state finds them held.
+        await this.#d.store.afar(() => worldStateFolds(u, scope.turn));
         // A place shown in full carries its base's lines (`src/places`): its features, access and what the story changed of it.
         const placeLines = placeLinesAt(u, this.#d.store.env, scope.chat, scope.turn, settings.places, settings.map);
         // With the chat's tidy-up on, the holds that cannot be, each with the fix the tidy-up would make: listed, never applied (R-173).

@@ -33,7 +33,7 @@ import type { AgentRef, AttachMoment, ConsentGrant, ContextBlock, FilesPort, Gap
 import { castViews, type MemorySearch, type SourceReader } from "../cast";
 import { mapView, mapWording, noMapWords, rulesetData } from "../iface";
 import { LORE_BATCH, LORE_KNOWN, type LoreIndex, type LoreProposals, loreBatchBlock, loreKnownBlock, loreLines } from "../lore";
-import { type DueSource, type Lane, type Part, readPart, type Store, type ViewLine, wordLine, worldState, type WorldStateBlock } from "../store";
+import { type DueSource, type Lane, type Part, readPart, type Store, type ViewLine, wordLine, worldState, type WorldStateBlock, worldStateFolds } from "../store";
 import { storyBrief } from "../story";
 import { storyAt } from "../story/path";
 import { StoryRecord } from "../story/record";
@@ -122,6 +122,8 @@ async function compiledWorld(deps: EventsDeps, scope: Scope, guidance: Guidance,
   const part = readPart(layout.text, "world-state");
   const settings = await turnSettings(deps.files, scope, deps.log);
   const map = maps ? mapView(await mapWording(guidanceTexts(deps.files, scope, deps.log)), settings.map) : undefined;
+  // The states it reads are folded first where a long fold of one runs on a worker thread, so the world state finds them held.
+  await deps.store.afar(() => worldStateFolds(store, turn));
   return { part, ahead: settings.worldState.dueAhead, state: worldState(store, { chat: scope.chat, turn, layout: part, ...(map !== undefined ? { map } : {}), due: deps.due, settings: settings.worldState, charsPerToken: settings.charsPerToken }) };
 }
 
