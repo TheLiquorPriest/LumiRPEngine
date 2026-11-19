@@ -189,6 +189,7 @@ test("memory-late: what a principal still holds from an earlier turn is in the n
   const second = await play(b, "I watch her work.");
   expect(fired(b, second)).toEqual(["memory-late"]);
   expect(told(b, LATE)).toBeGreaterThan(0);
+  expect(told(b, "- Wren Hale (principal): 1 waiting, the oldest of message ")).toBeGreaterThan(0);
   expect(wrenAt(b, second).untaken).toEqual([]);
 
   const third = await play(b, "I wait.");
@@ -215,6 +216,7 @@ test("memory-scene-end: a scene closed with a principal's perceptions waiting is
   const second = await play(b, "I go down the stairs.");
   expect(fired(b, second)).toEqual(["memory-scene-end"]);
   expect(told(b, ENDED)).toBeGreaterThan(0);
+  expect(told(b, "- Wren Hale (principal): 1 waiting, of Night watch.")).toBeGreaterThan(0);
   await b.until("the job to end", async () => (await b.turns.harness.jobs.list({ user: USER, chat: CHAT })).jobs.find((j) => j.ended !== undefined));
 
   const third = await play(b, "I wait.");

@@ -1,12 +1,23 @@
 import { describe, expect, test } from "bun:test";
-import type { AgentRef, JsonObject, ToolResult } from "rp-harness/contract";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import type { AgentRef, FactValue, JsonObject, ToolResult } from "rp-harness/contract";
+import { renderTemplate } from "rp-harness/helpers";
 import { factProblems } from "rp-harness/testing/kit";
 import { CAST_FACT_DEFS, castFacts, type JobRead } from "../../src/cast/facts";
 import { castAt } from "../../src/cast/path";
 import { CAST_DEFAULTS } from "../../src/cast/kit";
 import { turnFacts } from "../../src/turn/facts";
 import { charactersOf } from "../../src/cast/record";
+import { split } from "../guidance/set";
 import { CHAT, dataOf, openBench, USER } from "./rig";
+
+/** A shipped rule's text filled from one fact's value, laid out as RPH lays a fact out for a rule's text: under its dotted name, its count its own value, beside its names and its fields. */
+function shipped(rule: string, name: string, value: FactValue | undefined): string {
+  let fields: JsonObject = { ".": value?.count ?? 0, ...(value?.names !== undefined ? { names: value.names } : {}), ...(value?.fields ?? {}) };
+  for (const part of name.split(".").toReversed()) fields = { [part]: fields };
+  return renderTemplate(split(readFileSync(resolve(import.meta.dir, `../../guidance/.rules/${rule}.md`), "utf8")).body, fields).text ?? "";
+}
 
 /** No scene recorded for any turn, and the cast's settings as shipped. */
 const UNSCENED = { scenes: async () => ({ of: new Map(), closed: new Map() }), settings: async () => CAST_DEFAULTS, jobs: async () => [] };
@@ -98,6 +109,8 @@ describe("stage.unperceived and path.unperceived", () => {
     const now = await b.t.begin();
     const missing = (await facts.read({ user: USER, chat: CHAT, session: "s-1", turn: now.id }, ["path.unperceived"]))["path.unperceived"];
     expect(missing).toMatchObject({ count: 1, names: ["Bram"], fields: { missing: [{ name: "Bram", casting: "principal", turns: [{ message: castAt(b.t.s, CHAT, null).replyOf(later.id), time: "Tuesday, 20:10", place: "The Lamp" }] }] } });
+    // The shipped reminder names him by that turn's message, story time and place.
+    expect(shipped("perceptions-missing", "path.unperceived", missing)).toContain(`\n- Bram (principal): message ${castAt(b.t.s, CHAT, null).replyOf(later.id)}, Tuesday, 20:10, The Lamp;\n`);
   });
 
   test("turns a migration carried owe no perception and their stage is not asked: the count names only the turn RPE played", async () => {
@@ -173,6 +186,8 @@ describe("stage.unperceived and path.unperceived", () => {
     const waiting = (await read(next.id))["cast.growth.waiting"];
     expect(waiting).toMatchObject({ count: 1, names: ["Bram"], by: { principal: 1 }, fields: { proposed: [{ who: "Bram", casting: "principal", text: "Less trusting.", since: castAt(b.t.s, CHAT, null).replyOf(turn.id), turns: 1 }] } });
     const id = String(((waiting?.fields?.proposed as JsonObject[])[0] as JsonObject).id);
+    // The shipped reminder names who, the proposal and what it says.
+    expect(shipped("growth-waiting", "cast.growth.waiting", waiting)).toContain(`\n- Bram (principal), ${id}: "Less trusting."; proposed at message ${castAt(b.t.s, CHAT, null).replyOf(turn.id)}, 1 turn(s) ago.\n`);
     expect((await b.call("cast_update", { operations: [{ op: "growth", who: "Bram", id, accept: true }] }, next.id)).error).toBeUndefined();
     expect((await read(next.id))["cast.growth.waiting"]).toMatchObject({ count: 0, names: [] });
   });

@@ -24,6 +24,11 @@ import { type InHand, turnsSince, type Untaken, type Waiting, waitingOf } from "
 export const UNPERCEIVED_GROUPS = [...CASTINGS, "uncast"] as const;
 type Group = (typeof UNPERCEIVED_GROUPS)[number];
 
+/** The fields of a count of who is missing a perception: `missing` and what each of its items carries, each turn among them. */
+const MISSING_FIELDS = ["missing", "missing.name", "missing.casting", "missing.turns", "missing.turns.message", "missing.turns.time", "missing.turns.place"];
+/** The fields of a count of who holds perceptions not taken in: `held` and what each of its items carries. */
+const HELD_FIELDS = ["held", "held.name", "held.casting", "held.perceptions", "held.since", "held.turns"];
+
 /** How a stage was read: the open scene the Author recorded, where the owner's character stands (no scene recorded), or not recorded at all. */
 export type StageHow = "scene" | "owner" | "none";
 
@@ -78,25 +83,25 @@ export const CAST_FACT_DEFS: readonly FactDef[] = [
     name: "stage.unperceived",
     counts: "Characters on stage this turn with no perception of it recorded, by casting; read: how the stage was read (scene: the open scene's own list of who is in it, as the Author recorded it; owner: no scene recorded, who the state places where the owner's character is; none: not recorded); missing: each with its casting and the turn (message: its reply; time: the story's date and time as it left them, null where nobody set the clock; place). A perception of the same moment (the same story time and place) under another turn counts as one of it. A turn a migration carried counts no one: the previous build played it, and what its characters took from it was carried with their minds.",
     by: [...UNPERCEIVED_GROUPS],
-    fields: ["read", "missing"],
+    fields: ["read", ...MISSING_FIELDS],
   },
   {
     name: "path.unperceived",
     counts: "Characters on stage in earlier turns RPE played on the chat's path with no perception of that turn recorded, each counted once, by casting, the stage read as stage.unperceived reads it; messages: those turns' replies; read: how many of those turns' stages were read each way (scene, owner, none); missing: each with its casting and the turns it has none of (message: the turn's reply; time: the story's date and time as the turn left them, null where nobody set the clock; place). A perception of the same moment (the same story time and place) under another turn counts as one of it, and one with reach none (nothing reached them) settles the turn. The turns a migration carried are not counted: the previous build played them, and what their characters took from them was carried with their minds.",
     by: [...UNPERCEIVED_GROUPS],
-    fields: ["messages", "read", "missing"],
+    fields: ["messages", "read", "read.scene", "read.owner", "read.none", ...MISSING_FIELDS],
   },
   {
     name: "stage.untaken",
     counts: "Characters on stage this turn (read as stage.unperceived reads it) who hold perceptions their own agent has not taken in, of this turn or any earlier one RPE played, each counted once, by casting. A perception is taken in once a memory, a mind entry or a relationship of the character's own names it as where it came from, or the character says it was taken in with nothing to remember. A perception waits from the turn it was written in, whatever turn it is of, and none waits that a job of the character's own agent has in hand: one going on or waiting to, or ended after this turn began, started after the perception was written. held: each with its casting, how many it holds (perceptions), the reply of the turn the oldest was written in (since; null while that turn's reply is not on the path) and how many turns RPE played since that turn, this one included (turns).",
     by: [...UNPERCEIVED_GROUPS],
-    fields: ["held"],
+    fields: HELD_FIELDS,
   },
   {
     name: "path.untaken",
     counts: "Characters who hold perceptions written in earlier turns RPE played on the chat's path that their own agent has not taken in (as stage.untaken says it, a job's in hand left out), each counted once, by casting, whether or not they are on stage now. held: each with its casting, how many of those it holds (perceptions), the reply of the turn the oldest was written in (since) and how many turns RPE played since that turn, the one read included (turns).",
     by: [...UNPERCEIVED_GROUPS],
-    fields: ["held"],
+    fields: HELD_FIELDS,
   },
   {
     name: "path.untaken.turns",
@@ -107,25 +112,25 @@ export const CAST_FACT_DEFS: readonly FactDef[] = [
     name: "scene.untaken",
     counts: "Characters who hold perceptions their own agent has not taken in from turns RPE played in a scene the story record now holds closed, each counted once, by casting. held: each with its casting, how many of those it holds (perceptions), the reply of the turn of the oldest (since) and the scenes they are of (scenes, by title or id).",
     by: [...UNPERCEIVED_GROUPS],
-    fields: ["held"],
+    fields: [...HELD_FIELDS, "held.scenes"],
   },
   {
     name: "dream.due",
     counts: "Characters for whom, since they last dreamt (or since their first perception on a turn RPE played, if they never have), a sleep has begun (a turn RPE played whose world state has their person's activity at sleep, after one that did not) or story time has passed the hours the setting cast.dreamAfterHours gives, each counted once, by casting. A chat that keeps no story time counts the sleeps alone. One whose own agent has a job in hand (going on or waiting to, or ended after this turn began) is not counted until that job's writes count: one run of its agent at a time. due: each with its casting, the story hours since then (hours; null with no story time), whether a sleep began since (slept), and the reply of the turn it last dreamt in (dreamt; null for none, or a turn whose reply is not on the path).",
     by: [...UNPERCEIVED_GROUPS],
-    fields: ["due"],
+    fields: ["due", "due.name", "due.casting", "due.hours", "due.slept", "due.dreamt"],
   },
   {
     name: "cast.base.older",
     counts: "Characters whose base is older than a source bound to them (a card, a persona, a lore entry or a memory entity that changed or went since the base was drawn); sources: each with the character, the source and the aspect of the character it defines.",
-    fields: ["sources"],
+    fields: ["sources", "sources.who", "sources.kind", "sources.id", "sources.defines", "sources.title", "sources.gone"],
   },
   { name: "cast.growth.proposed", counts: "Characters with growth a reflection proposed that the Author has not accepted." },
   {
     name: "cast.growth.waiting",
     counts: "In turns, not characters: the most turns RPE has played since a growth a reflection proposed, and the Author has neither accepted nor struck, was written, the turn read included (one written in the turn just before reads 1); one written in the turn read is not counted. Each group is the most of the characters of that casting; picking several adds them, so pick one. names: the characters whose proposals wait so, those of each casting under namesBy. proposed: each such proposal, with who, its casting, its id, its words (text), what caused it (cause), the reply of the turn it was written in (since) and the turns since (turns).",
     by: [...UNPERCEIVED_GROUPS],
-    fields: ["proposed"],
+    fields: ["proposed", "proposed.who", "proposed.casting", "proposed.id", "proposed.text", "proposed.cause", "proposed.since", "proposed.turns"],
   },
   { name: "cast.playerMind", counts: "1 when the owner has switched on a mind of his own for his character (the setting cast.playerMind), so his persona is cast with an agent and memory work as any principal is; 0 when it has none." },
 ];

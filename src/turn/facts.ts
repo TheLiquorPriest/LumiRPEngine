@@ -125,7 +125,7 @@ export function turnFacts(store: Store, deps: TurnFactsDeps): FactSource {
       {
         name: "asked.unanswered",
         counts: "The player's presses from a panel of one of the world's actions this turn was told, that no `act` of that action has reached the engine for in this turn, carried out or refused with the world's reason; named by what was pressed and on what. asked: each with what was pressed (what), on what (on) and the action's id (action).",
-        fields: ["asked"],
+        fields: ["asked", "asked.what", "asked.on", "asked.action"],
       },
       { name: "previous.run.stopped", counts: "Runs of the turn before that this turn stopped at the wait's limit as it began, their work left as it stood." },
       { name: "story.from", counts: "Whose messages are the chat's story: 1 in the group the chat's setting story.from names.", by: [...STORY_FROM] },

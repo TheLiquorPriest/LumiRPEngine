@@ -55,6 +55,7 @@ test("a press the run ended without acting on is said by what was pressed, once;
   const turn = await play(b, "I look about.");
   // The reply went out with no act: at the run's end the reminder is said, and the act that follows answers the press.
   expect(told(b, from)).toEqual([false, true, true]);
+  expect(b.model.requests.slice(from).some((r) => JSON.stringify(r.messages).includes(`- Walk here: the action \`${TIMELAPSE_ACTION}\`.`))).toBe(true);
   expect(fired(b, turn)).toEqual(["press-owed"]);
   expect(answered(b, id, turn)).toBe(1);
   // The next turn was told no press, and nothing is said.
