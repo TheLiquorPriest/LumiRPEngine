@@ -571,7 +571,7 @@ function MapCanvas(props: { view: MapView; chatId: string }) {
           />
         ) : null}
         {hand && placeId !== null && !grid ? <IconButton icon="plus" label="Lay a grid" variant="secondary" pressed={laying} onClick={() => setLaying(!laying)} /> : null}
-        {!overlay ? <IconButton icon="expand" label="Full screen" variant="secondary" onClick={() => void app.overlays.openMap()} /> : null}
+        {!overlay ? <IconButton icon="expand" label="Full screen" variant="secondary" onClick={() => void app.overlays.openMap({ fullscreen: true })} /> : null}
       </div>
       {listing ? (
         <PlaceList

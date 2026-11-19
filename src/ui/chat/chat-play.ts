@@ -61,9 +61,9 @@ export function chatPlay(env: FrameEnv): ChatPlay | null {
     }
   };
   const overlays: Overlays = {
-    openMap: () => opened((set) => set.open("map")),
+    openMap: (how) => opened((set) => set.open("map", how)),
     closeMap: () => sheets?.close("map"),
-    openPalette: (tab, edit) => opened((set) => set.open("palette", tab, edit)),
+    openPalette: (tab, edit) => opened((set) => set.open("palette", { tab, edit })),
     closePalette: () => sheets?.close("palette"),
     openWorld: () => opened((set) => set.open("world")),
     closeWorld: () => sheets?.close("world"),

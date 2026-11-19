@@ -1,5 +1,6 @@
 // Float overlays: the map, the palette and the World sheet, each a chromeless float
-// widget (`ui_panels`) opened through the OverlayController, so the drawer closes first on mobile.
+// widget (`ui_panels`) opened through the OverlayController, so the drawer closes first on mobile,
+// and at any width for the map, which lies at the right edge the drawer covers.
 // One shows at a time. On a phone a bottom sheet spans the width less what the host's chat heads
 // cover of it, followed while it shows. Closing an overlay hands focus back to what opened it.
 
@@ -130,8 +131,15 @@ class WidgetSurface implements FloatSurface {
   }
 }
 
+/** How an overlay opens: the palette's tab and an intent gate's Edit; the map full screen at any width. */
+export interface OverlayOpening {
+  tab?: PaletteTab;
+  edit?: PaletteEdit;
+  fullscreen?: boolean;
+}
+
 export interface OverlaySet {
-  open(kind: OverlayKind, tab?: PaletteTab, edit?: PaletteEdit): Promise<void>;
+  open(kind: OverlayKind, how?: OverlayOpening): Promise<void>;
   close(kind: OverlayKind): void;
   destroy(): void;
 }
@@ -246,6 +254,7 @@ export function createOverlays(app: App, host: SheetHost): OverlaySet {
   );
 
   // On a phone the open drawer covers the float widgets, so it is closed first (through the extension's backend); where it could not be, the overlay is drawn inside the drawer instead.
+  // The map lies at the right edge, where the open drawer covers it at any width, so the drawer closes for it everywhere.
   const closeDrawer = (): Promise<boolean> => host.closeDrawer();
   const mapControl = new OverlayController({
     viewport: () => host.viewport.get(),
@@ -253,6 +262,7 @@ export function createOverlays(app: App, host: SheetHost): OverlaySet {
     closeDrawer,
     surface: map,
     inDrawer: () => app.ui.update((ui) => playAt(ui, "places", "space.map")),
+    covered: true,
   });
   const paletteControl = new OverlayController({
     viewport: () => host.viewport.get(),
@@ -273,13 +283,13 @@ export function createOverlays(app: App, host: SheetHost): OverlaySet {
   const controls: Record<OverlayKind, OverlayController> = { map: mapControl, palette: paletteControl, world: worldControl };
 
   return {
-    async open(kind, tab, edit) {
+    async open(kind, how = {}) {
       for (const other of ["map", "palette", "world"] as const) if (other !== kind) surfaces[other].hide();
       if (kind === "palette") {
-        paletteTab = tab ?? "actions";
-        paletteEdit = edit;
+        paletteTab = how.tab ?? "actions";
+        paletteEdit = how.edit;
       }
-      await controls[kind].open();
+      await controls[kind].open(how.fullscreen === true);
     },
     close(kind) {
       controls[kind].close();

@@ -127,7 +127,7 @@ describe("the Play page on RPE's own routes", () => {
     await leave(root);
   });
 
-  test("Act, the HUD's Actions and Timelapse open the actions sheet, Timelapse on its tab; the HUD's Map and the map's Full screen on Places open the map; the page says nothing of them", async () => {
+  test("Act, the HUD's Actions and Timelapse open the actions sheet, Timelapse on its tab; the HUD's Map opens the map, and the map's Full screen on Places opens it filling the window; the page says nothing of them", async () => {
     const rpe = await playing(PLAYED);
     const { root } = await openPlay(page.document, rpe.client, handTimers(), PLAYED);
     await until("Now", () => root.querySelector('.lre-play-main[data-lre-dest="now"] .lre-play-quick') !== null);
@@ -168,6 +168,7 @@ describe("the Play page on RPE's own routes", () => {
     await until("the map's Full screen", () => full() !== null);
     await act(() => (full() as PageElement).click());
     await until("the map", () => sheet("map") !== null);
+    expect(sheet("map")?.closest(".rpe-float")?.style.width).toBe("100vw");
     expect(said(root)).toEqual([]);
     await leave(root);
     expect(page.document.querySelector('[data-lre-overlay="map"]')).toBeNull();

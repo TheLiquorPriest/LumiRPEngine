@@ -82,9 +82,9 @@ export function mountPlay(root: HTMLElement, mount: PlayMount): () => void {
   let own: OverlaySet | null = null;
   const made = (): OverlaySet => (own ??= createOverlays(kept.app, mount.host));
   const ownSheets: Overlays = {
-    openMap: () => made().open("map"),
+    openMap: (how) => made().open("map", how),
     closeMap: () => own?.close("map"),
-    openPalette: (tab, edit) => made().open("palette", tab, edit),
+    openPalette: (tab, edit) => made().open("palette", { tab, edit }),
     closePalette: () => own?.close("palette"),
     openWorld: () => made().open("world"),
     closeWorld: () => own?.close("world"),
@@ -92,7 +92,7 @@ export function mountPlay(root: HTMLElement, mount: PlayMount): () => void {
   // The shell is asked at each opening, so a chat that becomes the one Lumiverse has open while the page shows opens its composer's sheets from then on.
   const sheets = (): Overlays => mount.sheets?.() ?? ownSheets;
   const overlays: Overlays = {
-    openMap: () => sheets().openMap(),
+    openMap: (how) => sheets().openMap(how),
     closeMap: () => sheets().closeMap(),
     openPalette: (tab, edit) => sheets().openPalette(tab, edit),
     closePalette: () => sheets().closePalette(),

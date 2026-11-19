@@ -317,7 +317,8 @@ export interface PaletteEdit {
 }
 
 export interface Overlays {
-  openMap(): Promise<void>;
+  /** `fullscreen`: the map fills the window at any width (the map's own Full screen), the drawer closed first where it is open. */
+  openMap(how?: { fullscreen?: boolean }): Promise<void>;
   closeMap(): void;
   /** `edit`: the palette opens to change an intent gate's read action (DESIGN §5.1), its picks made, and plays it through the chip. */
   openPalette(tab?: PaletteTab, edit?: PaletteEdit): Promise<void>;

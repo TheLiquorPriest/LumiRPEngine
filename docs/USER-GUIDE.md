@@ -148,7 +148,7 @@ A bar of six places runs along the page: **Now**, **Me**, **People**, **Orgs**, 
 
 Everything here is shown as your character knows it. Someone your character cannot know of is never listed, and a place stays hidden until your character has been there or heard of it. A secret stays out of every place, sheet and Journal line until the story reveals it.
 
-On this page, **Act** and **Timelapse…** say "The actions sheet (Act, Actions, Timelapse) does not open in this build of RPE", and the map's **Full screen** says Places shows it here. In the chat, the actions sheet and the map open over the chat (see [The HUD](#the-hud)).
+On this page, **Act**, **Timelapse** and **Actions** in the HUD's details open the actions sheet, **Map** in the HUD's details opens the map, and the map's **Full screen** opens it filling the window: the same sheet and map the chat's own entries open (see [The HUD](#the-hud)). In Lumiverse the drawer closes first for the map, which it would cover; in RPE's own web page they open over the page.
 
 ### What a press does
 
@@ -270,7 +270,7 @@ Tap a place for its sheet: whether you are here, have been or have only heard of
 
 Where the world uses the grid system, you stand on a square: tap a square of your grid and its card offers **Walk here** with the time it takes, around the walls and through the doors, or says "No way there from here."; the walk waits for your next message, its square marked on the map, and the card then offers **Take back Walk here**. Walls and doors are drawn as thin lines; a place you know may carry a mark (**Home**, **Yours**, **For sale**), named in the legend under **The map shows**.
 
-In the chat, **World map** and **Map** open the same map over the chat.
+In the chat, **World map** and **Map** open the same map over the chat; **Full screen** on Places opens it filling the window. Where Lumiverse's drawer is open, it closes first, since it would cover the map.
 
 ## Time, needs and routines
 

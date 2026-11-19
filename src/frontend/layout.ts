@@ -27,19 +27,22 @@ export function hudMode(viewport: Viewport): HudMode {
 }
 
 export interface OverlayPlan {
-  /** Close the host drawer first: on mobile it stacks above float widgets, even fullscreen ones. */
+  /** Close the host drawer first: it stacks above float widgets, even fullscreen ones, and covers them on mobile, at full screen and where they lie at its edge. */
   closeDrawer: boolean;
-  /** Fill the viewport (mobile) or keep a resizable float (desktop). */
+  /** Fill the viewport (mobile, or asked for) or keep a resizable float (desktop). */
   fullscreen: boolean;
 }
 
 /**
  * How to open a float overlay (the map, the palette sheet): on a mobile viewport with the drawer
  * open, the drawer must close or the overlay receives no input; mobile overlays go fullscreen.
+ * `full`: asked for full screen at any width, which the open drawer would cover, so it closes first.
+ * `covered`: the overlay lies where the open drawer covers it at any width (the map, at the
+ * viewport's right edge), so the drawer closes first there too.
  */
-export function overlayPlan(viewport: Viewport, drawerOpen: boolean): OverlayPlan {
-  const mobile = isMobile(viewport);
-  return { closeDrawer: mobile && drawerOpen, fullscreen: mobile };
+export function overlayPlan(viewport: Viewport, drawerOpen: boolean, how: { full?: boolean; covered?: boolean } = {}): OverlayPlan {
+  const fullscreen = isMobile(viewport) || how.full === true;
+  return { closeDrawer: drawerOpen && (fullscreen || how.covered === true), fullscreen };
 }
 
 export interface Rect {
