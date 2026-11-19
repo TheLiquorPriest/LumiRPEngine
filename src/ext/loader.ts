@@ -7,7 +7,7 @@
 // as given and takes off on cleanup. Lumiverse calls the module's `setup(ctx)` and the cleanup it returns.
 
 import type { SpindleDockPanelHandle, SpindleDockPanelOptions, SpindleFloatWidgetHandle, SpindleFrontendContext, SpindleInputBarActionOptions, SpindleMessageWidgetOptions } from "lumiverse-spindle-types";
-import type { DomDecoratorOptions, FloatWidgetOptions, HostUi } from "../spindle-augment";
+import type { DecoratorRenderContext, DomDecoratorOptions, FloatWidgetOptions, HostUi } from "../spindle-augment";
 import { pageRoad, type PageRoad } from "./page";
 
 /**
@@ -15,7 +15,7 @@ import { pageRoad, type PageRoad } from "./page";
  * gone. What each draws, it draws itself: the loader makes the registration and hands over the element the host gives.
  */
 export type ChatSurface =
-  /** A DOM decorator on one of the host's anchors (the two markers, the line under a reply): `ctx.ui.registerDomDecorator`; its `render` and `update` are the options', given an element of its own in the host's root (`ownRoot`). */
+  /** A DOM decorator on one of the host's anchors (the two markers, the line under a reply): `ctx.ui.registerDomDecorator`, one for every surface on its mount (`OnMount`); its `render` and `update` are the options', given an element of its own in the host's root (`ownRoot`). */
   | { key: string; placement: "dom-decorator"; options: DomDecoratorOptions }
   /** A float widget (the HUD): `ctx.ui.createFloatWidget`, drawn into its root by `render`, which may return what takes the drawing down. Needs `ui_panels`. */
   | { key: string; placement: "float-widget"; options?: FloatWidgetOptions; render(handle: SpindleFloatWidgetHandle): void | (() => void) }
@@ -70,31 +70,91 @@ function ownRoot(root: HTMLElement, key: string): HTMLElement {
   return own;
 }
 
-/** One surface registered through the host's frontend API; what takes it off. */
-function register(ctx: SpindleFrontendContext, surface: ChatSurface): () => void {
+/**
+ * Every surface of RPE on one of the host's mounts, drawn through one decorator: the host keeps one decorator of an extension on a mount, and
+ * one registered on a mount it already has one on takes that one's place (`dom-decorator-service.ts` `registerDecorator`, by owner,
+ * generation and mount). Each surface draws into its own element in each root (`ownRoot`); one added is drawn in every root at the host's
+ * next pass, and one taken off is taken down in every root at once while the others stay.
+ */
+class OnMount {
+  private readonly members = new Map<string, DomDecoratorOptions>();
+  /** Each root the host gave: each surface drawn in it, by key, and what takes that drawing down. */
+  private readonly drawn = new Map<HTMLElement, Map<string, () => void>>();
+  private remove: (() => void) | null = null;
+
+  constructor(
+    private readonly ui: HostUi,
+    private readonly mount: string,
+  ) {}
+
+  /** Draws a surface on the mount; what takes it off. */
+  add(key: string, options: DomDecoratorOptions): () => void {
+    this.members.set(key, options);
+    this.register();
+    return () => this.take(key);
+  }
+
+  private take(key: string): void {
+    if (!this.members.delete(key)) return;
+    for (const drawn of this.drawn.values()) {
+      drawn.get(key)?.();
+      drawn.delete(key);
+    }
+    if (this.members.size > 0) return;
+    const remove = this.remove;
+    this.remove = null;
+    remove?.();
+  }
+
+  /** Registers the mount's one decorator, or, while it is registered, has the host draw every root again (with `update`) for the surfaces now held. */
+  private register(): void {
+    const priorities = [...this.members.values()].flatMap((options) => (options.priority === undefined ? [] : [options.priority]));
+    // Under `ctx.ui` and returning its remover: the host has no such member at the context's top level.
+    this.remove = this.ui.registerDomDecorator({
+      mount: this.mount,
+      ...(priorities.length > 0 ? { priority: Math.min(...priorities) } : {}),
+      render: (root, at) => {
+        this.draw(root, at);
+        return () => this.clear(root);
+      },
+      update: (root, at) => this.draw(root, at),
+    });
+  }
+
+  /** Draws each surface held in a root: one drawn there before is updated, one new to it drawn; one that fails is named and costs the others nothing. */
+  private draw(root: HTMLElement, at: DecoratorRenderContext): void {
+    let drawn = this.drawn.get(root);
+    if (drawn === undefined) this.drawn.set(root, (drawn = new Map()));
+    for (const [key, options] of this.members) {
+      const own = ownRoot(root, key);
+      try {
+        if (drawn.has(key)) options.update?.(own, at);
+        else {
+          const done = options.render?.(own, at);
+          drawn.set(key, () => {
+            if (typeof done === "function") done();
+            own.remove();
+          });
+        }
+      } catch (error) {
+        console.warn(`RPE could not draw "${key}" in the chat: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  }
+
+  /** Takes down every surface drawn in a root the host takes away. */
+  private clear(root: HTMLElement): void {
+    for (const takeDown of this.drawn.get(root)?.values() ?? []) takeDown();
+    this.drawn.delete(root);
+  }
+}
+
+/** One surface registered through the host's frontend API, a DOM decorator through its mount's one decorator (`mountOf`); what takes it off. */
+function register(ctx: SpindleFrontendContext, surface: ChatSurface, mountOf: (mount: string) => OnMount): () => void {
   const ui = ctx.ui as unknown as HostUi;
   switch (surface.placement) {
-    case "dom-decorator": {
-      const { key } = surface;
-      const { render, update } = surface.options;
-      // Under `ctx.ui` and returning its remover: the host has no such member at the context's top level.
-      return ui.registerDomDecorator({
-        ...surface.options,
-        ...(render === undefined
-          ? {}
-          : {
-              render: (root, at) => {
-                const own = ownRoot(root, key);
-                const drawn = render(own, at);
-                return () => {
-                  if (typeof drawn === "function") drawn();
-                  own.remove();
-                };
-              },
-            }),
-        ...(update === undefined ? {} : { update: (root, at) => update(ownRoot(root, key), at) }),
-      });
-    }
+    case "dom-decorator":
+      return mountOf(surface.options.mount).add(surface.key, surface.options);
     case "float-widget": {
       const handle = ui.createFloatWidget(surface.options);
       const drawn = surface.render(handle);
@@ -138,6 +198,12 @@ export type PanelsGrant = (listener: (granted: boolean) => void) => () => void;
  */
 export function keepSurfaces(ctx: SpindleFrontendContext, list: SurfaceList, panels?: PanelsGrant): () => void {
   const held = new Map<string, { placement: ChatSurface["placement"]; remove: () => void }>();
+  const mounts = new Map<string, OnMount>();
+  const mountOf = (mount: string): OnMount => {
+    let on = mounts.get(mount);
+    if (on === undefined) mounts.set(mount, (on = new OnMount(ctx.ui as unknown as HostUi, mount)));
+    return on;
+  };
   let panelsGranted = true;
   const sync = (): void => {
     const now = list.current();
@@ -150,7 +216,7 @@ export function keepSurfaces(ctx: SpindleFrontendContext, list: SurfaceList, pan
     for (const surface of now) {
       if (held.has(surface.key) || (!panelsGranted && needsPanels(surface.placement))) continue;
       try {
-        held.set(surface.key, { placement: surface.placement, remove: register(ctx, surface) });
+        held.set(surface.key, { placement: surface.placement, remove: register(ctx, surface, mountOf) });
       } catch (error) {
         console.warn(`RPE could not put "${surface.key}" in the chat: ${error instanceof Error ? error.message : String(error)}`);
       }
