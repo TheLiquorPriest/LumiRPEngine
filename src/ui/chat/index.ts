@@ -12,6 +12,7 @@ import type { ChatSurface, FrameEnv, SurfaceList } from "./surface";
 import { SURFACES } from "./surfaces/list";
 import { releaseReplies } from "./replies";
 import { releaseWindow } from "./window";
+import { releaseWaitWords } from "./wait-words";
 import { releaseWorking } from "./working";
 
 export type { ChatSurface, DecoratorContext, FloatHandle, FrameEnv, SurfaceDef, SurfaceList } from "./surface";
@@ -69,8 +70,8 @@ export function chatFrame(env: FrameEnv, surfaces = SURFACES): ChatFrame {
     stop() {
       for (const off of offs) off();
       watching?.();
-      listeners.clear();
       releasePlay(env);
+      releaseWaitWords(env);
       releaseWorking(env);
       releaseWindow(env);
       releaseReplies(env);

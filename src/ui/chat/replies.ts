@@ -19,6 +19,8 @@ export interface RepliesState {
   /** What was read, by message. */
   lines: ReadonlyMap<string, ReplyLine>;
   failed: string | null;
+  /** A read of lines is out now. */
+  reading: boolean;
 }
 
 export interface Replies extends Readable<RepliesState> {
@@ -38,7 +40,7 @@ export function repliesOf(env: FrameEnv): Replies | null {
   }
   if (held !== undefined && held.chat === chat) return held.replies;
   held?.replies.stop();
-  const state = createStore<RepliesState>({ lines: new Map(), failed: null });
+  const state = createStore<RepliesState>({ lines: new Map(), failed: null, reading: false });
   const ask = env.client.call;
   /** The rows mounted now, by message: how many (a message may be drawn twice while Lumiverse swaps its row). */
   const mounted = new Map<string, number>();
@@ -57,6 +59,7 @@ export function repliesOf(env: FrameEnv): Replies | null {
     wanted.clear();
     if (ids.length === 0) return;
     asking = new Set(ids);
+    if (!state.get().reading) state.update((now) => ({ ...now, reading: true }));
     const settled = (): void => {
       asking = null;
       for (const message of stale) if (mounted.has(message)) wanted.add(message);
@@ -68,12 +71,12 @@ export function repliesOf(env: FrameEnv): Replies | null {
         if (!alive) return;
         const lines = new Map(state.get().lines);
         for (const line of reply.replies) lines.set(line.message, line);
-        state.set({ lines, failed: null });
+        state.set({ lines, failed: null, reading: false });
         settled();
       },
       (error: unknown) => {
         if (!alive) return;
-        state.update((now) => ({ ...now, failed: errorWords(error) }));
+        state.update((now) => ({ ...now, failed: errorWords(error), reading: false }));
         settled();
       },
     );

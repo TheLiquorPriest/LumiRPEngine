@@ -1,22 +1,45 @@
 // The HUD over the chat (plan §14, PlanChatUI-2 items 1 and 4): today's pill in a float widget while the
 // open chat plays a world, sized by its content and placed where Lumiverse keeps it, and on a phone the
 // status line above the composer doing the pill's job (the pill hides where a status line is mounted).
-// Phone and desktop each save the pill's place under their own key, so crossing the phone's width makes
-// a new widget under the other layout's key (the surface's key says which).
+// While the chat's world cannot be drawn yet, both say why in its place (`../wait-words.ts`): RPE gets
+// the chat ready for its build, with how far it is, or works out its world and lines. Phone and desktop
+// each save the pill's place under their own key, so crossing the phone's width makes a new widget under
+// the other layout's key (the surface's key says which).
 
 import { render } from "preact";
+import { useEffect, useState } from "preact/hooks";
 import { AppContext } from "../../../frontend/app";
 import { Hud, type HudSize, StatusLine } from "../../../frontend/hud";
 import { hudCentreX, hudFloatRect, isMobile } from "../../../frontend/layout";
 import { chatPlay } from "../chat-play";
 import type { FloatHandle, FrameEnv, SurfaceDef } from "../surface";
+import { waitWords } from "../wait-words";
 
-/** Whether the pill shows: the chat plays a world, the state has its values, and a phone's status line does not already say them. */
+/** What the HUD's place says while the chat's world cannot be drawn yet, read again as it changes. */
+function useWaiting(env: FrameEnv): string | null {
+  const words = waitWords(env);
+  const [now, setNow] = useState(words.get());
+  useEffect(() => {
+    setNow(words.get());
+    return words.subscribe(setNow);
+  }, [words]);
+  return now;
+}
+
+function Pill(props: { env: FrameEnv; resize(size: HudSize): void }) {
+  return <Hud resize={props.resize} waiting={useWaiting(props.env)} />;
+}
+
+function Line(props: { env: FrameEnv }) {
+  return <StatusLine waiting={useWaiting(props.env)} />;
+}
+
+/** Whether the pill shows: the chat plays a world and the state has its values, or the HUD's place says why not yet; and a phone's status line does not already say it. */
 function pillShown(env: FrameEnv): boolean {
   const play = chatPlay(env);
   const view = play?.app.sync.get().view ?? null;
   const world = view !== null && view.status !== "not_world" && view.hud !== null;
-  return world && (!isMobile(env.host.viewport.get()) || (play?.statusLines.get() ?? 0) === 0);
+  return (world || waitWords(env).get() !== null) && (!isMobile(env.host.viewport.get()) || (play?.statusLines.get() ?? 0) === 0);
 }
 
 function drawPill(env: FrameEnv, handle: FloatHandle): () => void {
@@ -32,7 +55,8 @@ function drawPill(env: FrameEnv, handle: FloatHandle): () => void {
   render(
     <AppContext.Provider value={play.app}>
       <div class="lre" style={{ width: "max-content", height: "100%" }}>
-        <Hud
+        <Pill
+          env={env}
           resize={(next) => {
             if (next.width === size.width && next.height === size.height) return;
             size = next;
@@ -48,7 +72,7 @@ function drawPill(env: FrameEnv, handle: FloatHandle): () => void {
     handle.root,
   );
   const follow = (): void => handle.setVisible(pillShown(env));
-  const offs = [play.app.sync.subscribe(follow), play.statusLines.subscribe(follow), env.host.viewport.subscribe(follow)];
+  const offs = [play.app.sync.subscribe(follow), play.statusLines.subscribe(follow), env.host.viewport.subscribe(follow), waitWords(env).subscribe(follow)];
   follow();
   return () => {
     for (const off of offs) off();
@@ -78,7 +102,7 @@ export const surface: SurfaceDef = {
             render(
               <AppContext.Provider value={play.app}>
                 <div class="lre">
-                  <StatusLine />
+                  <Line env={env} />
                 </div>
               </AppContext.Provider>,
               root,

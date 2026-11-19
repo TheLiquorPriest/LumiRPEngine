@@ -35,7 +35,8 @@ import { bodyProblem, JOINED_STATUS, problemsOf, readQuery, RouteError, shape, s
 import { RefusedSignIns } from "./refusals";
 import { LUMIVERSE_SIGNIN_PATH } from "./signin-routes";
 import type { Workers } from "./workers/pool";
-import type { ChatNamedHook, ChatReadyHook } from "./hooks";
+import type { ChatNamedHook, ChatPreparingHook, ChatReadyHook } from "./hooks";
+import type { PreparingShown } from "../shared/preparing";
 
 /** The address a request came from, as the socket says it; words for where none can be read. */
 function addressOf(server: Server<LiveSocketData> | null, request: Request): string {
@@ -59,6 +60,8 @@ export interface ServerParts {
   chatNamed?: ChatNamedHook;
   /** Waits, for any route that names a chat in its path, while RPE prepares that chat after a start or an update; absent, nothing is waited for. */
   chatReady?: ChatReadyHook;
+  /** How far RPE is with preparing a chat: a page's read of a chat being prepared is answered at once with an id, each read of which says how far it is; absent, nothing is told. */
+  chatPreparing?: ChatPreparingHook;
 }
 
 export interface RunningServer {
@@ -263,8 +266,11 @@ interface Asked {
   json: () => Promise<unknown>;
   /** For a long route's call: takes its work in hand and answers at once with an id (TCP); null where it is answered directly (the command socket). */
   later: ((work: (signal: AbortSignal) => Promise<Response>) => Response) | null;
-  /** For a page's call over TCP: how long it may run before its work is taken in hand and answered with an id, and what takes it in hand; null where it is answered directly. */
-  late: { ms: number; start(work: Promise<Response>): Response } | null;
+  /**
+   * For a page's call over TCP: how long it may run before its work is taken in hand and answered with an id, whether the chat it names
+   * is being prepared now (then it is taken in hand at once), and what takes it in hand; null where it is answered directly.
+   */
+  late: { ms: number; preparing(): boolean; start(work: Promise<Response>): Response } | null;
   /** What is done before the route's handler is given the call: the chat it names waited for and taken on (`chatReady`, `chatNamed`). */
   before: () => Promise<void>;
 }
@@ -324,6 +330,7 @@ async function answerDeclared(route: DeclaredRoute<any, any, any, any, any, any>
   if (asked.late === null) return await run(asked.signal);
   // A page's request still running after `server.answerLateSeconds` is answered with an id and goes on: the relay's proxy would cut it at
   // 30 s, and the page ask again for what RPE is still working. Until then it ends with its request; after, it goes on whatever the page does.
+  // A read of a chat RPE is preparing is answered so at once, each read of its id saying how far the chat is, for the page to say.
   const work = new AbortController();
   let handed = false;
   const ended = (): void => {
@@ -332,7 +339,7 @@ async function answerDeclared(route: DeclaredRoute<any, any, any, any, any, any>
   asked.signal.addEventListener("abort", ended, { once: true });
   const running = run(work.signal);
   const waited = Promise.withResolvers<null>();
-  const timer = setTimeout(() => waited.resolve(null), asked.late.ms);
+  const timer = setTimeout(() => waited.resolve(null), asked.late.preparing() ? 0 : asked.late.ms);
   try {
     const first = await Promise.race([running, waited.promise]);
     if (first !== null) return first;
@@ -440,8 +447,15 @@ export function startServer(parts: ServerParts): RunningServer {
         return response === undefined ? undefined : withCors(response, origin);
       }
       if (rest !== null && rest.decoded === null) return withCors(refusal(path, 400, `The path ${path} has a part that is not well encoded.`), origin);
-      const later = on === "tcp" ? (work: (signal: AbortSignal) => Promise<Response>): Response => parts.answers.start(work(new AbortController().signal).catch((error: unknown) => failure(error, path, at, placed.area))) : null;
-      const late = on === "tcp" && route.access === "page" ? { ms: config.server.answerLateSeconds * 1000, start: (work: Promise<Response>): Response => parts.answers.start(work.catch((error: unknown) => failure(error, path, at, placed.area))) } : null;
+      // How far the chat the route names is from ready, while RPE prepares it: told with each read of a waiting answer's id.
+      const chat = typeof params.chat === "string" ? params.chat : null;
+      const waiting = chat === null || parts.chatPreparing === undefined ? null : (): PreparingShown | null => {
+        const now = parts.chatPreparing?.(user, chat) ?? null;
+        return now === null ? null : { chat, ...now };
+      };
+      const start = (work: Promise<Response>): Response => parts.answers.start(work.catch((error: unknown) => failure(error, path, at, placed.area)), waiting);
+      const later = on === "tcp" ? (work: (signal: AbortSignal) => Promise<Response>): Response => start(work(new AbortController().signal)) : null;
+      const late = on === "tcp" && route.access === "page" ? { ms: config.server.answerLateSeconds * 1000, preparing: () => (waiting?.() ?? null) !== null, start } : null;
       const asked: Asked = { path, params: rest === null ? params : { ...params, "*": rest.decoded ?? "" }, search: url.searchParams, user, auth: call, bytes, signal: request.signal, json: json(true), later, late, before };
       return withCors(await answerDeclared(route, asked, cursorKey), origin);
     } catch (error) {

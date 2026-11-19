@@ -55,6 +55,7 @@ function heldClient(): RpeClient & { asked: Asked[]; listener(): LiveListener; c
   return {
     state: createStore<ClientState>({ phase: "relay", why: "the test" }),
     missing: createStore<readonly MissingPermissionShown[] | null>(null),
+    preparing: createStore(new Map()),
     call(key, params, options) {
       // The jobs the Live page reads beside the turns are none here: answered at once, so the calls the test counts are the chat's.
       if (key === "GET /api/v1/jobs") return Promise.resolve({ items: [], next: null } as never);

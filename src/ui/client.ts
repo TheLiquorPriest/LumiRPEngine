@@ -11,6 +11,7 @@
 import { createStore, type Readable } from "./store";
 import { ANSWER_STATUS, ANSWERS_PATH, type ApiRoutes, JOINED_STATUS, type JoinedAnswer, type LiveEvent, type MissingPermissionShown } from "../shared/api";
 import { isRecord } from "../shared/json";
+import { type PreparingShown, preparingOf } from "../shared/preparing";
 import { type Credential, directRoad, type LiveUpdate, probeDirect, type RelayChannel, relayRoad, type Road, type RoadAnswer, type RoadDeps, SESSION_PATH, type StartFacts, type Timers } from "./roads";
 import { createUiSettings, type UiSettings } from "./ui-settings";
 import { errorWords } from "./words";
@@ -105,6 +106,8 @@ export interface RpeClient {
    * updates were lost on the way. What a page shows of RPE outside a chat's events is read again then.
    */
   onReset(listener: () => void): () => void;
+  /** The chats RPE is getting ready for its build, by chat, as the page's waiting reads of them were last told; a chat leaves once a read of it is told so no more. */
+  readonly preparing: Readable<ReadonlyMap<string, PreparingShown>>;
   /** Finds a road now, unless one is found or being found: a shell does at its start, so the page says where it stands before any page asks. */
   connect(): void;
   /** Finds a road again: after a failure, or once the web UI's token is given. */
@@ -186,12 +189,19 @@ function readAnswer(answer: RoadAnswer): unknown {
   }
 }
 
-/** The id of the answer RPE says it will give, for a route that took the request in hand and answered at once (status 202, a body of the one key `answer`); null for any other answer. */
-function answerIdOf(answer: RoadAnswer): string | null {
+/**
+ * The answer RPE says it will give, for a route that took the request in hand and answered at once (status 202, a body of the key
+ * `answer`, and `preparing` beside it while the chat the request names is being made ready): its id and how far that is; null for any
+ * other answer.
+ */
+function waitOf(answer: RoadAnswer): { id: string; preparing: PreparingShown | null } | null {
   if (answer.status !== ANSWER_STATUS) return null;
   try {
     const body: unknown = JSON.parse(answer.text);
-    return isRecord(body) && typeof body.answer === "string" && Object.keys(body).length === 1 ? body.answer : null;
+    if (!isRecord(body) || typeof body.answer !== "string") return null;
+    const preparing = preparingOf(body.preparing);
+    const told = body.preparing === undefined ? 1 : 2;
+    return Object.keys(body).length === told && (told === 1 || preparing !== null) ? { id: body.answer, preparing } : null;
   } catch {
     return null;
   }
@@ -231,6 +241,17 @@ export function createClient(connector: Connector): RpeClient {
   const resets = new Set<() => void>();
   /** The GETs out now, by path: a page that asks the same while one is out shares its answer, one piece of RPE's work. */
   const out = new Map<string, Promise<RoadAnswer>>();
+  /** The chats RPE is getting ready for its build, as the waiting answers of the page's reads say. */
+  const preparing = createStore<ReadonlyMap<string, PreparingShown>>(new Map());
+  /** Takes what a waiting answer said of `chat`: how far it is from ready, or (null) that it is ready. */
+  const told = (chat: string, now: PreparingShown | null): void => {
+    const held = preparing.get();
+    if (now === null ? !held.has(chat) : JSON.stringify(held.get(chat)) === JSON.stringify(now)) return;
+    const next = new Map(held);
+    if (now === null) next.delete(chat);
+    else next.set(chat, now);
+    preparing.set(next);
+  };
   /** The next try of a connect that failed, and how many failed in a row: the wait doubles from `reconnectMs` up to `reconnectMaxMs`. */
   let again: unknown = null;
   let failures = 0;
@@ -318,18 +339,28 @@ export function createClient(connector: Connector): RpeClient {
     }, wait);
   }
 
-  /** One call's answer as RPE gives it at last: a long route's id asked after until its answer is ready. */
+  /**
+   * One call's answer as RPE gives it at last: a long route's id asked after until its answer is ready. While the chat the call names is
+   * being made ready, each waiting answer says how far it is (`preparing`), until one no longer does or the answer comes.
+   */
   async function answered(method: string, path: string, body: string | undefined): Promise<RoadAnswer> {
     let answer = await exchange(method, path, body);
-    // A route that may outlast the relay's 30 s answers at once with the id of its answer, which is asked for until it is ready.
-    for (let id = answerIdOf(answer); id !== null; id = answerIdOf(answer)) {
-      const { promise, resolve } = Promise.withResolvers<void>();
-      connector.timers.setTimeout(resolve, connector.settings.values.get().jobPollMs);
-      await promise;
-      if (closed) throw new RpeError(0, "The page closed.");
-      answer = await exchange("GET", pathOf(`${ANSWERS_PATH}/:id`, { id }), undefined);
+    let chat: string | null = null;
+    try {
+      // A route that may outlast the relay's 30 s answers at once with the id of its answer, which is asked for until it is ready.
+      for (let wait = waitOf(answer); wait !== null; wait = waitOf(answer)) {
+        if (wait.preparing !== null) told((chat = wait.preparing.chat), wait.preparing);
+        else if (chat !== null) told(chat, null);
+        const { promise, resolve } = Promise.withResolvers<void>();
+        connector.timers.setTimeout(resolve, connector.settings.values.get().jobPollMs);
+        await promise;
+        if (closed) throw new RpeError(0, "The page closed.");
+        answer = await exchange("GET", pathOf(`${ANSWERS_PATH}/:id`, { id: wait.id }), undefined);
+      }
+      return answer;
+    } finally {
+      if (chat !== null) told(chat, null);
     }
-    return answer;
   }
 
   function drop(): void {
@@ -374,6 +405,7 @@ export function createClient(connector: Connector): RpeClient {
   const client: RpeClient = {
     state,
     missing: connector.missing,
+    preparing,
     async call(key, params, options = {}) {
       const space = key.indexOf(" ");
       const method = key.slice(0, space);

@@ -3572,14 +3572,14 @@ One press switches one of his attached files on (R-81): GUIDANCE.md as AGENTS.md
 
 ### `GET /api/v1/answers/:id`
 
-The answer of a request to a long route, by the id it was answered with: the same 202 and id while its work runs, then the route's own answer, once.
+The answer of a request to a long route, by the id it was answered with: the same 202 and id while its work runs, with how far the chat it waits for is from ready while RPE makes it ready for its build, then the route's own answer, once.
 
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | `id` |
-| Answers | 202 with `{ answer: <id> }` while the work runs; then the route's own status and body, once; 404 for an id RPE does not hold |
+| Answers | 202 with `{ answer: <id> }` while the work runs, and `preparing: { chat, ahead, done, of }` beside it while the chat is made ready; then the route's own status and body, once; 404 for an id RPE does not hold |
 
 ### `GET /api/v1/backups`
 

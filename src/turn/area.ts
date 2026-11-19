@@ -123,6 +123,8 @@ export function turnArea(takes: TurnTakes): TurnArea {
       chatReady: async (user, chat) => {
         await preparer?.ready(user, chat);
       },
+      // How far it is, which a page whose read waits is told.
+      chatPreparing: (user, chat) => preparer?.preparing(user, chat) ?? null,
       door: {
         turns: { play: (turn, out, signal) => made().lane.play(turn, out, signal) },
         changes: { changed: (change) => made().lane.changed(change), reopened: () => made().lane.reopened() },

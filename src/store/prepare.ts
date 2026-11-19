@@ -7,6 +7,7 @@
 // (`inStretches`).
 
 import type { JsonValue } from "../shared/json";
+import type { ChatPreparing } from "../shared/preparing";
 import type { Store } from "./store";
 
 /** How long a reading over many turns works before it lets the thread go (`inStretches`). */
@@ -60,6 +61,8 @@ export class Preparer {
   private readonly waiting = new Map<string, PromiseWithResolvers<void>>();
   private stopped = false;
   private running: Promise<void> | null = null;
+  /** How far the chat made ready now (`current`) is. */
+  private progress: { done: number; of: number | null } = { done: 0, of: null };
 
   constructor(private readonly deps: PreparerDeps) {}
 
@@ -84,6 +87,14 @@ export class Preparer {
       this.waiting.set(chat, waits);
     }
     await waits.promise;
+  }
+
+  /** How far the pass is with `chat`, from what it keeps as it goes: null where it does not hold it (ready already, or never wanting). */
+  preparing(user: string, chat: string): ChatPreparing | null {
+    if (user !== this.user) return null;
+    if (this.current === chat) return { ahead: 0, ...this.progress };
+    const at = this.queue.indexOf(chat);
+    return at < 0 ? null : { ahead: at + (this.current === null ? 0 : 1), done: 0, of: null };
   }
 
   /** Ends the pass after the stretch that runs; every read that waits goes on. */
@@ -119,6 +130,7 @@ export class Preparer {
     let longest = 0;
     let after: string | null = null;
     let left = Number.POSITIVE_INFINITY;
+    this.progress = { done: 0, of: null };
     while (!this.stopped) {
       const at = performance.now();
       const step = s.prepareNext(chat, after, STRETCH_MS);
@@ -129,6 +141,8 @@ export class Preparer {
       stretches++;
       changes += step.changes;
       if (step.left < left) await this.deps.write(() => s.storeHeld(), "snapshots of a chat made ready for this build");
+      const of = this.progress.of ?? step.wanted;
+      this.progress = { done: Math.max(0, of - step.left), of };
       if (step.left === 0) break;
       after = step.at;
       left = step.left;

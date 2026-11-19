@@ -1,13 +1,15 @@
 // Long requests on the relay (plan §4.3, R-4): a page reaches RPE through Lumiverse's relay, whose proxy gives up after 30
 // seconds, so a route that may take longer says so (`long`), and the server answers a page's call to it at once, status 202,
-// with `{ answer: <id> }` and nothing else; any other page's call still running after `server.answerLateSeconds` is answered the
-// same way then (`server.ts`), so a page never asks again for what RPE is still working. The work goes on; its answer, the route's
-// own status and body, is kept here and read from one route, `GET /api/v1/answers/:id`: while the work runs it answers the same 202
-// and id, once it is done it gives the answer once, and an id it does not hold (never given, read already, or dropped) is 404. An
-// answer never read is dropped `server.answerKeepSeconds` after it was ready. Work that answers at once by naming its own run or job
-// (Settle now, bootstrap) goes on doing so; this is for the rest.
+// with `{ answer: <id> }`; any other page's call still running after `server.answerLateSeconds` is answered the same way then,
+// and a page's read of a chat RPE is making ready for its build at once (`server.ts`), so a page never asks again for what RPE is
+// still working. The work goes on; its answer, the route's own status and body, is kept here and read from one route,
+// `GET /api/v1/answers/:id`: while the work runs it answers the same 202 and id, once it is done it gives the answer once, and an id
+// it does not hold (never given, read already, or dropped) is 404. While the chat a read waits for is being made ready, each 202
+// says how far that is (`preparing`, `src/shared/preparing.ts`). An answer never read is dropped `server.answerKeepSeconds` after it
+// was ready. Work that answers at once by naming its own run or job (Settle now, bootstrap) goes on doing so; this is for the rest.
 
 import { randomBytes } from "node:crypto";
+import type { PreparingShown } from "../shared/preparing";
 import { rawRoute } from "./routes";
 
 /** The status a long route's call is answered with at once, and its answers route while the work runs. */
@@ -23,14 +25,17 @@ interface Ready {
   drop: Timer;
 }
 
-/** What the answer route and a long call answer while the work runs: the id alone. */
-function pending(id: string): Response {
-  return Response.json({ answer: id }, { status: ANSWER_STATUS, headers: { "cache-control": "no-store" } });
+/** What the answer route and a long call answer while the work runs: the id, and how far the chat it waits for is from ready while it is made ready. */
+function pending(id: string, preparing: PreparingShown | null): Response {
+  return Response.json(preparing === null ? { answer: id } : { answer: id, preparing }, { status: ANSWER_STATUS, headers: { "cache-control": "no-store" } });
 }
+
+/** How far the chat a request waits for is from ready, asked each time its answer is read while its work runs; null once it is ready, or for a request of no chat. */
+type Waiting = () => PreparingShown | null;
 
 /** The answers of long requests, kept for reading by id. */
 export class Answers {
-  readonly #running = new Set<string>();
+  readonly #running = new Map<string, Waiting | null>();
   readonly #ready = new Map<string, Ready>();
 
   constructor(
@@ -44,9 +49,9 @@ export class Answers {
   }
 
   /** Takes `work` in hand and answers at once with its id; its response is kept for reading once it is done. */
-  start(work: Promise<Response>): Response {
+  start(work: Promise<Response>, waiting: Waiting | null = null): Response {
     const id = randomBytes(16).toString("hex");
-    this.#running.add(id);
+    this.#running.set(id, waiting);
     void work.then(async (response) => {
       const body = await response.arrayBuffer();
       if (!this.#running.delete(id)) return;
@@ -54,12 +59,12 @@ export class Answers {
       drop.unref();
       this.#ready.set(id, { status: response.status, headers: new Headers(response.headers), body, drop });
     });
-    return pending(id);
+    return pending(id, waiting?.() ?? null);
   }
 
-  /** The answer of `id`: 202 while its work runs, its own response once (then forgotten), null for an id not held. */
+  /** The answer of `id`: 202 while its work runs (with how far its chat is from ready, while it is made ready), its own response once (then forgotten), null for an id not held. */
   read(id: string): Response | null {
-    if (this.#running.has(id)) return pending(id);
+    if (this.#running.has(id)) return pending(id, this.#running.get(id)?.() ?? null);
     const ready = this.#ready.get(id);
     if (ready === undefined) return null;
     this.#ready.delete(id);
@@ -82,8 +87,8 @@ export function answersRoute(answers: Answers) {
     path: `${ANSWERS_PATH}/:id`,
     access: "page",
     group: "service",
-    does: "The answer of a request to a long route, by the id it was answered with: the same 202 and id while its work runs, then the route's own answer, once.",
-    answers: "202 with `{ answer: <id> }` while the work runs; then the route's own status and body, once; 404 for an id RPE does not hold",
+    does: "The answer of a request to a long route, by the id it was answered with: the same 202 and id while its work runs, with how far the chat it waits for is from ready while RPE makes it ready for its build, then the route's own answer, once.",
+    answers: "202 with `{ answer: <id> }` while the work runs, and `preparing: { chat, ahead, done, of }` beside it while the chat is made ready; then the route's own status and body, once; 404 for an id RPE does not hold",
     raw: (_request, { params }) => answers.read(params.id) ?? Response.json({ error: "RPE holds no answer by that id: it was read already, was dropped once its time to be read had passed, or was never given." }, { status: 404 }),
   });
 }

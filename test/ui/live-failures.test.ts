@@ -17,6 +17,7 @@ function quietClient(): RpeClient & { listeners: Map<string, LiveListener> } {
   return {
     state: createStore<ClientState>({ phase: "relay", why: "the test" }),
     missing: createStore<readonly MissingPermissionShown[] | null>(null),
+    preparing: createStore(new Map()),
     call: () => new Promise<never>(() => undefined),
     follow(chat, listener) {
       listeners.set(chat, listener);

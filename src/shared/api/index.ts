@@ -7166,10 +7166,10 @@ export interface CommandRoutes {
 
 /** Every route in the form that answers in its own way (a stream, a socket, a file), and what it answers. */
 export interface RawRoutes {
-  /** The answer of a request to a long route, by the id it was answered with: the same 202 and id while its work runs, then the route's own answer, once. */
+  /** The answer of a request to a long route, by the id it was answered with: the same 202 and id while its work runs, with how far the chat it waits for is from ready while RPE makes it ready for its build, then the route's own answer, once. */
   "GET /api/v1/answers/:id": {
     params: { id: string };
-    answers: "202 with `{ answer: <id> }` while the work runs; then the route's own status and body, once; 404 for an id RPE does not hold";
+    answers: "202 with `{ answer: <id> }` while the work runs, and `preparing: { chat, ahead, done, of }` beside it while the chat is made ready; then the route's own status and body, once; 404 for an id RPE does not hold";
     joined: false;
   };
   /** The extension asks whether the registration it holds is the one this RPE made. */

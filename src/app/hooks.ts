@@ -6,6 +6,7 @@
 // from the app when it is asked.
 
 import type { AgentRef, HostTool, RunScope, UserSessionScope } from "rp-harness/contract";
+import type { ChatPreparing } from "../shared/preparing";
 import type { Setting } from "./setting-list";
 import type { NamedNow } from "./switches";
 
@@ -32,6 +33,9 @@ export type ChatNamedHook = (user: string, chat: string) => Promise<void>;
 /** Waits, before any route that names a chat in its path answers, until that chat is ready to be read: while RPE makes a chat's states ready for the build that runs (`src/store/prepare.ts`), a read of it waits, and it is taken next. */
 export type ChatReadyHook = (user: string, chat: string) => Promise<void>;
 
+/** How far RPE is with making a chat's states ready for the build that runs (`src/store/prepare.ts`): null where it is not making it ready. Costs nothing: the server asks it of every page's read of a chat. */
+export type ChatPreparingHook = (user: string, chat: string) => ChatPreparing | null;
+
 /** What one area adds to the hooks of the others. */
 export interface Fills {
   /** A view given to an agent by name, which the turn lane's `views` hook asks of every area in turn. */
@@ -44,6 +48,8 @@ export interface Fills {
   readonly chatNamed?: ChatNamedHook;
   /** Waits until a chat a route names is ready to be read, which the server asks before every such route answers. One area fills it. */
   readonly chatReady?: ChatReadyHook;
+  /** How far a chat a route names is from ready, which the server tells a page whose read of it waits. The area that fills `chatReady` fills it. */
+  readonly chatPreparing?: ChatPreparingHook;
   /** The door's lanes this area fills. */
   readonly door?: DoorFills;
 }
@@ -60,6 +66,8 @@ export interface Hooks {
   readonly chatNamed?: ChatNamedHook;
   /** The one area's wait for a chat a route names to be ready; absent where no area fills it, and nothing waits. */
   readonly chatReady?: ChatReadyHook;
+  /** The same area's word of how far a chat is from ready; absent where no area fills it. */
+  readonly chatPreparing?: ChatPreparingHook;
   /** The door's lanes, each as the one area that fills it gave it; a lane no area fills is absent. */
   readonly door: Readonly<DoorFills>;
 }
@@ -80,6 +88,7 @@ export function gatherHooks(areas: readonly Giving[]): Hooks {
   const filledBy = new Map<string, string>();
   let chatNamed: { by: string; hook: ChatNamedHook } | null = null;
   let chatReady: { by: string; hook: ChatReadyHook } | null = null;
+  let chatPreparing: { by: string; hook: ChatPreparingHook } | null = null;
   for (const area of areas) {
     if (area.fills?.views !== undefined) views.push(area.fills.views);
     if (area.fills?.jobTools !== undefined) tools.push(area.fills.jobTools);
@@ -91,6 +100,10 @@ export function gatherHooks(areas: readonly Giving[]): Hooks {
     if (area.fills?.chatReady !== undefined) {
       if (chatReady !== null) throw new Error(`Whether a chat a route names is ready is waited for by two areas, ${chatReady.by} and ${area.name}: one area waits for it.`);
       chatReady = { by: area.name, hook: area.fills.chatReady };
+    }
+    if (area.fills?.chatPreparing !== undefined) {
+      if (chatPreparing !== null) throw new Error(`How far a chat is from ready is told by two areas, ${chatPreparing.by} and ${area.name}: one area tells it.`);
+      chatPreparing = { by: area.name, hook: area.fills.chatPreparing };
     }
     for (const [lane, fill] of Object.entries(area.fills?.door ?? {})) {
       if (fill === undefined) continue;
@@ -118,6 +131,7 @@ export function gatherHooks(areas: readonly Giving[]): Hooks {
     },
     ...(chatNamed === null ? {} : { chatNamed: chatNamed.hook }),
     ...(chatReady === null ? {} : { chatReady: chatReady.hook }),
+    ...(chatPreparing === null ? {} : { chatPreparing: chatPreparing.hook }),
     door: door as DoorFills,
   };
 }

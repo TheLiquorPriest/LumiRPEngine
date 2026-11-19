@@ -38,7 +38,9 @@ export interface HudSize {
   height: number;
 }
 
-export function Hud(props: { resize(size: HudSize): void }) {
+/** The HUD pill; `waiting` is what it says while the chat's world cannot be drawn yet (RPE gets it ready, or works it out), in place of its values or beside them. */
+export function Hud(props: { resize(size: HudSize): void; waiting?: string | null }) {
+  const waiting = props.waiting ?? null;
   const app = useApp();
   const view = useView();
   const viewport = useSelect(app.host.viewport, (vp) => vp);
@@ -64,7 +66,7 @@ export function Hud(props: { resize(size: HudSize): void }) {
     const observer = new ResizeObserver(measure);
     observer.observe(target);
     return () => observer.disconnect();
-  }, [open, mode, viewport.width, viewport.height, hud, activity?.state, activity?.label, view?.staged?.label, view?.notCarried?.length]);
+  }, [open, mode, viewport.width, viewport.height, hud, activity?.state, activity?.label, view?.staged?.label, view?.notCarried?.length, waiting]);
 
   // Closing the details hands focus back to the pill instead of dropping it on the page. When they
   // closed for Map or Actions, that opens now, from the pill, so closing it returns focus there.
@@ -77,6 +79,13 @@ export function Hud(props: { resize(size: HudSize): void }) {
     next?.();
   }, [open]);
 
+  if (waiting !== null && (!view || !hud))
+    return (
+      <div ref={pill} class="lre-hud" data-lre-hud={mode} role="status" aria-live="polite">
+        <span class="lre-chat-pulse" aria-hidden="true" />
+        <span>{waiting}</span>
+      </div>
+    );
   if (!view || !hud || view.status === "not_world") return null;
   if (open)
     return (
@@ -142,7 +151,15 @@ export function Hud(props: { resize(size: HudSize): void }) {
           <Icon name="chevron-down" size={16} />
         </button>
       )}
-      {activity ? <ActivityLine compact={mode !== "full"} /> : view.status === "in_flight" ? <span class="lre-chat-pulse" role="img" aria-label="A turn is in progress" title="A turn is in progress" /> : null}
+      {waiting !== null ? (
+        <span role="status" aria-live="polite">
+          {waiting}
+        </span>
+      ) : activity ? (
+        <ActivityLine compact={mode !== "full"} />
+      ) : view.status === "in_flight" ? (
+        <span class="lre-chat-pulse" role="img" aria-label="A turn is in progress" title="A turn is in progress" />
+      ) : null}
       {view.status === "paused" ? <Badge tone="warn">Paused</Badge> : null}
       <NotCarriedPresses view={view} />
       <WaitingPress view={view} />
@@ -320,12 +337,20 @@ export function WorldSheet(props: { desk: boolean; onClose(): void; onHeight(hei
  * working or paused, and Act for the action sheet. Tapping the line opens the World sheet. It shows
  * in world chats on mobile only; on wider screens the floating pill does this job.
  */
-export function StatusLine() {
+export function StatusLine(props: { waiting?: string | null }) {
+  const waiting = props.waiting ?? null;
   const app = useApp();
   const view = useView();
   const mobile = useSelect(app.host.viewport, (vp) => isMobile(vp));
   const hud = view?.hud ?? null;
   const activity = useSelect(app.sync, (state) => state.activity);
+  if (mobile && waiting !== null && (!view || !hud))
+    return (
+      <div class="lre-chat-status" data-lre-status role="status" aria-live="polite">
+        <span class="lre-chat-pulse" aria-hidden="true" />
+        <span class="lre-chat-status-text">{waiting}</span>
+      </div>
+    );
   if (!mobile || !view || !hud || view.status === "not_world") return null;
   const cash = cashText(hud.cash);
   const said = [clockText(hud), hud.clock.paused ? "clock paused" : null, hud.place?.name ?? null, cash, view.status === "paused" ? "paused" : view.status === "in_flight" ? "a turn is in progress" : null].filter((part) => part !== null);
@@ -352,7 +377,7 @@ export function StatusLine() {
             </>
           ) : null}
         </span>
-        {activity?.state === "running" ? <ActivityLine /> : view.status === "in_flight" ? <span class="lre-chat-pulse" role="img" aria-label="A turn is in progress" title="A turn is in progress" /> : null}
+        {waiting !== null ? <span class="lre-chat-status-text">{waiting}</span> : activity?.state === "running" ? <ActivityLine /> : view.status === "in_flight" ? <span class="lre-chat-pulse" role="img" aria-label="A turn is in progress" title="A turn is in progress" /> : null}
         {view.status === "paused" ? <Badge tone="warn">Paused</Badge> : null}
       </button>
       {activity?.state === "failed" ? <ActivityLine compact /> : null}
