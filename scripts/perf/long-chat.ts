@@ -166,9 +166,9 @@ const GRIDS = 19;
  * like its shop, each with its owner, premises (and rooms), operating account, its owner's account, lease and owner's draw, two
  * vehicles, every fifth a loan, the first fifteen a property; the player character holding the first `HOLDERS` (60%) and through them
  * the rest (51% each), keeping six things in each one's first vehicle; the first `GRIDS` premises with a grid like the marina's; then
- * people like its townsfolk to `people` characters, each with a home, an account, a bill, a job at one of the businesses and every
- * third a household; everyone carrying five things and a wallet; the first ten owners a brokerage holding, the rest of the owners a
- * property let out; its tracks copied to `tracks`; lore to about `bytes` of JSON.
+ * people like its townsfolk to `people` characters, each with a home, an account, a bill, a job at one of the businesses, every third
+ * a household and every fourth its townsfolk's routines; everyone carrying five things and a wallet; the first ten owners a brokerage
+ * holding, the rest of the owners a property let out; its tracks copied to `tracks`; lore to about `bytes` of JSON.
  */
 function heavyWorld(bytes: number, o: { people: number; businesses: number; rooms: number; tracks: number }): WorldDoc {
   const doc = STARTER_WORLDS.modern_slice_of_life?.(WORLD_ID, "Long harbour");
@@ -256,6 +256,15 @@ function heavyWorld(bytes: number, o: { people: number; businesses: number; room
     if (work !== undefined) put("job_danny_mechanic", `job_${id}`, null, { worker: id, employer: work.id, workplace: work.place });
     carried(id, tag);
     place("harbor_street_114", home, `${madeWord(1000 + p, 2)}'s flat`, "port_alder");
+    // Every fourth keeps the routines of the townsfolk they were copied from, at their own work and home.
+    if (p % 4 === 0) {
+      const template = TOWNSFOLK[p % TOWNSFOLK.length] ?? "danny_okafor";
+      const at = new Map([["alder_automotive", work?.place ?? "alder_automotive"], ["harbor_street_114", home]]);
+      for (const s of Object.values(base.schedules).filter((x) => x.owner === template)) {
+        const sid = `${id}${s.id.slice(template.length)}`;
+        doc.schedules[sid] = { ...structuredClone(s), id: sid, owner: id, slots: s.slots.map((slot) => ({ ...slot, value: typeof slot.value === "string" ? (at.get(slot.value) ?? slot.value) : slot.value })) };
+      }
+    }
   }
   const tracks = Object.values(base.tracks);
   for (let t = 0; Object.keys(doc.tracks).length < o.tracks && tracks.length > 0; t++) {
