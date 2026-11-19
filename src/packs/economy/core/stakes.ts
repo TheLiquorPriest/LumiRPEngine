@@ -41,6 +41,19 @@ const BUSINESS_FIELDS: Record<string, FieldDef> = {
 /** The companies and trusts being valued right now: one that (through others) holds itself is worth nothing more the second time round. */
 const valuing = new Set<EntityId>();
 
+/**
+ * The valuations under way, innermost last: each with the companies and trusts its working out has asked the worth of so far (`reach`,
+ * its own among them), and whether it met one being valued around it (`tainted`), whose worth it then took as nothing because of where it
+ * was asked, not of what it is.
+ */
+const working: { org: EntityId; reach: Set<EntityId>; tainted: boolean }[] = [];
+
+/** A valuation worked out in the read pass, with every company and trust its working out asked the worth of. */
+interface Valued {
+  valuation: Valuation;
+  reach: ReadonlySet<EntityId>;
+}
+
 /** Every business (a party of kind business), by id. Kept for the read pass: every party's worth walks them. */
 export function businessIds(api: FinanceApi, ctx: ReadContext): EntityId[] {
   return passMemo([ctx.state, ctx.state.entities, ctx.world, api], "economy.businesses", () =>
@@ -103,24 +116,52 @@ export function valuationOf(api: FinanceApi, ctx: ReadContext, org: EntityId): V
  * A company's valuation by its books: its set value, else its book value (its net worth, which
  * counts what its customers owe it and what it owes) and its last year's operating profit times its
  * multiple; a trust's, its net worth. Never below nothing (`floored` where its books come to less).
- * A listed company's price follows it.
+ * A listed company's price follows it. Inside a read pass each is worked out once and kept: every
+ * party's worth asks the worth of each company it holds a share of, and each company's the worth of
+ * those it holds, so without it a long chat's organisations were valued again for every page that
+ * named them. One is kept only where its working out met no company being valued around it (whose
+ * worth it would have taken as nothing because of where it was asked), and is used again only while
+ * none of the companies it asked about is being valued: then working it out again would ask the
+ * same and come to the same.
  */
 export function bookValuationOf(api: FinanceApi, ctx: ReadContext, org: EntityId): Valuation {
   const f = own(ctx.state.entities, org)?.fields ?? {};
   const trust = api.partyKind(ctx, org) === "trust";
   const multiple = trust ? 0 : Math.max(0, numOf(f.valuation_multiple, VALUATION_MULTIPLE));
   if (!trust && typeof f.value === "number" && Number.isFinite(f.value)) return { value: Math.max(0, Math.round(f.value)), set: true, book: 0, profit: 0, multiple };
-  if (valuing.has(org)) return { value: 0, set: false, book: 0, profit: 0, multiple, ...(trust ? { trust: true as const } : {}) };
+  const around = working.at(-1);
+  around?.reach.add(org);
+  if (valuing.has(org)) {
+    // Every valuation under way inside the one of `org` took this as nothing because of where it was asked.
+    for (let i = working.findIndex((w) => w.org === org) + 1; i < working.length; i++) (working[i] as (typeof working)[number]).tainted = true;
+    return { value: 0, set: false, book: 0, profit: 0, multiple, ...(trust ? { trust: true as const } : {}) };
+  }
+  const kept = passMemo([ctx.state, ctx.world, api], "economy.valuations", () => new Map<EntityId, Valued>());
+  const hit = kept.get(org);
+  if (hit !== undefined && ![...hit.reach].some((id) => valuing.has(id))) {
+    if (around) for (const id of hit.reach) around.reach.add(id);
+    return hit.valuation;
+  }
+  const frame = { org, reach: new Set<EntityId>([org]), tainted: false };
+  working.push(frame);
   valuing.add(org);
   try {
-    const book = Math.round(api.netWorth(ctx, org));
-    if (trust) return { value: Math.max(0, book), set: false, book, profit: 0, multiple, trust: true, ...(book < 0 ? { floored: true as const } : {}) };
-    const books = optionalQuery(ctx, "economy.business_books") ? businessBooks(api, ctx, org, ctx.state.clock - YEAR_MINUTES, ctx.state.clock) : null;
-    const profit = Math.max(0, books?.operating ?? 0);
-    const worked = Math.round(book + profit * multiple);
-    return { value: Math.max(0, worked), set: false, book, profit, multiple, ...(worked < 0 ? { floored: true as const } : {}) };
+    const valuation = ((): Valuation => {
+      const book = Math.round(api.netWorth(ctx, org));
+      if (trust) return { value: Math.max(0, book), set: false, book, profit: 0, multiple, trust: true, ...(book < 0 ? { floored: true as const } : {}) };
+      const books = optionalQuery(ctx, "economy.business_books") ? businessBooks(api, ctx, org, ctx.state.clock - YEAR_MINUTES, ctx.state.clock) : null;
+      const profit = Math.max(0, books?.operating ?? 0);
+      const worked = Math.round(book + profit * multiple);
+      return { value: Math.max(0, worked), set: false, book, profit, multiple, ...(worked < 0 ? { floored: true as const } : {}) };
+    })();
+    if (!frame.tainted) kept.set(org, { valuation, reach: frame.reach });
+    return valuation;
   } finally {
     valuing.delete(org);
+    working.pop();
+    if (around) {
+      for (const id of frame.reach) around.reach.add(id);
+    }
   }
 }
 

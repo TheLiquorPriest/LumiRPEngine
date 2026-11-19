@@ -20,6 +20,7 @@ import { isGone, kindIs, placeOfEntity, placeWithin } from "./scope";
 import { isMemberOf } from "./selector";
 import type { WorldState } from "./state";
 import { holdersOf, possessorOf, sizeOf, whoseOf, type ThingContext } from "./things";
+import { passMemo } from "./read-pass";
 
 export interface UseGrant {
   who: EntityId;
@@ -97,10 +98,34 @@ export function atHome(ctx: ThingContext, at: PlaceId | null, home: unknown): bo
   return typeof home === "string" && at !== null && own(ctx.world.places, home) !== undefined && placeWithin(ctx.world, at, home) && together(ctx.world, at, home);
 }
 
+/** The households standing in the state, read once for a read pass (`passMemo`): every question of who shares one asks them all. */
+function households(ctx: ThingContext): EntityId[] {
+  return passMemo([ctx.state, ctx.world], "access.households", () => Object.keys(ctx.state.entities).filter((h) => orgTypeOf(ctx, h) === "household" && !isGone(ctx.state, h)));
+}
+
 /** The people a household or person shares a household with `who` in: a household organization they both belong to. */
 function shareHousehold(ctx: ThingContext, who: EntityId, other: EntityId): boolean {
-  return Object.keys(ctx.state.entities).some((h) => orgTypeOf(ctx, h) === "household" && !isGone(ctx.state, h) && isMemberOf(ctx, who, h) && isMemberOf(ctx, other, h));
+  return households(ctx).some((h) => isMemberOf(ctx, who, h) && isMemberOf(ctx, other, h));
 }
+
+/** Who owns each property standing at a place, by the place, read once for a read pass (`passMemo`): a shared home's owners. */
+function homeOwnersAt(ctx: ThingContext, place: PlaceId): ReadonlySet<EntityId> {
+  const byPlace = passMemo([ctx.state, ctx.world], "access.home_owners", () => {
+    const out = new Map<PlaceId, Set<EntityId>>();
+    for (const p of Object.keys(ctx.state.entities)) {
+      const prop = own(ctx.state.entities, p);
+      const at = prop?.fields.place;
+      if (!prop || typeof at !== "string" || !kindIs(ctx.registry, ctx.world, prop.kind, "property") || isGone(ctx.state, p)) continue;
+      const owners = out.get(at) ?? new Set<EntityId>();
+      for (const o of ownersIn(prop.fields)) owners.add(o.party);
+      out.set(at, owners);
+    }
+    return out;
+  });
+  return byPlace.get(place) ?? NO_OWNERS;
+}
+
+const NO_OWNERS: ReadonlySet<EntityId> = new Set();
 
 /** A `permits` from `from` to `who` in force at the clock, and its scope. */
 function permitOf(state: Readonly<WorldState>, from: EntityId, who: EntityId): PermitScope | null {
@@ -181,11 +206,7 @@ function useFor(ctx: ThingContext, who: EntityId, thing: EntityId, owners: reado
   }
   if (rules.housemates && typeof mine === "string" && atHome(ctx, at, mine)) {
     // At a shared home: what the home's owners own, and what nobody does.
-    const homeOwners = new Set<EntityId>();
-    for (const p of Object.keys(state.entities)) {
-      const prop = own(state.entities, p);
-      if (prop && prop.fields.place === mine && kindIs(ctx.registry, ctx.world, prop.kind, "property") && !isGone(state, p)) for (const o of ownersIn(prop.fields)) homeOwners.add(o.party);
-    }
+    const homeOwners = homeOwnersAt(ctx, mine);
     const stated = ownersIn(e.fields).map((o) => o.party);
     if (stated.length === 0 || stated.some((o) => homeOwners.has(o))) return { basis: "housemate", ...(owners[0] !== undefined ? { via: owners[0] } : {}), ...presumed };
   }

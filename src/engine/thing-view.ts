@@ -20,7 +20,7 @@ import { accessFor, atHome, type AccessAnswer } from "./access";
 import { calendarOf, formatClock } from "./calendar";
 import { orgPlaces, orgTypeOf, placesOf } from "./org";
 import { own } from "./pack-kit";
-import { readPass } from "./read-pass";
+import { passMemo, readPass } from "./read-pass";
 import type { ReadContext } from "./registry";
 import type { Registry } from "./registry-impl";
 import { isGone, kindDef, kindIs, placeOfEntity, placeWithin } from "./scope";
@@ -285,9 +285,13 @@ function orgPlaceAt(ctx: ReadContext, org: EntityId, at: PlaceId | null): string
  */
 export function useChips(ctx: ReadContext, thing: EntityId, keep: (who: EntityId) => boolean = () => true): AccessChip[] {
   const chips = new Map<string, { answer: AccessAnswer; who: string[] }>();
-  const people = Object.keys(ctx.state.entities)
-    .filter((id) => isPerson(ctx, id) && !isGone(ctx.state, id) && keep(id))
-    .sort((a, b) => partyOrder(ctx, partyRef(ctx, a), partyRef(ctx, b)));
+  // Everyone who acts, in the order their names list, read once for a read pass: every thing's chips ask the same people.
+  const everyone = passMemo([ctx.state, ctx.world], "things.people_in_order", () =>
+    Object.keys(ctx.state.entities)
+      .filter((id) => isPerson(ctx, id) && !isGone(ctx.state, id))
+      .sort((a, b) => partyOrder(ctx, partyRef(ctx, a), partyRef(ctx, b))),
+  );
+  const people = everyone.filter(keep);
   for (const who of people) {
     const use = accessFor(ctx, who, thing).use;
     if (!use || use.basis === "grant") continue;
