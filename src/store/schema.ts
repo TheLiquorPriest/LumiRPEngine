@@ -341,10 +341,28 @@ CREATE TABLE reply_reason (
       db.run("DROP TABLE job_end");
     },
   },
+  {
+    version: 17,
+    name: "what a page reads of a turn, stored with it",
+    // A turn's Journal notes and the line under its reply, worked out from the state at its end and stored with the turn's node, under
+    // the fingerprint it was folded under and the reader's own key (`turn-reads.ts`), so a restart reads them and folds nothing for
+    // them. Kept by node (`KEPT_BY_NODE`): they go in the write that makes the node's state another, and with the node.
+    sql: `
+CREATE TABLE turn_read (
+  user TEXT NOT NULL,
+  node TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  fingerprint TEXT NOT NULL,
+  key TEXT NOT NULL,
+  value TEXT NOT NULL,
+  PRIMARY KEY (user, node, kind)
+);
+`,
+  },
 ];
 
 /** The tables the store reads and writes, all made by its migrations. */
-export const STORE_TABLES: readonly string[] = ["chat", "message_link", "session", "turn", "path_node", "change", "snapshot", "fold_mark", "world_part", "job", "snapshot_part", "reply_reason"];
+export const STORE_TABLES: readonly string[] = ["chat", "message_link", "session", "turn", "path_node", "change", "snapshot", "fold_mark", "world_part", "job", "snapshot_part", "reply_reason", "turn_read"];
 
 /**
  * Tables that keep something worked out from the state at a path node, by their `user` and `node` columns (a turn's notes, a reply's
@@ -352,7 +370,7 @@ export const STORE_TABLES: readonly string[] = ["chat", "message_link", "session
  * snapshots, so a row that is there was worked out from the node's state as it stands. What stands only in a chat's reading of its
  * head (his changes made since its newest turn began, a job ended since) is in no node's fold: a row of it keeps the chat's fold mark.
  */
-export const KEPT_BY_NODE: readonly string[] = [];
+export const KEPT_BY_NODE: readonly string[] = ["turn_read"];
 
 /** The store's tables `db` does not hold. */
 export function missingStoreTables(db: Database): string[] {

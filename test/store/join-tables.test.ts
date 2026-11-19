@@ -58,6 +58,8 @@ const FATES: Readonly<Record<string, Readonly<Record<string, Fate>>>> = {
   // A job's record keeps the turn that started it as RPH's record names it (`value`'s scope): the join leaves the record as it was.
   job: { user: "none", id: "none", started: "none", chat: "none", turn: "none", state: "none", value: "none", ended: "none" },
   reply_reason: { user: "none", chat: "none", message: "none", why: "none" },
+  // A node's stored reads (the Journal's notes, a reply's line) go in the write that makes its state another, as its snapshots do.
+  turn_read: { user: "none", node: nodeIs("dropped"), kind: "none", fingerprint: "none", key: "none", value: "none" },
 };
 
 type Row = Record<string, unknown> & { _row: number };
@@ -76,6 +78,8 @@ test("every store column that names a turn is one the join handles", () => {
   s.openSession({ chat: "c", scene: "the cellar", turn: held.id });
   s.closeSession(s.openSession({ chat: "c", scene: "the inn", turn: into.id }).id, held.id);
   s.setBase(held.id, s.stateAt(held.id).state.world);
+  // A read kept of the held turn's node, as a reader stores one (`turn_read`), after the writes above, each of which lets it go.
+  db.run("INSERT INTO turn_read (user, node, kind, fingerprint, key, value) VALUES (?, ?, 'notes', ?, 'k', '[]')", [USER, held.node, store.fingerprint]);
 
   // The store's tables, as the database holds them, are the ones this test knows, column for column.
   const tables = db

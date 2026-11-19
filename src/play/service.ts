@@ -22,7 +22,7 @@ import type { Database } from "bun:sqlite";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Log } from "rp-harness/contract";
-import { type LiveHub, RouteError, type WriteQueue } from "../app";
+import { type LiveHub, RouteError, type WriteQueue, WritesClosed } from "../app";
 import { calendarOf, clockOfStamp, placeOffset } from "../engine/calendar";
 import { resolveEdit } from "../engine/edits";
 import { ENGINE_EVENTS } from "../engine/engine-pack";
@@ -63,6 +63,7 @@ import { RunEnds, stateChanged } from "./live";
 import type { PanelAsk, RequestRecord, Requests, TapFrom } from "../turn/requests";
 import { editId, type Head, headOf, PLAYER, recordOwnerEdit, Refused, type Resolved } from "./owner-edits";
 import { type GuidanceFiles, historyTexts } from "../iface";
+import { type KeepTurnReads, turnReadKeeper } from "../store/turn-reads";
 import { journalNotes } from "./journal";
 import { chipsOf, meterOf, pendingOf } from "./panel-reads";
 import type { TapSettings } from "./settings";
@@ -298,7 +299,13 @@ export class PlayService {
 
   constructor(private readonly deps: PlayDeps) {
     this.runEnds = new RunEnds(deps.live);
+    this.keep = turnReadKeeper(deps.writes, (error) => {
+      if (!(error instanceof WritesClosed)) deps.log.warn("The Journal's notes a read worked out could not be stored; the next read after a restart works them out again.", { error: error instanceof Error ? error.message : String(error) });
+    });
   }
+
+  /** Stores the Journal's notes a read worked out with their turns, so a restart reads them (`journal.ts`). */
+  private readonly keep: KeepTurnReads;
 
   /**
    * The chat's state view at its head, or at `turn`, one of its turns: its controls preset by the chat's out-of-play settings, its
@@ -369,13 +376,13 @@ export class PlayService {
     if (s.chat(chat)?.world == null) return [];
     const { taps } = await this.deps.settings(user, chat);
     const keys = (await this.part()).keys;
-    // Each turn's notes are kept while its state and these words stand, so the words name themselves by what they hold.
+    // Each turn's notes are kept and stored while its state and these words stand, so the words name themselves by what they hold.
     const texts = await historyTexts(this.deps.texts(user, chat));
     const words = { texts, code: (code: string) => own(keys, code) ?? code, key: hashParts("journal-words", JSON.stringify(texts), JSON.stringify(keys)) };
     const key = JSON.stringify([s.stateKey(chat, null), words.key, taps.journalMost]);
     const going = this.reading.get(key);
     if (going !== undefined) return await going;
-    const work = journalNotes(this.deps.store, user, chat, taps.journalMost, words);
+    const work = journalNotes(this.deps.store, user, chat, taps.journalMost, words, this.keep);
     this.reading.set(key, work);
     try {
       return await work;

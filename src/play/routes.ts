@@ -157,7 +157,7 @@ export function playRoutes(play: PlayService) {
       path: JOURNAL_PATH,
       access: "page",
       group: "state",
-      does: "The Journal's notes of the chat's newest turns, oldest first, read when the Journal opens and again as the state it shows changes (the state view carries none of them): for each reply on the chat's path, what its turn recorded that the player may read, and what it recorded that took no effect, with why. Each turn's notes are kept while its state stands; the first read after RPE starts works each out from its turn's state.",
+      does: "The Journal's notes of the chat's newest turns, oldest first, read when the Journal opens and again as the state it shows changes (the state view carries none of them): for each reply on the chat's path, what its turn recorded that the player may read, and what it recorded that took no effect, with why. Each turn's notes are worked out once from the state at its end and stored with it while that state stands, so a read after RPE starts works out only those of turns it has none stored for.",
       reply: shape.object({ notes: shape.list(journalNote) }),
       handle: async ({ user, params }) => ({ notes: await play.journal(user, params.chat) }),
     }),
