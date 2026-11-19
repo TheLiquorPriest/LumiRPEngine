@@ -261,14 +261,14 @@ function watch(client: RpeClient, chat: string | null, only: string | null, time
   async function readJobs(): Promise<void> {
     const of = chat === null ? {} : { chat };
     try {
-      // RPE lists jobs of every chat or of one: the jobs of no chat are picked from among every chat's. The newest of no chat is looked for among as many as the page keeps runs.
+      // RPE lists jobs of every chat or of one: the jobs of no chat are picked from among every chat's. Those going on (running, or held
+      // for his word) in one read, and the newest in another; the newest of no chat is looked for among as many as the page keeps runs.
       const lists = await Promise.all([
-        walk(client, "GET /api/v1/jobs", {}, { query: { ...of, state: "running" } }),
-        walk(client, "GET /api/v1/jobs", {}, { query: { ...of, state: "asking" } }),
+        walk(client, "GET /api/v1/jobs", {}, { query: { ...of, state: "running,asking" } }),
         client.call("GET /api/v1/jobs", {}, { query: { ...of, limit: chat === null ? limits().keepRuns : 1 } }).then((page) => page.items),
       ]);
-      const [running = [], asking = [], newest = []] = lists.map((jobs) => (chat === null ? jobs.filter((job) => job.scope.chat === undefined) : jobs));
-      const ids = new Set([...running, ...asking, ...newest.slice(0, 1)].map((job) => job.id));
+      const [going = [], newest = []] = lists.map((jobs) => (chat === null ? jobs.filter((job) => job.scope.chat === undefined) : jobs));
+      const ids = new Set([...going, ...newest.slice(0, 1)].map((job) => job.id));
       if (alive) await Promise.all([...ids].map((id) => readJob(id)));
     } catch (error) {
       problem = errorWords(error);

@@ -2238,16 +2238,16 @@ He starts a job of the chat, as his own and tied to no turn, in which a characte
 
 ### `GET /api/v1/jobs`
 
-His jobs a page at a time, of every chat or of one, in one state or in any, the newest started first, each as RPH keeps it: where it stands, its agent, who started it and the turn that did.
+His jobs a page at a time (the setting jobs.page, at most jobs.maxPage), of every chat or of one, in the states named or in any, the newest started first, each by its row: what a list shows of it, its whole read by its id.
 
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | none |
-| Query | `chat` (may be left out): `string`, Only the jobs of this chat<br>`state` (may be left out): `"queued" | "held" | "running" | "asking" | "done" | "failed" | "cancelled" | "off-path" | "interrupted"`, Only the jobs in this state<br>`limit` (may be left out): `number`, the page's size<br>`cursor` (may be left out): `string`, where the page starts: a page's `next` |
+| Query | `chat` (may be left out): `string`, Only the jobs of this chat<br>`state` (may be left out): `string`, Only the jobs in these states, a comma between two: running,asking. Each is one of queued, held, running, asking, done, failed, cancelled, off-path, interrupted<br>`limit` (may be left out): `number`, the page's size<br>`cursor` (may be left out): `string`, where the page starts: a page's `next` |
 | Body | none |
-| Reply | `{ items: JobView[]; next: string | null }`, a page at a time |
+| Reply | `{ items: JobRow[]; next: string | null }`, a page at a time |
 
 ### `POST /api/v1/jobs`
 
@@ -2394,6 +2394,19 @@ Starts again a job that was interrupted by a restart, failed or was cancelled: a
 | Reply | [`JobReply`](#jobreply) |
 
 ### `POST /api/v1/jobs/:job/resume`
+
+### `GET /api/v1/jobs/:job/record`
+
+One job whole, as RPH keeps it, without its run's work: what a page shows of a job it opens, its trace read behind the chat's gate.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `job` |
+| Query | none |
+| Body | none |
+| Reply | [`JobReply`](#jobreply) |
 
 Resumes an interrupted job from the last call its own session holds, with what it had done and spent.
 
@@ -5857,6 +5870,28 @@ export interface JobStartAsk {
   given?: string[];
   /** Limits of its own: each holds in place of the setting's for this job. */
   limits?: JobLimitsAsk;
+}
+```
+
+### `JobRow`
+
+A job as a list shows it: its id, its agent, the first line of what it was asked (cut at the characters the Jobs list shows), where it stands, its scope (its chat and the turn that started it), who started it, when it started and ended, what it spent, the limit it ended at, who ended it, the attachments its start named and the limits of its own its start gave. The whole job is read by its id.
+
+```ts
+export interface JobRow {
+  id: string;
+  agent: string;
+  brief: string;
+  state: JobState;
+  scope: RunScope;
+  startedBy: AgentRef | "user";
+  started: number;
+  ended?: number;
+  usage: Usage;
+  limit?: LimitHit;
+  stoppedBy?: JobStopper;
+  attach?: string[];
+  limits?: JobLimits;
 }
 ```
 

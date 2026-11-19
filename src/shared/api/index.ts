@@ -1205,6 +1205,23 @@ export interface JobReply {
   job: JobView;
 }
 
+/** A job as a list shows it: its id, its agent, the first line of what it was asked (cut at the characters the Jobs list shows), where it stands, its scope (its chat and the turn that started it), who started it, when it started and ended, what it spent, the limit it ended at, who ended it, the attachments its start named and the limits of its own its start gave. The whole job is read by its id. */
+export interface JobRow {
+  id: string;
+  agent: string;
+  brief: string;
+  state: JobState;
+  scope: RunScope;
+  startedBy: AgentRef | "user";
+  started: number;
+  ended?: number;
+  usage: Usage;
+  limit?: LimitHit;
+  stoppedBy?: JobStopper;
+  attach?: string[];
+  limits?: JobLimits;
+}
+
 /** One job: its record, its run's trace as the live view shows a turn's, what its run spent by agent (null before it spent anything or after the record was let go), and how full each of its agents' windows is while it runs. */
 export interface JobShownReply {
   job: JobView;
@@ -6043,12 +6060,12 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
-  /** His jobs a page at a time, of every chat or of one, in one state or in any, the newest started first, each as RPH keeps it: where it stands, its agent, who started it and the turn that did. */
+  /** His jobs a page at a time (the setting jobs.page, at most jobs.maxPage), of every chat or of one, in the states named or in any, the newest started first, each by its row: what a list shows of it, its whole read by its id. */
   "GET /api/v1/jobs": {
     params: Record<string, never>;
-    query: { chat?: string; state?: "queued" | "held" | "running" | "asking" | "done" | "failed" | "cancelled" | "off-path" | "interrupted"; limit?: number; cursor?: string };
+    query: { chat?: string; state?: string; limit?: number; cursor?: string };
     body: undefined;
-    reply: { items: JobView[]; next: string | null };
+    reply: { items: JobRow[]; next: string | null };
     paged: true;
     long: false;
     joined: false;
@@ -6181,6 +6198,16 @@ export interface ApiRoutes {
     reply: JobToldReply;
     paged: false;
     long: false;
+  /** One job whole, as RPH keeps it, without its run's work: what a page shows of a job it opens, its trace read behind the chat's gate. */
+  "GET /api/v1/jobs/:job/record": {
+    params: { job: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: JobReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
     joined: false;
   };
   /** Undoes all a job recorded that no change of his undid yet, the newest first, as his own. Says what was recorded and what is left, as report codes and in the play answers' words. */
