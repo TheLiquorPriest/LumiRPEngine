@@ -2492,13 +2492,14 @@ export class UserStore {
    * Folds the next stretch of a chat's path that wants a snapshot (`unprepared`): from the state the stretch before it ended on (`after`,
    * held in memory) or the deepest snapshot stored before it, turn after turn, each from the state the one before it left, for as long
    * as `forMs` allows (one turn at least), up to the first node where a snapshot is due and none is stored at most. The snapshots it finds
-   * wait to be stored (`storeHeld`). What it folded: the node it ended on, the changes of its turns, and how many such nodes are left.
+   * wait to be stored (`storeHeld`). What it folded: the node it ended on, the changes of its turns, and how many such nodes are left
+   * after it (`left`) and were before it (`wanted`).
    */
-  prepareNext(chat: string, after: string | null, forMs: number): { at: string | null; changes: number; left: number } {
+  prepareNext(chat: string, after: string | null, forMs: number): { at: string | null; changes: number; left: number; wanted: number } {
     const began = performance.now();
     const { rows, missing } = this.wanting(chat);
     const end = rows.findIndex((r) => r.due && !r.usable);
-    if (end < 0) return { at: null, changes: 0, left: 0 };
+    if (end < 0) return { at: null, changes: 0, left: 0, wanted: missing };
     let to = end;
     while (to > 0 && !rows[to - 1]?.usable && rows[to - 1]?.key !== after) to--;
     let changes = 0;
@@ -2510,7 +2511,7 @@ export class UserStore {
       at = row.key;
       changes += row.changes;
     }
-    return { at, changes, left: at === rows[end]?.key ? missing - 1 : missing };
+    return { at, changes, left: at === rows[end]?.key ? missing - 1 : missing, wanted: missing };
   }
 
   /**
