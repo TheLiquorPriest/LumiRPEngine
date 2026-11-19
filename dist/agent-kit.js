@@ -18084,25 +18084,7 @@ function buildMapView(ctx, chosen = null, config = MAP_DEFAULTS) {
   }
   const scope = defaultScope(world, here, children, filter);
   const shownScope = scope === null ? null : filter.shown(scope);
-  const targets = new Set(ids.filter(known));
-  const travel = [];
-  if (here && level >= 1) {
-    for (const id of targets) {
-      if (id === here)
-        continue;
-      const minutes = goMinutes(ctx, here, id);
-      const name = own(world.places, id)?.name ?? id;
-      const shut = entryFor(ctx, world.pov, id) === null ? entryRefusal(ctx, world.pov, id) : "";
-      travel.push({ to: id, label: `Walk to ${name}`, mode: "walk", minutes: minutes ?? 0, action: "go", params: { to: id }, ...minutes === null ? { disabled: "no walking route" } : shut !== "" ? { disabled: shut } : {} });
-    }
-    const vehicles = optionalQuery(ctx, "vehicles.travel_options");
-    if (vehicles) {
-      for (const o of vehicles(ctx, here))
-        if (targets.has(o.to))
-          travel.push(o);
-    }
-  }
-  return { level, here: here === null ? null : filter.shown(here), path: path.map(filter.shown), scope: shownScope === null || scopes.some((s) => s.id === shownScope) ? shownScope : null, display: display2, movement: settings.grid.movement, scopes, travel };
+  return { level, here: here === null ? null : filter.shown(here), path: path.map(filter.shown), scope: shownScope === null || scopes.some((s) => s.id === shownScope) ? shownScope : null, display: display2, movement: settings.grid.movement, scopes };
 }
 
 // src/engine/access.ts
@@ -43786,11 +43768,13 @@ var vehiclesPack = {
       r.table({ id: t.id, schema: t.schema, columns: t.columns, defaults: t, shipped: SHIPPED5[t.id] ?? [] });
     r.kind(VEHICLE);
     r.query("fuel_ok", fuelOk);
-    r.query("vehicles.travel_options", (ctx, from) => {
+    r.query("vehicles.travel_options", (ctx, from, to) => {
       const out = [];
       const pov = ctx.world.pov;
       const walk3 = optionalQuery(ctx, "space.route");
-      const targets = Object.keys(ctx.world.places).sort().filter((to) => to !== from);
+      const targets = (to === undefined ? Object.keys(ctx.world.places).sort() : own(ctx.world.places, to) !== undefined ? [to] : []).filter((p) => p !== from);
+      if (targets.length === 0)
+        return out;
       const placeName2 = (p) => own(ctx.world.places, p)?.name ?? p;
       const home = own(ctx.state.entities, pov)?.fields.home;
       for (const v of vehiclesFor(ctx, pov).map((u) => u.id)) {
@@ -43801,9 +43785,9 @@ var vehiclesPack = {
         if (!at || at !== from && !canSeePlace(ctx.registry, ctx.world, ctx.state, pov, at))
           continue;
         const named = /^(your|my|the|a|an)\s/i.test(e.name) ? e.name.charAt(0).toLowerCase() + e.name.slice(1) : say("trip_the_vehicle", { name: e.name });
-        for (const [to, trip] of tripsFor(ctx, v, from, targets)) {
-          const direct = walk3 ? walk3(ctx, from, to, "walk") : null;
-          if (trip.park !== to && direct && trip.minutes >= direct.minutes)
+        for (const [to2, trip] of tripsFor(ctx, v, from, targets)) {
+          const direct = walk3 ? walk3(ctx, from, to2, "walk") : null;
+          if (trip.park !== to2 && direct && trip.minutes >= direct.minutes)
             continue;
           const leg = legOf(trip);
           const why = e.fields.status === "broken" ? say("trip_broken_down") : !fuelOk(ctx, v, leg) ? say("trip_not_enough_fuel") : undefined;
@@ -43820,7 +43804,7 @@ var vehiclesPack = {
             parts.push({ kind: "park", minutes: trip.parkMinutes, words: say(fly ? "trip_park_air" : sail ? "trip_park_water" : "trip_park") });
           if (trip.walk && trip.walk.minutes > 0)
             parts.push({ kind: "walk", minutes: trip.walk.minutes, words: say("trip_on_foot_from", { place: placeName2(trip.park) }) });
-          out.push({ to, label: say(fly ? "trip_fly" : sail ? "trip_sail" : "trip_drive", { vehicle: named, place: placeName2(to) }), mode: trip.drive.mode, minutes: trip.minutes, parts, vehicle: e.name, action: "drive", params: { vehicle: v, to }, ...why ? { disabled: why } : {} });
+          out.push({ to: to2, label: say(fly ? "trip_fly" : sail ? "trip_sail" : "trip_drive", { vehicle: named, place: placeName2(to2) }), mode: trip.drive.mode, minutes: trip.minutes, parts, vehicle: e.name, action: "drive", params: { vehicle: v, to: to2 }, ...why ? { disabled: why } : {} });
         }
       }
       return out;
@@ -103768,7 +103752,7 @@ var package_default = {
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "73a70ebb";
+var BUILD = "7fb8b962";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;

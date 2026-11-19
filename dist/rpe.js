@@ -14080,7 +14080,35 @@ function revisionDoc(env, revision) {
   return world;
 }
 function same(a, b) {
-  return a === undefined || b === undefined ? a === b : hashJson(a) === hashJson(b);
+  return a === undefined || b === undefined ? a === b : sameJson(a, b);
+}
+function sameJson(a, b) {
+  if (a === b)
+    return true;
+  if (a === null || b === null || typeof a !== "object" || typeof b !== "object")
+    return typeof a === "number" && typeof b === "number" && String(a) === String(b);
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length)
+      return false;
+    for (let i = 0;i < a.length; i++)
+      if (!sameJson(a[i] ?? null, b[i] ?? null))
+        return false;
+    return true;
+  }
+  const x = a;
+  const y = b;
+  let keys = 0;
+  for (const k of Object.keys(x)) {
+    if (x[k] === undefined)
+      continue;
+    keys++;
+    if (y[k] === undefined || !Object.hasOwn(y, k) || !sameJson(x[k], y[k]))
+      return false;
+  }
+  for (const k of Object.keys(y))
+    if (y[k] !== undefined)
+      keys--;
+  return keys === 0;
 }
 function startRelations(types, world) {
   const holders = {};
@@ -21879,25 +21907,31 @@ function buildMapView(ctx, chosen = null, config = MAP_DEFAULTS) {
   }
   const scope = defaultScope(world, here, children, filter);
   const shownScope = scope === null ? null : filter.shown(scope);
-  const targets = new Set(ids.filter(known));
-  const travel = [];
-  if (here && level >= 1) {
-    for (const id2 of targets) {
-      if (id2 === here)
-        continue;
-      const minutes = goMinutes(ctx, here, id2);
-      const name = own2(world.places, id2)?.name ?? id2;
-      const shut = entryFor(ctx, world.pov, id2) === null ? entryRefusal(ctx, world.pov, id2) : "";
-      travel.push({ to: id2, label: `Walk to ${name}`, mode: "walk", minutes: minutes ?? 0, action: "go", params: { to: id2 }, ...minutes === null ? { disabled: "no walking route" } : shut !== "" ? { disabled: shut } : {} });
-    }
-    const vehicles = optionalQuery(ctx, "vehicles.travel_options");
-    if (vehicles) {
-      for (const o of vehicles(ctx, here))
-        if (targets.has(o.to))
-          travel.push(o);
-    }
+  return { level, here: here === null ? null : filter.shown(here), path: path.map(filter.shown), scope: shownScope === null || scopes.some((s) => s.id === shownScope) ? shownScope : null, display: display2, movement: settings.grid.movement, scopes };
+}
+function travelWays(ctx, to) {
+  const { world, state } = ctx;
+  const here = placeOfEntity(state, world.pov);
+  if (!here || ctx.levelOf(world.pov, "space") < 1)
+    return [];
+  const known = (id2) => canSeePlace(ctx.registry, world, state, world.pov, id2);
+  const targets = new Set((to === null ? Object.keys(world.places).sort() : own2(world.places, to) !== undefined ? [to] : []).filter((id2) => id2 !== here && known(id2)));
+  if (targets.size === 0)
+    return [];
+  const ways = [];
+  for (const id2 of targets) {
+    const minutes = goMinutes(ctx, here, id2);
+    const name = own2(world.places, id2)?.name ?? id2;
+    const shut = entryFor(ctx, world.pov, id2) === null ? entryRefusal(ctx, world.pov, id2) : "";
+    ways.push({ to: id2, label: `Walk to ${name}`, mode: "walk", minutes: minutes ?? 0, action: "go", params: { to: id2 }, ...minutes === null ? { disabled: "no walking route" } : shut !== "" ? { disabled: shut } : {} });
   }
-  return { level, here: here === null ? null : filter.shown(here), path: path.map(filter.shown), scope: shownScope === null || scopes.some((s) => s.id === shownScope) ? shownScope : null, display: display2, movement: settings.grid.movement, scopes, travel };
+  const vehicles = optionalQuery(ctx, "vehicles.travel_options");
+  if (vehicles) {
+    for (const o of vehicles(ctx, here, to ?? undefined))
+      if (targets.has(o.to))
+        ways.push(o);
+  }
+  return ways;
 }
 var init_view2 = __esm(() => {
   init_grid();
@@ -49588,11 +49622,13 @@ var init_core5 = __esm(() => {
         r.table({ id: t.id, schema: t.schema, columns: t.columns, defaults: t, shipped: SHIPPED5[t.id] ?? [] });
       r.kind(VEHICLE);
       r.query("fuel_ok", fuelOk);
-      r.query("vehicles.travel_options", (ctx, from) => {
+      r.query("vehicles.travel_options", (ctx, from, to) => {
         const out = [];
         const pov = ctx.world.pov;
         const walk3 = optionalQuery(ctx, "space.route");
-        const targets = Object.keys(ctx.world.places).sort().filter((to) => to !== from);
+        const targets = (to === undefined ? Object.keys(ctx.world.places).sort() : own2(ctx.world.places, to) !== undefined ? [to] : []).filter((p) => p !== from);
+        if (targets.length === 0)
+          return out;
         const placeName2 = (p) => own2(ctx.world.places, p)?.name ?? p;
         const home = own2(ctx.state.entities, pov)?.fields.home;
         for (const v of vehiclesFor(ctx, pov).map((u) => u.id)) {
@@ -49603,9 +49639,9 @@ var init_core5 = __esm(() => {
           if (!at || at !== from && !canSeePlace(ctx.registry, ctx.world, ctx.state, pov, at))
             continue;
           const named = /^(your|my|the|a|an)\s/i.test(e.name) ? e.name.charAt(0).toLowerCase() + e.name.slice(1) : say("trip_the_vehicle", { name: e.name });
-          for (const [to, trip] of tripsFor(ctx, v, from, targets)) {
-            const direct = walk3 ? walk3(ctx, from, to, "walk") : null;
-            if (trip.park !== to && direct && trip.minutes >= direct.minutes)
+          for (const [to2, trip] of tripsFor(ctx, v, from, targets)) {
+            const direct = walk3 ? walk3(ctx, from, to2, "walk") : null;
+            if (trip.park !== to2 && direct && trip.minutes >= direct.minutes)
               continue;
             const leg = legOf(trip);
             const why = e.fields.status === "broken" ? say("trip_broken_down") : !fuelOk(ctx, v, leg) ? say("trip_not_enough_fuel") : undefined;
@@ -49622,7 +49658,7 @@ var init_core5 = __esm(() => {
               parts.push({ kind: "park", minutes: trip.parkMinutes, words: say(fly ? "trip_park_air" : sail ? "trip_park_water" : "trip_park") });
             if (trip.walk && trip.walk.minutes > 0)
               parts.push({ kind: "walk", minutes: trip.walk.minutes, words: say("trip_on_foot_from", { place: placeName2(trip.park) }) });
-            out.push({ to, label: say(fly ? "trip_fly" : sail ? "trip_sail" : "trip_drive", { vehicle: named, place: placeName2(to) }), mode: trip.drive.mode, minutes: trip.minutes, parts, vehicle: e.name, action: "drive", params: { vehicle: v, to }, ...why ? { disabled: why } : {} });
+            out.push({ to: to2, label: say(fly ? "trip_fly" : sail ? "trip_sail" : "trip_drive", { vehicle: named, place: placeName2(to2) }), mode: trip.drive.mode, minutes: trip.minutes, parts, vehicle: e.name, action: "drive", params: { vehicle: v, to: to2 }, ...why ? { disabled: why } : {} });
           }
         }
         return out;
@@ -107385,6 +107421,7 @@ class Store {
   viewOptions;
   now;
   worldTold;
+  heldWaiting;
   log;
   owned;
   folds = new Map;
@@ -107439,6 +107476,7 @@ class Store {
     this.viewOptions = { ownOnly: options.ownOnly ?? STORE_DEFAULTS.ownOnly, notable: Math.max(0, Math.floor(options.notable ?? STORE_DEFAULTS.notable)), placeDepth: whole4(options.placeDepth, STORE_DEFAULTS.placeDepth, 1) };
     this.now = options.now ?? Date.now;
     this.worldTold = options.worldChanged;
+    this.heldWaiting = options.heldWaiting;
   }
   envOf(user) {
     let env = this.envs.get(user);
@@ -107617,6 +107655,7 @@ class Store {
         break;
       held3.delete(oldest);
     }
+    this.heldWaiting?.(user);
   }
   flush(user) {
     const held3 = this.held.get(user);
@@ -108591,6 +108630,10 @@ class UserStore {
   stateAt(turnId) {
     return this.foldNode(this.turnToWrite(turnId).node).folded;
   }
+  foldKey(turnId) {
+    const t = this.turnToWrite(turnId);
+    return `${this.id}\x00${t.node}\x00${this.store.markOf(this.id, t.chat)}`;
+  }
   stateFor(turnId, job) {
     const at = this.stateAt(turnId);
     if (job === null)
@@ -108735,6 +108778,47 @@ class UserStore {
   holdAhead(chat) {
     this.store.viewOf(this.headState(chat).state);
   }
+  storeHeld() {
+    this.db.transaction(() => this.store.flush(this.id))();
+  }
+  unprepared() {
+    return this.db.query("SELECT c.id FROM chat c WHERE c.user = ?1 AND c.deleted IS NULL AND c.head IS NOT NULL ORDER BY (SELECT max(t.created) FROM turn t WHERE t.user = c.user AND t.chat = c.id) DESC, c.created DESC").all(this.id).map((c) => c.id).filter((chat) => this.wanting(chat).missing > 0);
+  }
+  wanting(chat) {
+    const head = this.chatDb(chat)?.head ?? null;
+    if (head === null)
+      return { rows: [], missing: 0 };
+    const every = this.store.snapshotEvery;
+    const rows2 = this.db.query(`WITH RECURSIVE up(key, prev, turn, depth) AS (
+           SELECT key, prev, turn, depth FROM path_node WHERE user = ?1 AND key = ?2
+           UNION ALL SELECT n.key, n.prev, n.turn, n.depth FROM path_node n JOIN up ON n.user = ?1 AND n.key = up.prev)
+         SELECT up.key, up.depth, t.status = 'open' AS open,
+           (SELECT count(*) FROM change c WHERE c.user = ?1 AND c.turn = up.turn AND c.job IS NULL) AS changes,
+           EXISTS(SELECT 1 FROM snapshot s WHERE s.user = ?1 AND s.node = up.key AND (s.kind = 'base' OR s.fingerprint = ?3)) AS usable
+         FROM up JOIN turn t ON t.user = ?1 AND t.id = up.turn ORDER BY up.depth`).all(this.id, head, this.store.fingerprint).map((r) => ({ key: r.key, depth: r.depth, changes: r.changes, due: (r.depth + 1) % every === 0 && r.open !== 1, usable: r.usable === 1 }));
+    return { rows: rows2, missing: rows2.filter((r) => r.due && !r.usable).length };
+  }
+  prepareNext(chat, after, forMs) {
+    const began = performance.now();
+    const { rows: rows2, missing: missing2 } = this.wanting(chat);
+    const end = rows2.findIndex((r) => r.due && !r.usable);
+    if (end < 0)
+      return { at: null, changes: 0, left: 0 };
+    let to = end;
+    while (to > 0 && !rows2[to - 1]?.usable && rows2[to - 1]?.key !== after)
+      to--;
+    let changes = 0;
+    let at = null;
+    for (;to <= end && (at === null || performance.now() - began < forMs); to++) {
+      const row = rows2[to];
+      if (row === undefined)
+        break;
+      this.foldNode(row.key);
+      at = row.key;
+      changes += row.changes;
+    }
+    return { at, changes, left: at === rows2[end]?.key ? missing2 - 1 : missing2 };
+  }
   setBase(turnId, world, at) {
     const turn = this.turnToWrite(turnId);
     const node = at ?? turn.node;
@@ -108843,6 +108927,7 @@ class UserStore {
       steps.unshift(stepOf(first, late));
     const every = this.store.snapshotEvery;
     const snaps = [];
+    const began = performance.now();
     const result = foldSteps(this.store.envOf(this.id), start, steps, (step, state2, upto, notApplied, rebased) => {
       if (step.n % every !== 0 || turns.get(step.turn)?.status === "open" || stored !== null && step.node === first.key)
         return;
@@ -108850,6 +108935,7 @@ class UserStore {
       const of = at.get(step.node) ?? { chat: own3.chat, mark: mark2 };
       snaps.push([step.node, upto, snapshotRows(doc), of.chat, of.mark]);
     });
+    this.saidLong(began, own3.chat, node, steps.length);
     this.store.hold(this.id, snaps);
     const same2 = base !== null && steps.every((s) => s.changes.length === 0 && (s.jobs?.length ?? 0) === 0 && (s.owner?.length ?? 0) === 0);
     const folded = { node, state: same2 && base !== null ? base : result.state, notApplied: [...start.notApplied, ...result.notApplied], rebased: [...start.rebased, ...result.rebased] };
@@ -108894,6 +108980,7 @@ class UserStore {
     });
     const every = this.store.snapshotEvery;
     const snaps = [];
+    const began = performance.now();
     const result = foldSteps(this.store.envOf(this.id), { state: draft(base.folded.state), upto: base.upto }, steps, (step, state2, upto, notApplied, rebased) => {
       if (step.n % every !== 0 || turns.get(step.turn)?.status === "open")
         return;
@@ -108901,10 +108988,16 @@ class UserStore {
       const of = turns.get(step.turn)?.chat ?? chat;
       snaps.push([step.node, upto, snapshotRows(doc), of, markFor(of)]);
     });
+    this.saidLong(began, chat, end, steps.length);
     this.store.hold(this.id, snaps);
     const folded = { node: end, state: result.state, notApplied: [...base.folded.notApplied, ...result.notApplied], rebased: [...base.folded.rebased, ...result.rebased] };
     this.store.keep(this.cacheKey(end), folded, result.upto, this.id, chat, mark2);
     return folded;
+  }
+  saidLong(began, chat, node, turns) {
+    const ms = Math.round(performance.now() - began);
+    if (ms >= LONG_FOLD_MS)
+      this.store.log?.("A fold held the thread long.", { chat, node, turns, ms });
   }
   guardLong(ids3, job) {
     if (!this.store.guarding)
@@ -109191,7 +109284,7 @@ class UserStore {
     return this.write(false, () => this.db.query("UPDATE chat SET world = NULL WHERE user = ? AND world = ? AND deleted IS NULL RETURNING id").all(this.id, world).map((row) => row.id));
   }
 }
-var STORE_DEFAULTS, FOLD_VERSION = 8;
+var STORE_DEFAULTS, FOLD_VERSION = 8, LONG_FOLD_MS = 1000;
 var init_store = __esm(() => {
   init_json();
   init_scope();
@@ -110648,6 +110741,115 @@ var init_reading = __esm(() => {
   };
   POINTS = { world: "world", groups: "groups", elsewhere: "elsewhere" };
 });
+
+// src/store/prepare.ts
+function letGo() {
+  const { promise, resolve: resolve2 } = Promise.withResolvers();
+  setTimeout(resolve2, 0);
+  return promise;
+}
+async function inStretches(items, work, around2 = (stretch) => stretch()) {
+  const out = [];
+  let at = 0;
+  while (at < items.length) {
+    const began = performance.now();
+    around2(() => {
+      for (;at < items.length && (at === 0 || performance.now() - began < STRETCH_MS); at++)
+        out.push(work(items[at]));
+    });
+    if (at < items.length)
+      await letGo();
+  }
+  return out;
+}
+
+class Preparer {
+  deps;
+  user = "";
+  queue = [];
+  current = null;
+  waiting = new Map;
+  stopped = false;
+  running = null;
+  constructor(deps) {
+    this.deps = deps;
+  }
+  start() {
+    if (this.running !== null)
+      return;
+    this.user = this.deps.user();
+    if (this.user === "")
+      return;
+    this.queue = this.deps.store.user(this.user).unprepared();
+    if (this.queue.length === 0)
+      return;
+    this.deps.log.info("RPE makes ready the states of chats this build cannot use yet, one chat at a time; a read of one waits for it.", { chats: this.queue.length });
+    this.running = this.run();
+  }
+  async ready(user, chat) {
+    if (user !== this.user || this.current !== chat && !this.queue.includes(chat))
+      return;
+    if (this.current !== chat)
+      this.queue = [chat, ...this.queue.filter((c) => c !== chat)];
+    let waits = this.waiting.get(chat);
+    if (waits === undefined) {
+      waits = Promise.withResolvers();
+      this.waiting.set(chat, waits);
+    }
+    await waits.promise;
+  }
+  async stop() {
+    this.stopped = true;
+    this.queue = [];
+    for (const waits of this.waiting.values())
+      waits.resolve();
+    this.waiting.clear();
+    await this.running;
+  }
+  async run() {
+    for (let chat = this.queue.shift();chat !== undefined && !this.stopped; chat = this.queue.shift()) {
+      this.current = chat;
+      try {
+        await this.prepare(chat);
+      } catch (error) {
+        this.deps.log.warn("A chat's states could not be made ready for this build: each of its reads folds what it needs as it goes.", { chat, error: error instanceof Error ? error.message : String(error) });
+      } finally {
+        this.current = null;
+        this.waiting.get(chat)?.resolve();
+        this.waiting.delete(chat);
+      }
+    }
+  }
+  async prepare(chat) {
+    const s = this.deps.store.user(this.user);
+    const began = performance.now();
+    let stretches = 0;
+    let changes = 0;
+    let longest = 0;
+    let after = null;
+    let left2 = Number.POSITIVE_INFINITY;
+    while (!this.stopped) {
+      const at = performance.now();
+      const step = s.prepareNext(chat, after, STRETCH_MS);
+      longest = Math.max(longest, performance.now() - at);
+      if (step.at === null)
+        break;
+      if (step.at === after && step.left >= left2)
+        throw new Error("a stretch's snapshot could not be stored");
+      stretches++;
+      changes += step.changes;
+      if (step.left < left2)
+        await this.deps.write(() => s.storeHeld(), "snapshots of a chat made ready for this build");
+      if (step.left === 0)
+        break;
+      after = step.at;
+      left2 = step.left;
+      await letGo();
+    }
+    this.deps.log.info("A chat's states were made ready for this build.", { chat, stretches, changes, ms: Math.round(performance.now() - began), longestStretchMs: Math.round(longest) });
+  }
+}
+var STRETCH_MS = 50;
 
 // src/store/due.ts
 function answers(entry, change2) {
@@ -116654,7 +116856,7 @@ function limitsOf(read, log = null) {
     address: checkedSetting(read, s.address, hostName, D.address, log),
     origins: checkedSetting(read, s.origins, listOf5(origin), D.origins, log),
     hosts: checkedSetting(read, s.hosts, listOf5(hostName), D.hosts, log),
-    server: { bodyBytes: n(s.bodyBytes), providerBodyBytes: n(s.providerBodyBytes), preflightSeconds: n(s.preflightSeconds), workerParseBytes: n(s.workerParseBytes), idleSeconds: n(s.idleSeconds), headroomBytes: n(s.headroomBytes), answerKeepSeconds: n(s.answerKeepSeconds) },
+    server: { bodyBytes: n(s.bodyBytes), providerBodyBytes: n(s.providerBodyBytes), preflightSeconds: n(s.preflightSeconds), workerParseBytes: n(s.workerParseBytes), idleSeconds: n(s.idleSeconds), headroomBytes: n(s.headroomBytes), answerKeepSeconds: n(s.answerKeepSeconds), answerLateSeconds: n(s.answerLateSeconds) },
     auth: { pageTokenMinutes: n(s.pageTokenMinutes), commandLineSeconds: n(s.commandLineSeconds), webKeyDays: read.value(s.webKeyDays), webSessionMinutes: n(s.webSessionMinutes), nonceSeconds: n(s.nonceSeconds), signInTries: n(s.signInTries), signInPauseMinutes: n(s.signInPauseMinutes), refusedSignInSeconds: n(s.refusedSignInSeconds) },
     live: { queueEvents: n(s.queueEvents), messageBytes: n(s.messageBytes), follows: n(s.follows), chatIdChars: n(s.chatIdChars), sockets: n(s.sockets) },
     database: { busyMs: n(s.busyMs), sliceMs: n(s.sliceMs), copiesKept: n(s.copiesKept), pieceBytes: n(s.pieceBytes) },
@@ -116696,6 +116898,7 @@ function configOf(raw, env, where, limits2 = LIMIT_DEFAULTS) {
         idleSeconds: l.server.idleSeconds,
         headroomBytes: l.server.headroomBytes,
         answerKeepSeconds: l.server.answerKeepSeconds,
+        answerLateSeconds: l.server.answerLateSeconds,
         ...readGroup(value, at2, {
           bodyBytes: [wholeIn(1024, 1024 * 1024 * 1024), l.server.bodyBytes],
           providerBodyBytes: [wholeIn(1024, 1024 * 1024 * 1024), l.server.providerBodyBytes],
@@ -116932,7 +117135,7 @@ var init_config = __esm(() => {
     fromEnvironment: [],
     origins: [],
     hosts: [],
-    server: { bodyBytes: 1024 * 1024, providerBodyBytes: 32 * 1024 * 1024, preflightSeconds: 600, workerParseBytes: 1024 * 1024, idleSeconds: 60, headroomBytes: 1024 * 1024, answerKeepSeconds: 300 },
+    server: { bodyBytes: 1024 * 1024, providerBodyBytes: 32 * 1024 * 1024, preflightSeconds: 600, workerParseBytes: 1024 * 1024, idleSeconds: 60, headroomBytes: 1024 * 1024, answerKeepSeconds: 300, answerLateSeconds: 20 },
     auth: { pageTokenMinutes: 30, commandLineSeconds: 60, webKeyDays: null, webSessionMinutes: 30, nonceSeconds: 60, signInTries: 4, signInPauseMinutes: 15, refusedSignInSeconds: 60 },
     live: { queueEvents: 512, messageBytes: 64 * 1024, follows: 64, chatIdChars: 200, sockets: 64 },
     database: { busyMs: 5000, sliceMs: 10, copiesKept: 3, pieceBytes: 1024 * 1024 },
@@ -116972,6 +117175,7 @@ var init_config = __esm(() => {
     idleSeconds: { key: "server.idleSeconds", default: D.server.idleSeconds, takes: { type: "whole", least: 0, most: 255 }, levels: GLOBAL2, perConnection: false, name: "Idle connection closed after", about: "Seconds a connection may send and be sent nothing before RPE closes it; 0 for no bound. A reply's stream and the live socket stay open by what they send.", effect: "start" },
     headroomBytes: { key: "server.headroomBytes", default: D.server.headroomBytes, takes: whole4(0), advice: [{ above: GIB, says: "The server reads over 1 GiB past a route's limit before it refuses a request." }], levels: GLOBAL2, perConnection: false, name: "Room above the largest request", about: "Bytes above the largest body any route takes at which the server itself refuses a request, so that each route refuses a body over its own limit in its own words first.", effect: "start" },
     answerKeepSeconds: { key: "server.answerKeepSeconds", default: D.server.answerKeepSeconds, takes: whole4(1), advice: [{ above: 86400, says: "An answer never read is kept over a day." }], levels: GLOBAL2, perConnection: false, name: "A long request's answer kept", about: "Seconds the answer of a request RPE answered at once with an id is kept, once ready, for the page to read; one never read is dropped then.", effect: "start" },
+    answerLateSeconds: { key: "server.answerLateSeconds", default: D.server.answerLateSeconds, takes: whole4(1), advice: [{ above: 29, says: "Lumiverse gives up on a page's request through the relay after 30 seconds: a request still running then fails at the page while RPE goes on working it." }], levels: GLOBAL2, perConnection: false, name: "A page's request answered later", about: "Seconds a page's request may run before RPE answers it with an id and goes on working it; the page reads the answer by that id once it is ready, and never asks again for what RPE is still working.", effect: "start" },
     busyMs: { key: "database.busyMs", default: D.database.busyMs, takes: whole4(0), advice: [{ above: 600000, says: "A write waits over ten minutes for another program's write." }], levels: GLOBAL2, perConnection: false, name: "Wait for another writer", about: "Milliseconds a write waits for another program's write to RPE's database file to finish.", effect: "start" },
     sliceMs: { key: "database.sliceMs", default: D.database.sliceMs, takes: whole4(1), advice: [{ above: 1e4, says: "The write queue runs writes over ten seconds at a time while other work waits." }], levels: GLOBAL2, perConnection: false, name: "Writes run at a time", about: "Milliseconds the write queue runs writes before it lets other work in.", effect: "start" },
     waitMs: { key: "commandLine.waitMs", default: D.commandLine.waitMs, takes: whole4(1), advice: [{ below: 100, says: "A command seldom finds the running server within a tenth of a second." }, { above: 600000, says: "A command waits over ten minutes for the running server." }], levels: GLOBAL2, perConnection: false, name: "The command line waits for RPE", about: "Milliseconds rpe status and rpe connection wait for the running server, and a command waits for the data folder's lock.", effect: "start" },
@@ -117547,7 +117751,7 @@ function liveSockets(hub, options) {
     }
   };
 }
-var LIVE_PATH = "/api/v1/live", LIVE_PROTOCOL = "rpe.live", TOKEN_PROTOCOL_PREFIX = "rpe.token.", LIVE_TOKEN_ENDED = 4401, TOKEN_ENDED_WORDS = "The page's token has run out or was replaced: open the live socket again with a new one.", T5, N, opt2, scope, userSessionScope, runScope, hookEvent, agentRef, usage2, effort, sampling, toolCall, toolContent, toolResult, layerLevel, factValue, ruleThen, ruleFiring, presetRef, promptNotice, limitHit, release, approvalAnswer, callPermission, switchThing, callRefusal, jobLimits, jobState, jobStopper, jobView2, jobRefusal, callFailureKind, callBreakPoint, replyError, runOutcome, traceEvent, traceRecord, traceDelta, LIVE_KINDS, LIVE_JOBS = "~jobs", LIVE_USER = "~user", LIVE_ADDRESS_PREFIX = "~to:", missedRange, LIVE_SOCKET, LONGEST_TIMER_MS = 2147483647, TOO_MANY_SOCKETS = 1013, liveRoute;
+var LIVE_PATH = "/api/v1/live", LIVE_PROTOCOL = "rpe.live", TOKEN_PROTOCOL_PREFIX = "rpe.token.", LIVE_TOKEN_ENDED = 4401, TOKEN_ENDED_WORDS = "The page's token has run out or was replaced: open the live socket again with a new one.", T5, N, opt2, scope, userSessionScope, runScope, hookEvent, agentRef, usage2, effort, sampling, toolCall, toolContent, toolResult, layerLevel, factValue, ruleThen, ruleFiring, presetRef, promptNotice, limitHit, release, approvalAnswer, callPermission, switchThing, callRefusal, jobLimits, jobState, jobStopper, jobView2, jobRow, jobRefusal, callFailureKind, callBreakPoint, replyError, runOutcome, traceEvent, traceRecord, traceDelta, LIVE_KINDS, LIVE_JOBS = "~jobs", LIVE_USER = "~user", LIVE_ADDRESS_PREFIX = "~to:", missedRange, LIVE_SOCKET, LONGEST_TIMER_MS = 2147483647, TOO_MANY_SOCKETS = 1013, liveRoute;
 var init_live = __esm(() => {
   init_routes();
   T5 = shape.text();
@@ -117625,6 +117829,21 @@ var init_live = __esm(() => {
     asks: opt2(shape.object({ at: N, tokens: N }), "For a job that asks: the ask point it reached, and the tokens it had spent when it did."),
     more: opt2(jobLimits, "What the owner gave it beyond its limits by carrying it on, added up over every time he did."),
     check: opt2(shape.object({ connection: T5 }), "For a tag check: the connection it measures, by id.")
+  }));
+  jobRow = shape.named("JobRow", "A job as a list shows it: its id, its agent, the first line of what it was asked (cut at the characters the Jobs list shows), where it stands, its scope (its chat and the turn that started it), who started it, when it started and ended, what it spent, the limit it ended at, who ended it, the attachments its start named and the limits of its own its start gave. The whole job is read by its id.", shape.object({
+    id: T5,
+    agent: T5,
+    brief: T5,
+    state: jobState,
+    scope: runScope,
+    startedBy: shape.union(agentRef, shape.literal("user")),
+    started: N,
+    ended: opt2(N),
+    usage: usage2,
+    limit: opt2(limitHit),
+    stoppedBy: opt2(jobStopper),
+    attach: opt2(shape.list(T5)),
+    limits: opt2(jobLimits)
   }));
   jobRefusal = shape.named("JobRefusal", "Why a job was not started or a control did not apply: jobs switched off; the day's count or tokens reached; a limit that is no whole number above 0; no such agent or no model for it; no such job; a job not in a state the control applies to, or not stopped at one of its own limits; his job-start hook, with its reason; a tag check of none of his connections, or whose part is missing or not as it needs.", shape.union(shape.object({ refused: shape.literal("off") }), shape.object({ refused: shape.literal("day-count"), max: N, value: N, connection: opt2(T5) }), shape.object({ refused: shape.literal("day-tokens"), max: N, value: N }), shape.object({ refused: shape.literal("limit"), limit: shape.oneOf("calls", "tokensIn", "tokensOut", "tokens", "time", "askAt"), value: N }), shape.object({ refused: shape.literal("agent"), agent: T5 }), shape.object({ refused: shape.literal("no-job"), id: T5 }), shape.object({ refused: shape.literal("state"), id: T5, state: jobState, applies: shape.list(jobState) }), shape.object({ refused: shape.literal("not-at-limit"), id: T5 }), shape.object({ refused: shape.literal("hook"), hook: T5, reason: T5 }), shape.object({ refused: shape.literal("connection"), connection: T5 }), shape.object({ refused: shape.literal("part"), part: shape.oneOf("tag-check", "reply-contract") })));
   callFailureKind = shape.named("CallFailureKind", "What broke a model call that failed. Made again as the settings say: connection (refused, reset, cut, or the stream ended early), timeout (timed out, or went silent too long), overloaded (the provider is busy or asks to slow down), server (a fault of the provider's server), other. Never made again: credit, key, invalid, too-long, unmade (never sent).", shape.oneOf("connection", "timeout", "overloaded", "server", "other", "credit", "key", "invalid", "too-long", "unmade"));
@@ -118153,6 +118372,7 @@ function gatherHooks(areas) {
   const door = {};
   const filledBy = new Map;
   let chatNamed = null;
+  let chatReady = null;
   for (const area of areas) {
     if (area.fills?.views !== undefined)
       views.push(area.fills.views);
@@ -118164,6 +118384,11 @@ function gatherHooks(areas) {
       if (chatNamed !== null)
         throw new Error(`A chat a route names is taken on by two areas, ${chatNamed.by} and ${area.name}: one area takes it on.`);
       chatNamed = { by: area.name, hook: area.fills.chatNamed };
+    }
+    if (area.fills?.chatReady !== undefined) {
+      if (chatReady !== null)
+        throw new Error(`Whether a chat a route names is ready is waited for by two areas, ${chatReady.by} and ${area.name}: one area waits for it.`);
+      chatReady = { by: area.name, hook: area.fills.chatReady };
     }
     for (const [lane, fill] of Object.entries(area.fills?.door ?? {})) {
       if (fill === undefined)
@@ -118193,6 +118418,7 @@ function gatherHooks(areas) {
       return { user: first.user, names: new Set(found.flatMap((n) => n === null ? [] : [...n.names])) };
     },
     ...chatNamed === null ? {} : { chatNamed: chatNamed.hook },
+    ...chatReady === null ? {} : { chatReady: chatReady.hook },
     door
   };
 }
@@ -119071,6 +119297,7 @@ async function answerDeclared(route2, asked2, cursorKey) {
       return await refused3(problem, `${at2} does not take this body: ${problemsOf(declared, body, "body").slice(0, 3).join(" ")}`);
   }
   const run2 = async (signal3) => {
+    await asked2.before();
     const reply = await route2.handle({ params: asked2.params, query: query2, body, user: asked2.user, auth: asked2.auth, signal: signal3 });
     if (route2.reply.kind === "nothing")
       return new Response(null, { status: 204 });
@@ -119079,7 +119306,28 @@ async function answerDeclared(route2, asked2, cursorKey) {
   };
   if (route2.long === true && asked2.later !== null)
     return asked2.later(run2);
-  return await run2(asked2.signal);
+  if (asked2.late === null)
+    return await run2(asked2.signal);
+  const work = new AbortController;
+  let handed = false;
+  const ended3 = () => {
+    if (!handed)
+      work.abort(asked2.signal.reason);
+  };
+  asked2.signal.addEventListener("abort", ended3, { once: true });
+  const running2 = run2(work.signal);
+  const waited = Promise.withResolvers();
+  const timer = setTimeout(() => waited.resolve(null), asked2.late.ms);
+  try {
+    const first = await Promise.race([running2, waited.promise]);
+    if (first !== null)
+      return first;
+    handed = true;
+    return asked2.late.start(running2);
+  } finally {
+    clearTimeout(timer);
+    asked2.signal.removeEventListener("abort", ended3);
+  }
 }
 function startServer(parts) {
   const { config: config3, auth: auth2, log } = parts;
@@ -119159,9 +119407,16 @@ function startServer(parts) {
     };
     const rest2 = route2.path.endsWith("/*") ? restOf2(route2.path, path) : null;
     try {
-      if (parts.chatNamed !== undefined && takesChat(route2) && typeof params.chat === "string")
-        await parts.chatNamed(user, params.chat);
+      const before2 = async () => {
+        if (typeof params.chat !== "string")
+          return;
+        if (parts.chatReady !== undefined)
+          await parts.chatReady(user, params.chat);
+        if (parts.chatNamed !== undefined && takesChat(route2))
+          await parts.chatNamed(user, params.chat);
+      };
       if ("raw" in route2) {
+        await before2();
         const given = bytes === null ? request : new Request(request.url, { method: request.method, headers: request.headers, body: bytes, signal: request.signal });
         const openLiveSocket = (headers) => server2?.upgrade(request, { data: { follows: new Map, auth: call, ends: undefined, catchUp: undefined, counted: false }, ...headers === undefined ? {} : { headers } }) ?? false;
         const untimed = () => server2?.timeout(request, 0);
@@ -119171,7 +119426,8 @@ function startServer(parts) {
       if (rest2 !== null && rest2.decoded === null)
         return withCors(refusal5(path, 400, `The path ${path} has a part that is not well encoded.`), origin2);
       const later = on === "tcp" ? (work) => parts.answers.start(work(new AbortController().signal).catch((error) => failure(error, path, at2, placed2.area))) : null;
-      const asked2 = { path, params: rest2 === null ? params : { ...params, "*": rest2.decoded ?? "" }, search: url2.searchParams, user, auth: call, bytes, signal: request.signal, json: json3(true), later };
+      const late = on === "tcp" && route2.access === "page" ? { ms: config3.server.answerLateSeconds * 1000, start: (work) => parts.answers.start(work.catch((error) => failure(error, path, at2, placed2.area))) } : null;
+      const asked2 = { path, params: rest2 === null ? params : { ...params, "*": rest2.decoded ?? "" }, search: url2.searchParams, user, auth: call, bytes, signal: request.signal, json: json3(true), later, late, before: before2 };
       return withCors(await answerDeclared(route2, asked2, cursorKey), origin2);
     } catch (error) {
       if (route2.path === LUMIVERSE_SIGNIN_PATH && error instanceof RouteError && (error.status === 401 || error.status === 403 || error.status === 429))
@@ -120027,7 +120283,7 @@ async function openApp(options) {
       if (starting !== null)
         throw new Error("RPE's server is already started.");
       const run2 = (async () => {
-        const server = startServer({ config: config3, routes, auth: auth2, live, log, now, workers, answers: answers2, commandSocket: commandSocketPath(paths.root), ...hooks.chatNamed === undefined ? {} : { chatNamed: hooks.chatNamed } });
+        const server = startServer({ config: config3, routes, auth: auth2, live, log, now, workers, answers: answers2, commandSocket: commandSocketPath(paths.root), ...hooks.chatNamed === undefined ? {} : { chatNamed: hooks.chatNamed }, ...hooks.chatReady === undefined ? {} : { chatReady: hooks.chatReady } });
         running2 = server;
         for (const area of mounted)
           await hook(area, "started");
@@ -129867,15 +130123,7 @@ function messageFrom(row) {
       swipes = [row.content ?? ""];
     }
   }
-  let extra = row.extra;
-  if (typeof extra === "string") {
-    try {
-      extra = JSON.parse(extra);
-    } catch {
-      extra = {};
-    }
-  }
-  const ex = object(extra);
+  const marks = "extra" in row ? marksOf2(row.extra) : { hidden: flag2(row.hidden), system: flag2(row.system) };
   let dates = row.swipe_dates;
   if (typeof dates === "string") {
     try {
@@ -129892,12 +130140,12 @@ function messageFrom(row) {
     id: id2(row.id),
     chat: str28(row.chat_id),
     index: num10(row.index_in_chat),
-    role: isUser ? "user" : ex.spindle_role === "system" ? "system" : "assistant",
+    role: isUser ? "user" : marks.system ? "system" : "assistant",
     name: str28(row.name),
     text: str28(row.content),
     swipe,
     swipes: Array.isArray(swipes) ? swipes.length : 1,
-    hidden: ex.hidden === true,
+    hidden: marks.hidden,
     sentAt: num10(row.send_date) * 1000,
     revision: num10(row.revision),
     shown: { hash: textHash(typeof saved === "string" ? saved : str28(row.content)), date: typeof date === "number" ? date : null },
@@ -129906,6 +130154,18 @@ function messageFrom(row) {
       return { text: typeof text10 === "string" ? text10 : "", date: typeof at2 === "number" ? at2 : null };
     }) : [{ text: str28(row.content), date: null }]
   };
+}
+function marksOf2(extra) {
+  let parsed2 = extra;
+  if (typeof parsed2 === "string") {
+    try {
+      parsed2 = JSON.parse(parsed2);
+    } catch {
+      parsed2 = {};
+    }
+  }
+  const ex = object(parsed2);
+  return { hidden: ex.hidden === true, system: ex.spindle_role === "system" };
 }
 function bookFrom(row) {
   return { id: id2(row.id), name: str28(row.name), description: str28(row.description), metadata: object(parsed(row.metadata, "metadata")), createdAt: num10(row.created_at), updatedAt: num10(row.updated_at) };
@@ -130172,10 +130432,15 @@ function createDbReader(deps) {
     return at2;
   }
   async function step(what, run2) {
-    const { tries, retryMs } = deps.settings?.() ?? { tries: TRIES, retryMs: RETRY_MS };
+    const { tries, retryMs, slowMs } = deps.settings?.() ?? { tries: TRIES, retryMs: RETRY_MS, slowMs: SLOW_MS };
     for (let tried = 1;; tried++) {
       try {
-        return run2(file().db);
+        const began = performance.now();
+        const out = run2(file().db);
+        const took = performance.now() - began;
+        if (took >= slowMs)
+          deps.log(`Reading ${what} from Lumiverse's database held RPE for ${Math.round(took)} ms.`);
+        return out;
       } catch (error) {
         if (error instanceof SourceOff || error instanceof Unreadable)
           throw error;
@@ -130313,7 +130578,7 @@ function createDbReader(deps) {
       return r === null ? null : mapped(`setting ${key}`, () => settingFrom(row(r)));
     },
     async breakdown(chat) {
-      const r = await step(`chat ${chat}'s breakdown`, (db) => db.query(Q.breakdown).get(chat, user));
+      const r = await step(`chat ${chat}'s breakdown`, (db) => db.query(Q.breakdown).get(user, chat, user));
       if (r === null)
         return null;
       try {
@@ -130335,16 +130600,7 @@ function createDbReader(deps) {
   };
   return reader;
 }
-var READ_COLUMNS, TABLES5, COLUMNS, SCHEMA = "SELECT schema_version AS schema FROM pragma_schema_version", MESSAGE = "m.id, m.chat_id, m.index_in_chat, m.is_user, m.name, m.content, m.send_date, m.swipe_id, m.swipes, m.swipe_dates, m.extra, m.revision", OF_CHAT = "FROM messages m JOIN chats c ON c.id = m.chat_id WHERE m.chat_id = ? AND c.user_id = ?", ORDER2 = "ORDER BY m.index_in_chat, m.rowid", STEP = `m.id, m.chat_id, m.index_in_chat, m.is_user, m.swipe_id, m.revision,
-  CASE WHEN json_valid(m.swipes) AND json_type(m.swipes) = 'array' THEN json_array_length(m.swipes) ELSE 1 END AS swipe_count,
-  CASE WHEN json_valid(m.extra) THEN coalesce(json_type(m.extra, '$.hidden') = 'true', 0) ELSE 0 END AS hidden,
-  CASE WHEN json_valid(m.extra) THEN coalesce(json_extract(m.extra, '$.spindle_role') = 'system', 0) ELSE 0 END AS system,
-  CASE WHEN m.swipe_id < 0 OR NOT json_valid(m.swipes) THEN m.content
-    WHEN json_type(m.swipes, '$[' || m.swipe_id || ']') = 'text' THEN json_extract(m.swipes, '$[' || m.swipe_id || ']')
-    ELSE m.content END AS shown_text,
-  CASE WHEN m.swipe_id < 0 OR NOT json_valid(m.swipe_dates) THEN NULL
-    WHEN json_type(m.swipe_dates, '$[' || m.swipe_id || ']') IN ('integer', 'real') THEN json_extract(m.swipe_dates, '$[' || m.swipe_id || ']')
-    END AS shown_date`, ENTRY2 = "e.id, e.world_book_id, e.uid, e.key, e.keysecondary, e.content, e.comment, e.position, e.depth, e.role, e.order_value, e.constant, e.disabled, e.selective, e.vectorized, e.sticky, e.extensions, e.revision, e.updated_at", CHARACTER = "id, name, description, personality, scenario, first_mes, mes_example, system_prompt, post_history_instructions, tags, alternate_greetings, extensions, updated_at", Q, TRIES = 4, RETRY_MS = 25, MAGIC, code = (error) => error instanceof Error && ("code" in error) && typeof error.code === "string" ? error.code : "", words11 = (error) => error instanceof Error ? error.message : String(error);
+var READ_COLUMNS, TABLES5, COLUMNS, SCHEMA = "SELECT schema_version AS schema FROM pragma_schema_version", HIDDEN2 = "CASE WHEN json_valid(m.extra) THEN coalesce(json_type(m.extra, '$.hidden') = 'true', 0) ELSE 0 END AS hidden", SYSTEM = "CASE WHEN json_valid(m.extra) THEN coalesce(json_extract(m.extra, '$.spindle_role') = 'system', 0) ELSE 0 END AS system", MESSAGE, OF_CHAT = "FROM messages m JOIN chats c ON c.id = m.chat_id WHERE m.chat_id = ? AND c.user_id = ?", ORDER2 = "ORDER BY m.index_in_chat, m.rowid", STEP, ENTRY2 = "e.id, e.world_book_id, e.uid, e.key, e.keysecondary, e.content, e.comment, e.position, e.depth, e.role, e.order_value, e.constant, e.disabled, e.selective, e.vectorized, e.sticky, e.extensions, e.revision, e.updated_at", CHARACTER = "id, name, description, personality, scenario, first_mes, mes_example, system_prompt, post_history_instructions, tags, alternate_greetings, extensions, updated_at", Q, TRIES = 4, RETRY_MS = 25, SLOW_MS = 1000, MAGIC, code = (error) => error instanceof Error && ("code" in error) && typeof error.code === "string" ? error.code : "", words11 = (error) => error instanceof Error ? error.message : String(error);
 var init_db = __esm(() => {
   init_reads();
   init_rows();
@@ -130398,6 +130654,17 @@ var init_db = __esm(() => {
   };
   TABLES5 = Object.keys(READ_COLUMNS);
   COLUMNS = `WITH t(name) AS (VALUES ${TABLES5.map(() => "(?)").join(", ")}) SELECT t.name AS tbl, c.name AS col, c.type AS type FROM t LEFT JOIN pragma_table_info(t.name) AS c`;
+  MESSAGE = `m.id, m.chat_id, m.index_in_chat, m.is_user, m.name, m.content, m.send_date, m.swipe_id, m.swipes, m.swipe_dates, m.revision, ${HIDDEN2}, ${SYSTEM}`;
+  STEP = `m.id, m.chat_id, m.index_in_chat, m.is_user, m.swipe_id, m.revision,
+  CASE WHEN json_valid(m.swipes) AND json_type(m.swipes) = 'array' THEN json_array_length(m.swipes) ELSE 1 END AS swipe_count,
+  ${HIDDEN2},
+  ${SYSTEM},
+  CASE WHEN m.swipe_id < 0 OR NOT json_valid(m.swipes) THEN m.content
+    WHEN json_type(m.swipes, '$[' || m.swipe_id || ']') = 'text' THEN json_extract(m.swipes, '$[' || m.swipe_id || ']')
+    ELSE m.content END AS shown_text,
+  CASE WHEN m.swipe_id < 0 OR NOT json_valid(m.swipe_dates) THEN NULL
+    WHEN json_type(m.swipe_dates, '$[' || m.swipe_id || ']') IN ('integer', 'real') THEN json_extract(m.swipe_dates, '$[' || m.swipe_id || ']')
+    END AS shown_date`;
   Q = {
     chat: "SELECT id, user_id, character_id, name, metadata, updated_at FROM chats WHERE id = ? AND user_id = ?",
     chats: "SELECT id, user_id, character_id, name, metadata, updated_at FROM chats WHERE user_id = ? ORDER BY updated_at DESC, rowid",
@@ -130414,7 +130681,7 @@ var init_db = __esm(() => {
     defaultPersona: "SELECT id, name, title, description, metadata, attached_world_book_id, is_default, is_narrator, updated_at FROM personas WHERE is_default = 1 AND user_id = ? LIMIT 1",
     preset: "SELECT id, name, provider, engine, parameters, prompt_order, prompts, metadata, cache_revision, updated_at FROM presets WHERE id = ? AND user_id = ?",
     setting: "SELECT key, value, updated_at FROM settings WHERE key = ? AND user_id = ?",
-    breakdown: "SELECT b.data FROM message_breakdowns b JOIN messages m ON m.id = b.message_id WHERE b.chat_id = ? AND b.user_id = ? ORDER BY m.index_in_chat DESC, m.rowid DESC LIMIT 1",
+    breakdown: "SELECT b.data FROM message_breakdowns b WHERE b.user_id = ? AND b.message_id = (SELECT n.message_id FROM message_breakdowns n JOIN messages m ON m.id = n.message_id WHERE n.chat_id = ? AND n.user_id = ? ORDER BY m.index_in_chat DESC, m.rowid DESC LIMIT 1)",
     bookStamp: "SELECT w.updated_at AS book, COUNT(e.id) AS count, COALESCE(MAX(e.updated_at), 0) AS latest, COALESCE(SUM(e.revision), 0) AS revisions FROM world_books w LEFT JOIN world_book_entries e ON e.world_book_id = w.id WHERE w.id = ? AND w.user_id = ?",
     presetStamp: "SELECT updated_at, cache_revision FROM presets WHERE id = ? AND user_id = ?",
     version: "PRAGMA data_version"
@@ -148981,7 +149248,7 @@ async function migrate3(sources, options) {
             worlds.set(r, doc);
         }
       }
-      const store = openStore({ db, registry: registry2, worlds: (r) => worlds.get(r), areas: [CAST_STORE_AREA, STORY_STORE_AREA] });
+      const store = openStore({ db, registry: registry2, worlds: (r) => worlds.get(r), areas: STORE_AREAS, fingerprint: options.version ?? "dev" });
       step2 = "importing the chats";
       const s = store.user(sources.userId);
       const run3 = crypto.randomUUID();
@@ -149065,6 +149332,7 @@ var init_migrate = __esm(() => {
   init_packs();
   init_store2();
   init_story3();
+  init_store_areas();
   init_briefing();
   init_carry2();
   init_connections2();
@@ -149350,7 +149618,7 @@ async function swapRun(plan2, rpe, io) {
   const base = localUrl(plan2.at.address, plan2.at.port);
   const undo2 = [];
   let told2 = null;
-  const letGo = io.onStop((signal3) => {
+  const letGo2 = io.onStop((signal3) => {
     if (told2 !== null)
       return;
     told2 = signal3;
@@ -149441,7 +149709,7 @@ async function swapRun(plan2, rpe, io) {
         io.out(line3);
     return null;
   } finally {
-    letGo();
+    letGo2();
   }
   io.out(`Started ${rpe.service.unit}, RPE's service: RPE answers at ${base}${took === null ? "" : `, where the previous runtime ${took.name} did${rpe.todays ? `, under its model name (${took.loopback.model})` : ""}${took.loopback.keyHash === null ? "" : `${rpe.todays ? " and" : ","} with its key`}`}.`);
   if (took?.unit)
@@ -162832,6 +163100,9 @@ var init_tree = __esm(() => {
 });
 
 // src/turn/settings.ts
+function jobsPage(read3) {
+  return { default: read3.value(DEFS2.jobsPage), most: read3.value(DEFS2.jobsPageMost) };
+}
 async function turnSettings(files, scope2, log) {
   const read3 = readConfig(await portTexts(files, scope2), log, [...TURN_SETTINGS, LEAD2]);
   const previousRun = read3.value(DEFS2.previousRun);
@@ -163114,6 +163385,26 @@ var init_settings13 = __esm(() => {
       perConnection: false,
       name: "Most turns on a page",
       about: "The most turns one page of a chat's list may ask for.",
+      effect: "use"
+    },
+    jobsPage: {
+      key: "jobs.page",
+      default: 50,
+      takes: { type: "whole", least: 1 },
+      levels: ["shipped", "global"],
+      perConnection: false,
+      name: "Jobs on a page",
+      about: "The jobs a list of jobs gives when the page names no number, each by its line; a page reads a job whole when it opens it.",
+      effect: "use"
+    },
+    jobsPageMost: {
+      key: "jobs.maxPage",
+      default: 500,
+      takes: { type: "whole", least: 1 },
+      levels: ["shipped", "global"],
+      perConnection: false,
+      name: "Most jobs on a page",
+      about: "The most jobs one page of a list of jobs may ask for.",
       effect: "use"
     },
     requestsTextMost: {
@@ -164002,38 +164293,59 @@ function reasonOf(change2, code2) {
 function beatsOf(changes) {
   return changes.flatMap((c) => c.lane === "story" && isRecord(c.value) && c.value.part === "beat" && isRecord(c.value.value) && typeof c.value.value.text === "string" ? [c.value.value.text] : []);
 }
-function journalNotes(store2, user, chat, most, code2 = (c) => c) {
+function notesOf(store2, s, entry, words13) {
+  const turn = entry.turn;
+  if (turn === null)
+    return [];
+  try {
+    const key2 = `${s.foldKey(turn)}\x00${entry.message}\x00${words13.key}`;
+    const hit = kept4.get(key2);
+    if (hit !== undefined) {
+      kept4.delete(key2);
+      kept4.set(key2, hit);
+      return hit;
+    }
+    const view2 = s.viewAt(turn);
+    const changes = s.changes(turn);
+    const applied3 = changes.filter((c) => c.applied);
+    const events3 = applied3.filter((c) => c.lane === "engine").flatMap((c) => eventOf(c.op, c.value) ?? []);
+    const lines = events3.length === 0 ? [] : playerLines(store2.env.registry, view2.world, view2.state.world, view2.world.pov, events3, events3.length);
+    const notes = [];
+    for (const text15 of [...lines, ...beatsOf(applied3)])
+      notes.push({ kind: "note", messageId: entry.message, ref: null, text: text15 });
+    for (const change2 of changes)
+      if (!change2.applied)
+        notes.push({ kind: "dropped", messageId: entry.message, ref: null, text: reasonOf(change2, words13.code) });
+    kept4.set(key2, notes);
+    for (const oldest of kept4.keys()) {
+      if (kept4.size <= KEPT4)
+        break;
+      kept4.delete(oldest);
+    }
+    return notes;
+  } catch (error) {
+    if (!(error instanceof JoinedTurnError))
+      throw error;
+    return [];
+  }
+}
+async function journalNotes(store2, user, chat, most, words13) {
   const s = store2.user(user);
   if (s.chat(chat) === null)
     return [];
   const turns = s.path(chat).filter((entry) => !entry.user && entry.turn !== null);
-  const notes = [];
-  for (const entry of turns.slice(-Math.max(1, most))) {
-    if (entry.turn === null)
-      continue;
-    try {
-      const view2 = s.viewAt(entry.turn);
-      const changes = s.changes(entry.turn);
-      const applied3 = changes.filter((c) => c.applied);
-      const events3 = applied3.filter((c) => c.lane === "engine").flatMap((c) => eventOf(c.op, c.value) ?? []);
-      const lines = events3.length === 0 ? [] : playerLines(store2.env.registry, view2.world, view2.state.world, view2.world.pov, events3, events3.length);
-      for (const text15 of [...lines, ...beatsOf(applied3)])
-        notes.push({ kind: "note", messageId: entry.message, ref: null, text: text15 });
-      for (const change2 of changes)
-        if (!change2.applied)
-          notes.push({ kind: "dropped", messageId: entry.message, ref: null, text: reasonOf(change2, code2) });
-    } catch (error) {
-      if (!(error instanceof JoinedTurnError))
-        throw error;
-    }
-  }
-  return notes;
+  const lines = linesOf(words13.texts);
+  const notes = await inStretches(turns.slice(-Math.max(1, most)), (entry) => notesOf(store2, s, entry, words13), (stretch) => withLines(lines, stretch));
+  return notes.flat();
 }
+var kept4, KEPT4 = 4096;
 var init_journal3 = __esm(() => {
   init_player_events();
+  init_history_lines();
   init_json();
   init_store2();
   init_fold();
+  kept4 = new Map;
 });
 
 // src/play/panel-reads.ts
@@ -164804,7 +165116,8 @@ class PlayService {
       throw new JoinedTurnError(turn, row.joined);
     const { taps, map } = await this.deps.settings(user, chat);
     const keys = (await this.part()).keys;
-    const journal = await withHistoryLines(this.deps.texts(user, chat), () => journalNotes(this.deps.store, user, chat, taps.journalMost, (code2) => own2(keys, code2) ?? code2));
+    const texts4 = await historyTexts(this.deps.texts(user, chat));
+    const journal = await journalNotes(this.deps.store, user, chat, taps.journalMost, { texts: texts4, code: (code2) => own2(keys, code2) ?? code2, key: hashParts("journal-words", JSON.stringify(texts4), JSON.stringify(keys)) });
     const turning = this.deps.turning(user, chat);
     const { db } = this.deps;
     const knowledge = { ...taps.choices, chat: { ...taps.choices.chat, ...taps.tidy.on === null ? {} : { tidy: taps.tidy.on } } };
@@ -164962,9 +165275,9 @@ class PlayService {
     };
     const message = await lumiverse.appendMessage(user, chat, words13 !== "" ? words13 : pressedLine(asked4)).catch(refused5("lumiverse_refused"));
     const sent = "request" in ask ? await this.deps.requests.played(user, chat, ask.request, message.id) : null;
-    const kept4 = sent ?? await this.deps.requests.hold(user, chat, { kind: "panel", asked: asked4, played: true, message: message.id }, Date.now());
+    const kept5 = sent ?? await this.deps.requests.hold(user, chat, { kind: "panel", asked: asked4, played: true, message: message.id }, Date.now());
     const generation = await lumiverse.startGeneration(user, chat, {}).catch(refused5("reply_not_started"));
-    return { message: message.id, generation, request: kept4.id };
+    return { message: message.id, generation, request: kept5.id };
   }
   async pressed(user, chat, tap, text15) {
     const { registry: registry2, world, state: state2 } = headOf2(this.deps.store, user, chat);
@@ -165448,7 +165761,7 @@ function jobRecords(db, writes2) {
         args.push(from.started, from.started, from.id);
       }
       args.push(query3.limit === undefined ? -1 : query3.limit + 1);
-      const jobs = db.query(`SELECT value FROM job WHERE ${where.join(" AND ")} ORDER BY started DESC, id DESC LIMIT ?`).all(...args).map((r) => JSON.parse(r.value));
+      const jobs = db.query(`SELECT json_remove(value, '$.transcript') AS value FROM job WHERE ${where.join(" AND ")} ORDER BY started DESC, id DESC LIMIT ?`).all(...args).map((r) => JSON.parse(r.value));
       if (query3.limit === undefined || jobs.length <= query3.limit)
         return { jobs };
       const page = jobs.slice(0, query3.limit);
@@ -165508,6 +165821,24 @@ var init_kv = __esm(() => {
 });
 
 // src/turn/jobs.ts
+function jobRowOf(job, shared) {
+  const briefChars = BRIEF_CHARS === undefined ? PAGE_SETTING_DEFS.briefChars.default : shared.value(BRIEF_CHARS);
+  return {
+    id: job.id,
+    agent: job.agent,
+    brief: job.brief.slice(0, briefChars + 1),
+    state: job.state,
+    scope: job.scope,
+    startedBy: job.startedBy,
+    started: job.started,
+    ...job.ended !== undefined ? { ended: job.ended } : {},
+    usage: job.usage,
+    ...job.limit !== undefined ? { limit: job.limit } : {},
+    ...job.stoppedBy !== undefined ? { stoppedBy: job.stoppedBy } : {},
+    ...job.attach !== undefined ? { attach: job.attach } : {},
+    ...job.limits !== undefined ? { limits: job.limits } : {}
+  };
+}
 function carryJob(into, user, job) {
   const view2 = {
     id: job.id,
@@ -165535,11 +165866,14 @@ function jobsAmong(db, user, ids3, limit3, after2) {
   const last = page.at(-1);
   return { jobs: page, next: rows2.length > limit3 && last !== undefined ? placeOf9(last) : null };
 }
-var JOB_KIND2, CARRIED_STATES;
+var JOB_KIND2, BRIEF_CHARS, CARRIED_STATES;
 var init_jobs2 = __esm(() => {
   init_app2();
+  init_page_settings2();
+  init_page_settings();
   init_kv();
-  JOB_KIND2 = liveKind("job", { data: shape.object({ job: jobView2 }), does: "One of his jobs changed: the job as RPH keeps it now." });
+  JOB_KIND2 = liveKind("job", { data: shape.object({ job: jobRow }), does: "One of his jobs changed: its row as a list shows it now; its whole is read by its id." });
+  BRIEF_CHARS = PAGE_SETTINGS.find((s) => s.key === PAGE_SETTING_DEFS.briefChars.key);
   CARRIED_STATES = { ended: "done", failed: "failed", cancelled: "cancelled" };
 });
 
@@ -165799,8 +166133,8 @@ function scanSettingsOf(value) {
   };
 }
 function scannedSteps(steps, writing2, depth3) {
-  const kept4 = steps.filter((s) => !writing2.has(s.id));
-  return depth3 === null || depth3 >= kept4.length ? kept4 : kept4.slice(-depth3);
+  const kept5 = steps.filter((s) => !writing2.has(s.id));
+  return depth3 === null || depth3 >= kept5.length ? kept5 : kept5.slice(-depth3);
 }
 function findMarkerSpans(text15) {
   const spans = [];
@@ -166199,7 +166533,7 @@ function joinOf(saved, base, reply) {
   const join45 = saved.slice(base.length, saved.length - reply.length);
   return join45.trim() === "" ? join45 : null;
 }
-function marksOf2(store2, turn) {
+function marksOf3(store2, turn) {
   return { mark: store2.changes(turn).at(-1)?.ord ?? -1 };
 }
 async function unlessAborted(ready, signal3) {
@@ -166459,15 +166793,15 @@ ${begun.id}`, stopped.length);
           ...maxTokens !== undefined ? { replyMaxTokens: maxTokens } : {}
         };
         const timed = storyTime !== null;
-        const kept4 = typed !== undefined && typed.found !== "none";
-        if (told2.length > 0 || asking.length > 0 || timed || kept4) {
+        const kept5 = typed !== undefined && typed.found !== "none";
+        if (told2.length > 0 || asking.length > 0 || timed || kept5) {
           await this.#d.writes.run((db) => {
             if (told2.length > 0)
               this.#d.since.told(db, user, (named4 ?? begun).id, told2);
             this.#d.requests.tell(db, user, asking.map((r) => r.id), begun.id);
             if (timed)
               store2.updateTurn(begun.id, { storyTime });
-            if (kept4)
+            if (kept5)
               db.run("INSERT INTO turn_told (user, turn, kind, body, at) VALUES (?, ?, ?, ?, ?)", [user, begun.id, FEEDBACK_TOLD, JSON.stringify(typed), this.#d.clock.now()]);
           }, "keeping what a turn was told and its story time");
           if (asking.length > 0)
@@ -166670,10 +167004,10 @@ ${turn}`) ?? 0;
     const window2 = this.#leadWindow(await this.#leadLimits(scope2, settings.lead), settings.lead, null);
     const reads = this.#d.reads();
     const steps = edge === null || reads === null ? null : await reads.path(chat);
-    const kept4 = steps === null ? -1 : steps.findIndex((s) => s.id === edge);
-    if (part?.format !== "template" || kept4 <= 0)
+    const kept5 = steps === null ? -1 : steps.findIndex((s) => s.id === edge);
+    if (part?.format !== "template" || kept5 <= 0)
       return { text: "", tokens: 0, budget: storySoFarBudget(window2, settings.storySoFar), leftOut: [] };
-    return storySoFar({ record: storyRecordParts({ store: this.#d.store, user, chat, turn: null }), keptFrom: kept4, contextWindow: window2, settings: settings.storySoFar, tokens: tokenCount2(settings.charsPerToken), layout: part });
+    return storySoFar({ record: storyRecordParts({ store: this.#d.store, user, chat, turn: null }), keptFrom: kept5, contextWindow: window2, settings: settings.storySoFar, tokens: tokenCount2(settings.charsPerToken), layout: part });
   }
   async stop(user, turn) {
     const run3 = this.#d.runs.running(user, turn);
@@ -166776,7 +167110,7 @@ ${turn}`) ?? 0;
         leadCall: { failed: null, open: null }
       };
       await this.#d.writes.run((db) => {
-        Object.assign(run3, marksOf2(store2, turn.id));
+        Object.assign(run3, marksOf3(store2, turn.id));
         this.#d.runs.put(db, run3);
         this.#d.runs.hold(run3);
       }, "keeping a Settle now run").catch((error) => {
@@ -167124,8 +167458,8 @@ ${scope2.turn}`, { ...drawnGiven, ...state2.drawnShown });
     const point = { store: this.#d.store, user: scope2.user, chat: scope2.chat, turn: scope2.turn };
     const [soFarPart, briefPart] = await Promise.all([guidance.part(PARTS4.storySoFar), guidance.part(PARTS4.storyBrief)]);
     if (soFarPart?.format === "template") {
-      const kept4 = at3.keep === null ? -1 : steps.findIndex((s) => s.id === at3.keep);
-      const keptFrom = kept4 > 0 ? kept4 : null;
+      const kept5 = at3.keep === null ? -1 : steps.findIndex((s) => s.id === at3.keep);
+      const keptFrom = kept5 > 0 ? kept5 : null;
       const soFar = keptFrom === null ? null : storySoFar({ record: storyRecordParts(point), keptFrom, contextWindow: this.#leadWindow(await at3.limits(), settings.lead, scope2.turn), settings: settings.storySoFar, tokens: tokenCount2(settings.charsPerToken), layout: soFarPart });
       if (soFar !== null && soFar.text.trim() !== "")
         blocks2.push({ name: BLOCKS2.storySoFar, text: soFar.text.trimEnd() });
@@ -167216,8 +167550,8 @@ ${parent}`);
     if (carried !== null && carriedPart?.format === "template")
       add4("migrated", notices?.line(migrated.notice, { carried: carriedPart.render(carried).text.trim() }));
     const attempts = replaced2 === null ? [] : store2.swipes(chat, replaced2).filter((t) => t.id !== turn.id);
-    const kept4 = this.#keptFor(user, turn, again, attempts);
-    const of = (kind) => kept4.flatMap((k) => k.item.kind === kind ? [k.item] : []);
+    const kept5 = this.#keptFor(user, turn, again, attempts);
+    const of = (kind) => kept5.flatMap((k) => k.item.kind === kind ? [k.item] : []);
     const gone2 = new Map;
     for (const d of of("deleted")) {
       for (const t of d.turns)
@@ -167349,7 +167683,7 @@ ${parent}`);
     }
     for (const q of this.#d.approvals.waitingIn(user, chat))
       add4("awaiting", notices?.line("approval_waiting", { tool: q.tool, lane: q.lane, ...q.turn !== null ? { turn: q.turn } : {} }), q.turn === null ? {} : { turn: q.turn });
-    return { items, told: again ? kept4.map((k) => k.id) : [] };
+    return { items, told: again ? kept5.map((k) => k.id) : [] };
   }
   #keptFor(user, turn, again, attempts) {
     const { since } = this.#d;
@@ -167358,11 +167692,11 @@ ${parent}`);
       return since.found(user, turn.chat, turn.id).filter((k) => !told3.has(k.id));
     }
     const told2 = turn.parent === null ? new Set : since.toldTo(user, turn.parent);
-    const kept4 = new Map(since.found(user, turn.chat, turn.parent).flatMap((k) => told2.has(k.id) ? [] : [[k.id, k]]));
+    const kept5 = new Map(since.found(user, turn.chat, turn.parent).flatMap((k) => told2.has(k.id) ? [] : [[k.id, k]]));
     for (const attempt2 of attempts)
       for (const k of since.found(user, turn.chat, attempt2.id))
-        kept4.set(k.id, k);
-    return [...kept4.values()].sort((a, b) => a.at - b.at);
+        kept5.set(k.id, k);
+    return [...kept5.values()].sort((a, b) => a.at - b.at);
   }
   #jobsEnded(user, turn, ended3, told2) {
     if (ended3.length === 0)
@@ -167409,8 +167743,8 @@ ${parent}`);
       }
       const report = view2.report?.trim() ?? "";
       const cut2 = report.length > told2.report;
-      const kept4 = cut2 ? report.slice(0, told2.report).replace(/\s+\S*$/, "") : report;
-      const fields3 = { job: view2.id, agent: view2.agent, ...view2.plays !== undefined && view2.plays !== "" ? { plays: view2.plays } : {}, ...kept4 !== "" ? { report: kept4 } : {}, ...cut2 ? { cut: true, chars: report.length } : {}, applied: applied3, not_applied: notApplied, ...more > 0 ? { more } : {} };
+      const kept5 = cut2 ? report.slice(0, told2.report).replace(/\s+\S*$/, "") : report;
+      const fields3 = { job: view2.id, agent: view2.agent, ...view2.plays !== undefined && view2.plays !== "" ? { plays: view2.plays } : {}, ...kept5 !== "" ? { report: kept5 } : {}, ...cut2 ? { cut: true, chars: report.length } : {}, applied: applied3, not_applied: notApplied, ...more > 0 ? { more } : {} };
       return [{ turn: started2, line: line3, fields: fields3 }];
     });
   }
@@ -167649,8 +167983,8 @@ ${parent}`);
     const store2 = this.#d.store.user(user);
     const tied2 = written3 === null ? null : this.#tiedTo(user, run3.chat, written3.message.id);
     const into = tied2 !== null && tied2.turn.chat === run3.chat && tied2.turn.id !== heldTurn && (tied2.turn.status === "done" || tied2.turn.status === "cut") ? tied2.turn : null;
-    const kept4 = tied2 === null ? undefined : this.#d.runs.ofTurn(user, tied2.turn.id).findLast((r) => r.kind !== "settle" && r.id !== run3.id);
-    const before2 = written3 === null || written3.message.id === run3.target ? run3.base : kept4 === undefined ? "" : kept4.saved ?? kept4.base + kept4.reply;
+    const kept5 = tied2 === null ? undefined : this.#d.runs.ofTurn(user, tied2.turn.id).findLast((r) => r.kind !== "settle" && r.id !== run3.id);
+    const before2 = written3 === null || written3.message.id === run3.target ? run3.base : kept5 === undefined ? "" : kept5.saved ?? kept5.base + kept5.reply;
     const nothingNew = written3 !== null && (written3.text === before2 || joinOf(written3.text, before2, "") !== null || tied2 !== null && tied2.turn.hash === textHash(written3.text));
     if (written3 === null || cut2 && nothingNew) {
       if (into !== null)
@@ -170632,12 +170966,12 @@ function partFields(store2, scope2, log) {
     flushing = false;
     const writes2 = [...pending2.entries()];
     pending2.clear();
-    for (const [key2, kept4] of writes2) {
+    for (const [key2, kept5] of writes2) {
       try {
-        if (kept4.whole !== undefined)
-          await store2.set({ user: scope2.user }, key2, kept4.whole);
+        if (kept5.whole !== undefined)
+          await store2.set({ user: scope2.user }, key2, kept5.whole);
         else
-          await store2.update({ user: scope2.user }, key2, (current3) => ({ ...typeof current3 === "object" && current3 !== null && !Array.isArray(current3) ? current3 : {}, ...kept4.lines }));
+          await store2.update({ user: scope2.user }, key2, (current3) => ({ ...typeof current3 === "object" && current3 !== null && !Array.isArray(current3) ? current3 : {}, ...kept5.lines }));
       } catch (error) {
         log.warn("The values a part was rendered with could not be kept; its preview shows the ones before.", { key: key2, error: error instanceof Error ? error.message : String(error) });
       }
@@ -170645,12 +170979,12 @@ function partFields(store2, scope2, log) {
   };
   return (kind, name, fields3, line3) => {
     const key2 = fieldsKey(scope2.chat, kind, name);
-    const kept4 = pending2.get(key2) ?? { lines: {} };
+    const kept5 = pending2.get(key2) ?? { lines: {} };
     if (line3 === undefined)
-      kept4.whole = asJson(fields3);
+      kept5.whole = asJson(fields3);
     else
-      kept4.lines[line3] = asJson(fields3);
-    pending2.set(key2, kept4);
+      kept5.lines[line3] = asJson(fields3);
+    pending2.set(key2, kept5);
     if (flushing)
       return;
     flushing = true;
@@ -188067,18 +188401,18 @@ function rejectCompactionEdit(params) {
   }
 }
 function withoutCompactionIncompatibleParams(params) {
-  const { context_management, stop_sequences, output_format, ...kept4 } = params;
+  const { context_management, stop_sequences, output_format, ...kept5 } = params;
   const withoutFormat = ({ format, ...outputConfig }) => outputConfig;
-  if (kept4.tool_choice?.type === "any" || kept4.tool_choice?.type === "tool") {
-    delete kept4.tool_choice;
+  if (kept5.tool_choice?.type === "any" || kept5.tool_choice?.type === "tool") {
+    delete kept5.tool_choice;
   }
-  if (kept4.output_config) {
-    kept4.output_config = withoutFormat(kept4.output_config);
+  if (kept5.output_config) {
+    kept5.output_config = withoutFormat(kept5.output_config);
   }
-  if (Array.isArray(kept4.fallbacks)) {
-    kept4.fallbacks = kept4.fallbacks.map((fallback) => fallback.output_config ? { ...fallback, output_config: withoutFormat(fallback.output_config) } : fallback);
+  if (Array.isArray(kept5.fallbacks)) {
+    kept5.fallbacks = kept5.fallbacks.map((fallback) => fallback.output_config ? { ...fallback, output_config: withoutFormat(fallback.output_config) } : fallback);
   }
-  return kept4;
+  return kept5;
 }
 async function generateToolResponse(runnable, available, lastMessage, requestOptions, calls) {
   if (!lastMessage || lastMessage.role !== "assistant" || !lastMessage.content || typeof lastMessage.content === "string") {
@@ -234529,11 +234863,11 @@ class ClientSDK {
         var _a7;
         return (_a7 = pair.split("=")[0]) !== null && _a7 !== undefined ? _a7 : "";
       }));
-      const kept4 = current3.split("&").filter((pair) => {
+      const kept5 = current3.split("&").filter((pair) => {
         var _a7;
         return pair !== "" && !additionKeys.has((_a7 = pair.split("=")[0]) !== null && _a7 !== undefined ? _a7 : "");
       });
-      return [...kept4, additions].join("&");
+      return [...kept5, additions].join("&");
     };
     const encodeQueryRecord = (record5) => {
       return Object.entries(record5).map(([k, v]) => {
@@ -246008,8 +246342,8 @@ function networkWords(text15) {
     return plain8;
   const at3 = NETWORK_AT.exec(plain8)?.[1]?.replace(/[.,;:]+$/, "");
   const code2 = NETWORK_CODE.exec(plain8)?.[0];
-  const kept4 = plain8.replace(NETWORK_AT, "").replace(NETWORK_FILLER, "").replace(new RegExp(NETWORK_CODE.source, "g"), "").replace(/\(\s*\)/g, "").replace(/^[\s:;,.()-]+|[\s:;,.()-]+$/g, "");
-  return `${net.words(at3)}${/[\p{L}\p{N}]/u.test(kept4) ? `: ${kept4}` : ""}${code2 !== undefined ? ` (${code2})` : ""}`;
+  const kept5 = plain8.replace(NETWORK_AT, "").replace(NETWORK_FILLER, "").replace(new RegExp(NETWORK_CODE.source, "g"), "").replace(/\(\s*\)/g, "").replace(/^[\s:;,.()-]+|[\s:;,.()-]+$/g, "");
+  return `${net.words(at3)}${/[\p{L}\p{N}]/u.test(kept5) ? `: ${kept5}` : ""}${code2 !== undefined ? ` (${code2})` : ""}`;
 }
 function failureWords2(text15) {
   const trimmed3 = text15.trim();
@@ -246034,11 +246368,11 @@ function redact(text15, secrets, terms2) {
   let out = text15;
   for (const secret of long)
     if (out.includes(secret))
-      out = out.split(secret).join(HIDDEN2);
+      out = out.split(secret).join(HIDDEN3);
   out = withoutCutSecrets(out, long, terms2.secretFloor);
   const short = all3.filter((s) => s.length < terms2.secretFloor).map(asWord);
   if (short.length > 0)
-    out = out.split(HIDDEN2).map((piece) => short.reduce((cleaned, word) => cleaned.replace(word, HIDDEN2), piece)).join(HIDDEN2);
+    out = out.split(HIDDEN3).map((piece) => short.reduce((cleaned, word) => cleaned.replace(word, HIDDEN3), piece)).join(HIDDEN3);
   return out.length > terms2.wordsMost ? `${out.slice(0, terms2.wordsMost)}\u2026` : out;
 }
 function withoutCutSecrets(text15, secrets, floor) {
@@ -246054,7 +246388,7 @@ function withoutCutSecrets(text15, secrets, floor) {
       while (from !== -1 && from <= end2 - floor && !secret.startsWith(out.slice(from, end2)))
         from = out.indexOf(head, from + 1);
       if (from !== -1 && from <= end2 - floor) {
-        out = `${out.slice(0, from)}${HIDDEN2}${out.slice(end2)}`;
+        out = `${out.slice(0, from)}${HIDDEN3}${out.slice(end2)}`;
         break;
       }
     }
@@ -246077,7 +246411,7 @@ function untakenWords(media2, part, model2, connection) {
 function errorWords(error3) {
   return error3 instanceof Error ? error3.message : String(error3);
 }
-var LEADING_STATUS, PREFIXED_STATUS, BUN_ADVICE, NETWORK, NETWORK_CODE, NETWORK_AT, NETWORK_FILLER, REDIRECT_REFUSED, REDIRECT_WORDS = "the server answered with a redirect to another address, which isn't followed, so that the connection's key and headers never go with it: give the connection the address it moved to.", HIDDEN2 = "[secret]", CUT_MARK = "... [truncated ", UNTAKEN;
+var LEADING_STATUS, PREFIXED_STATUS, BUN_ADVICE, NETWORK, NETWORK_CODE, NETWORK_AT, NETWORK_FILLER, REDIRECT_REFUSED, REDIRECT_WORDS = "the server answered with a redirect to another address, which isn't followed, so that the connection's key and headers never go with it: give the connection the address it moved to.", HIDDEN3 = "[secret]", CUT_MARK = "... [truncated ", UNTAKEN;
 var init_words4 = __esm(() => {
   LEADING_STATUS = /^(\d{3})(?::\s*|\s+)([\s\S]*)$/;
   PREFIXED_STATUS = /^[^\n(]*\((\d{3})\):\s*([\s\S]*)$/;
@@ -246123,15 +246457,15 @@ function limitRecord(value) {
       return null;
     if (pictures2 !== undefined && typeof pictures2 !== "boolean" || audio !== undefined && typeof audio !== "boolean" || video !== undefined && typeof video !== "boolean")
       return null;
-    const kept4 = {
+    const kept5 = {
       ...contextWindow !== undefined ? { contextWindow } : {},
       ...maxTokens !== undefined ? { maxTokens } : {},
       ...pictures2 !== undefined ? { pictures: pictures2 } : {},
       ...audio !== undefined ? { audio } : {},
       ...video !== undefined ? { video } : {}
     };
-    if (Object.keys(kept4).length > 0)
-      out[model2] = kept4;
+    if (Object.keys(kept5).length > 0)
+      out[model2] = kept5;
   }
   return out;
 }
@@ -246264,11 +246598,11 @@ function samePlaces(a, b) {
   const ids3 = Object.keys(a);
   return ids3.length === Object.keys(b).length && ids3.every((id3) => Object.hasOwn(b, id3) && b[id3] === a[id3]);
 }
-function valuesOf2(given3, kept4) {
-  return Object.fromEntries(Object.entries(given3).map(([name, value]) => [name, value ?? own3(kept4, name) ?? null]));
+function valuesOf2(given3, kept5) {
+  return Object.fromEntries(Object.entries(given3).map(([name, value]) => [name, value ?? own3(kept5, name) ?? null]));
 }
-function withValues(connection, kept4) {
-  return connection.headers === undefined ? connection : { ...connection, headers: valuesOf2(connection.headers, kept4) };
+function withValues(connection, kept5) {
+  return connection.headers === undefined ? connection : { ...connection, headers: valuesOf2(connection.headers, kept5) };
 }
 function givenPlaceOf(entry) {
   const { provider: provider2, baseUrl } = entry;
@@ -246360,9 +246694,9 @@ class Book {
         for (const [id3, values3] of Object.entries(raw.headers)) {
           if (!isRecord3(values3))
             continue;
-          const kept4 = Object.entries(values3).filter((entry) => typeof entry[1] === "string");
-          if (kept4.length > 0)
-            secrets.headers[id3] = Object.fromEntries(kept4);
+          const kept5 = Object.entries(values3).filter((entry) => typeof entry[1] === "string");
+          if (kept5.length > 0)
+            secrets.headers[id3] = Object.fromEntries(kept5);
         }
       }
       if (isRecord3(raw.places)) {
@@ -246503,12 +246837,12 @@ class Book {
     for (const c of put5) {
       keep2(c.id, c.headers);
       const { headers, ...rest2 } = c;
-      const kept4 = { ...rest2, ...headers !== undefined ? { headers: Object.keys(headers) } : {} };
+      const kept5 = { ...rest2, ...headers !== undefined ? { headers: Object.keys(headers) } : {} };
       const at3 = entries4.findIndex((e) => isRecord3(e) && e.id === c.id);
       if (at3 === -1)
-        entries4.push(kept4);
+        entries4.push(kept5);
       else
-        entries4[at3] = kept4;
+        entries4[at3] = kept5;
     }
     for (const [id3, place3] of Object.entries(change2.places ?? {})) {
       if (place3 === null)
@@ -246588,9 +246922,9 @@ class Book {
     return (await this.keptNow()).default;
   }
   async connection(id3) {
-    const kept4 = await this.keptNow();
-    const wanted = id3 ?? kept4.default;
-    return wanted === null ? null : kept4.connections.find((c) => c.id === wanted) ?? null;
+    const kept5 = await this.keptNow();
+    const wanted = id3 ?? kept5.default;
+    return wanted === null ? null : kept5.connections.find((c) => c.id === wanted) ?? null;
   }
   async key(id3) {
     return own3((await this.secretsNow()).keys, id3);
@@ -246645,8 +246979,8 @@ class Book {
     return this.serial(async () => {
       const secrets = await this.secretsNow();
       await this.readAgain();
-      const kept4 = await this.keptNow();
-      const at3 = input.id === undefined ? -1 : kept4.connections.findIndex((c) => c.id === input.id);
+      const kept5 = await this.keptNow();
+      const at3 = input.id === undefined ? -1 : kept5.connections.findIndex((c) => c.id === input.id);
       if (input.id !== undefined && at3 === -1)
         throw new Error("That connection is no longer there: reload the page.");
       if (typeof id3 === "string") {
@@ -246663,7 +246997,7 @@ class Book {
         throw new Error("A key can't be empty: leave it out to keep the one there is.");
       if (typeof key2 === "string" && key2.trim().length < floor)
         throw new Error(`A key needs ${floor} characters at least: a key is taken out of whatever a server says back (some repeat a key they refuse), and a shorter one only where it stands as a word of its own. ${settingWords(MODELS.secretFloor)} says how many. For a server that takes any key, choose No key: its calls then send "none".`);
-      const before2 = at3 === -1 ? undefined : kept4.connections[at3];
+      const before2 = at3 === -1 ? undefined : kept5.connections[at3];
       const place3 = placeOf(connection.provider, connection.baseUrl);
       const elsewhere = before2 !== undefined && this.heldFor(connection) !== undefined;
       const giving = typeof key2 === "string" || Object.values(input.headers ?? {}).some((value) => typeof value === "string");
@@ -246677,7 +247011,7 @@ class Book {
       else if (typeof key2 === "string")
         keys[saved.id] = key2.trim();
       const places2 = { [saved.id]: elsewhere && !giving ? own3(secrets.places, saved.id) ?? null : place3 };
-      await this.writeConnections([saved], [], kept4.default ?? saved.id, { keys, places: places2 });
+      await this.writeConnections([saved], [], kept5.default ?? saved.id, { keys, places: places2 });
       this.places.set(saved.id, place3);
       return saved;
     });
@@ -246686,18 +247020,18 @@ class Book {
     await this.serial(async () => {
       const secrets = await this.secretsNow();
       await this.readAgain();
-      const kept4 = await this.keptNow();
+      const kept5 = await this.keptNow();
       const keys = { ...secrets.keys };
       delete keys[id3];
-      await this.writeConnections([], [id3], kept4.default === id3 ? null : kept4.default, { keys });
+      await this.writeConnections([], [id3], kept5.default === id3 ? null : kept5.default, { keys });
       this.places.delete(id3);
     });
   }
   async setDefault(id3) {
     await this.serial(async () => {
       await this.readAgain();
-      const kept4 = await this.keptNow();
-      if (id3 !== null && !kept4.connections.some((c) => c.id === id3))
+      const kept5 = await this.keptNow();
+      if (id3 !== null && !kept5.connections.some((c) => c.id === id3))
         throw new Error("That connection is no longer there: reload the page.");
       await this.writeConnections([], [], id3);
     });
@@ -246706,12 +247040,12 @@ class Book {
     await this.serial(async () => {
       if (!await this.readAgain().then(() => true, () => false))
         return;
-      const kept4 = await this.keptNow();
-      const was = kept4.connections.find((c) => c.id === listed5.id);
+      const kept5 = await this.keptNow();
+      const was = kept5.connections.find((c) => c.id === listed5.id);
       if (was === undefined || placeOf(was.provider, was.baseUrl) !== placeOf(listed5.provider, listed5.baseUrl) || JSON.stringify(was.reported ?? {}) === JSON.stringify(reported))
         return;
       const { reported: _old, ...rest2 } = was;
-      await this.writeConnections([Object.keys(reported).length > 0 ? { ...rest2, reported } : rest2], [], kept4.default);
+      await this.writeConnections([Object.keys(reported).length > 0 ? { ...rest2, reported } : rest2], [], kept5.default);
     });
   }
   async device(make2) {
@@ -247088,18 +247422,18 @@ function writtenCalls(text15, names2) {
   const calls = [];
   let rest2 = text15;
   const take = (blocks2, read3) => {
-    let kept4 = "";
+    let kept5 = "";
     let from = 0;
     for (const block of blocks2) {
       const found = read3(block);
       if (!found)
         continue;
       calls.push(...found);
-      kept4 += rest2.slice(from, block.start);
+      kept5 += rest2.slice(from, block.start);
       from = block.end;
     }
     if (from > 0)
-      rest2 = kept4 + rest2.slice(from);
+      rest2 = kept5 + rest2.slice(from);
   };
   const named4 = (name, args) => {
     const read3 = writtenArgs(args);
@@ -247131,8 +247465,8 @@ function withWrittenCalls(answer2, tools, id3) {
   if (calls.length === 0)
     return answer2;
   const made2 = calls.map((call) => ({ type: "toolCall", id: id3(), name: call.name, arguments: call.args }));
-  const kept4 = answer2.content.filter((part) => part.type !== "text");
-  return { ...answer2, content: [...kept4, ...rest2 !== "" ? [{ type: "text", text: rest2 }] : [], ...made2], stopReason: "toolUse" };
+  const kept5 = answer2.content.filter((part) => part.type !== "text");
+  return { ...answer2, content: [...kept5, ...rest2 !== "" ? [{ type: "text", text: rest2 }] : [], ...made2], stopReason: "toolUse" };
 }
 var TOOL_REFUSALS, NAME_END, NAME_ATTRIBUTE, DEEPSEEK_NAME, FENCE_LINE, NAMESPACE = "antml:", DEEPSEEK_CALL, TAGGED_CALL, FUNCTION_CALLS, INVOKE, PARAMETER, LLAMA_CALL, FENCED, LEFTOVERS, SPACE, FENCE_OPENS;
 var init_tools_text = __esm(() => {
@@ -249054,9 +249388,9 @@ function cut2(texts4, roles, layout) {
   const named4 = [];
   const placed2 = [];
   const loose = (span, role, kind = "loose") => {
-    const kept4 = trimmed2(texts4, span);
-    if (kept4 !== undefined)
-      placed2.push({ name: "", kind, span: kept4, role });
+    const kept5 = trimmed2(texts4, span);
+    if (kept5 !== undefined)
+      placed2.push({ name: "", kind, span: kept5, role });
   };
   if (!fits3) {
     texts4.forEach((text15, message) => loose({ message, start: 0, end: text15.length }, roles[message] ?? "system"));
@@ -249445,12 +249779,12 @@ function learn(prompt, written3, head) {
     cut3.set(slice2, spans.flatMap((span) => without(prompt.texts, span, later)));
   }
   const before2 = prompt.facts.map?.slices.filter((slice2) => slice2.edited === true) ?? [];
-  const kept4 = [];
+  const kept5 = [];
   for (const slice2 of before2) {
     const found = prompt.mapped ? prompt.slices.find((s) => s.from === "map" && s.marker === slice2.marker) : undefined;
-    kept4.push({ slice: slice2, spans: found?.spans ?? [] });
+    kept5.push({ slice: slice2, spans: found?.spans ?? [] });
   }
-  const players = kept4.flatMap((k) => k.spans);
+  const players = kept5.flatMap((k) => k.spans);
   const made2 = [];
   for (const [slice2, spans] of cut3) {
     const own4 = mergedSpans(prompt.texts, spans.flatMap((span) => without(prompt.texts, span, players)));
@@ -249459,17 +249793,17 @@ function learn(prompt, written3, head) {
     const marker = slice2.marker.trim();
     if (own4.length === 0)
       problems.push({ line: "write_left_empty", fields: { marker } });
-    if (kept4.some((k) => same3(k.slice.marker, marker)))
+    if (kept5.some((k) => same3(k.slice.marker, marker)))
       problems.push({ line: "write_players", fields: { marker } });
     made2.push({ slice: { marker, kind: slice2.kind, line: slice2.line, behaviour: slice2.behaviour, find: {} }, spans: own4 });
   }
   if (problems.length > 0)
     return { problems };
-  const slices2 = withFinders(prompt, [...made2, ...kept4.filter((k) => k.spans.length > 0)], head);
-  for (const k of kept4)
+  const slices2 = withFinders(prompt, [...made2, ...kept5.filter((k) => k.spans.length > 0)], head);
+  for (const k of kept5)
     if (k.spans.length === 0)
       slices2.push(k.slice);
-  return { map: { format: 1, preset, slices: slices2 }, kept: kept4.map((k) => k.slice.marker) };
+  return { map: { format: 1, preset, slices: slices2 }, kept: kept5.map((k) => k.slice.marker) };
 }
 function withFinders(prompt, given3, head) {
   const placed2 = [...given3].sort((a, b) => order2(a.spans[0], b.spans[0]));
@@ -249525,12 +249859,12 @@ function moved3(was, now) {
       const row = table[i2] ?? [];
       row[j2] = order3[i2] === common3[j2] ? (table[i2 + 1]?.[j2 + 1] ?? 0) + 1 : Math.max(table[i2 + 1]?.[j2] ?? 0, row[j2 + 1] ?? 0);
     }
-  const kept4 = new Set;
+  const kept5 = new Set;
   let i = 0;
   let j = 0;
   while (i < order3.length && j < common3.length) {
     if (order3[i] === common3[j]) {
-      kept4.add(common3[j] ?? "");
+      kept5.add(common3[j] ?? "");
       i++;
       j++;
     } else if ((table[i + 1]?.[j] ?? 0) >= (table[i]?.[j + 1] ?? 0))
@@ -249538,7 +249872,7 @@ function moved3(was, now) {
     else
       j++;
   }
-  return common3.filter((marker) => !kept4.has(marker));
+  return common3.filter((marker) => !kept5.has(marker));
 }
 function noticesOf(prompt, before2) {
   const notices = [];
@@ -249833,19 +250167,19 @@ class PromptMemory {
     this.#store = store2;
     this.#files = files;
   }
-  async#file(scope2, kept4) {
-    const at3 = { user: scope2.user, chat: scope2.chat, session: kept4.session, turn: kept4.turn };
-    const file = await this.#files.read(at3, `${kept4.folder}${KEPT_FILE}`).catch(() => {
+  async#file(scope2, kept5) {
+    const at3 = { user: scope2.user, chat: scope2.chat, session: kept5.session, turn: kept5.turn };
+    const file = await this.#files.read(at3, `${kept5.folder}${KEPT_FILE}`).catch(() => {
       return;
     });
     return file?.status === "refused" ? undefined : file;
   }
   async#found(scope2, turn) {
     const all3 = keptOf2(await this.#store.get(scope2, keyOf7(scope2)));
-    const kept4 = turn === undefined ? all3.at(-1) : all3.find((k) => k.turn === turn);
-    const file = kept4 === undefined ? undefined : await this.#file(scope2, kept4);
+    const kept5 = turn === undefined ? all3.at(-1) : all3.find((k) => k.turn === turn);
+    const file = kept5 === undefined ? undefined : await this.#file(scope2, kept5);
     const held4 = file?.status === "read" ? heldOf2(file.text) : undefined;
-    return kept4 === undefined || held4 === undefined ? undefined : { kept: kept4, held: held4 };
+    return kept5 === undefined || held4 === undefined ? undefined : { kept: kept5, held: held4 };
   }
   async before(scope2, parent) {
     if (parent === null)
@@ -249875,11 +250209,11 @@ class PromptMemory {
   }
   async remark(env4, scope2, map2, renamed) {
     const earlier = keptOf2(await this.#store.get(scope2, keyOf7(scope2)));
-    for (const kept4 of earlier) {
-      const found = await this.#found(scope2, kept4.turn);
+    for (const kept5 of earlier) {
+      const found = await this.#found(scope2, kept5.turn);
       if (found === undefined)
         continue;
-      const at3 = { user: scope2.user, chat: scope2.chat, session: kept4.session, turn: kept4.turn };
+      const at3 = { user: scope2.user, chat: scope2.chat, session: kept5.session, turn: kept5.turn };
       try {
         const { held: held4 } = found;
         const prompt = await TurnPrompt.read({ env: env4, scope: at3, messages: held4.messages });
@@ -249889,13 +250223,13 @@ class PromptMemory {
         const told2 = JSON.stringify(located) === JSON.stringify(held4.located);
         if (same4 && told2)
           continue;
-        const written3 = await this.#files.write(at3, `${kept4.folder}${KEPT_FILE}`, { op: "write", text: JSON.stringify({ ...held4, located, record: record5 }) }, "harness");
+        const written3 = await this.#files.write(at3, `${kept5.folder}${KEPT_FILE}`, { op: "write", text: JSON.stringify({ ...held4, located, record: record5 }) }, "harness");
         if (written3.status !== "written")
-          throw new Error(`The host did not let RPH write ${kept4.folder}${KEPT_FILE} (${written3.status}).`);
+          throw new Error(`The host did not let RPH write ${kept5.folder}${KEPT_FILE} (${written3.status}).`);
         if (!told2)
           await env4.prompt.saveLocated(at3, located);
       } catch (error3) {
-        env4.log.warn("A kept turn's record could not be made again after an edit of the prompt map.", { turn: kept4.turn, error: error3 instanceof Error ? error3.message : String(error3) });
+        env4.log.warn("A kept turn's record could not be made again after an edit of the prompt map.", { turn: kept5.turn, error: error3 instanceof Error ? error3.message : String(error3) });
       }
     }
   }
@@ -250146,10 +250480,10 @@ function between2(prompt, slices2) {
 function promptMapApi(env4) {
   return {
     async show(scope2) {
-      const kept4 = await keptPrompt(env4, scope2, scope2.turn);
-      if (kept4 === undefined)
+      const kept5 = await keptPrompt(env4, scope2, scope2.turn);
+      if (kept5 === undefined)
         return;
-      const { prompt, shown: shown5 } = kept4;
+      const { prompt, shown: shown5 } = kept5;
       const map2 = prompt.facts.map;
       const slices2 = prompt.slices.filter((slice2) => slice2.from !== "unclaimed" && slice2.from !== "history").map((slice2) => {
         const text15 = prompt.text(slice2);
@@ -250172,11 +250506,11 @@ function promptMapApi(env4) {
     },
     async edit(scope2, edit, by) {
       const guidance = loadGuidance2(env4.files, scope2);
-      const [words14, settings, kept4] = await Promise.all([promptWords(guidance), readSettings(guidance, env4, scope2), keptPrompt(env4, scope2, scope2.turn)]);
+      const [words14, settings, kept5] = await Promise.all([promptWords(guidance), readSettings(guidance, env4, scope2), keptPrompt(env4, scope2, scope2.turn)]);
       const refused5 = (line3, fields3) => ({ status: "refused", words: words14(line3, fields3) ?? "" });
-      if (kept4 === undefined)
+      if (kept5 === undefined)
         return refused5("no_prompt");
-      const { prompt } = kept4;
+      const { prompt } = kept5;
       const map2 = prompt.facts.map;
       if (map2 === undefined || !prompt.mapped)
         return refused5("edit_unmapped");
@@ -252892,9 +253226,9 @@ class AgentRunner {
     const waiting = [...stint.reworded];
     stint.reworded.clear();
     for (const [id3, { tool, made: made2, ms: ms2 }] of waiting) {
-      const { kept: kept4, read: read3 } = await this.#bounded(stint, { agent: this.agent, callId: id3, tool, args: {} }, { content: [...made2.content], error: true }, []);
+      const { kept: kept5, read: read3 } = await this.#bounded(stint, { agent: this.agent, callId: id3, tool, args: {} }, { content: [...made2.content], error: true }, []);
       made2.content.splice(0, made2.content.length, ...read3);
-      stint.results.set(id3, kept4);
+      stint.results.set(id3, kept5);
       this.#ended(stint, id3, tool, made2, true, ms2);
     }
   }
@@ -253034,10 +253368,10 @@ class AgentRunner {
     return count2 >= most ? { limit: "repeats", per: "agent", max: most, value: count2, agent: this.agent } : undefined;
   }
   async#blocked(stint, call, answer3, added) {
-    const { kept: kept4, read: read3 } = await this.#bounded(stint, call, answer3, added);
+    const { kept: kept5, read: read3 } = await this.#bounded(stint, call, answer3, added);
     if (stint.halt !== undefined)
       return { block: true };
-    stint.results.set(call.callId, { ...kept4, error: true });
+    stint.results.set(call.callId, { ...kept5, error: true });
     stint.read.set(call.callId, read3);
     const text16 = read3.map((part) => part.type === "text" ? part.text : "").join("");
     stint.reading.set(call.callId, tokensOf(text16, this.#o.terms.charsPerToken));
@@ -253178,7 +253512,7 @@ class AgentRunner {
     const due = await this.#o.runEnd?.due({ agent: this.agent, call: this.#calls }) ?? [];
     if (stint.halt !== undefined)
       return { action: "end" };
-    const kept4 = stint.hooked ? undefined : await this.#o.atRunEnd?.();
+    const kept5 = stint.hooked ? undefined : await this.#o.atRunEnd?.();
     stint.hooked = true;
     if (stint.halt !== undefined)
       return { action: "end" };
@@ -253190,8 +253524,8 @@ class AgentRunner {
       this.#add(stint, fired, "follow-up", "follow-up");
     for (const judged of stint.judged.splice(0))
       this.#judged(stint, judged, "follow-up");
-    if (kept4 !== undefined)
-      this.#pi.followUp(this.#message([kept4]));
+    if (kept5 !== undefined)
+      this.#pi.followUp(this.#message([kept5]));
     return;
   }
   #judge(stint, message) {
@@ -253328,8 +253662,8 @@ class AgentRunner {
     });
     if (stint.halt !== undefined)
       return { content: [] };
-    const kept4 = stint.results.get(callId);
-    if (kept4 === undefined) {
+    const kept5 = stint.results.get(callId);
+    if (kept5 === undefined) {
       const line3 = this.#invalid(tool, args, callId);
       const answer3 = { content: line3 === undefined ? [] : [{ type: "text", text: line3 }], error: true };
       stint.results.set(callId, answer3);
@@ -253340,8 +253674,8 @@ class AgentRunner {
     return {
       content: read3 ?? outcome.result.content,
       ...outcome.isError ? { error: true } : {},
-      ...kept4?.details !== undefined ? { details: kept4.details } : {},
-      ...kept4?.ask !== undefined ? { ask: kept4.ask } : {}
+      ...kept5?.details !== undefined ? { details: kept5.details } : {},
+      ...kept5?.ask !== undefined ? { ask: kept5.ask } : {}
     };
   }
   async#run(tool, args, ctx) {
@@ -253584,8 +253918,8 @@ function pointerForm(messages, files, tools) {
     }
     return { ...head2, text: text16 };
   });
-  const kept4 = { sent: hashOf6(messages), messages: lines4, tools: [...tools] };
-  return JSON.stringify(kept4);
+  const kept5 = { sent: hashOf6(messages), messages: lines4, tools: [...tools] };
+  return JSON.stringify(kept5);
 }
 function isKeptFile(value) {
   return typeof value === "object" && value !== null && "sent" in value && typeof value.sent === "string" && "messages" in value && Array.isArray(value.messages) && "tools" in value && Array.isArray(value.tools);
@@ -253594,13 +253928,13 @@ async function rebuildRequest(files, scope2, path7) {
   const read3 = await files.read(scope2, path7);
   if (read3.status !== "read")
     return;
-  let kept4;
+  let kept5;
   try {
-    kept4 = JSON.parse(read3.text);
+    kept5 = JSON.parse(read3.text);
   } catch {
     return;
   }
-  if (!isKeptFile(kept4))
+  if (!isKeptFile(kept5))
     return;
   const at3 = path7.lastIndexOf(TRANSCRIPTS);
   const turn = at3 < 0 ? "" : path7.slice(0, at3);
@@ -253613,11 +253947,11 @@ async function rebuildRequest(files, scope2, path7) {
     return texts4.get(file);
   };
   const messages = [];
-  for (const line3 of kept4.messages) {
+  for (const line3 of kept5.messages) {
     const text16 = "text" in line3 ? line3.text : (await textOf9(line3.from.file))?.slice(line3.from.at, line3.from.at + line3.from.length);
     messages.push({ role: line3.role, text: text16 ?? "", ...line3.block !== undefined ? { block: line3.block } : {}, ..."from" in line3 ? { file: `${turn}${line3.from.file}` } : {} });
   }
-  return { messages, tools: kept4.tools, same: hashOf6(messages) === kept4.sent };
+  return { messages, tools: kept5.tools, same: hashOf6(messages) === kept5.sent };
 }
 var TRANSCRIPTS = "transcripts/", blocks3;
 var init_requests = __esm(() => {
@@ -253648,8 +253982,8 @@ function summaryStands(log3, entry) {
   if (entry.of === "run" || log3.undone(entry.id) !== undefined)
     return false;
   const written3 = log3.path(entry.id, true);
-  const kept4 = written3.findIndex((step2) => step2.id === entry.kept);
-  const stood = written3.slice(0, kept4 < 0 ? written3.length - 1 : kept4);
+  const kept5 = written3.findIndex((step2) => step2.id === entry.kept);
+  const stood = written3.slice(0, kept5 < 0 ? written3.length - 1 : kept5);
   return !stood.some((step2) => step2.type === "turn" && log3.leftAfter(step2.turn, entry.id));
 }
 function newestSummary(log3, path7) {
@@ -253663,8 +253997,8 @@ function newestSummary(log3, path7) {
 function unsummarized(log3, turns, path7, compacted) {
   if (compacted === undefined)
     return [...turns];
-  const kept4 = log3.inPlaceOf(compacted.kept);
-  const start2 = path7.findIndex((entry) => entry.id === kept4);
+  const kept5 = log3.inPlaceOf(compacted.kept);
+  const start2 = path7.findIndex((entry) => entry.id === kept5);
   if (start2 < 0)
     return [];
   const after3 = new Set(path7.slice(start2).map((entry) => entry.id));
@@ -253726,8 +254060,8 @@ function compactionAt(log3, from, current3, keep2, compacted) {
   const cut3 = Math.max(0, earlier.length - keep2);
   if (cut3 === 0)
     return;
-  const kept4 = earlier[cut3]?.entry.id ?? current3?.id;
-  return { turns: earlier.slice(0, cut3), keptTurns: earlier.length - cut3, ...kept4 !== undefined ? { kept: kept4 } : {} };
+  const kept5 = earlier[cut3]?.entry.id ?? current3?.id;
+  return { turns: earlier.slice(0, cut3), keptTurns: earlier.length - cut3, ...kept5 !== undefined ? { kept: kept5 } : {} };
 }
 async function compactionMaterial(input, turns) {
   const summary = (input.compacted ?? newestSummary(input.tree, input.tree.path(input.from)))?.summary;
@@ -253866,10 +254200,10 @@ function olderWork(messages, start2, keep2, ratio, summaries2) {
     return;
   const prior = summaries2.get(messages[from]);
   let to = messages.length;
-  let kept4 = 0;
-  while (to > from && kept4 < keep2) {
+  let kept5 = 0;
+  while (to > from && kept5 < keep2) {
     to -= 1;
-    kept4 += weigh([messages[to]], ratio);
+    kept5 += weigh([messages[to]], ratio);
   }
   while (to > from && messages[to]?.role === "toolResult")
     to -= 1;
@@ -254056,8 +254390,8 @@ function shown5(lines4) {
   return lines4.filter((line3) => line3 !== undefined && line3 !== "");
 }
 function linesAnswer(lines4, between3, error3 = false) {
-  const kept4 = shown5(lines4);
-  return answer2(kept4.length === 0 ? undefined : kept4.join(between3), error3);
+  const kept5 = shown5(lines4);
+  return answer2(kept5.length === 0 ? undefined : kept5.join(between3), error3);
 }
 function heldLimit(named4, most) {
   return named4 === undefined ? undefined : Math.min(named4, most);
@@ -255213,26 +255547,26 @@ class TurnGate {
     const cut4 = (text16) => {
       if (left2 <= 0)
         return;
-      const kept4 = text16.slice(0, left2);
-      left2 -= kept4.length;
-      return kept4;
+      const kept5 = text16.slice(0, left2);
+      left2 -= kept5.length;
+      return kept5;
     };
     const content = result.content.flatMap((part) => {
       if (part.type !== "text")
         return [part];
-      const kept4 = cut4(part.text);
-      return kept4 === undefined ? [] : [{ ...part, text: kept4 }];
+      const kept5 = cut4(part.text);
+      return kept5 === undefined ? [] : [{ ...part, text: kept5 }];
     });
     const shownReports = reports.flatMap((report) => {
-      const kept4 = cut4(report);
-      return kept4 === undefined ? [] : [kept4];
+      const kept5 = cut4(report);
+      return kept5 === undefined ? [] : [kept5];
     });
     const shownAdded = added.flatMap((text16) => {
-      const kept4 = cut4(text16);
-      return kept4 === undefined ? [] : [kept4];
+      const kept5 = cut4(text16);
+      return kept5 === undefined ? [] : [kept5];
     });
     const shown6 = most - left2;
-    const reportsLeft = reports.length - shownReports.filter((kept4, at3) => kept4.length === reports[at3]?.length).length;
+    const reportsLeft = reports.length - shownReports.filter((kept5, at3) => kept5.length === reports[at3]?.length).length;
     const path7 = await this.#keep(call, whole10.join(`
 `));
     const line3 = d.words("clipped", { shown: shown6, length: length2, left: length2 - shown6, ...reportsLeft > 0 ? { reports: reports.length, reports_left: reportsLeft } : {}, ...path7 !== undefined ? { path: path7 } : {} });
@@ -255765,20 +256099,20 @@ class SessionBook {
   }
   heldNow() {
     let chars = 0;
-    for (const kept4 of this.#files.values())
-      chars += kept4.read?.chars ?? 0;
+    for (const kept5 of this.#files.values())
+      chars += kept5.read?.chars ?? 0;
     return { files: this.#files.size, chars };
   }
   async hold(scope2) {
     const key3 = JSON.stringify([scope2.user, scope2.chat ?? null, scope2.session]);
-    let kept4 = this.#files.get(key3);
-    if (kept4 === undefined) {
-      kept4 = { file: this.#read(sessionScope(scope2, scope2.session)), holds: 0 };
-      this.#files.set(key3, kept4);
+    let kept5 = this.#files.get(key3);
+    if (kept5 === undefined) {
+      kept5 = { file: this.#read(sessionScope(scope2, scope2.session)), holds: 0 };
+      this.#files.set(key3, kept5);
     }
     this.#idle.delete(key3);
-    kept4.holds += 1;
-    const held4 = kept4;
+    kept5.holds += 1;
+    const held4 = kept5;
     let file;
     try {
       file = await held4.file;
@@ -255808,17 +256142,17 @@ class SessionBook {
       release2();
     }
   }
-  #let(key3, kept4) {
-    kept4.holds -= 1;
-    if (kept4.holds > 0)
+  #let(key3, kept5) {
+    kept5.holds -= 1;
+    if (kept5.holds > 0)
       return;
     const drop2 = () => {
-      if (kept4.holds === 0 && this.#files.get(key3) === kept4)
+      if (kept5.holds === 0 && this.#files.get(key3) === kept5)
         this.#files.delete(key3);
     };
-    kept4.file.then(async (file) => {
+    kept5.file.then(async (file) => {
       await file.settled();
-      if (file.unwritten || kept4.holds > 0 || this.#files.get(key3) !== kept4)
+      if (file.unwritten || kept5.holds > 0 || this.#files.get(key3) !== kept5)
         return;
       if (file.unreadable !== undefined && "reason" in file.unreadable)
         return drop2();
@@ -255832,13 +256166,13 @@ class SessionBook {
       if (this.#idle.size <= this.held)
         return;
       this.#idle.delete(key3);
-      const kept4 = this.#files.get(key3);
-      if (kept4 !== undefined && kept4.holds === 0)
+      const kept5 = this.#files.get(key3);
+      if (kept5 !== undefined && kept5.holds === 0)
         this.#files.delete(key3);
     }
   }
   async settled() {
-    const files = await Promise.allSettled([...this.#files.values()].map((kept4) => kept4.file));
+    const files = await Promise.allSettled([...this.#files.values()].map((kept5) => kept5.file));
     await Promise.all(files.map((file) => file.status === "fulfilled" ? file.value.flush() : undefined));
   }
   async#read(scope2) {
@@ -256060,12 +256394,12 @@ class AgentRuns {
         return;
       const path7 = requestPath(turn, agent2, call, kind);
       const sent = sentMessages(messages, opening);
-      const kept4 = (async () => {
+      const kept5 = (async () => {
         const own4 = new Set(d.tools().flatMap((tool) => tool.from === "rph" ? [tool.name] : []));
         const [sources, tools] = await Promise.all([d.sources?.() ?? [], Promise.all(declared.map(async (name) => ({ name, ...own4.has(name) ? await describedBy(d.guidance, name) : {} })))]);
         return env4.files.write(d.scope, path7, { op: "write", text: pointerForm(sent, sources, tools) }, "harness");
       })();
-      d.tell(kept4.then((done) => {
+      d.tell(kept5.then((done) => {
         if (done.status !== "written")
           env4.log.warn("What a model call was sent could not be kept.", { agent: agent2.id, call, path: path7, status: done.status });
       }, (error3) => env4.log.warn("What a model call was sent could not be kept.", { agent: agent2.id, call, path: path7, error: error3 instanceof Error ? error3.message : String(error3) })));
@@ -256639,12 +256973,12 @@ function archiveSearch(deps, stores) {
         return answer2(words14("archive_needs"), true);
       const own5 = sessions.info();
       const theirs = stores === undefined ? [] : (await stores.list(scope2)).filter((store2) => store2.name !== own5.name);
-      const kept4 = [...theirs.map((store2) => store2.name), own5.name];
+      const kept5 = [...theirs.map((store2) => store2.name), own5.name];
       const named4 = [...new Set(textsOf2(given3["stores"]))];
-      const unknown2 = named4.find((name) => !kept4.includes(name));
+      const unknown2 = named4.find((name) => !kept5.includes(name));
       if (unknown2 !== undefined)
-        return answer2(words14("no_store", { name: unknown2, stores: kept4.join(", ") }), true);
-      const asked4 = named4.length > 0 ? named4 : kept4;
+        return answer2(words14("no_store", { name: unknown2, stores: kept5.join(", ") }), true);
+      const asked4 = named4.length > 0 ? named4 : kept5;
       const limit5 = heldLimit(whole9(given3, "limit"), deps.perCall) ?? deps.perCall;
       const lists = await Promise.all(asked4.map(async (name) => {
         const found = name === own5.name ? await sessions.search(scope2, query5, limit5) : await stores.search(scope2, { text: query5, stores: [name], limit: limit5 });
@@ -256871,7 +257205,7 @@ async function prepareJob(core, ask) {
     late: (agent2, judged) => env4.log.info("A rule's question was answered yes after its agent's work had ended; its text went to no agent.", { job: ask.id, agent: agent2.id, rule: judged.fired.firing.rule })
   });
   let turnPrompt;
-  const prompt = () => turnPrompt ??= scope2.chat === undefined ? Promise.resolve(undefined) : keptPrompt(env4, scope2, scope2.turn).then((kept4) => kept4?.prompt);
+  const prompt = () => turnPrompt ??= scope2.chat === undefined ? Promise.resolve(undefined) : keptPrompt(env4, scope2, scope2.turn).then((kept5) => kept5?.prompt);
   const team = new Team({
     env: env4,
     trace,
@@ -257292,8 +257626,8 @@ async function prepareTagCheck(core, ask, named4) {
   const day3 = new Budget("day", settings.jobs.tokensPerDay !== undefined ? { tokens: settings.jobs.tokensPerDay } : {}, everyAgent, { spent: ask.spend.jobs, cachedWeight: settings.cachedWeight });
   const budget = new Budget("job", {}, day3, { cachedWeight: settings.cachedWeight });
   const ref2 = { id: ask.id, definition: TAG_CHECK, job: ask.id };
-  const finish3 = async (model2, tried, kept4) => {
-    const form = kept4 >= settings.checkKept ? "tags" : "two-step";
+  const finish3 = async (model2, tried, kept5) => {
+    const form = kept5 >= settings.checkKept ? "tags" : "two-step";
     let set3 = false;
     const global = (await env4.files.layers({ user })).find((layer2) => layer2.level === "global");
     if (global?.config !== undefined) {
@@ -257310,7 +257644,7 @@ async function prepareTagCheck(core, ask, named4) {
         env4.log.warn("A tag check's form could not be written into the global config; the record keeps it.", { connection: connection.name, path: path7, error: error3 instanceof Error ? error3.message : String(error3) });
       }
     }
-    const record5 = { connection: connection.id, name: connection.name, model: model2, tried, kept: kept4, needed: settings.checkKept, form, set: set3, at: env4.clock.now(), job: ask.id };
+    const record5 = { connection: connection.id, name: connection.name, model: model2, tried, kept: kept5, needed: settings.checkKept, form, set: set3, at: env4.clock.now(), job: ask.id };
     await env4.store.set({ user }, `${RECORDS}${connection.id}`, record5);
     return record5;
   };
@@ -257332,7 +257666,7 @@ async function prepareTagCheck(core, ask, named4) {
       });
       trace.event(ref2, undefined, { kind: "run_started", run: "job", lead: TAG_CHECK });
       let tried = 0;
-      let kept4 = 0;
+      let kept5 = 0;
       let model2 = "";
       let ended3 = { agent: ref2, status: "done", text: "", usage: emptyUsage() };
       try {
@@ -257355,11 +257689,11 @@ async function prepareTagCheck(core, ask, named4) {
           }
           tried += 1;
           if (keepsTags(outcome.text, tags))
-            kept4 += 1;
-          hearing2.text(`${kept4}/${tried}`);
+            kept5 += 1;
+          hearing2.text(`${kept5}/${tried}`);
         }
         if (ended3.status === "done" && !signal3.aborted) {
-          const record5 = await finish3(model2, tried, kept4);
+          const record5 = await finish3(model2, tried, kept5);
           ended3 = { ...ended3, text: `${record5.kept}/${record5.tried} ${record5.form}` };
         }
       } catch (error3) {
@@ -257706,8 +258040,8 @@ class Jobs2 {
     if (at3 !== undefined && !(Number.isInteger(at3) && at3 > 0))
       return { refused: "limit", limit: "askAt", value: at3 };
     const { asks: _asked, limits: limits3, ...rest2 } = live.view;
-    const { askAt: _point, ...kept4 } = limits3 ?? {};
-    const next = { ...kept4, ...at3 !== undefined ? { askAt: at3 } : {} };
+    const { askAt: _point, ...kept5 } = limits3 ?? {};
+    const next = { ...kept5, ...at3 !== undefined ? { askAt: at3 } : {} };
     if (at3 === undefined)
       delete live.askAt;
     else
@@ -257857,17 +258191,17 @@ class Jobs2 {
     live.view = { ...live.view, state: "running" };
     this.#changed(live);
     const signal3 = live.controller.signal;
-    const kept4 = (change2) => {
+    const kept5 = (change2) => {
       live.view = { ...live.view, ...change2 };
       this.#keep(live.view);
     };
     live.prepared.run(signal3, {
-      text: (text16) => kept4({ report: text16 }),
+      text: (text16) => kept5({ report: text16 }),
       spent: (usage3) => {
-        kept4({ usage: usage3 });
+        kept5({ usage: usage3 });
         this.#asks(live, usage3);
       },
-      wrote: (write) => kept4({ wrote: [...live.view.wrote ?? [], write] })
+      wrote: (write) => kept5({ wrote: [...live.view.wrote ?? [], write] })
     }).then((end2) => {
       const { outcome } = end2;
       const stoppedAs = signal3.aborted ? signal3.reason : undefined;
@@ -258408,8 +258742,8 @@ class McpServers {
     if (this.#closed)
       return { failed: "the harness is closing" };
     const key3 = McpServers.key(user, server);
-    let kept4 = this.#kept.get(key3);
-    if (kept4 === undefined) {
+    let kept5 = this.#kept.get(key3);
+    if (kept5 === undefined) {
       const named4 = "command" in server.runs ? server.env : server.runs.headers;
       const values3 = {};
       for (const [field7, secret] of Object.entries(named4)) {
@@ -258420,9 +258754,9 @@ class McpServers {
       }
       const secrets = Object.values(values3);
       const client = McpClient.start(server, { values: values3, startMs: terms2.startMs, readMost: terms2.answerMax });
-      kept4 = { client, secrets };
-      this.#kept.set(key3, kept4);
-      const mine = kept4;
+      kept5 = { client, secrets };
+      this.#kept.set(key3, kept5);
+      const mine = kept5;
       client.then((started2) => {
         this.#failed.delete(key3);
         started2.ended.then((why) => {
@@ -258439,9 +258773,9 @@ class McpServers {
       });
     }
     try {
-      return { client: await kept4.client, secrets: kept4.secrets };
+      return { client: await kept5.client, secrets: kept5.secrets };
     } catch (error3) {
-      return { failed: redact(errorText3(error3), kept4.secrets, terms2.secrets) };
+      return { failed: redact(errorText3(error3), kept5.secrets, terms2.secrets) };
     }
   }
   async tools(user, servers, guidance, terms2, words14) {
@@ -258513,9 +258847,9 @@ class McpServers {
   }
   async close() {
     this.#closed = true;
-    const kept4 = [...this.#kept.values()];
+    const kept5 = [...this.#kept.values()];
     this.#kept.clear();
-    await Promise.all(kept4.map((k) => k.client.then((client) => client.close()).catch(() => {
+    await Promise.all(kept5.map((k) => k.client.then((client) => client.close()).catch(() => {
       return;
     })));
   }
@@ -259330,13 +259664,13 @@ function isOpening(v) {
   return typeof v["text"] === "string" && isMapping2(v["snapshot"]) && isStrings3(v["tools"]) && isStrings3(v["given"]) && isStrings3(v["outOfReach"]) && isMapping2(v["declared"]) && typeof v["form"] === "string" && typeof v["stream"] === "boolean";
 }
 function keptOpening(log3, lead) {
-  const kept4 = log3.opening(lead)?.opening;
-  return kept4 !== undefined && isOpening(kept4) ? kept4 : undefined;
+  const kept5 = log3.opening(lead)?.opening;
+  return kept5 !== undefined && isOpening(kept5) ? kept5 : undefined;
 }
 function memoryKey(chat2, turn) {
   return `rules/memory/${textHash3(chat2)}/${textHash3(turn)}`;
 }
-async function memoryAt(state3, kept4, scope2, log3, from, follows) {
+async function memoryAt(state3, kept5, scope2, log3, from, follows) {
   const turns = log3.path(from).flatMap((entry) => entry.type === "turn" ? [entry.turn] : []).reverse();
   if (typeof follows === "string" && log3.turn(follows) === undefined)
     turns.push(follows);
@@ -259346,9 +259680,9 @@ async function memoryAt(state3, kept4, scope2, log3, from, follows) {
       return held4;
     let value;
     try {
-      value = await kept4.store.get(scope2, memoryKey(log3.turn(turn)?.played?.chat ?? scope2.chat, turn));
+      value = await kept5.store.get(scope2, memoryKey(log3.turn(turn)?.played?.chat ?? scope2.chat, turn));
     } catch (error3) {
-      kept4.log.warn("What the rules remembered could not be read from the host's store; they start from nothing.", { turn, error: error3 instanceof Error ? error3.message : String(error3) });
+      kept5.log.warn("What the rules remembered could not be read from the host's store; they start from nothing.", { turn, error: error3 instanceof Error ? error3.message : String(error3) });
       return;
     }
     if (isMapping2(value) && typeof value["turns"] === "number" && isMapping2(value["fired"]) && Array.isArray(value["held"])) {
@@ -259359,13 +259693,13 @@ async function memoryAt(state3, kept4, scope2, log3, from, follows) {
   }
   return;
 }
-async function keepMemory(state3, kept4, scope2, memory3, turns) {
+async function keepMemory(state3, kept5, scope2, memory3, turns) {
   state3.memories.set(scope2.turn, memory3);
   keepOnly(state3, turns);
   try {
-    await kept4.store.set(scope2, memoryKey(scope2.chat, scope2.turn), memory3);
+    await kept5.store.set(scope2, memoryKey(scope2.chat, scope2.turn), memory3);
   } catch (error3) {
-    kept4.log.warn("What the rules remembered could not be kept in the host's store; after a restart they start from an earlier turn's.", { turn: scope2.turn, error: error3 instanceof Error ? error3.message : String(error3) });
+    kept5.log.warn("What the rules remembered could not be kept in the host's store; after a restart they start from an earlier turn's.", { turn: scope2.turn, error: error3 instanceof Error ? error3.message : String(error3) });
   }
 }
 function keepOnly(state3, turns) {
@@ -259522,8 +259856,8 @@ class Release {
     let upTo2 = this.#held.length;
     if (!all3 && this.#heldSentences > 0) {
       const ends = sentenceEnds(this.#held);
-      const kept4 = this.#heldSentences - 1;
-      upTo2 = ends.length > kept4 ? ends[ends.length - 1 - kept4] ?? 0 : 0;
+      const kept5 = this.#heldSentences - 1;
+      upTo2 = ends.length > kept5 ? ends[ends.length - 1 - kept5] ?? 0 : 0;
     }
     if (upTo2 === 0)
       return true;
@@ -259919,11 +260253,11 @@ class TagReply {
     return this.#checking ?? Promise.resolve();
   }
   answers() {
-    const kept4 = this.#kept.splice(0);
+    const kept5 = this.#kept.splice(0);
     if (this.#second !== "due")
-      return kept4;
+      return kept5;
     this.#second = "said";
-    return this.#o.second !== undefined ? [...kept4, this.#o.second] : kept4;
+    return this.#o.second !== undefined ? [...kept5, this.#o.second] : kept5;
   }
   #out() {
     if (!this.#flush(true))
@@ -260280,14 +260614,14 @@ class Turn {
     this.#words = (name, fields3) => answers2?.line(name, fields3);
     const { time: setTime, ...counted5 } = settings.turn;
     const quiet = (this.#progress?.line("still", { elapsed: "0:00" }) ?? "").trim() === "";
-    const kept4 = quiet ? Math.min(setTime ?? SILENCE_MOST_MS, SILENCE_MOST_MS) : undefined;
-    const time = kept4 ?? setTime;
+    const kept5 = quiet ? Math.min(setTime ?? SILENCE_MOST_MS, SILENCE_MOST_MS) : undefined;
+    const time = kept5 ?? setTime;
     this.#keep = new KeepAlive({
       sink: this.#sink,
       clock: env4.clock,
       silenceMs: settings.silenceMs,
       still: (fields3) => this.#progress?.line("still", fields3),
-      ...kept4 !== undefined ? { missing: () => this.#trace.event(this.#lead, undefined, { kind: "progress_missing", time: kept4 }) } : {},
+      ...kept5 !== undefined ? { missing: () => this.#trace.event(this.#lead, undefined, { kind: "progress_missing", time: kept5 }) } : {},
       lined: () => this.#thinking?.lined()
     });
     const shows = this.#keep.sink;
@@ -260759,9 +261093,9 @@ class Turn {
     if (at3 === undefined || carried2.length === 0)
       return;
     const d = this.#cacheDeps(places2);
-    const kept4 = standing4(file.log, from);
+    const kept5 = standing4(file.log, from);
     for (const path7 of carried2) {
-      const entry = kept4.get(path7);
+      const entry = kept5.get(path7);
       const text16 = entry === undefined ? undefined : await readCached(d, entry);
       if (text16 === undefined)
         continue;
@@ -260847,10 +261181,10 @@ class Turn {
       return {};
     const d = this.#cacheDeps(places2);
     const folder = `${places2.session}${CACHE}`;
-    const kept4 = standing4(file.log, file.log.tip(this.scope.turn) ?? null);
-    const carried2 = places2.turn === undefined ? [] : this.#settings.sessions.carried.filter((path7) => kept4.has(path7)).map((path7) => ({ path: `${places2.turn}${path7}` }));
-    const lore3 = [...kept4.values()].flatMap((entry) => entry.key.startsWith("lore/") && entry.meta !== undefined ? [{ id: entry.meta["id"] ?? "", title: entry.meta["title"] ?? "", path: `${folder}${entry.file}` }] : []);
-    const map2 = kept4.get(PROMPT_MAP_KEY);
+    const kept5 = standing4(file.log, file.log.tip(this.scope.turn) ?? null);
+    const carried2 = places2.turn === undefined ? [] : this.#settings.sessions.carried.filter((path7) => kept5.has(path7)).map((path7) => ({ path: `${places2.turn}${path7}` }));
+    const lore3 = [...kept5.values()].flatMap((entry) => entry.key.startsWith("lore/") && entry.meta !== undefined ? [{ id: entry.meta["id"] ?? "", title: entry.meta["title"] ?? "", path: `${folder}${entry.file}` }] : []);
+    const map2 = kept5.get(PROMPT_MAP_KEY);
     const host = (await hostCached(d, file.log)).map((path7) => ({ path: path7 }));
     if (carried2.length === 0 && lore3.length === 0 && map2 === undefined && host.length === 0)
       return {};
@@ -261085,11 +261419,11 @@ ${text16}` } : { op: "write", text: text16 };
         return answer2(words14(`refused_${read3.reason}`, { path: read3.path, writable: read3.writable }), true);
       if (read3.status === "missing")
         return answer2(words14(read3.folder === true ? "folder" : "missing", { path: read3.path }), true);
-      const kept5 = await this.#heldBack(read3.text, "file", ctx.agent);
+      const kept6 = await this.#heldBack(read3.text, "file", ctx.agent);
       if (ctx.signal.aborted || this.#stopped)
         return { content: [] };
-      if (kept5 !== undefined)
-        return answer2(kept5, true);
+      if (kept6 !== undefined)
+        return answer2(kept6, true);
       if (!this.#desk.claim("file"))
         return answer2(words14("second_reply"), true);
       this.#keep?.sink.content(read3.text);
@@ -261099,11 +261433,11 @@ ${text16}` } : { op: "write", text: text16 };
     const draft2 = this.#draft;
     if (draft2 === undefined)
       return answer2(words14("no_draft"), true);
-    const kept4 = await this.#heldBack(draft2.text, "narrator", draft2.by);
+    const kept5 = await this.#heldBack(draft2.text, "narrator", draft2.by);
     if (ctx.signal.aborted || this.#stopped)
       return { content: [] };
-    if (kept4 !== undefined)
-      return answer2(kept4, true);
+    if (kept5 !== undefined)
+      return answer2(kept5, true);
     if (!this.#desk.claim("narrator"))
       return answer2(words14("second_reply"), true);
     this.#keep?.sink.content(draft2.text);
@@ -261343,10 +261677,10 @@ function withOff(text16, key3, on, layers, at3) {
   const named4 = entries5.filter((entry) => writtenKey2(entry, layers) === key3);
   if (on && named4.length === 0)
     return text16;
-  const kept4 = entries5.filter((entry) => writtenKey2(entry, layers) !== key3);
+  const kept5 = entries5.filter((entry) => writtenKey2(entry, layers) !== key3);
   if (!on)
-    kept4.push(named4[0] ?? key3);
-  const list3 = `[${kept4.map(listed6).join(", ")}]`;
+    kept5.push(named4[0] ?? key3);
+  const list3 = `[${kept5.map(listed6).join(", ")}]`;
   const start2 = lines4.findIndex((line3) => new RegExp(`^${CONFIG_SECTION}[ \\t]*:`).test(line3));
   if (start2 === -1) {
     const body = lines4.join(`
@@ -261618,34 +261952,34 @@ function olderTokens(value, user) {
 function spentOf(value) {
   if (!isObject11(value) || typeof value["at"] !== "number")
     return;
-  const kept4 = value["in"];
+  const kept5 = value["in"];
   const at3 = value["at"];
-  return kept4 === "turn" || kept4 === "job" || kept4 === "day" || kept4 === "jobs" ? { at: at3, in: kept4, usage: storedUsage(value) } : undefined;
+  return kept5 === "turn" || kept5 === "job" || kept5 === "day" || kept5 === "jobs" ? { at: at3, in: kept5, usage: storedUsage(value) } : undefined;
 }
 function spentValue(spent) {
   return { at: spent.at, in: spent.in, ...spent.usage };
 }
 function hourSpends(value) {
-  const kept4 = isObject11(value) ? value["spends"] : undefined;
-  return Array.isArray(kept4) ? kept4.flatMap((item) => spentOf(item) ?? []) : [];
+  const kept5 = isObject11(value) ? value["spends"] : undefined;
+  return Array.isArray(kept5) ? kept5.flatMap((item) => spentOf(item) ?? []) : [];
 }
 function countsOf2(value) {
   if (!isObject11(value) || !("all" in value) && !("connections" in value))
     return;
   const connections2 = {};
-  const kept4 = value["connections"];
-  if (isObject11(kept4)) {
-    for (const [key3, count2] of Object.entries(kept4))
+  const kept5 = value["connections"];
+  if (isObject11(kept5)) {
+    for (const [key3, count2] of Object.entries(kept5))
       if (typeof count2 === "number")
         connections2[key3] = count2;
   }
   return { all: typeof value["all"] === "number" ? value["all"] : 0, connections: connections2 };
 }
 function hourStarts(value) {
-  const kept4 = isObject11(value) ? value["starts"] : undefined;
-  if (!Array.isArray(kept4))
+  const kept5 = isObject11(value) ? value["starts"] : undefined;
+  if (!Array.isArray(kept5))
     return [];
-  return kept4.flatMap((item) => {
+  return kept5.flatMap((item) => {
     const counts4 = countsOf2(item);
     return isObject11(item) && typeof item["at"] === "number" && counts4 !== undefined ? [{ at: item["at"], ...counts4 }] : [];
   });
@@ -261821,11 +262155,11 @@ class UsageBook {
     return day3.starts;
   }
   #spend(user, spent) {
-    const kept4 = this.#day(user).then(async (day3) => {
+    const kept5 = this.#day(user).then(async (day3) => {
       day3.spends.push(spent);
       await this.#keepIn(user, day3, spent.at, (doc) => ({ ...doc, spends: [...hourSpends(doc).map(spentValue), spentValue(spent)] }));
     });
-    this.#pend(kept4, "A call's usage could not be kept in the day's record.", { at: spent.at });
+    this.#pend(kept5, "A call's usage could not be kept in the day's record.", { at: spent.at });
   }
   async#keepIn(user, day3, at3, change2) {
     await this.#d.store.update({ user }, hourKey(hourOf(at3)), (current3) => change2(isObject11(current3) ? current3 : {}));
@@ -261897,21 +262231,21 @@ class UsageBook {
     const settings = await readSettingsOf([USAGE], { layers: () => files.layers({ user }) }, files, { user }, log3);
     await store2.set({ user }, `${RUNS}${book.run}`, runUsage(book));
     const gone2 = [];
-    await store2.update({ user }, KEPT4, (current3) => {
-      const kept4 = (Array.isArray(current3) ? current3 : []).filter((run3) => typeof run3 === "string" && run3 !== book.run);
-      kept4.push(book.run);
-      gone2.push(...kept4.splice(0, Math.max(0, kept4.length - settings.usage.keptRuns)));
-      return kept4;
+    await store2.update({ user }, KEPT5, (current3) => {
+      const kept5 = (Array.isArray(current3) ? current3 : []).filter((run3) => typeof run3 === "string" && run3 !== book.run);
+      kept5.push(book.run);
+      gone2.push(...kept5.splice(0, Math.max(0, kept5.length - settings.usage.keptRuns)));
+      return kept5;
     });
     await Promise.all(gone2.map((run3) => store2.delete({ user }, `${RUNS}${run3}`)));
   }
   #pend(work, message, fields3) {
-    const kept4 = work.catch((error3) => this.#d.log.error(message, { ...fields3, error: errorText5(error3) }));
-    this.#writing.add(kept4);
-    kept4.finally(() => this.#writing.delete(kept4));
+    const kept5 = work.catch((error3) => this.#d.log.error(message, { ...fields3, error: errorText5(error3) }));
+    this.#writing.add(kept5);
+    kept5.finally(() => this.#writing.delete(kept5));
   }
 }
-var HOUR_MS2 = 3600000, DAY_MS4, HOURS = "usage/hours/", RUNS = "usage/runs/", KEPT4 = "usage/kept", OLD_DAYS = "usage/days/", OLD_JOB_DAYS = "jobs/days/";
+var HOUR_MS2 = 3600000, DAY_MS4, HOURS = "usage/hours/", RUNS = "usage/runs/", KEPT5 = "usage/kept", OLD_DAYS = "usage/days/", OLD_JOB_DAYS = "jobs/days/";
 var init_usage3 = __esm(() => {
   init_settings();
   init_usage();
@@ -262114,7 +262448,7 @@ function createHarness(env4, options = {}) {
         const { guidance, settings, registry: registry3 } = await registryOf2(scope2);
         const contract = template(await guidance.part("reply-contract"));
         let prompt;
-        const slice2 = promptSlice(() => prompt ??= keptPrompt(env4, scope2).then((kept4) => kept4?.prompt), guidance);
+        const slice2 = promptSlice(() => prompt ??= keptPrompt(env4, scope2).then((kept5) => kept5?.prompt), guidance);
         const made2 = new Map;
         for (const lead of leads2) {
           const definition = await guidance.definition(lead);
@@ -262322,12 +262656,12 @@ class MeaningIndex {
     return { rows: rows2, bytes: bytes2 };
   }
   async#update(user, scope2, docs, made2) {
-    const kept4 = new Map((await this.#d.index.rows(MEANING_TABLE, user, scope2)).map((r) => [r.id, r]));
+    const kept5 = new Map((await this.#d.index.rows(MEANING_TABLE, user, scope2)).map((r) => [r.id, r]));
     const ids3 = new Set(docs.map((d) => d.id));
-    const gone2 = [...kept4.keys()].filter((id3) => !ids3.has(id3));
+    const gone2 = [...kept5.keys()].filter((id3) => !ids3.has(id3));
     if (gone2.length > 0)
       await this.#d.index.dropRows(MEANING_TABLE, user, gone2);
-    const stale = docs.filter((d) => kept4.get(d.id)?.revision !== revisionOf2(d, made2) && d.text.trim() !== "");
+    const stale = docs.filter((d) => kept5.get(d.id)?.revision !== revisionOf2(d, made2) && d.text.trim() !== "");
     if (stale.length > 0) {
       const embedded = vectorsOf2(await this.#d.embed(user, stale.map((d) => d.text)));
       if (embedded === null)
@@ -262338,10 +262672,10 @@ class MeaningIndex {
       });
       await this.#d.index.putRows(MEANING_TABLE, user, fresh);
       for (const row of fresh)
-        kept4.set(row.id, row);
+        kept5.set(row.id, row);
     }
     return docs.flatMap((d) => {
-      const row = kept4.get(d.id);
+      const row = kept5.get(d.id);
       return row !== undefined && row.revision === revisionOf2(d, made2) ? [row] : [];
     });
   }
@@ -263394,10 +263728,10 @@ function turnTrace(deps) {
       const folder = await (open9.get(keyOf10(scope2))?.folder ?? lookup2(scope2));
       if (folder === null)
         return [];
-      const kept4 = await readLines2(folder, TURN_TRACE, (row) => typeof row.seq === "number" && isRecord(row.event), deps.log);
-      const names2 = [...new Set(kept4.flatMap((record5) => isTraffic(record5) ? [transcriptName(record5.agent)] : []))];
+      const kept5 = await readLines2(folder, TURN_TRACE, (row) => typeof row.seq === "number" && isRecord(row.event), deps.log);
+      const names2 = [...new Set(kept5.flatMap((record5) => isTraffic(record5) ? [transcriptName(record5.agent)] : []))];
       const transcripts = new Map(await Promise.all(names2.map(async (name) => [name, await transcriptLines(folder, name, deps.log)])));
-      return kept4.map((record5) => isTraffic(record5) ? withTraffic(record5, transcripts.get(transcriptName(record5.agent)) ?? NO_LINES) : record5).sort((a, b) => a.at - b.at || a.seq - b.seq);
+      return kept5.map((record5) => isTraffic(record5) ? withTraffic(record5, transcripts.get(transcriptName(record5.agent)) ?? NO_LINES) : record5).sort((a, b) => a.at - b.at || a.seq - b.seq);
     }
   };
 }
@@ -263555,7 +263889,21 @@ function openAppStore(app) {
   const global = globalConfig(app.paths.files, app.log);
   const worlds = storedWorlds(app.db, global.numbers(WORLD_DOCS_SETTING_DEFS));
   const away = { path: app.paths.database, run: (brief, job) => app.workers.run("fold", { brief, job }) };
-  return openStore({ db: app.db, registry: createRegistry(ALL_PACKS), worlds, fingerprint: app.version, handlerFailed, log: (message, data) => app.log.warn(message, data), areas: STORE_AREAS, away, ...global.numbers(STORE_SETTING_DEFS) });
+  const storing = new Set;
+  const heldWaiting = (user) => {
+    if (storing.has(user))
+      return;
+    storing.add(user);
+    setImmediate(() => {
+      storing.delete(user);
+      app.writes.run(() => store2.user(user).storeHeld(), "snapshots a read folded").catch((error3) => {
+        if (!(error3 instanceof WritesClosed))
+          app.log.warn("The snapshots a read folded could not be stored; the next write stores them.", { error: error3 instanceof Error ? error3.message : String(error3) });
+      });
+    });
+  };
+  const store2 = openStore({ db: app.db, registry: createRegistry(ALL_PACKS), worlds, fingerprint: app.version, handlerFailed, log: (message, data) => app.log.warn(message, data), areas: STORE_AREAS, away, heldWaiting, ...global.numbers(STORE_SETTING_DEFS) });
+  return store2;
 }
 function buildTurns(app, options) {
   const owner2 = () => app.config.lumiverse.user;
@@ -263752,7 +264100,7 @@ ${e.text}` })))
     return into === null ? scope2 : { ...scope2, turn: into };
   };
   const lorePorts = lorePort(lore3, loreIndex);
-  const eventsDeps = { db: app.db, writes: app.writes, store: store2, runs: runs3, files, sources, search: memorySearch, loreIndex, notes, suggestions, proposals: options.proposals, due, ...options.views !== undefined ? { views: options.views } : {}, now: () => clock.now(), jobEnded: (user, chat2, turn) => lane.sessionsAfter(user, chat2, turn), jobTold: (job) => JOB_KIND2.publish(app.live, LIVE_JOBS, { job }), log: app.log };
+  const eventsDeps = { db: app.db, writes: app.writes, store: store2, runs: runs3, files, sources, search: memorySearch, loreIndex, notes, suggestions, proposals: options.proposals, due, ...options.views !== undefined ? { views: options.views } : {}, now: () => clock.now(), jobEnded: (user, chat2, turn) => lane.sessionsAfter(user, chat2, turn), jobTold: (job) => JOB_KIND2.publish(app.live, LIVE_JOBS, { job: jobRowOf(job, globalConfig(app.paths.files, app.log)) }), log: app.log };
   const events3 = turnEvents(eventsDeps);
   const env4 = {
     id: "rpe",
@@ -264714,7 +265062,24 @@ var init_review = __esm(() => {
 });
 
 // src/turn/replies.ts
-function linesOf9(store2, registry3, turn) {
+function keptLanes(store2, registry3, turn, words14) {
+  const key3 = `${store2.foldKey(turn)}\x00${words14}`;
+  const hit = kept5.get(key3);
+  if (hit !== undefined) {
+    kept5.delete(key3);
+    kept5.set(key3, hit);
+    return hit;
+  }
+  const lanes = lanesAt(store2, registry3, turn);
+  kept5.set(key3, lanes);
+  for (const oldest of kept5.keys()) {
+    if (kept5.size <= KEPT6)
+      break;
+    kept5.delete(oldest);
+  }
+  return lanes;
+}
+function lanesAt(store2, registry3, turn) {
   const view2 = store2.viewAt(turn);
   const place3 = ownerPlaceOf(view2);
   const changes2 = store2.changes(turn).filter((c) => c.applied);
@@ -264744,50 +265109,49 @@ function unfinishedWhy(turns, user, turn, errors) {
   const e = last.error ?? (limit5 !== undefined ? { code: "limit", limit: limit5 } : { code: last.status === "limit" ? "limit" : last.status === "stopped" ? "stopped" : "failed" });
   return replyErrorWords(e, errors, true) || `${e.code}${e.detail !== undefined ? `: ${e.detail}` : ""}`;
 }
-function replyLines(turns, user, chat2, ids3, errors) {
+async function replyLines(turns, user, chat2, ids3, errors, words14) {
   const store2 = turns.store.user(user);
   const row = store2.chat(chat2);
   if (row === null)
     return [];
   const steps = store2.path(chat2);
-  const path7 = new Map(steps.map((entry) => [entry.message, entry]));
+  const path7 = new Map(steps.map((entry, at3) => [entry.message, { entry, at: at3 }]));
   const settles = turns.runs.ofChat(user, chat2).length > 0 ? null : steps.findLast((e) => e.turn !== null && store2.turn(e.turn)?.chat === chat2)?.turn ?? null;
-  const out = [];
-  for (const message of ids3) {
-    const entry = path7.get(message);
-    if (entry === undefined || entry.user)
-      continue;
-    if (entry.turn === null) {
-      out.push({ message, played: false, empty: entry.hash === textHash(""), engine: null, turn: null, joined: null, time: null, place: null, lanes: [], marks: [], unfinished: null });
-      continue;
+  const lineOf5 = (message) => {
+    const entry = path7.get(message)?.entry;
+    if (entry === undefined || entry.turn === null) {
+      return { message, played: false, empty: entry?.hash === textHash(""), engine: null, turn: null, joined: null, time: null, place: null, lanes: [], marks: [], unfinished: null };
     }
     let turn = entry.turn;
     let joined7 = null;
-    let lines4;
+    let lines5;
     try {
-      lines4 = linesOf9(store2, turns.store.env.registry, turn);
+      lines5 = keptLanes(store2, turns.store.env.registry, turn, words14.key);
     } catch (error3) {
       if (!(error3 instanceof JoinedTurnError))
         throw error3;
       joined7 = { turn: error3.turn, joined: error3.joined };
       turn = error3.joined;
-      lines4 = linesOf9(store2, turns.store.env.registry, turn);
+      lines5 = keptLanes(store2, turns.store.env.registry, turn, words14.key);
     }
     const imported = store2.turn(turn)?.imported === true;
     const why = unfinishedWhy(turns, user, turn, errors);
-    out.push({
+    return {
       message,
       played: true,
       empty: false,
       engine: imported ? row.engine : null,
       turn: joined7?.turn ?? turn,
       joined: joined7,
-      ...lines4,
+      ...lines5,
       marks: turns.marks.ofTurn(user, turn).map((m) => ({ kind: m.kind })),
       unfinished: why === null ? null : { why, settle: settles === turn }
-    });
-  }
-  return out;
+    };
+  };
+  const replies = [...new Set(ids3)].filter((id3) => path7.get(id3)?.entry.user === false).sort((a, b) => (path7.get(a)?.at ?? 0) - (path7.get(b)?.at ?? 0));
+  const lines4 = linesOf(words14.texts);
+  const made2 = new Map(await inStretches(replies, (message) => [message, lineOf5(message)], (stretch) => withLines(lines4, stretch)));
+  return ids3.flatMap((id3) => made2.get(id3) ?? []);
 }
 function replyRoutes(turns) {
   return [
@@ -264803,24 +265167,23 @@ function replyRoutes(turns) {
         const scope2 = { user, chat: params.chat, session: NO_SESSION };
         const part = await loadGuidance(turns.files, scope2).part(PARTS4.errors);
         const errors = part?.format === "lines" ? part : undefined;
-        return await withHistoryLines(guidanceTexts(turns.files, scope2, turns.env.log), () => ({
-          replies: replyLines(turns, user, params.chat, query5.ids.split(",").filter((id3) => id3 !== ""), errors)
-        }));
+        const texts4 = await historyTexts(guidanceTexts(turns.files, scope2, turns.env.log));
+        return { replies: await replyLines(turns, user, params.chat, query5.ids.split(",").filter((id3) => id3 !== ""), errors, { texts: texts4, key: hashParts("reply-words", JSON.stringify(texts4)) }) };
       }
     })
   ];
 }
-var T22, laneShown, replyLine, repliesReply;
+var T22, laneShown, replyLine, repliesReply, kept5, KEPT6 = 4096;
 var init_replies = __esm(() => {
   init_wire();
   init_app2();
   init_guidance();
   init_player_events();
+  init_iface();
   init_json();
   init_store2();
   init_fold();
   init_fold4();
-  init_iface();
   init_texts2();
   init_turns();
   T22 = shape.text();
@@ -264839,6 +265202,7 @@ var init_replies = __esm(() => {
     unfinished: shape.nullable(shape.object({ why: T22, settle: shape.yesNo() }))
   }));
   repliesReply = shape.named("RepliesReply", "The line under each reply asked for that the chat's path holds; his own messages are left out.", shape.object({ replies: shape.list(replyLine) }));
+  kept5 = new Map;
 });
 
 // src/turn/state-routes.ts
@@ -265153,13 +265517,13 @@ function turnRoutes(deps) {
   };
   const feedbackAsked2 = (user, chat2, turn) => {
     const told2 = toldOf3(turns.store.db, user, turn);
-    const kept4 = told2.findLast((t) => t.kind === FEEDBACK_TOLD);
-    const body = kept4?.body;
-    if (kept4 === undefined || !isRecord(body) || body.found !== "separated" || typeof body.text !== "string")
+    const kept6 = told2.findLast((t) => t.kind === FEEDBACK_TOLD);
+    const body = kept6?.body;
+    if (kept6 === undefined || !isRecord(body) || body.found !== "separated" || typeof body.text !== "string")
       return [];
     const corrected2 = told2.findLast((t) => t.kind === FEEDBACK_CORRECTED);
     const settled3 = corrected2 !== undefined ? isRecord(corrected2.body) && corrected2.body.was === null ? "completed" : "corrected" : told2.some((t) => t.kind === FEEDBACK_CONFIRMED) ? "confirmed" : "start";
-    return [{ id: `feedback-${turn}`, chat: chat2, kind: "feedback", asked: { feedback: { text: body.text, at: kept4.at, settled: settled3 } }, played: false, message: null, turn, at: kept4.at }];
+    return [{ id: `feedback-${turn}`, chat: chat2, kind: "feedback", asked: { feedback: { text: body.text, at: kept6.at, settled: settled3 } }, played: false, message: null, turn, at: kept6.at }];
   };
   const turnRead = async (user, chat2, turn, run3, from) => {
     const r = turnOf3(user, chat2, turn);
@@ -265251,12 +265615,12 @@ function turnRoutes(deps) {
         const limit5 = Math.min(query5.limit ?? turnsPage.size, turnsPage.most);
         if (query5.before !== undefined)
           notJoined(user, params.chat, query5.before);
-        const kept4 = turns.runs.ofChatKept(user, params.chat, limit5 + 1, query5.before);
+        const kept6 = turns.runs.ofChatKept(user, params.chat, limit5 + 1, query5.before);
         const rowOf7 = (r) => ({
           ...summary(user, params.chat, r),
           runs: turns.runs.ofTurn(user, r.turn).map((run3, i) => ({ nth: i + 1, kind: run3.kind, status: run3.status, error: run3.error, timings: momentsOf(run3), usage: run3.usage ?? NO_USAGE2 }))
         });
-        return { turns: kept4.slice(0, limit5).map(rowOf7), more: kept4.length > limit5 };
+        return { turns: kept6.slice(0, limit5).map(rowOf7), more: kept6.length > limit5 };
       }
     }),
     route({
@@ -266053,11 +266417,11 @@ class KeptAnswers {
     this.#byChat.set(chat2, { generation, answer: answer3 });
   }
   take(chat2, generation) {
-    const kept4 = this.#byChat.get(chat2);
-    if (kept4 === undefined || kept4.generation !== generation)
+    const kept6 = this.#byChat.get(chat2);
+    if (kept6 === undefined || kept6.generation !== generation)
       return null;
     this.#byChat.delete(chat2);
-    return kept4.answer;
+    return kept6.answer;
   }
 }
 function pointOf(generation, path7) {
@@ -266211,7 +266575,7 @@ function merged4(list3, tag) {
   }
   return out;
 }
-function kept4(x, tag) {
+function kept6(x, tag) {
   if (x.form === "parts") {
     const t = tag[x.owner];
     return (t.parts?.length ?? 0) + (t.media ?? 0) > 0;
@@ -266240,7 +266604,7 @@ function replay(joining, tag, members) {
     list3 = merged4(list3, tag);
   else if (joining.post === "single" && list3.length > 1)
     list3 = [{ role: "system", partial: false, form: "joined", chunks: list3.flatMap((x) => whole10(x, tag)), owner: null, media: [] }];
-  list3 = list3.filter((x) => kept4(x, tag));
+  list3 = list3.filter((x) => kept6(x, tag));
   if (joining.collapse && list3.length > 1)
     list3 = [collapsed(list3)];
   return list3;
@@ -266408,9 +266772,9 @@ function rebuild(laid4, tag, removed) {
     return { message: laid4.messages[i], before: next ? Math.min(...membersOf4(next)) : Number.POSITIVE_INFINITY };
   });
   let u = 0;
-  const kept5 = tag.map((_, i) => i).filter((m) => !removed.has(m));
+  const kept7 = tag.map((_, i) => i).filter((m) => !removed.has(m));
   const out = [];
-  for (const x of replay(laid4.joining, tag, kept5)) {
+  for (const x of replay(laid4.joining, tag, kept7)) {
     const least = Math.min(...membersOf4(x));
     while (u < unlisted.length && unlisted[u].before <= least)
       out.push(unlisted[u++].message);
@@ -266549,8 +266913,8 @@ async function clippedIn(tag, path7, keep2, limit5) {
     return { count: count2, by: null };
   if (summarized === count2)
     return { count: count2, by: "memory" };
-  const kept5 = await limit5();
-  return { count: count2, by: kept5 !== null && kept5 < inWindow ? "message-limit" : "context-size" };
+  const kept7 = await limit5();
+  return { count: count2, by: kept7 !== null && kept7 < inWindow ? "message-limit" : "context-size" };
 }
 function words15(error3) {
   return error3 instanceof Error ? error3.message : String(error3);
@@ -267037,11 +267401,11 @@ class HeardGenerations {
   named(change2) {
     if (change2.kind !== "generation-ended")
       return change2;
-    const kept5 = this.#targets.get(change2.chat);
-    if (kept5?.generation !== change2.generation)
+    const kept7 = this.#targets.get(change2.chat);
+    if (kept7?.generation !== change2.generation)
       return change2;
     this.#targets.delete(change2.chat);
-    return change2.stopped === true && change2.message === null ? { ...change2, message: kept5.message } : change2;
+    return change2.stopped === true && change2.message === null ? { ...change2, message: kept7.message } : change2;
   }
   untagged(model2) {
     let awaiting = false;
@@ -267104,15 +267468,15 @@ function addedTo(position, tag, messages, earlier) {
   const now = messages.map((m) => ({ role: m.role, text: m.text }));
   const same4 = (i) => now[i].role === before2[i].role && now[i].text === before2[i].text;
   if (position === "system") {
-    const kept5 = now.length === before2.length ? now.length : now.length - 1;
+    const kept7 = now.length === before2.length ? now.length : now.length - 1;
     if (now.length !== before2.length && now.length !== before2.length + 1)
       return null;
-    for (let i = 0;i < kept5; i++)
+    for (let i = 0;i < kept7; i++)
       if (!same4(i))
         return null;
     if (now.length === before2.length)
       return "";
-    const last = now[kept5];
+    const last = now[kept7];
     return last.role === "system" ? last.text : null;
   }
   const line3 = lastUserLine(tag);
@@ -267316,21 +267680,21 @@ class Hints {
         return { hint: stored2, revision };
       }
     }
-    const kept5 = this.#kept.get(tag.chat);
-    const fits3 = kept5 !== undefined && kept5.hint.presetId === tag.preset && kept5.deletes === deletes && (kept5.revision === null || kept5.revision === revision);
+    const kept7 = this.#kept.get(tag.chat);
+    const fits3 = kept7 !== undefined && kept7.hint.presetId === tag.preset && kept7.deletes === deletes && (kept7.revision === null || kept7.revision === revision);
     if (!fits3)
       this.#ask(tag, revision, deletes);
-    return { hint: fits3 ? kept5.hint : null, revision };
+    return { hint: fits3 ? kept7.hint : null, revision };
   }
   named(chat2, layout2, prompt) {
-    const kept5 = this.#kept.get(chat2);
+    const kept7 = this.#kept.get(chat2);
     const preset2 = layout2.preset;
-    if (kept5 === undefined || layout2.blocksFrom !== null || preset2 === null || kept5.hint.presetId !== preset2.id)
+    if (kept7 === undefined || layout2.blocksFrom !== null || preset2 === null || kept7.hint.presetId !== preset2.id)
       return layout2;
-    if (kept5.revision !== null && preset2.revision !== undefined && kept5.revision !== preset2.revision)
+    if (kept7.revision !== null && preset2.revision !== undefined && kept7.revision !== preset2.revision)
       return layout2;
     const texts4 = readBodyMessages(prompt)?.map((m) => m.text);
-    return texts4 === undefined ? layout2 : withBlocks(layout2, texts4, kept5.hint);
+    return texts4 === undefined ? layout2 : withBlocks(layout2, texts4, kept7.hint);
   }
   deleted(chat2) {
     this.#deletes.set(chat2, (this.#deletes.get(chat2) ?? 0) + 1);
@@ -267858,7 +268222,7 @@ function replaced2(messages, text16, insert2) {
 function createLoreCheck(deps) {
   const check5 = async (tag, messages, lore3, signal3) => {
     const byExtension = tag.secrecy.by === "extension";
-    const kept5 = deps.answers.take(tag.chat, tag.generation)?.secrecy ?? null;
+    const kept7 = deps.answers.take(tag.chat, tag.generation)?.secrecy ?? null;
     if (!byExtension && lore3.length === 0)
       return { messages, record: null, lore: lore3 };
     let candidates;
@@ -267867,7 +268231,7 @@ function createLoreCheck(deps) {
     } catch (error3) {
       return { messages, record: byExtension ? { checked: false, why: words16(error3) } : null, lore: lore3 };
     }
-    let verdict2 = kept5;
+    let verdict2 = kept7;
     let from = "late";
     let unworked = null;
     if (byExtension && verdict2 === null) {
@@ -268079,10 +268443,10 @@ function streamedReply(run3, meta, signal3, life2) {
 `);
       end2();
     },
-    error(message, kept5) {
+    error(message, kept7) {
       if (ended3)
         return;
-      const text16 = oneLine(kept5 ?? "");
+      const text16 = oneLine(kept7 ?? "");
       if (thought && life2.turn && text16 !== "")
         thinking(`${lineEnded ? "" : `
 `}${text16}
@@ -268869,7 +269233,7 @@ function lumiverseSettings(read3) {
   return {
     sessionCheckMs: v.sessionCheck * S3,
     socket: { pingMs: v.ping * S3, pongMs: v.pong * S3, openMs: v.open * S3, retryMs: v.retry * S3, retryMaxMs: v.retryMax * S3 },
-    database: { tries: v.dbTries, retryMs: v.dbWait * S3 },
+    database: { tries: v.dbTries, retryMs: v.dbWait * S3, slowMs: v.dbSlow * S3 },
     reads: { rereads: v.rereads, breakdownReplies: v.breakdownReplies, keepMs: v.readKeep * S3, kept: v.readKept },
     dryRunMs: v.dryRun * S3,
     commentMs: v.comment * S3,
@@ -268914,6 +269278,7 @@ var init_settings14 = __esm(() => {
     retryMax: setting("sockets.maxRetrySeconds", SOCKET_DEFAULTS.retryMaxMs / S3, { type: "number", least: 1 }, "Socket longest retry", "The longest wait in seconds between tries to open a socket."),
     dbTries: setting("database.tries", TRIES, { type: "whole", least: 1 }, "Database tries", "Tries of a read while Lumiverse holds its database file locked."),
     dbWait: setting("database.waitSeconds", RETRY_MS / S3, { type: "number", least: 0.001 }, "Database first wait", "Seconds before the second try of a locked read, doubled after each try."),
+    dbSlow: setting("database.slowSeconds", SLOW_MS / S3, { type: "number", least: 0.001 }, "Slow database read", "Seconds a read of Lumiverse's database file may hold RPE before RPE's log says, in one line, which read it was and how long it took."),
     rereads: setting("reads.rereads", REREADS, { type: "whole", least: 1 }, "Rereads of a changing chat", "Times a chat read over HTTP is read again when it changed while it was read."),
     breakdownReplies: setting("reads.breakdownReplies", BREAKDOWN_TRIES, { type: "whole", least: 1 }, "Replies asked for a breakdown", "The newest replies asked when looking for the prompt breakdown Lumiverse stored.", "use", [{ above: PAGE_ROWS, says: "Lumiverse gives at most 1000 rows a page: no more replies than that are asked." }]),
     readKeep: setting("reads.keepSeconds", HTTP_KEEP_MS / S3, { type: "number", least: 0 }, "Seconds a read over HTTP is held", "Seconds what RPE read of Lumiverse's rows over HTTP is held before it is read again; an event Lumiverse sends for a change lets it go at once. Read from the database file, a read is held exactly as long as the rows are unchanged."),
@@ -271299,13 +271664,13 @@ function addDrop(drops, why, fields3 = {}, count2 = 1) {
 function sayOr(say2, line3, fields3 = {}) {
   return say2(line3, fields3) ?? [line3, ...Object.values(fields3)].join(" ");
 }
-function dropSummary(raw, kept5, drops, say2) {
-  if (kept5 > 0 && drops.size === 0)
+function dropSummary(raw, kept7, drops, say2) {
+  if (kept7 > 0 && drops.size === 0)
     return null;
   if (raw === 0)
     return say2("proposed_nothing") ?? null;
   const reasons = [...drops.values()].sort((a, b) => b.count - a.count).map((d) => `${d.count} ${sayOr(say2, `dropped_${d.why}`, d.fields)}`);
-  return say2("dropped_summary", { dropped: raw - kept5, proposed: raw, reasons: reasons.join("; ") }) ?? JSON.stringify({ dropped: raw - kept5, proposed: raw, reasons });
+  return say2("dropped_summary", { dropped: raw - kept7, proposed: raw, reasons: reasons.join("; ") }) ?? JSON.stringify({ dropped: raw - kept7, proposed: raw, reasons });
 }
 function baseKind(world, registry3) {
   const bases2 = new Set;
@@ -271489,8 +271854,8 @@ function keptText(text16, max) {
 `, max);
   const space = whole11.lastIndexOf(" ", max);
   const at3 = end2 > 0 ? end2 : space > 0 ? space : max;
-  const kept5 = whole11.slice(0, at3).trim();
-  return { text: kept5, cut: whole11.length - kept5.length };
+  const kept7 = whole11.slice(0, at3).trim();
+  return { text: kept7, cut: whole11.length - kept7.length };
 }
 function names2(v, max, count2) {
   const out = [];
@@ -272066,7 +272431,7 @@ function readCompany(scope2, owner2, raw, c, say2) {
   const invite = raw.invite === true ? { invite: true } : {};
   const ids3 = strings7(raw.ids);
   if (ids3 && ids3.length > 0) {
-    const kept5 = [];
+    const kept7 = [];
     for (const id3 of [...new Set(ids3)]) {
       if (id3 === owner2)
         continue;
@@ -272074,9 +272439,9 @@ function readCompany(scope2, owner2, raw, c, say2) {
         c.problems.push(sayOr(say2, "fix_company_not_person", { id: id3 }));
       else if (scope2.people.has(id3) && !grounded(scope2, owner2, id3, c.sources))
         c.problems.push(sayOr(say2, "fix_company_no_tie", { name: nameOf13(scope2, id3), id: id3, owner: nameOf13(scope2, owner2) }));
-      kept5.push(id3);
+      kept7.push(id3);
     }
-    return kept5.length > 0 ? { who: { ids: kept5 }, ...invite } : undefined;
+    return kept7.length > 0 ? { who: { ids: kept7 }, ...invite } : undefined;
   }
   const group = str34(raw.group);
   if (group !== "") {
@@ -272478,8 +272843,8 @@ function proposing(from, mode, review, given3, fields3) {
       review(doc, raw, before2);
       raw.push(...fresh);
       const after3 = new Map;
-      const kept5 = review(doc, raw, after3);
-      return { answer: { read: fresh.length, standing: kept5.length, dropped: droppedBy(before2, after3, say2) }, unusable: fresh.length === 0 };
+      const kept7 = review(doc, raw, after3);
+      return { answer: { read: fresh.length, standing: kept7.length, dropped: droppedBy(before2, after3, say2) }, unusable: fresh.length === 0 };
     },
     proposals: () => last === null ? [] : review(last, raw, new Map),
     end(_cut, say2) {
@@ -272576,8 +272941,8 @@ var init_kinds4 = __esm(() => {
   indexText = {
     agent: "build-index-text",
     bound(input, limits3) {
-      const kept5 = keptText(typeof input.text === "string" ? input.text : "", limits3.indexChars);
-      return { text: kept5.text, ...kept5.cut > 0 ? { cut: kept5.cut } : {} };
+      const kept7 = keptText(typeof input.text === "string" ? input.text : "", limits3.indexChars);
+      return { text: kept7.text, ...kept7.cut > 0 ? { cut: kept7.cut } : {} };
     },
     async start(from) {
       const text16 = textOf11(from.input.text, from.limits.indexChars);
@@ -272605,8 +272970,8 @@ var init_kinds4 = __esm(() => {
           checkIndexProposals(last, raw, from.limits.proposals, before2);
           raw.push(...fresh);
           const after3 = new Map;
-          const kept5 = checkIndexProposals(last, raw, from.limits.proposals, after3);
-          return { answer: { read: fresh.length, standing: kept5.length, dropped: droppedBy(before2, after3, say2) }, unusable: fresh.length === 0 };
+          const kept7 = checkIndexProposals(last, raw, from.limits.proposals, after3);
+          return { answer: { read: fresh.length, standing: kept7.length, dropped: droppedBy(before2, after3, say2) }, unusable: fresh.length === 0 };
         },
         proposals: () => checkIndexProposals(last, raw, from.limits.proposals),
         end(_cut, say2) {
@@ -272725,7 +273090,7 @@ function userGuidance(files, user) {
     }
   };
 }
-function linesOf10(part) {
+function linesOf9(part) {
   return part?.format === "lines" ? part : undefined;
 }
 function refusedWords3(lines4, refusal10) {
@@ -272823,7 +273188,7 @@ class ModelJobs {
   }
   async propose(args, user, agent2) {
     const live = await this.liveOf(user, agent2);
-    const lines4 = linesOf10(await userGuidance(this.deps.rph.files, user).part(BUILD_JOBS_PART));
+    const lines4 = linesOf9(await userGuidance(this.deps.rph.files, user).part(BUILD_JOBS_PART));
     if (live === null)
       return { content: [{ type: "text", text: lines4?.line("propose_no_job") ?? JSON.stringify({ proposed: false }) }], error: true };
     const { answer: answer4, unusable } = await live.run.propose(objectOf3(args), (line3, fields3) => lines4?.line(line3, fields3));
@@ -272837,7 +273202,7 @@ class ModelJobs {
     const { rph, worlds, books, log: log3 } = this.deps;
     const limits3 = await this.deps.limits();
     const run3 = await MODEL_KINDS[kind].start({ user: job.user, world: job.world, input: job.input, limits: limits3, worlds, books });
-    const lines4 = linesOf10(await userGuidance(rph.files, job.user).part(BUILD_JOBS_PART));
+    const lines4 = linesOf9(await userGuidance(rph.files, job.user).part(BUILD_JOBS_PART));
     const draft2 = await worlds.worlds.working(job.world, job.user);
     const brief = lines4?.line(`brief_${kind}`, { world: job.world, name: draft2.name, ...run3.fields }) ?? "";
     const live = { job, run: run3, calls: 0 };
@@ -274618,9 +274983,9 @@ function migrationPage(input) {
   const lumiverse = sources?.lumiverse ?? (input.database === null ? null : dirname18(input.database));
   const stage = new Map(notCarriedOf(report2).map((c) => [c.chat, c.stage]));
   const standing10 = new Set(importedChats(input.db, input.user).map((c) => c.chat));
-  const kept5 = failedChats(input.data).map((chat2) => ({ chat: chat2, stage: readFailure(input.data, chat2)?.stage ?? stage.get(chat2) ?? "fold", stands: standing10.has(chat2) }));
+  const kept7 = failedChats(input.data).map((chat2) => ({ chat: chat2, stage: readFailure(input.data, chat2)?.stage ?? stage.get(chat2) ?? "fold", stands: standing10.has(chat2) }));
   const line3 = ["rpe", "migrate", "--lumiverse", lumiverse ?? "", "--user", input.user];
-  out.notCarried = notCarriedShown(kept5, report2, { again: line3.map(shellWord).join(" "), one: (chat2) => [...line3, "--chat", chat2].map(shellWord).join(" "), back: lastSwap(input.db, input.user) === null ? null : "rpe down" }, { lumiverse, user: input.user }, input.data);
+  out.notCarried = notCarriedShown(kept7, report2, { again: line3.map(shellWord).join(" "), one: (chat2) => [...line3, "--chat", chat2].map(shellWord).join(" "), back: lastSwap(input.db, input.user) === null ? null : "rpe down" }, { lumiverse, user: input.user }, input.data);
   if (out.run !== null)
     out.run.counts.offRpe = out.offRpe.filter((c) => !c.done).length;
   const tree = input.tree;
@@ -275978,8 +276343,8 @@ function gmRoutes(deps) {
         const draft2 = draftOf2(body.draft);
         return read3(user, params.chat, (ctx) => {
           const placed3 = keepPlaces(ctx, body.places, draft2);
-          const kept5 = keepThings(ctx, body.things, draft2, new Set(placed3.result.places));
-          return { ops: [...placed3.ops, ...kept5.ops], kept: { things: kept5.result.things, places: placed3.result.places, skipped: [...placed3.result.skipped, ...kept5.result.skipped], notes: kept5.result.notes } };
+          const kept7 = keepThings(ctx, body.things, draft2, new Set(placed3.result.places));
+          return { ops: [...placed3.ops, ...kept7.ops], kept: { things: kept7.result.things, places: placed3.result.places, skipped: [...placed3.result.skipped, ...kept7.result.skipped], notes: kept7.result.notes } };
         });
       }
     }),
@@ -276034,6 +276399,58 @@ var init_gm_read = __esm(() => {
   T36 = shape.text();
   answer5 = shape.json();
   draftParts = shape.field(shape.json(), "The world's draft as Build holds it now: its `entities` and `places`.");
+});
+
+// src/play/map-travel.ts
+function mapTravelRoutes(store2) {
+  return [
+    route({
+      method: "GET",
+      path: "/api/v1/chats/:chat/travel",
+      access: "page",
+      group: "state",
+      does: "The quickest way's minutes to each place the player's character knows and can go to from where it is now, for the map's list of places.",
+      reply: shape.object({ ways: shape.list(shape.object({ to: T37, minutes: shape.number() })) }),
+      handle: ({ user, params }) => readPass(() => {
+        const quickest = new Map;
+        for (const way of travelWays(chatContext(store2, user, params.chat), null)) {
+          if (way.disabled !== undefined)
+            continue;
+          quickest.set(way.to, Math.min(way.minutes, quickest.get(way.to) ?? Number.POSITIVE_INFINITY));
+        }
+        return { ways: [...quickest].map(([to, minutes2]) => ({ to, minutes: minutes2 })) };
+      })
+    }),
+    route({
+      method: "GET",
+      path: "/api/v1/chats/:chat/travel/:place",
+      access: "page",
+      group: "state",
+      does: "Every way the player's character could go from where it is now to one place, for that place's sheet: the walk and each vehicle's trip, worked out for that place alone.",
+      reply: shape.object({ options: shape.list(travelWay) }),
+      handle: ({ user, params }) => readPass(() => ({ options: travelWays(chatContext(store2, user, params.chat), params.place) }))
+    })
+  ];
+}
+var T37, travelPart, travelWay;
+var init_map_travel = __esm(() => {
+  init_app2();
+  init_view2();
+  init_things4();
+  T37 = shape.text();
+  travelPart = shape.object({ kind: shape.oneOf("fetch", "start", "drive", "park", "walk"), minutes: shape.number(), words: T37 });
+  travelWay = shape.named("TravelWay", "One way to a place: what it is called, how it goes (walk, road, offroad, water, air), its minutes and how a vehicle trip's minutes break down, its fare, the vehicle, the action and values that take it, and why it is greyed where it is.", shape.object({
+    to: T37,
+    label: T37,
+    mode: shape.oneOf("walk", "road", "offroad", "water", "air"),
+    minutes: shape.number(),
+    parts: shape.optional(shape.list(travelPart), "How a vehicle trip's minutes break down, each part in words; left out for a walk."),
+    cents: shape.optional(shape.number(), "Its fare, where it has one."),
+    vehicle: shape.optional(T37, "The vehicle, by name, for a trip in one."),
+    action: T37,
+    params: shape.record(shape.json()),
+    disabled: shape.optional(T37, "Why it cannot be taken now; left out where it can.")
+  }));
 });
 
 // src/play/map-walk.ts
@@ -276170,7 +276587,7 @@ function ownRoutes(own5) {
     })
   ];
 }
-var OWN_PATH = "/api/v1/chats/:chat/own-values", T37, opt15, level3, share2, minutes2, ownAsk, ownValues, ownAnswer, STATUS5;
+var OWN_PATH = "/api/v1/chats/:chat/own-values", T38, opt15, level3, share2, minutes2, ownAsk, ownValues, ownAnswer, STATUS5;
 var init_own3 = __esm(() => {
   init_adjudication2();
   init_events();
@@ -276184,7 +276601,7 @@ var init_own3 = __esm(() => {
   init_types();
   init_owner_edits();
   init_service();
-  T37 = shape.text();
+  T38 = shape.text();
   opt15 = shape.optional;
   level3 = shape.whole({ least: 0, most: 4 });
   share2 = shape.number({ least: 0, most: 1 });
@@ -276205,7 +276622,7 @@ var init_own3 = __esm(() => {
       levels: shape.record(level3),
       caps: shape.record(shape.record(level3)),
       floors: shape.record(level3),
-      tiers: shape.record(shape.list(T37))
+      tiers: shape.record(shape.list(T38))
     }),
     claims: shape.object({ mode: shape.oneOf(...CLAIM_MODES), capped: shape.yesNo(), own: shape.yesNo() }),
     checks: shape.object({
@@ -276218,7 +276635,7 @@ var init_own3 = __esm(() => {
       own: shape.yesNo()
     })
   }), shape.object({ world: shape.literal(false) })));
-  ownAnswer = shape.named("OwnAnswer", "What a change to a chat's own values came to: whether it was recorded, the id its Undo takes (null where nothing was recorded), and the answer in words.", shape.object({ applied: shape.yesNo(), undo: shape.nullable(T37), words: T37 }));
+  ownAnswer = shape.named("OwnAnswer", "What a change to a chat's own values came to: whether it was recorded, the id its Undo takes (null where nothing was recorded), and the answer in words.", shape.object({ applied: shape.yesNo(), undo: shape.nullable(T38), words: T38 }));
   STATUS5 = { bad_request: 400, not_found: 404, not_world_chat: 404, conflict: 409, paused: 409, validation: 422, forbidden: 403, unavailable: 409, internal: 500 };
 });
 
@@ -276242,7 +276659,7 @@ function playRoutes(play) {
       access: "page",
       group: "state",
       does: "One of the HUD's time controls (Pause clock, Resume clock, and the others the clock's controls carry), at its scope and with its value, recorded at once as his own edit; a refusal is answered in words with nothing changed.",
-      body: shape.object({ control: T38, scope: shape.field(shape.json(), "Where it holds: every scene, a kind of scene, an activity, or an interrupt."), to: shape.json() }),
+      body: shape.object({ control: T39, scope: shape.field(shape.json(), "Where it holds: every scene, a kind of scene, an activity, or an interrupt."), to: shape.json() }),
       reply: tapReply,
       handle: ({ user, params, body }) => play.time(user, params.chat, body)
     }),
@@ -276298,34 +276715,34 @@ function playRoutes(play) {
     })
   ];
 }
-var STATE_PATH = "/api/v1/chats/:chat/state", DUE_PATH = "/api/v1/chats/:chat/state/due", TAPS_PATH = "/api/v1/chats/:chat/taps", EDIT_UNDO_PATH = "/api/v1/chats/:chat/edits/:edit/undo", TIME_PATH = "/api/v1/chats/:chat/time", PANEL_REQUEST_PATH = "/api/v1/chats/:chat/requests/panel", PLAYS_PATH = "/api/v1/chats/:chat/plays", T38, opt16, tell2, editOpAsk, tapAsk, values3, panelTapAsk, panelHeldReply, playAsk, playedReply, tapAsked, tapReply, dueShown2, dueReply;
+var STATE_PATH = "/api/v1/chats/:chat/state", DUE_PATH = "/api/v1/chats/:chat/state/due", TAPS_PATH = "/api/v1/chats/:chat/taps", EDIT_UNDO_PATH = "/api/v1/chats/:chat/edits/:edit/undo", TIME_PATH = "/api/v1/chats/:chat/time", PANEL_REQUEST_PATH = "/api/v1/chats/:chat/requests/panel", PLAYS_PATH = "/api/v1/chats/:chat/plays", T39, opt16, tell2, editOpAsk, tapAsk, values3, panelTapAsk, panelHeldReply, playAsk, playedReply, tapAsked, tapReply, dueShown2, dueReply;
 var init_routes12 = __esm(() => {
   init_app2();
   init_shapes5();
-  T38 = shape.text();
+  T39 = shape.text();
   opt16 = shape.optional;
   tell2 = opt16(shape.yesNo(), `Whether the next turn's briefing tells the Author of it (his "Tell the story" choice); left out, the tap's group decides.`);
   editOpAsk = shape.named("EditOpAsk", "One field of the World page's edit: a value or a fact at a level (world, place:<id>, entity:<id>), set or removed, with how exact and how sure he says a fact is.", shape.object({
     op: shape.oneOf("set", "remove"),
-    at: T38,
-    key: T38,
+    at: T39,
+    key: T39,
     as: shape.oneOf("value", "fact"),
-    value: opt16(T38),
+    value: opt16(T39),
     precision: opt16(shape.oneOf("exact", "approximate", "vague", "unknown")),
     standing: opt16(shape.oneOf("established", "proposed", "assumed"))
   }));
-  tapAsk = shape.named("TapAsk", `A tap that manages, recorded at once as his own edit: one of the world's actions done at once (money, a group, gear, a vehicle); one \u270E form (a hint, the time, a thing, things with a label, or a field); the World page's edit of values and facts; or an edit of operations ("Make this a property").`, shape.union(shape.object({ kind: shape.literal("action"), action: T38, params: shape.record(shape.json()), source: T38, text: opt16(T38), now: opt16(shape.yesNo()), tell: tell2 }), shape.object({
+  tapAsk = shape.named("TapAsk", `A tap that manages, recorded at once as his own edit: one of the world's actions done at once (money, a group, gear, a vehicle); one \u270E form (a hint, the time, a thing, things with a label, or a field); the World page's edit of values and facts; or an edit of operations ("Make this a property").`, shape.union(shape.object({ kind: shape.literal("action"), action: T39, params: shape.record(shape.json()), source: T39, text: opt16(T39), now: opt16(shape.yesNo()), tell: tell2 }), shape.object({
     kind: shape.literal("fix"),
-    fix: shape.union(shape.object({ hint: T38 }), shape.object({ time: T38 }), shape.object({ thing: shape.json() }), shape.object({ things: shape.list(shape.json()), label: T38 }), shape.object({ entity: T38, field: T38, value: shape.json() })),
+    fix: shape.union(shape.object({ hint: T39 }), shape.object({ time: T39 }), shape.object({ thing: shape.json() }), shape.object({ things: shape.list(shape.json()), label: T39 }), shape.object({ entity: T39, field: T39, value: shape.json() })),
     tell: tell2
   }), shape.object({ kind: shape.literal("edit"), ops: shape.list(editOpAsk), tell: tell2 }), shape.object({ kind: shape.literal("ops"), ops: shape.list(shape.json()), tell: tell2 })));
   values3 = shape.record(shape.json());
-  panelTapAsk = shape.named("PanelTapAsk", `A panel's tap for his next message: one of the world's actions (Walk here among them, or a Timelapse with its label and its "follow my routine" choice among its values), its values, and where it was made.`, shape.object({ action: T38, values: values3, from: shape.oneOf("palette", "map", "panel") }));
+  panelTapAsk = shape.named("PanelTapAsk", `A panel's tap for his next message: one of the world's actions (Walk here among them, or a Timelapse with its label and its "follow my routine" choice among its values), its values, and where it was made.`, shape.object({ action: T39, values: values3, from: shape.oneOf("palette", "map", "panel") }));
   panelHeldReply = shape.named("PanelHeldReply", "The tap held: it waits for his next message, in place of a panel's tap that waited; null where the same tap again took the one that waited back.", shape.object({ request: shape.nullable(requestShown) }));
-  playAsk = shape.named("PlayAsk", "A tap that plays now: one of the world's actions with its values, where it was made, and any words typed with it (its line in the chat; with none, what was pressed); or the id of a request that waits (Send now).", shape.union(shape.object({ action: T38, values: values3, from: shape.oneOf("palette", "map", "panel", "chip", "send-now", "command"), words: opt16(T38, "Words typed with it: the line put in the chat as his message.") }), shape.object({ request: T38 })));
-  playedReply = shape.named("PlayedReply", "The tap played: the message its line went into the chat as, the generation Lumiverse started to answer it, and the request kept with it as played now.", shape.object({ message: T38, generation: T38, request: T38 }));
+  playAsk = shape.named("PlayAsk", "A tap that plays now: one of the world's actions with its values, where it was made, and any words typed with it (its line in the chat; with none, what was pressed); or the id of a request that waits (Send now).", shape.union(shape.object({ action: T39, values: values3, from: shape.oneOf("palette", "map", "panel", "chip", "send-now", "command"), words: opt16(T39, "Words typed with it: the line put in the chat as his message.") }), shape.object({ request: T39 })));
+  playedReply = shape.named("PlayedReply", "The tap played: the message its line went into the chat as, the generation Lumiverse started to answer it, and the request kept with it as played now.", shape.object({ message: T39, generation: T39, request: T39 }));
   tapAsked = shape.named("TapAsked", "What became of a tap that is no tap that manages: held for his next message (the request that waits; null where the same tap again took the one that waited back), or played now.", shape.union(shape.object({ held: shape.nullable(requestShown) }), playedReply));
-  tapReply = shape.named("TapReply", "What a tap or its Undo came to: whether it was applied, what the world's rules reported of it (kept with it, listed under unsettled), the id its Undo takes (null where nothing was recorded), the answer in words, and, for a tap that is no tap that manages, what became of it.", shape.object({ applied: shape.yesNo(), reports: shape.list(T38), undo: shape.nullable(T38), words: T38, asked: opt16(tapAsked, "Held for his next message or played now; left out for a tap that manages, an Undo and a time control.") }));
+  tapReply = shape.named("TapReply", "What a tap or its Undo came to: whether it was applied, what the world's rules reported of it (kept with it, listed under unsettled), the id its Undo takes (null where nothing was recorded), the answer in words, and, for a tap that is no tap that manages, what became of it.", shape.object({ applied: shape.yesNo(), reports: shape.list(T39), undo: shape.nullable(T39), words: T39, asked: opt16(tapAsked, "Held for his next message or played now; left out for a tap that manages, an Undo and a time control.") }));
   dueShown2 = shape.named("DueShown", "One thing a turn's time brought due: what kind it is in a person's words, what it is (whose it is by name, what, and where), when it fell due as the world prints it, the level it concerns (null where none), and each change of the turn that concerns it, one to a line in the words the GM view uses for a change (none while there were none).", shape.object({ label: shape.text(), words: shape.text(), when: shape.text(), at: shape.nullable(shape.text()), changes: shape.list(shape.text()) }));
   dueReply = shape.named("DueReply", "What a turn's time brought due, soonest first, as many as the chat's engine.maxDueItems lists, and how many more fell due (null: more did, uncounted).", shape.object({
     turn: shape.turnId(),
@@ -276384,16 +276801,16 @@ function rulesRoutes2(rules) {
     })
   ];
 }
-var RULES_PATH = "/api/v1/chats/:chat/rule-set", T39, opt17, rulesAsk, rulesAnswer;
+var RULES_PATH = "/api/v1/chats/:chat/rule-set", T40, opt17, rulesAsk, rulesAnswer;
 var init_rules8 = __esm(() => {
   init_app2();
   init_rules4();
   init_worlds2();
   init_service();
-  T39 = shape.text();
+  T40 = shape.text();
   opt17 = shape.optional;
-  rulesAsk = shape.named("RulesAsk", "A rule set to put on a chat's world, by its id, and whether to only say what it would add and keep, with nothing changed.", shape.object({ rules: T39, preview: opt17(shape.yesNo()) }));
-  rulesAnswer = shape.named("RulesAnswer", "What putting a rule set on the chat's world came to: whether the world has a new revision this chat moves to or the chat's rules were switched on, the id the Undo of the Upgrade takes (null where nothing was recorded), and the answer in words, one sentence each.", shape.object({ made: shape.yesNo(), undo: shape.nullable(T39), words: shape.list(T39) }));
+  rulesAsk = shape.named("RulesAsk", "A rule set to put on a chat's world, by its id, and whether to only say what it would add and keep, with nothing changed.", shape.object({ rules: T40, preview: opt17(shape.yesNo()) }));
+  rulesAnswer = shape.named("RulesAnswer", "What putting a rule set on the chat's world came to: whether the world has a new revision this chat moves to or the chat's rules were switched on, the id the Undo of the Upgrade takes (null where nothing was recorded), and the answer in words, one sentence each.", shape.object({ made: shape.yesNo(), undo: shape.nullable(T40), words: shape.list(T40) }));
 });
 
 // src/play/area.ts
@@ -276407,12 +276824,14 @@ function playArea(takes5) {
       at3.routes.add("play-rules", rulesRoutes2(new RulesService({ worlds: taken.worlds, store: taken.store, writes: at3.writes, guidance: taken.guidance })));
       at3.routes.add("play-things", thingsRoutes(taken.store));
       at3.routes.add("play-map-walk", mapWalkRoutes(taken.store));
+      at3.routes.add("play-map-travel", mapTravelRoutes(taken.store));
       at3.routes.add("play-gm", gmRoutes(taken));
     }
   };
 }
 var init_area11 = __esm(() => {
   init_gm_read();
+  init_map_travel();
   init_map_walk();
   init_own3();
   init_routes12();
@@ -276487,53 +276906,53 @@ var init_journal4 = __esm(() => {
 });
 
 // src/quests/shapes.ts
-var T40, field16, nullable13, kind, call, stageRow, closedRow, record5, journalRow, journalReply, recordRow, questsReply, questReply;
+var T41, field16, nullable13, kind, call, stageRow, closedRow, record5, journalRow, journalReply, recordRow, questsReply, questReply;
 var init_shapes8 = __esm(() => {
   init_app2();
-  T40 = shape.text();
+  T41 = shape.text();
   field16 = shape.field;
   nullable13 = shape.nullable;
   kind = shape.oneOf("quest", "secret", "puzzle", "agenda");
   call = shape.oneOf("met", "failed", "open");
   stageRow = shape.named("QuestStageRow", "A stage of a quest: its label, the condition that moves the quest past it in words, what the story called on it (null: nothing yet) and why, and whether the quest stands on it now.", shape.object({
-    id: T40,
-    label: T40,
-    condition: T40,
+    id: T41,
+    label: T41,
+    condition: T41,
     state: field16(nullable13(call), "What the Author or the GM called on the stage; for a stage the world's quest was moved past and nothing was called on, how the move went (its outcome, or failed where it took the stage's failing way, else met); null where nothing was called and the quest has not moved on."),
-    why: field16(nullable13(T40), "The reason given with that call, or with the move."),
+    why: field16(nullable13(T41), "The reason given with that call, or with the move."),
     current: field16(nullable13(shape.yesNo()), "Whether the quest stands on this stage now; null for a quest the story opened, which has no single place to stand."),
-    objectives: field16(shape.list(shape.object({ label: T40, met: shape.yesNo() })), "A world's stage's objectives, each with whether it holds on the record now; none for a stage the story wrote."),
-    way: field16(nullable13(shape.object({ to: T40, fails: shape.yesNo() })), "For the stage a world's quest stands on, the way on that holds on the record now: the stage it leads to and whether it is how the stage fails. The Author moves the quest; null where no way holds.")
+    objectives: field16(shape.list(shape.object({ label: T41, met: shape.yesNo() })), "A world's stage's objectives, each with whether it holds on the record now; none for a stage the story wrote."),
+    way: field16(nullable13(shape.object({ to: T41, fails: shape.yesNo() })), "For the stage a world's quest stands on, the way on that holds on the record now: the stage it leads to and whether it is how the stage fails. The Author moves the quest; null where no way holds.")
   }));
-  closedRow = shape.named("QuestClosedRow", "How a quest closed: its outcome and the reason given.", shape.object({ outcome: T40, why: nullable13(T40) }));
+  closedRow = shape.named("QuestClosedRow", "How a quest closed: its outcome and the reason given.", shape.object({ outcome: T41, why: nullable13(T41) }));
   record5 = {
-    id: T40,
+    id: T41,
     kind,
-    name: T40,
+    name: T41,
     world: field16(shape.yesNo(), "The world defines the quest: its labels and conditions are as the world wrote them."),
-    objective: field16(nullable13(T40), "What it is."),
-    why: field16(nullable13(T40), "Why it matters."),
-    stakes: nullable13(T40),
-    rewards: nullable13(T40),
+    objective: field16(nullable13(T41), "What it is."),
+    why: field16(nullable13(T41), "Why it matters."),
+    stakes: nullable13(T41),
+    rewards: nullable13(T41),
     stages: shape.list(stageRow),
-    who: field16(shape.list(T40), "Who it involves, as tree refs."),
-    where: field16(shape.list(T40), "Where it takes place, as tree refs."),
-    things: field16(shape.list(T40), "What it involves, as tree refs."),
+    who: field16(shape.list(T41), "Who it involves, as tree refs."),
+    where: field16(shape.list(T41), "Where it takes place, as tree refs."),
+    things: field16(shape.list(T41), "What it involves, as tree refs."),
     closed: field16(nullable13(closedRow), "How it closed; null while it is open. A quest of the world's standing on an end stage the story never closed is closed as that stage ended it.")
   };
-  journalRow = shape.named("JournalQuestRow", "A quest the player may see, as his journal shows it: whole, with what it is and its stakes, or only its name and the stages the Author showed him.", shape.object({ ...record5, whole: field16(shape.yesNo(), "The player sees the whole quest; false: only its name and the stages named."), thread: field16(nullable13(T40), "The thread of the story it belongs to, for a quest seen whole; never given for one seen by stages.") }));
-  journalReply = shape.named("Journal", "The player's journal: each quest he may see, at the chat's newest turn or as it stood at one of its turns. A quest set to show him nothing is absent: no row, no count.", shape.object({ chat: T40, turn: field16(nullable13(shape.turnId()), "The turn read at; null: the chat's newest."), open: field16(shape.whole({ least: 0 }), "How many of the quests he may see are open."), quests: shape.list(journalRow) }));
+  journalRow = shape.named("JournalQuestRow", "A quest the player may see, as his journal shows it: whole, with what it is and its stakes, or only its name and the stages the Author showed him.", shape.object({ ...record5, whole: field16(shape.yesNo(), "The player sees the whole quest; false: only its name and the stages named."), thread: field16(nullable13(T41), "The thread of the story it belongs to, for a quest seen whole; never given for one seen by stages.") }));
+  journalReply = shape.named("Journal", "The player's journal: each quest he may see, at the chat's newest turn or as it stood at one of its turns. A quest set to show him nothing is absent: no row, no count.", shape.object({ chat: T41, turn: field16(nullable13(shape.turnId()), "The turn read at; null: the chat's newest."), open: field16(shape.whole({ least: 0 }), "How many of the quests he may see are open."), quests: shape.list(journalRow) }));
   recordRow = shape.named("QuestRecordRow", "A quest of the chat as the record holds it, whatever the player may see (the Quests page keeps it behind its spoiler gate): what it is, its stages with their calls, who and where, its stakes, how it was shown to the player and where it came from.", shape.object({
     ...record5,
-    thread: nullable13(T40),
+    thread: nullable13(T41),
     visibility: field16(nullable13(shape.oneOf("public", "known_by", "secret")), "The quest's own visibility; null where it was not said."),
-    shown: field16(nullable13(shape.union(shape.oneOf("all", "none"), shape.list(T40))), "What the Author set the player to be shown: all, none, the stages named; null: as the quest's own visibility says."),
+    shown: field16(nullable13(shape.union(shape.oneOf("all", "none"), shape.list(T41))), "What the Author set the player to be shown: all, none, the stages named; null: as the quest's own visibility says."),
     open: shape.yesNo()
   }));
   questsReply = shape.named("QuestRecords", "A page of the chat's quests, the world's and those opened in play, in the order they are kept.", shape.page(recordRow));
   questReply = shape.named("QuestRecord", "One quest in full: its record, and every write made to it in the order made (the writes of a quest opened in play, and each move of the world's own quest from one stage to another, with how it went and the reason it came with).", shape.object({
     quest: recordRow,
-    history: shape.list(shape.object({ turn: nullable13(shape.turnId()), by: nullable13(T40), op: T40, value: shape.record(shape.json()) }))
+    history: shape.list(shape.object({ turn: nullable13(shape.turnId()), by: nullable13(T41), op: T41, value: shape.record(shape.json()) }))
   }));
 });
 
@@ -276848,7 +277267,7 @@ function mapRoutes(deps) {
       access: "page",
       group: "places",
       does: "Drags someone or something to a square of the grid of a place: his own change, applied at once on the chat's line, with an Undo, told to the Author at the next turn unless he says not to. Dropped on the area of another room of the place, it is in that room (at the room's entrance when the room has a grid of its own); one that lies on or in something is taken off it and stands on the square.",
-      body: shape.object({ who: shape.field(T41, "Who or what is moved: its id, or its name."), square: shape.field(SQUARE2, "Where: [column, row], counted from 1 at the top left."), tell: opt18(shape.yesNo(), "Whether the Author is told; the chat's setting when left out.") }),
+      body: shape.object({ who: shape.field(T42, "Who or what is moved: its id, or its name."), square: shape.field(SQUARE2, "Where: [column, row], counted from 1 at the top left."), tell: opt18(shape.yesNo(), "Whether the Author is told; the chat's setting when left out.") }),
       reply: wroteReply,
       handle: async ({ user, params, body }) => {
         held5(user, params.chat);
@@ -276889,7 +277308,7 @@ function mapRoutes(deps) {
       group: "places",
       does: "Edits squares of the grid of a place, by the same code as the `map_edit` tool: strokes of one symbol over squares, a rectangle or a line, and what a symbol stands for. His own change, applied at once, with an Undo, told to the Author at the next turn unless he says not to.",
       body: shape.object({
-        strokes: shape.field(shape.list(shape.object({ symbol: T41, squares: opt18(shape.list(SQUARE2)), rect: opt18(shape.list(SQUARE2)), line: opt18(shape.list(SQUARE2)) })), "The strokes, drawn in order: a symbol over each square, a rectangle's two corners, or a line's two ends."),
+        strokes: shape.field(shape.list(shape.object({ symbol: T42, squares: opt18(shape.list(SQUARE2)), rect: opt18(shape.list(SQUARE2)), line: opt18(shape.list(SQUARE2)) })), "The strokes, drawn in order: a symbol over each square, a rectangle's two corners, or a line's two ends."),
         legend: opt18(shape.record(shape.json()), "What symbols stand for: a symbol to what the map's format holds for it, or null to take it out."),
         tell: opt18(shape.yesNo(), "Whether the Author is told; the chat's setting when left out.")
       }),
@@ -276910,15 +277329,15 @@ function mapRoutes(deps) {
       group: "places",
       does: "Lays a grid for a place, by the same code as the `map_lay` tool: rows of symbols, or a walled room of a width and a height; over one square of a coarser map with `over` and `square`. His own change, applied at once, with an Undo, told to the Author at the next turn unless he says not to.",
       body: shape.object({
-        place: shape.field(T41, "The place to lay it for: its id or name; with `over`, a new place made on that square when none is drawn there."),
-        rows: opt18(shape.list(T41), "The rows, top first, one symbol to a square."),
+        place: shape.field(T42, "The place to lay it for: its id or name; with `over`, a new place made on that square when none is drawn there."),
+        rows: opt18(shape.list(T42), "The rows, top first, one symbol to a square."),
         width: opt18(W, "Without rows: a walled room this many squares wide."),
         height: opt18(W, "Without rows: this many squares high."),
         doors: opt18(shape.list(SQUARE2), "Without rows: the squares of the walls that are doors."),
         legend: opt18(shape.record(shape.json()), "What the symbols stand for, as the map's format holds them."),
         feet: opt18(N16, "How wide a square is, in feet; the settings' when left out."),
-        title: opt18(T41, "The map's title."),
-        over: opt18(T41, "The place whose coarser map this lies over one square of."),
+        title: opt18(T42, "The map's title."),
+        over: opt18(T42, "The place whose coarser map this lies over one square of."),
         square: opt18(SQUARE2, "With `over`: that square of the coarser map."),
         tell: opt18(shape.yesNo(), "Whether the Author is told; the chat's setting when left out.")
       }),
@@ -276957,7 +277376,7 @@ function mapRoutes(deps) {
       access: "page",
       group: "places",
       does: "Keeps the chat's map of a place in the world: its map as the chat plays it, with the squares drawn on it, copied into the world's draft, the working copy Build edits, with the places, paths and settings named; the chat keeps its own changes until the world takes them in.",
-      body: shape.object({ places: opt18(shape.list(T41), "Places of the world's own this chat changed, to keep with the map."), paths: opt18(shape.list(T41), "Paths of the world's own this chat changed, to keep with the map."), settings: opt18(shape.yesNo(), "Whether to keep the map settings this chat changed.") }),
+      body: shape.object({ places: opt18(shape.list(T42), "Places of the world's own this chat changed, to keep with the map."), paths: opt18(shape.list(T42), "Paths of the world's own this chat changed, to keep with the map."), settings: opt18(shape.yesNo(), "Whether to keep the map settings this chat changed.") }),
       reply: keptReply,
       takesChat: false,
       handle: async ({ user, params, body }) => {
@@ -276974,7 +277393,7 @@ function mapRoutes(deps) {
     })
   ];
 }
-var T41, N16, W, opt18, nullable14, SQUARE2, mapListed, mapsReply, pieceShown, mapGridReply, wroteReply, keptReply;
+var T42, N16, W, opt18, nullable14, SQUARE2, mapListed, mapsReply, pieceShown, mapGridReply, wroteReply, keptReply;
 var init_routes14 = __esm(() => {
   init_app2();
   init_places_in_play();
@@ -276992,35 +277411,35 @@ var init_routes14 = __esm(() => {
   init_lay();
   init_record3();
   init_words3();
-  T41 = shape.text();
+  T42 = shape.text();
   N16 = shape.number();
   W = shape.whole();
   opt18 = shape.optional;
   nullable14 = shape.nullable;
   SQUARE2 = shape.list(shape.whole({ least: 1 }));
-  mapListed = shape.named("MapListed", "A grid of a chat as the Places page lists it: the place it is the grid of and its name, the grid's id, the map that draws it (none for a grid authored without one), where it comes from (the world's own, laid in play, or the world's own changed in play), its size in squares and how wide a square is.", shape.object({ place: T41, name: T41, grid: T41, map: nullable14(T41), from: shape.oneOf("world", "laid", "changed"), width: W, height: W, feet: N16, unit: shape.oneOf("feet", "metres") }));
+  mapListed = shape.named("MapListed", "A grid of a chat as the Places page lists it: the place it is the grid of and its name, the grid's id, the map that draws it (none for a grid authored without one), where it comes from (the world's own, laid in play, or the world's own changed in play), its size in squares and how wide a square is.", shape.object({ place: T42, name: T42, grid: T42, map: nullable14(T42), from: shape.oneOf("world", "laid", "changed"), width: W, height: W, feet: N16, unit: shape.oneOf("feet", "metres") }));
   mapsReply = shape.named("MapsReply", "The grids of a chat, by place.", shape.object({ maps: shape.list(mapListed) }));
-  pieceShown = shape.named("MapPieceShown", "Someone or something on a grid: its id, name and kind, its square (the top left of its footprint), its footprint when it covers more than one square, what it blocks, what it lies on or in, and its life state when it is not alive.", shape.object({ id: T41, name: T41, kind: T41, square: SQUARE2, size: opt18(shape.list(W)), blocks: opt18(shape.object({ way: opt18(shape.yesNo()), view: opt18(shape.yesNo()) })), on: opt18(T41), within: opt18(shape.yesNo()), state: opt18(T41) }));
+  pieceShown = shape.named("MapPieceShown", "Someone or something on a grid: its id, name and kind, its square (the top left of its footprint), its footprint when it covers more than one square, what it blocks, what it lies on or in, and its life state when it is not alive.", shape.object({ id: T42, name: T42, kind: T42, square: SQUARE2, size: opt18(shape.list(W)), blocks: opt18(shape.object({ way: opt18(shape.yesNo()), view: opt18(shape.yesNo()) })), on: opt18(T42), within: opt18(shape.yesNo()), state: opt18(T42) }));
   mapGridReply = shape.named("MapGridReply", "One grid in full, as the chat plays it: both layers as data. What is drawn (its rows of symbols with the squares the chat changed laid over, its legend, where it comes from), what moves (everyone and everything on a square, those at the place with none and where they are kept, each door's state), the squares and symbols the chat changed, and the scale and time step.", shape.object({
-    place: T41,
-    name: T41,
-    grid: T41,
-    map: nullable14(T41),
+    place: T42,
+    name: T42,
+    grid: T42,
+    map: nullable14(T42),
     from: shape.oneOf("world", "laid", "changed"),
     width: W,
     height: W,
     scale: shape.json(),
-    rows: shape.list(T41),
+    rows: shape.list(T42),
     legend: shape.record(shape.json()),
     doors: shape.list(shape.object({ square: SQUARE2, state: shape.oneOf("open", "closed", "locked") })),
     pieces: shape.list(pieceShown),
-    unplaced: shape.list(shape.object({ id: T41, name: T41, kind: T41, zone: opt18(T41), words: opt18(T41) })),
-    edits: shape.object({ squares: W, legend: shape.list(T41) })
+    unplaced: shape.list(shape.object({ id: T42, name: T42, kind: T42, zone: opt18(T42), words: opt18(T42) })),
+    edits: shape.object({ squares: W, legend: shape.list(T42) })
   }));
-  wroteReply = shape.named("MapWrote", "What an edit of his on a map came to: the id its Undo takes (null when it changed nothing), and what the grid found that does not add up, which was done all the same.", shape.object({ undo: nullable14(T41), advised: shape.list(shape.json()) }));
+  wroteReply = shape.named("MapWrote", "What an edit of his on a map came to: the id its Undo takes (null when it changed nothing), and what the grid found that does not add up, which was done all the same.", shape.object({ undo: nullable14(T42), advised: shape.list(shape.json()) }));
   keptReply = shape.named("MapKept", "What keeping a chat's map in the world came to: what was copied into the world's draft, what was left (the id and why), and the draft's version after it, with whether anything was written.", shape.object({
-    kept: shape.object({ maps: shape.list(T41), places: shape.list(T41), paths: shape.list(T41), settings: shape.yesNo() }),
-    skipped: shape.list(shape.object({ id: T41, code: shape.oneOf("not_changed", "in_draft_already", "no_map") })),
+    kept: shape.object({ maps: shape.list(T42), places: shape.list(T42), paths: shape.list(T42), settings: shape.yesNo() }),
+    skipped: shape.list(shape.object({ id: T42, code: shape.oneOf("not_changed", "in_draft_already", "no_map") })),
     draft: shape.object({ version: W, written: shape.yesNo() })
   }));
 });
@@ -277125,32 +277544,36 @@ function ownerJobRoutes(turns) {
     })
   ];
 }
-var T42, nullable15, jobChange, jobChangesReply;
+var T43, nullable15, jobChange, jobChangesReply;
 var init_owner_jobs = __esm(() => {
   init_app2();
   init_events4();
   init_review();
   init_shapes5();
-  T42 = shape.text();
+  T43 = shape.text();
   nullable15 = shape.nullable;
   jobChange = shape.named("JobChange", "One change a job recorded: its id, its lane and operation, its value, who decided it, where it came from, how sure it is, what it cites, whether it applied, its reports, and the changes of his that undid it.", shape.object({
-    id: T42,
-    lane: T42,
-    op: T42,
+    id: T43,
+    lane: T43,
+    op: T43,
     value: shape.json(),
-    by: nullable15(T42),
-    source: nullable15(T42),
-    standing: nullable15(T42),
-    precision: nullable15(T42),
+    by: nullable15(T43),
+    source: nullable15(T43),
+    standing: nullable15(T43),
+    precision: nullable15(T43),
     cite: shape.json(),
     applied: shape.yesNo(),
     reports: shape.list(report),
-    undoneBy: shape.list(T42)
+    undoneBy: shape.list(T43)
   }));
-  jobChangesReply = shape.named("JobChangesReply", "What a job recorded, change by change in the order recorded, and the evidence it was told as it went (its gap checks, consents and rules fired).", shape.object({ job: T42, changes: shape.list(jobChange), told: toldShown }));
+  jobChangesReply = shape.named("JobChangesReply", "What a job recorded, change by change in the order recorded, and the evidence it was told as it went (its gap checks, consents and rules fired).", shape.object({ job: T43, changes: shape.list(jobChange), told: toldShown }));
 });
 
 // src/turn/job-routes.ts
+function wholeOf(job) {
+  const { transcript: _transcript, carried: _carried, ...whole11 } = job;
+  return whole11;
+}
 function refusalWords(refusal10) {
   switch (refusal10.refused) {
     case "off":
@@ -277194,6 +277617,13 @@ function viewOrThrow(answer6, lead) {
     throw new RouteError(refusalStatus(answer6), `${lead}: ${refusalWords(answer6)}`);
   return answer6;
 }
+function statesIn(given3) {
+  const named4 = given3.split(",").map((s) => s.trim());
+  const unknown2 = named4.filter((s) => !jobState2.values.includes(s));
+  if (unknown2.length > 0)
+    throw new RouteError(400, `The query's state names ${unknown2.map((s) => JSON.stringify(s)).join(", ")}, which is no state a job can be in: each is one of ${jobState2.values.join(", ")}, a comma between two.`);
+  return named4;
+}
 function ofChat(scope2) {
   return scope2.chat !== undefined;
 }
@@ -277204,7 +277634,7 @@ function jobRoutes(deps) {
     const job = await jobs.get(user, id3);
     if (job === undefined)
       throw new RouteError(404, `There is no job ${id3}.`);
-    return job;
+    return wholeOf(job);
   };
   const start2 = async (scope2, ask) => {
     const view2 = await jobs.start(scope2, { agent: ask.definition, brief: ask.brief, ...ask.given !== undefined ? { attach: ask.given } : {}, ...ask.limits !== undefined ? { limits: ask.limits } : {} });
@@ -277240,22 +277670,24 @@ function jobRoutes(deps) {
       path: "/api/v1/jobs",
       access: "page",
       group: "jobs",
-      does: "His jobs a page at a time, of every chat or of one, in one state or in any, the newest started first, each as RPH keeps it: where it stands, its agent, who started it and the turn that did.",
+      does: "His jobs a page at a time (the setting jobs.page, at most jobs.maxPage), of every chat or of one, in the states named or in any, the newest started first, each by its row: what a list shows of it, its whole read by its id.",
       query: {
-        chat: opt19(T43, "Only the jobs of this chat."),
-        state: opt19(jobState2, "Only the jobs in this state.")
+        chat: opt19(T44, "Only the jobs of this chat."),
+        state: opt19(T44, `Only the jobs in these states, a comma between two: running,asking. Each is one of ${jobState2.values.join(", ")}.`)
       },
-      reply: shape.page(jobView2),
-      paged: {},
+      reply: shape.page(jobRow),
+      paged: { sizes: () => jobsPage(deps.shared()) },
       handle: async ({ user, query: query5 }) => {
+        const shared3 = deps.shared();
+        const states = query5.state === undefined ? undefined : statesIn(query5.state);
         const page = await jobs.list({
           user,
           ...query5.chat !== undefined ? { chat: query5.chat } : {},
-          ...query5.state !== undefined ? { states: [query5.state] } : {},
-          ...query5.limit !== undefined ? { limit: query5.limit } : {},
+          ...states !== undefined ? { states } : {},
+          limit: query5.limit,
           ...query5.after !== undefined ? { cursor: query5.after } : {}
         });
-        return { items: page.jobs, next: page.next ?? null };
+        return { items: page.jobs.map((job) => jobRowOf(job, shared3)), next: page.next ?? null };
       }
     }),
     route({
@@ -277301,7 +277733,7 @@ function jobRoutes(deps) {
       access: "page",
       group: "jobs",
       does: "His switches over all his jobs, and the limits in force for jobs (for the chat's levels, or the shared ones) with the use each is held against over the last 24 hours.",
-      query: { chat: opt19(T43, "The chat whose levels the limits are read for; the shared levels when left out.") },
+      query: { chat: opt19(T44, "The chat whose levels the limits are read for; the shared levels when left out.") },
       reply: jobSwitchesReply,
       handle: ({ user, query: query5 }) => switches(user, query5.chat)
     }),
@@ -277337,6 +277769,15 @@ function jobRoutes(deps) {
         }))).flat() : [];
         return { job, trace, usage: spent2, windows };
       }
+    }),
+    route({
+      method: "GET",
+      path: "/api/v1/jobs/:job/record",
+      access: "page",
+      group: "jobs",
+      does: "One job whole, as RPH keeps it, without its run's work: what a page shows of a job it opens, its trace read behind the chat's gate.",
+      reply: jobReply,
+      handle: async ({ user, params }) => ({ job: await jobOf4(user, params.job) })
     }),
     route({
       method: "GET",
@@ -277456,17 +277897,19 @@ function jobRoutes(deps) {
     ...ownerJobRoutes(turns)
   ];
 }
-var T43, N17, opt19, jobState2, WHOLE2, jobLimitsAsk, jobStartAsk, CAST_JOBS_PART = "cast-jobs", CHARACTER_DEFINITION = "character", takeInAsk, jobReply, runUsage2, windowGauge, jobShownReply, jobLimitShown, jobSwitchesReply;
+var T44, N17, opt19, jobState2, WHOLE2, jobLimitsAsk, jobStartAsk, CAST_JOBS_PART = "cast-jobs", CHARACTER_DEFINITION = "character", takeInAsk, jobReply, runUsage2, windowGauge, jobShownReply, jobLimitShown, jobSwitchesReply;
 var init_job_routes = __esm(() => {
   init_guidance();
   init_app2();
   init_config_read();
   init_setting_list();
   init_events4();
+  init_jobs2();
   init_owner_jobs();
+  init_settings13();
   init_shapes5();
   init_turns();
-  T43 = shape.text();
+  T44 = shape.text();
   N17 = shape.number();
   opt19 = shape.optional;
   jobState2 = shape.oneOf("queued", "held", "running", "asking", "done", "failed", "cancelled", "off-path", "interrupted");
@@ -277474,16 +277917,16 @@ var init_job_routes = __esm(() => {
   jobLimitsAsk = shape.named("JobLimitsAsk", "Limits a start or a carry-on gives one job, each a whole number above 0: model calls, tokens sent, tokens written, tokens together as the day's job tokens are counted, seconds, and the tokens at which it is held and he is asked whether to go on.", shape.object({ calls: opt19(WHOLE2), tokensIn: opt19(WHOLE2), tokensOut: opt19(WHOLE2), tokens: opt19(WHOLE2), time: opt19(WHOLE2), askAt: opt19(WHOLE2) }));
   jobStartAsk = shape.named("JobStartAsk", "A job he starts: the agent definition it runs as, what it is to do, what it is given by name, and limits of its own.", shape.object({
     definition: shape.text({ blank: false }),
-    brief: T43,
-    given: opt19(shape.list(T43), "What it is given by name, as an agent's attachments are named."),
+    brief: T44,
+    given: opt19(shape.list(T44), "What it is given by name, as an agent's attachments are named."),
     limits: opt19(jobLimitsAsk, "Limits of its own: each holds in place of the setting's for this job.")
   }));
   takeInAsk = shape.named("TakeInAsk", "The character whose own agent is to take in what it has perceived and not yet taken in, by its name as the cast holds it.", shape.object({ character: shape.text({ blank: false }) }));
   jobReply = shape.named("JobReply", "A job as it stands after the call.", shape.object({ job: jobView2 }));
-  runUsage2 = shape.named("RunUsage", "What a run spent, in all and by agent.", shape.object({ run: T43, total: usage2, agents: shape.list(shape.object({ agent: agentRef, usage: usage2 })) }));
+  runUsage2 = shape.named("RunUsage", "What a run spent, in all and by agent.", shape.object({ run: T44, total: usage2, agents: shape.list(shape.object({ agent: agentRef, usage: usage2 })) }));
   windowGauge = shape.named("WindowGauge", "How full an agent's context is: the tokens it holds, its model's window, and the room kept for its answer.", shape.object({ used: N17, window: N17, reserve: N17 }));
   jobShownReply = shape.named("JobShownReply", "One job: its record, its run's trace as the live view shows a turn's, what its run spent by agent (null before it spent anything or after the record was let go), and how full each of its agents' windows is while it runs.", shape.object({ job: jobView2, trace: shape.list(traceRecord), usage: shape.nullable(runUsage2), windows: shape.list(shape.object({ agent: agentRef, gauge: windowGauge })) }));
-  jobLimitShown = shape.named("JobLimitShown", "A limit in force for jobs: its setting's key, its value (null: none), and the use it is held against: the jobs running now for the jobs at once, the jobs started over the window for the jobs in a day (with the window and the limit as the harness counts them), else the tokens used over the last 24 hours; null where it counts no use.", shape.object({ key: T43, value: shape.json(), used: shape.nullable(N17), window: opt19(N17, "For the jobs in a day: the window the count is over, in milliseconds back from now.") }));
+  jobLimitShown = shape.named("JobLimitShown", "A limit in force for jobs: its setting's key, its value (null: none), and the use it is held against: the jobs running now for the jobs at once, the jobs started over the window for the jobs in a day (with the window and the limit as the harness counts them), else the tokens used over the last 24 hours; null where it counts no use.", shape.object({ key: T44, value: shape.json(), used: shape.nullable(N17), window: opt19(N17, "For the jobs in a day: the window the count is over, in milliseconds back from now.") }));
   jobSwitchesReply = shape.named("JobSwitchesReply", "His two switches over all his jobs (switched off: none starts; held: those running wait at their next call and none starts), and the limits in force for jobs with the day's use.", shape.object({ off: shape.yesNo(), held: shape.yesNo(), limits: shape.list(jobLimitShown) }));
 });
 
@@ -277612,16 +278055,16 @@ function sessionRoutes(deps) {
           throw new RouteError(409, `Session ${view2.id} is closed: only an open session is compacted.`);
         const scope2 = { user, chat: params.chat, session: view2.id };
         const after3 = await asked4(() => sessions.compact(scope2));
-        const kept5 = Number(readConfig(await portTexts(turns.files, scope2), deps.log, [KEEP_TURNS]).value(KEEP_TURNS));
+        const kept7 = Number(readConfig(await portTexts(turns.files, scope2), deps.log, [KEEP_TURNS]).value(KEEP_TURNS));
         const name = harnessSettings().find((s) => s.key === KEEP_TURNS.key)?.name ?? KEEP_TURNS.key;
         if (after3.compactAsked === true) {
           const words19 = view2.compactAsked === true ? "Compaction was asked for already: it runs at the session's next turn." : "Compaction is asked for: it runs at the session's next turn, the Author first given its chance to save what it wants kept.";
-          return { session: shown7(user, after3), asked: true, turns: after3.turns, kept: kept5, words: words19 };
+          return { session: shown7(user, after3), asked: true, turns: after3.turns, kept: kept7, words: words19 };
         }
         const summarized = (await sessions.compactions(scope2)).reduce((sum3, c) => c.stands && c.of === "turns" ? sum3 + c.turns.length : sum3, 0);
         const played2 = `This session has played ${after3.turns} ${after3.turns === 1 ? "turn" : "turns"}${summarized > 0 ? `, ${summarized} of them under a summary already` : ""}`;
-        const words18 = `There is nothing to compact yet. ${played2}, and the newest ${kept5} are always kept as they were, so a compaction waits until more than ${kept5} of its turns have no summary. You can change that number on the Settings page, under "${name}".`;
-        return { session: shown7(user, after3), asked: false, turns: after3.turns, kept: kept5, words: words18 };
+        const words18 = `There is nothing to compact yet. ${played2}, and the newest ${kept7} are always kept as they were, so a compaction waits until more than ${kept7} of its turns have no summary. You can change that number on the Settings page, under "${name}".`;
+        return { session: shown7(user, after3), asked: false, turns: after3.turns, kept: kept7, words: words18 };
       }
     }),
     route({
@@ -277709,7 +278152,7 @@ function sessionRoutes(deps) {
     })
   ];
 }
-var T44, N18, opt20, nullable16, sessionFields, sessionBase, sessionShown, compactionShown, carryMode, sessionRead, sessionClosed, reopenAsk, sessionOne, uncompactAsk, compactionsReply, sessionTurnRow, compactAnswer, KEEP_TURNS, measureFigures, measureTurn, measureDecision, measureRepeat, measureMode, measurementReport, measurementKept, measurementRow, measurementRead, SESSIONS_PATH = "/api/v1/chats/:chat/sessions", SESSION_PATH2 = "/api/v1/chats/:chat/sessions/:session", MEASUREMENTS_PATH = "/api/v1/sessions/measurements", MEASUREMENT_PATH = "/api/v1/sessions/measurements/:id";
+var T45, N18, opt20, nullable16, sessionFields, sessionBase, sessionShown, compactionShown, carryMode, sessionRead, sessionClosed, reopenAsk, sessionOne, uncompactAsk, compactionsReply, sessionTurnRow, compactAnswer, KEEP_TURNS, measureFigures, measureTurn, measureDecision, measureRepeat, measureMode, measurementReport, measurementKept, measurementRow, measurementRead, SESSIONS_PATH = "/api/v1/chats/:chat/sessions", SESSION_PATH2 = "/api/v1/chats/:chat/sessions/:session", MEASUREMENTS_PATH = "/api/v1/sessions/measurements", MEASUREMENT_PATH = "/api/v1/sessions/measurements/:id";
 var init_session_routes = __esm(() => {
   init_app2();
   init_config_read();
@@ -277717,39 +278160,39 @@ var init_session_routes = __esm(() => {
   init_helpers();
   init_story3();
   init_settings13();
-  T44 = shape.text();
+  T45 = shape.text();
   N18 = shape.number();
   opt20 = shape.optional;
   nullable16 = shape.nullable;
   sessionFields = {
-    id: T44,
-    user: T44,
-    chat: T44,
+    id: T45,
+    user: T45,
+    chat: T45,
     kind: shape.oneOf("scene", "agent", "job", "talk"),
-    parent: opt20(shape.union(shape.object({ session: opt20(T44), turn: opt20(T44), agent: T44, call: T44 }), shape.object({ owner: shape.literal(true) }))),
-    agent: opt20(T44),
+    parent: opt20(shape.union(shape.object({ session: opt20(T45), turn: opt20(T45), agent: T45, call: T45 }), shape.object({ owner: shape.literal(true) }))),
+    agent: opt20(T45),
     offPath: opt20(shape.literal(true)),
     state: shape.oneOf("open", "closed"),
     opened: N18,
-    closedBy: opt20(T44),
+    closedBy: opt20(T45),
     by: opt20(shape.literal("user")),
     closedAt: opt20(N18),
     closedHow: opt20(shape.oneOf("user", "turn", "host", "run", "job")),
-    from: opt20(shape.object({ chat: T44, session: T44, turn: T44 })),
+    from: opt20(shape.object({ chat: T45, session: T45, turn: T45 })),
     turns: N18,
     compactAsked: opt20(shape.literal(true)),
-    held: opt20(shape.object({ hook: T44, reason: T44 })),
-    hooked: opt20(T44)
+    held: opt20(shape.object({ hook: T45, reason: T45 })),
+    hooked: opt20(T45)
   };
   sessionBase = shape.object(sessionFields);
-  sessionShown = shape.named("SessionShown", "A session as the Sessions page shows it: a scene's, a sub-agent's run, a job's run or a talk thread; open or closed, the turn that closed it (for his own close, the chat's newest turn when he closed it), when it was closed and what closed it (you, a turn's scene change, RPE's own close, the end of its run or of its job), a compaction asked for that waits for its next turn, and, for a scene's, the id of the story record's scene it was opened for.", shape.object({ ...sessionFields, scene: opt20(T44) }));
+  sessionShown = shape.named("SessionShown", "A session as the Sessions page shows it: a scene's, a sub-agent's run, a job's run or a talk thread; open or closed, the turn that closed it (for his own close, the chat's newest turn when he closed it), when it was closed and what closed it (you, a turn's scene change, RPE's own close, the end of its run or of its job), a compaction asked for that waits for its next turn, and, for a scene's, the id of the story record's scene it was opened for.", shape.object({ ...sessionFields, scene: opt20(T45) }));
   compactionShown = shape.named("CompactionShown", "A compaction of a session: its summary, the turn whose work it was, what it stands for, why it was made, its size before and after in tokens, and whether it still stands; one he undid is marked.", shape.object({
-    id: T44,
-    turn: T44,
-    summary: T44,
+    id: T45,
+    turn: T45,
+    summary: T45,
     at: N18,
     of: shape.oneOf("turns", "run"),
-    turns: shape.list(T44),
+    turns: shape.list(T45),
     reason: opt20(shape.oneOf("would-not-fit", "refused", "asked", "fold")),
     before: opt20(N18),
     after: opt20(N18),
@@ -277757,21 +278200,21 @@ var init_session_routes = __esm(() => {
     undone: opt20(shape.literal(true))
   }));
   carryMode = shape.named("CarryMode", "How much of a scene's earlier turns its next turn carries: what the Author did in them (continuing), its record of each (records), or only the summary the scene opened with (nothing).", shape.oneOf("continuing", "records", "nothing"));
-  sessionRead = shape.named("SessionRead", "One session with what its next turn would carry in the mode asked for (block 3 as it would go; empty where it would carry nothing) and each of its compactions in the order written.", shape.object({ session: sessionShown, carry: carryMode, carried: T44, compactions: shape.list(compactionShown) }));
-  sessionClosed = shape.named("SessionClosed", "A session he closed: the session as it now stands, the scene of the story record closed with it, and the id of his change that closed the scene, which his Undo takes (both null where the record held no scene open).", shape.object({ session: sessionShown, scene: nullable16(T44), change: nullable16(shape.whole({ least: 1 })) }));
+  sessionRead = shape.named("SessionRead", "One session with what its next turn would carry in the mode asked for (block 3 as it would go; empty where it would carry nothing) and each of its compactions in the order written.", shape.object({ session: sessionShown, carry: carryMode, carried: T45, compactions: shape.list(compactionShown) }));
+  sessionClosed = shape.named("SessionClosed", "A session he closed: the session as it now stands, the scene of the story record closed with it, and the id of his change that closed the scene, which his Undo takes (both null where the record held no scene open).", shape.object({ session: sessionShown, scene: nullable16(T45), change: nullable16(shape.whole({ least: 1 })) }));
   reopenAsk = shape.named("SessionReopenAsk", "His Undo of a close: the change the close answered with, taken back, so the scene stands open again with its session.", shape.object({ change: opt20(shape.whole({ least: 1 })) }));
   sessionOne = shape.named("SessionOne", "A session as it now stands.", shape.object({ session: sessionShown }));
   uncompactAsk = shape.named("SessionUncompactAsk", "A compaction to undo, by its id.", shape.object({ id: shape.text({ blank: false }) }));
   compactionsReply = shape.named("SessionCompactions", "A session's compactions after one was undone, in the order written.", shape.object({ compactions: shape.list(compactionShown) }));
-  sessionTurnRow = shape.named("SessionTurnRow", "A turn played in a session: its number on the chat's path (none where it left the path), when RPE received it, and the runs of RPE's that ran in this session on it, oldest first.", shape.object({ turn: shape.turnId(), n: nullable16(shape.whole({ least: 1 })), at: N18, runs: shape.list(T44) }));
-  compactAnswer = shape.named("SessionCompactAnswer", "What asking for a compaction came to: the session as it now stands, whether a compaction is now waiting for its next turn (no when the session holds too few turns without a summary), the session's turns, how many of its newest turns a summary never stands for, and the answer in words, which says what is so: that it is asked for, was asked for already, or that there is nothing to compact yet and why.", shape.object({ session: sessionShown, asked: shape.yesNo(), turns: shape.whole({ least: 0 }), kept: shape.whole({ least: 0 }), words: T44 }));
+  sessionTurnRow = shape.named("SessionTurnRow", "A turn played in a session: its number on the chat's path (none where it left the path), when RPE received it, and the runs of RPE's that ran in this session on it, oldest first.", shape.object({ turn: shape.turnId(), n: nullable16(shape.whole({ least: 1 })), at: N18, runs: shape.list(T45) }));
+  compactAnswer = shape.named("SessionCompactAnswer", "What asking for a compaction came to: the session as it now stands, whether a compaction is now waiting for its next turn (no when the session holds too few turns without a summary), the session's turns, how many of its newest turns a summary never stands for, and the answer in words, which says what is so: that it is asked for, was asked for already, or that there is nothing to compact yet and why.", shape.object({ session: sessionShown, asked: shape.yesNo(), turns: shape.whole({ least: 0 }), kept: shape.whole({ least: 0 }), words: T45 }));
   KEEP_TURNS = SETTINGS.find((s) => s.key === "compaction.keepTurns") ?? (() => {
     throw new Error("rp-harness declares no compaction.keepTurns setting.");
   })();
   measureFigures = shape.named("MeasureFigures", "What a stretch of turns cost, as the measurement counts it from RPE's own record of each turn: tokens in, out and cached, the time to the reply's end and to the run's end (ms), and the model calls made.", shape.object({ tokensIn: shape.whole({ least: 0 }), tokensOut: shape.whole({ least: 0 }), cached: shape.whole({ least: 0 }), replyMs: shape.whole({ least: 0 }), runMs: shape.whole({ least: 0 }), calls: shape.whole({ least: 0 }) }));
   measureTurn = shape.named("MeasureTurn", "One turn of the measurement's script as played in a mode: its number in the script, and what it cost.", shape.object({ n: shape.whole({ least: 1 }), figures: measureFigures }));
-  measureDecision = shape.named("MeasureDecision", "One decision the script plants in the scene, with the check of whether the scene honoured it: what was planted and in which turn, the question put to the judging connection and the turn it tested, the excerpt of the reply and of the Author's records it judged, whether it found the decision honoured, and the judge's own answer.", shape.object({ name: T44, planted: shape.whole({ least: 1 }), check: T44, tested: shape.whole({ least: 1 }), evidence: T44, honoured: shape.yesNo(), answer: T44 }));
-  measureRepeat = shape.named("MeasureRepeat", "A look-up an agent made again: the tool and its arguments as they were made, the turn that repeated it and the turn that made it first.", shape.object({ tool: T44, args: T44, turn: shape.whole({ least: 1 }), first: shape.whole({ least: 1 }) }));
+  measureDecision = shape.named("MeasureDecision", "One decision the script plants in the scene, with the check of whether the scene honoured it: what was planted and in which turn, the question put to the judging connection and the turn it tested, the excerpt of the reply and of the Author's records it judged, whether it found the decision honoured, and the judge's own answer.", shape.object({ name: T45, planted: shape.whole({ least: 1 }), check: T45, tested: shape.whole({ least: 1 }), evidence: T45, honoured: shape.yesNo(), answer: T45 }));
+  measureRepeat = shape.named("MeasureRepeat", "A look-up an agent made again: the tool and its arguments as they were made, the turn that repeated it and the turn that made it first.", shape.object({ tool: T45, args: T45, turn: shape.whole({ least: 1 }), first: shape.whole({ least: 1 }) }));
   measureMode = shape.named("MeasureMode", "The script played in one carry mode: each turn's figures, their totals and medians, each planted decision with its check, and the look-ups made (calls of read tools) and the ones that repeated an earlier turn's, each named.", shape.object({
     mode: carryMode,
     turns: shape.list(measureTurn),
@@ -277782,16 +278225,16 @@ var init_session_routes = __esm(() => {
   }));
   measurementReport = shape.named("MeasurementReport", "A run of the session measurement: when it ran, the Author's connection and model, the judging connection and model, the script's hash, the three carry modes as played, and the recommendation of whoever ran it (blank until they write it; a report with none is kept and the page marks it as waiting for one).", shape.object({
     ran: shape.whole({ least: 0 }),
-    connection: T44,
-    model: T44,
-    judge: shape.object({ connection: T44, model: T44 }),
-    script: T44,
+    connection: T45,
+    model: T45,
+    judge: shape.object({ connection: T45, model: T45 }),
+    script: T45,
     modes: shape.list(measureMode),
-    recommendation: T44
+    recommendation: T45
   }));
-  measurementKept = shape.named("MeasurementKept", "A report kept: the id RPE gave it and when it received it (ms).", shape.object({ id: T44, at: shape.whole({ least: 0 }) }));
-  measurementRow = shape.named("MeasurementRow", "A kept report in the list: its id, when RPE received it, when it ran, the connection and model it ran on, the judging connection, and whether its recommendation is written.", shape.object({ id: T44, at: shape.whole({ least: 0 }), ran: shape.whole({ least: 0 }), connection: T44, model: T44, judge: T44, recommended: shape.yesNo() }));
-  measurementRead = shape.named("MeasurementRead", "A kept report whole, as it was sent, with its id and when RPE received it.", shape.object({ id: T44, at: shape.whole({ least: 0 }), report: measurementReport }));
+  measurementKept = shape.named("MeasurementKept", "A report kept: the id RPE gave it and when it received it (ms).", shape.object({ id: T45, at: shape.whole({ least: 0 }) }));
+  measurementRow = shape.named("MeasurementRow", "A kept report in the list: its id, when RPE received it, when it ran, the connection and model it ran on, the judging connection, and whether its recommendation is written.", shape.object({ id: T45, at: shape.whole({ least: 0 }), ran: shape.whole({ least: 0 }), connection: T45, model: T45, judge: T45, recommended: shape.yesNo() }));
+  measurementRead = shape.named("MeasurementRead", "A kept report whole, as it was sent, with its id and when RPE received it.", shape.object({ id: T45, at: shape.whole({ least: 0 }), report: measurementReport }));
 });
 
 // src/turn/area.ts
@@ -277799,6 +278242,7 @@ function turnArea(takes5) {
   const clock = takes5.clock ?? MACHINE_CLOCK;
   let app = null;
   let turns = null;
+  let preparer = null;
   const made2 = () => {
     if (turns === null)
       throw new Error("RPE's turn lane is not mounted yet.");
@@ -277848,6 +278292,9 @@ function turnArea(takes5) {
       chatNamed: async (user, chat2) => {
         await made2().take(user, chat2);
       },
+      chatReady: async (user, chat2) => {
+        await preparer?.ready(user, chat2);
+      },
       door: {
         turns: { play: (turn, out, signal3) => made2().lane.play(turn, out, signal3) },
         changes: { changed: (change2) => made2().lane.changed(change2), reopened: () => made2().lane.reopened() },
@@ -277877,8 +278324,8 @@ function turnArea(takes5) {
             return null;
           const s = made2().store.user(owner2());
           const turn = s.path(tag.chat).find((e) => e.message === message2)?.turn ?? s.swipes(tag.chat, message2).at(-1)?.id ?? null;
-          const kept5 = turn === null ? null : made2().prompts.carried(owner2(), turn);
-          return kept5 === null || kept5.prompt === null ? null : { prompt: kept5.prompt, layout: kept5.layout };
+          const kept7 = turn === null ? null : made2().prompts.carried(owner2(), turn);
+          return kept7 === null || kept7.prompt === null ? null : { prompt: kept7.prompt, layout: kept7.layout };
         },
         models: { pass: (request2, sink, signal3) => made2().harness.models.pass(owner2(), request2, sink, signal3) },
         passConnection: () => app === null ? null : passConnection(app.paths.files, app.log),
@@ -277943,8 +278390,13 @@ function turnArea(takes5) {
       at3.routes.add("web", webRoutes(at3.secrets));
       at3.routes.add("maps", mapRoutes({ store: turns.store, writes: at3.writes, live: at3.live, config: async (chat2) => (await chatSettings(chat2)).map }));
       await lane.preload();
+      preparer = new Preparer({ store: store2, user: owner2, write: (write, label6) => at3.writes.run(() => write(), label6), log: at3.log });
     },
-    stopping: () => turns?.harness.close()
+    started: () => preparer?.start(),
+    stopping: async () => {
+      await preparer?.stop();
+      await turns?.harness.close();
+    }
   };
   return { area, turns: () => turns };
 }
@@ -277955,6 +278407,7 @@ var init_area15 = __esm(() => {
   init_routes14();
   init_setting_list();
   init_meaning();
+  init_store2();
   init_story3();
   init_window();
   init_lane();
@@ -278181,7 +278634,7 @@ var init_settings15 = __esm(() => {
 
 // src/turn/bootstrap/jobs.ts
 function keyOf12(chat2) {
-  return `${KEPT5}${Buffer.from(chat2, "utf8").toString("base64url")}`;
+  return `${KEPT7}${Buffer.from(chat2, "utf8").toString("base64url")}`;
 }
 function keptOf3(value) {
   const jobs = isRecord(value) && Array.isArray(value.jobs) ? value.jobs : [];
@@ -278253,8 +278706,8 @@ class BootstrapJobs {
   }
   async chat(user, chat2) {
     const turns = this.#deps.turns();
-    const kept5 = keptOf3(await turns.env.store.get({ user }, keyOf12(chat2)));
-    const asks = new Map(kept5.map((k) => [k.job, k]));
+    const kept7 = keptOf3(await turns.env.store.get({ user }, keyOf12(chat2)));
+    const asks = new Map(kept7.map((k) => [k.job, k]));
     const [facts, start2, going] = await Promise.all([this.facts(user, chat2), this.startShown(user, chat2), turns.harness.jobs.list({ user, chat: chat2, states: Object.keys(UNDER_WAY2) })]);
     const underWay2 = going.jobs.flatMap((view2) => {
       const ask = asks.get(view2.id);
@@ -278265,8 +278718,8 @@ class BootstrapJobs {
   }
   async jobs(user, chat2, limit5, after3) {
     const turns = this.#deps.turns();
-    const kept5 = keptOf3(await turns.env.store.get({ user }, keyOf12(chat2)));
-    const asks = new Map(kept5.map((k) => [k.job, k]));
+    const kept7 = keptOf3(await turns.env.store.get({ user }, keyOf12(chat2)));
+    const asks = new Map(kept7.map((k) => [k.job, k]));
     const page = jobsAmong(turns.store.db, user, [...asks.keys()], limit5, after3);
     return { items: page.jobs.map((view2) => ({ id: view2.id, relive: asks.get(view2.id)?.relive ?? null, tokenLimit: asks.get(view2.id)?.tokenLimit ?? 0, view: view2 })), next: page.next };
   }
@@ -278283,15 +278736,15 @@ class BootstrapJobs {
   }
   async answer(user, chat2, job, word) {
     const turns = this.#deps.turns();
-    const kept5 = keptOf3(await turns.env.store.get({ user }, keyOf12(chat2))).find((k) => k.job === job);
-    if (kept5 === undefined)
+    const kept7 = keptOf3(await turns.env.store.get({ user }, keyOf12(chat2))).find((k) => k.job === job);
+    if (kept7 === undefined)
       return refused5(404, `Chat ${chat2} has no bootstrap job ${job}.`);
     const view2 = await turns.harness.jobs.get(user, job);
     if (view2 === undefined)
       return refused5(404, `There is no job ${job}.`);
     if (view2.state !== "asking" || view2.asks === undefined)
       return refused5(409, `Bootstrap job ${job} is not waiting for your word: it is ${view2.state}.`);
-    const answered3 = await turns.harness.jobs.answer(user, job, word.go === "end" ? { go: "end" } : { go: "on", askAt: view2.asks.tokens + (word.more ?? kept5.tokenLimit) });
+    const answered3 = await turns.harness.jobs.answer(user, job, word.go === "end" ? { go: "end" } : { go: "on", askAt: view2.asks.tokens + (word.more ?? kept7.tokenLimit) });
     return "refused" in answered3 ? refused5(409, `Nothing was done: ${refusalWords(answered3)}`) : { started: answered3 };
   }
   async view(scope2, agent2, ref2) {
@@ -278299,8 +278752,8 @@ class BootstrapJobs {
       return JSON.stringify(await this.facts(scope2.user, scope2.chat));
     if (ref2 !== BOOTSTRAP_JOB || agent2.job === undefined)
       return null;
-    const kept5 = keptOf3(await this.#deps.turns().env.store.get(scope2, keyOf12(scope2.chat))).find((k) => k.job === agent2.job);
-    const ask = kept5 ?? this.#asking.get(`${scope2.user}\x00${scope2.chat}`);
+    const kept7 = keptOf3(await this.#deps.turns().env.store.get(scope2, keyOf12(scope2.chat))).find((k) => k.job === agent2.job);
+    const ask = kept7 ?? this.#asking.get(`${scope2.user}\x00${scope2.chat}`);
     return ask === undefined ? null : JSON.stringify({ ...ask.relive !== null ? { relive: ask.relive } : {}, tokenLimit: ask.tokenLimit });
   }
   #question(view2, tokenLimit, cachedWeight, facts) {
@@ -278345,7 +278798,7 @@ class BootstrapJobs {
     }
   }
 }
-var BOOTSTRAP_SKILL = "bootstrap", BOOTSTRAP_JOB = "bootstrap:job", BOOTSTRAP_FACTS = "bootstrap:facts", KEPT5 = "rpe/bootstrap/", UNDER_WAY2, RPH_CAPS, RELIVE_PART = "bootstrap-relive";
+var BOOTSTRAP_SKILL = "bootstrap", BOOTSTRAP_JOB = "bootstrap:job", BOOTSTRAP_FACTS = "bootstrap:facts", KEPT7 = "rpe/bootstrap/", UNDER_WAY2, RPH_CAPS, RELIVE_PART = "bootstrap-relive";
 var init_jobs6 = __esm(() => {
   init_config_read();
   init_guidance();
@@ -278362,10 +278815,10 @@ var init_jobs6 = __esm(() => {
 });
 
 // src/turn/bootstrap/shapes.ts
-var T45, N19, opt21, MIGRATED = "migrated", relive, tokenLimit, bootstrapStartBody, bootstrapBatchBody, bootstrapAnswerBody, notKnown, fact2 = (fields3) => shape.union(shape.object({ known: shape.literal(true), ...fields3 }), notKnown), stretch, horizonPart, doneEnough2, bootstrapJob, startShown, question2, bootstrapChatReply, carriedBootstrap, bootstrapBatchReply;
+var T46, N19, opt21, MIGRATED = "migrated", relive, tokenLimit, bootstrapStartBody, bootstrapBatchBody, bootstrapAnswerBody, notKnown, fact2 = (fields3) => shape.union(shape.object({ known: shape.literal(true), ...fields3 }), notKnown), stretch, horizonPart, doneEnough2, bootstrapJob, startShown, question2, bootstrapChatReply, carriedBootstrap, bootstrapBatchReply;
 var init_shapes9 = __esm(() => {
   init_app2();
-  T45 = shape.text();
+  T46 = shape.text();
   N19 = shape.number();
   opt21 = shape.optional;
   relive = opt21(shape.nullable(shape.text({ blank: false })), "His choice of what to relive: one of the words the bootstrap skill's header offers (`relive:`); left out or null, the skill decides. Another word is refused with the words it takes.");
@@ -278379,17 +278832,17 @@ var init_shapes9 = __esm(() => {
   doneEnough2 = shape.named("DoneEnoughShown", `The six facts of "done enough", in the order the bootstrap skill names them: the lore index, the history the window leaves out, the cast, the story model, the horizon, and each principal's base and memories.`, shape.object({
     lore: fact2({ entries: N19, indexed: N19, stale: N19 }),
     history: fact2({ messages: N19, leftOut: N19, covered: N19, stretches: N19, summarized: N19, nearestUncovered: shape.nullable(stretch), nearestUnsummarized: shape.nullable(stretch) }),
-    cast: fact2({ listed: N19, cast: N19, uncast: shape.list(T45) }),
+    cast: fact2({ listed: N19, cast: N19, uncast: shape.list(T46) }),
     story: fact2({ premise: N19, chapters: N19, scenes: N19, beats: N19, threads: N19, openThreads: N19, arcs: N19, principals: N19, principalsWithArc: N19, player: N19 }),
     horizon: fact2({ entries: N19, named: N19, clock: shape.yesNo(), time: horizonPart, place: horizonPart, onStage: horizonPart, holdings: horizonPart }),
-    principals: fact2({ principals: shape.list(shape.object({ id: T45, name: T45, base: shape.list(T45), memories: N19, own: N19, ownFromPerceptions: N19 })) })
+    principals: fact2({ principals: shape.list(shape.object({ id: T46, name: T46, base: shape.list(T46), memories: N19, own: N19, ownFromPerceptions: N19 })) })
   }));
-  bootstrapJob = shape.named("BootstrapJobShown", "A bootstrap job of a chat: what it was given (his relive word, the token limit at which it asks), and its view as RPH gives it (null: RPH no longer holds it).", shape.object({ id: T45, relive: shape.nullable(T45), tokenLimit: N19, view: shape.nullable(jobView2) }));
-  startShown = shape.named("BootstrapStartShown", "The start as it stands for the chat, before any press: whether the bootstrap skill is in force; the relive words its header offers (none while it is off); the token limit at which a job asks him whether to go on, counted as tokens sent and written by every agent of the job with a cached token at `cachedWeight`; and each cap that ends a bootstrap job's run, as in force for the chat (null: none).", shape.object({ skill: shape.yesNo(), relive: shape.list(T45), tokenLimit: N19, cachedWeight: N19, caps: shape.list(shape.object({ key: T45, value: shape.nullable(N19) })) }));
-  question2 = shape.named("BootstrapQuestion", "A bootstrap job held at its token limit, waiting for his word: the point it reached and the tokens counted when it did, what it spent and how a cached token counts, what its agent last wrote, the six facts as they stand now, and how many more tokens a go-on gives by default.", shape.object({ job: T45, at: N19, tokens: N19, usage: usage2, cachedWeight: N19, wrote: shape.nullable(T45), facts: doneEnough2, more: N19 }));
-  bootstrapChatReply = shape.named("BootstrapChatReply", "A chat's bootstrap: the six facts, the start as it stands, the chat's bootstrap jobs under way (newest first), and the question of each that waits for his word.", shape.object({ chat: T45, facts: doneEnough2, start: startShown, underWay: shape.list(bootstrapJob), questions: shape.list(question2) }));
-  carriedBootstrap = shape.named("CarriedBootstrap", "A chat the last migration carried, with how its bootstrap stands (none: no job yet; queued, held, running, asking: its newest job; ended: its newest job ended, how and with what on the job), its newest bootstrap job, that job's question when it waits for his word, and the start as it stands for the chat.", shape.object({ chat: T45, state: shape.oneOf("none", "queued", "held", "running", "asking", "ended"), job: shape.nullable(bootstrapJob), question: shape.nullable(question2), start: startShown }));
-  bootstrapBatchReply = shape.named("BootstrapBatchReply", "What came of starting the job for several chats, one after another: each chat started, with its job's view, and each refused, with why.", shape.object({ started: shape.list(shape.object({ chat: T45, job: jobView2 })), refused: shape.list(shape.object({ chat: T45, why: T45 })) }));
+  bootstrapJob = shape.named("BootstrapJobShown", "A bootstrap job of a chat: what it was given (his relive word, the token limit at which it asks), and its view as RPH gives it (null: RPH no longer holds it).", shape.object({ id: T46, relive: shape.nullable(T46), tokenLimit: N19, view: shape.nullable(jobView2) }));
+  startShown = shape.named("BootstrapStartShown", "The start as it stands for the chat, before any press: whether the bootstrap skill is in force; the relive words its header offers (none while it is off); the token limit at which a job asks him whether to go on, counted as tokens sent and written by every agent of the job with a cached token at `cachedWeight`; and each cap that ends a bootstrap job's run, as in force for the chat (null: none).", shape.object({ skill: shape.yesNo(), relive: shape.list(T46), tokenLimit: N19, cachedWeight: N19, caps: shape.list(shape.object({ key: T46, value: shape.nullable(N19) })) }));
+  question2 = shape.named("BootstrapQuestion", "A bootstrap job held at its token limit, waiting for his word: the point it reached and the tokens counted when it did, what it spent and how a cached token counts, what its agent last wrote, the six facts as they stand now, and how many more tokens a go-on gives by default.", shape.object({ job: T46, at: N19, tokens: N19, usage: usage2, cachedWeight: N19, wrote: shape.nullable(T46), facts: doneEnough2, more: N19 }));
+  bootstrapChatReply = shape.named("BootstrapChatReply", "A chat's bootstrap: the six facts, the start as it stands, the chat's bootstrap jobs under way (newest first), and the question of each that waits for his word.", shape.object({ chat: T46, facts: doneEnough2, start: startShown, underWay: shape.list(bootstrapJob), questions: shape.list(question2) }));
+  carriedBootstrap = shape.named("CarriedBootstrap", "A chat the last migration carried, with how its bootstrap stands (none: no job yet; queued, held, running, asking: its newest job; ended: its newest job ended, how and with what on the job), its newest bootstrap job, that job's question when it waits for his word, and the start as it stands for the chat.", shape.object({ chat: T46, state: shape.oneOf("none", "queued", "held", "running", "asking", "ended"), job: shape.nullable(bootstrapJob), question: shape.nullable(question2), start: startShown }));
+  bootstrapBatchReply = shape.named("BootstrapBatchReply", "What came of starting the job for several chats, one after another: each chat started, with its job's view, and each refused, with why.", shape.object({ started: shape.list(shape.object({ chat: T46, job: jobView2 })), refused: shape.list(shape.object({ chat: T46, why: T46 })) }));
 });
 
 // src/turn/bootstrap/routes.ts
@@ -278900,7 +279353,7 @@ async function toolsIn(folder) {
   const names3 = await readdir15(folder).catch(() => []);
   return names3.flatMap((name) => /\.(md|json)$/.test(name) ? [name.replace(/\.(md|json)$/, "")] : []);
 }
-function notesOf(db, files) {
+function notesOf2(db, files) {
   const writes2 = { run: async (write) => write(db) };
   return new TreeNotes({ files, db, writes: writes2, chats: new TreeChats(db, writes2, files) });
 }
@@ -278915,8 +279368,8 @@ function treeLayout() {
       const at3 = await new TreeChats(db, { run: async (write) => write(db) }, files).place(user, chat2, names3);
       return join51(CHATS_FOLDER, at3.character, at3.chat);
     },
-    recordVersion: (db, files, user, chat2, turn, path7, before2, after3, by2, at3, stands2) => notesOf(db, files).recordVersion(user, chat2, turn, path7, before2, after3, by2, at3, stands2),
-    forgetVersions: (db, files, user, chat2) => notesOf(db, files).forgetCarried(user, chat2),
+    recordVersion: (db, files, user, chat2, turn, path7, before2, after3, by2, at3, stands2) => notesOf2(db, files).recordVersion(user, chat2, turn, path7, before2, after3, by2, at3, stands2),
+    forgetVersions: (db, files, user, chat2) => notesOf2(db, files).forgetCarried(user, chat2),
     toolNames: async (files) => [...new Set((await Promise.all([SHIPPED_GUIDANCE, RPE_GUIDANCE, files].map((root) => toolsIn(join51(root, GLOBAL_FOLDERS.tools))))).flat())]
   };
 }
@@ -279124,7 +279577,11 @@ async function serving(paths, config3, io, options) {
     io.out(`RPE ${options.version} listens on ${running2.url} (data folder: ${paths.root}).`);
     if (!currentKeys(app.db, app.auth.owner).some((k) => k.kind === "provider"))
       io.out(`There is no provider key yet: make one with ${runLine(io, paths, "key", "provider")}`);
-    const waiting2 = app.switches.list(await app.hooks.listFiles()).filter((s) => s.state === "waiting").length;
+    const counted5 = app.hooks.listFiles().then((files) => app.switches.list(files).filter((s) => s.state === "waiting").length);
+    counted5.catch(() => {
+      return;
+    });
+    const waiting2 = await Promise.race([counted5, stop2.then(() => 0)]);
     if (waiting2 > 0)
       io.out(`${waiting2} waiting to be switched on: \`${runLine(io, paths, "status")}\` lists them.`);
     await Promise.race([app.builds.check(), stop2]);
@@ -279648,7 +280105,7 @@ async function swapUp(line4, io, version) {
   }, swapIo);
   if (ran === null)
     return 1;
-  const after3 = { ...current3, lumiverse: { ...current3.lumiverse, connections: ids3 } };
+  const after3 = { ...current3, address: plan2.at.address, port: plan2.at.port, lumiverse: { ...current3.lumiverse, connections: ids3 } };
   await webToken(ctx, after3);
   const left2 = await extensionLeft(call2);
   left2.push(...await connectionsWithoutLimits(paths, after3, io));
@@ -279999,10 +280456,10 @@ async function upCommand(argv, io, options, serveHere) {
     throw new Error(`There is no file at ${database}: give --database the path of Lumiverse's database file. Nothing was changed.`);
   const guard = oneUser(paths, config3);
   const ctx = { paths, config: config3, io, version, what: "rpe up" };
-  const kept5 = await keptSession(url2, username, paths, config3, io);
-  if (kept5 !== null && config3.lumiverse.user !== null)
+  const kept7 = await keptSession(url2, username, paths, config3, io);
+  if (kept7 !== null && config3.lumiverse.user !== null)
     guard(config3.lumiverse.user);
-  const session = kept5 ?? await signInTo(url2, username, {}, ctx, guard);
+  const session = kept7 ?? await signInTo(url2, username, {}, ctx, guard);
   let current3 = await loadConfig(paths, io.env);
   const call2 = (method, path7, body) => session.request(method, path7, body);
   const identifier = flags.identifier ?? EXTENSION_IDENTIFIER;
@@ -280071,7 +280528,7 @@ async function upCommand(argv, io, options, serveHere) {
     if (blocked !== null)
       left2.push(blocked);
     else if (answer6 !== null && "rpe" in answer6)
-      left2.push(`RPE ${answer6.rpe} already answers at ${loopbackUrl(current3.port)}${kept5 === null || settled3.moved || saved.listens !== undefined ? ": restart it (stop it and start it again) so it takes what this run wrote" : ""}; this run did not start another.`);
+      left2.push(`RPE ${answer6.rpe} already answers at ${loopbackUrl(current3.port)}${kept7 === null || settled3.moved || saved.listens !== undefined ? ": restart it (stop it and start it again) so it takes what this run wrote" : ""}; this run did not start another.`);
     else if (answer6 !== null)
       left2.push(`Something other than RPE answers at ${loopbackUrl(current3.port)}: give RPE a free port with ${runLine(io, paths, "up", "--port", "<port>")}.`);
   }
@@ -280293,5 +280750,5 @@ if (Bun.isMainThread) {
     stopped,
     fetch: (url2, init) => fetch(url2, init),
     invoked: invokedAs2(process.execPath, Bun.main)
-  }, { version: "73a70ebb", areas: compose2().areas, appFile: Bun.main, host: { platform: process.platform, uid: process.getuid?.() ?? null, bun: process.execPath } });
+  }, { version: "7fb8b962", areas: compose2().areas, appFile: Bun.main, host: { platform: process.platform, uid: process.getuid?.() ?? null, bun: process.execPath } });
 }

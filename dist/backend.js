@@ -203,7 +203,7 @@ var PAGE_HEADERS = ["authorization", "content-type", "accept", "if-none-match"];
 var ANSWER_HEADERS = ["content-type", "etag", "cache-control"];
 var words = (error) => error instanceof Error ? error.message : String(error);
 var JAVASCRIPT_PATH = /\.(?:js|mjs|cjs|es)(?:[;/\\]|$)/i;
-var TOO_LARGE = /CORS proxy response (too large|exceeded)/;
+var TOO_LARGE = /CORS proxy response (too large|exceeded)|Response too large/;
 function startPipe(deps) {
   const { spindle: spindle2 } = deps;
   const pages = new Map;
@@ -1594,8 +1594,8 @@ async function startExtension(spindle2, options = {}) {
     spindle: spindle2,
     registrations,
     missing: lacking,
-    build: options.build ?? "73a70ebb" ?? "dev",
-    statedHash: options.statedHash !== undefined ? options.statedHash : "e05da84d5796c4d45308c9ef9b973c0c2c0270c8064e6f2898faf7de74379503",
+    build: options.build ?? "7fb8b962" ?? "dev",
+    statedHash: options.statedHash !== undefined ? options.statedHash : "bdc8fb94273d85b49b9a1edd805d8768f055de718cd5e8e35387576456f17265",
     log,
     registered: () => notice(),
     refused: (user) => {
