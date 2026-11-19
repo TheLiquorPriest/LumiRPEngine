@@ -58,8 +58,8 @@ const words = (error: unknown): string => (error instanceof Error ? error.messag
 
 /** A path Lumiverse's proxy refuses to carry, as it tells one (`utils/safe-fetch.ts:67-73`): one naming a JavaScript file. */
 const JAVASCRIPT_PATH = /\.(?:js|mjs|cjs|es)(?:[;/\\]|$)/i;
-/** How Lumiverse's proxy says an answer was too large for it (`worker-host.ts:4676-4679`, `:784-788`). */
-const TOO_LARGE = /CORS proxy response (too large|exceeded)/;
+/** How Lumiverse's proxy says an answer was too large for it: its own words (`worker-host.ts:4676-4679`, `:784-788`), and its fetch's (`utils/safe-fetch.ts:538`), which come first for an answer that declares its length. */
+const TOO_LARGE = /CORS proxy response (too large|exceeded)|Response too large/;
 
 export function startPipe(deps: PipeDeps): Pipe {
   const { spindle } = deps;

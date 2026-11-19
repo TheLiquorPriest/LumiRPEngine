@@ -91,7 +91,7 @@ describe("a page's request", () => {
     expect(elsewhere).toEqual([]);
   });
 
-  test("a page's answer past 25 MiB fails as Lumiverse fails it: cut as it is read, or refused by its declared length, and told to the page as RPE not reached", async () => {
+  test("a page's answer past 25 MiB fails as Lumiverse fails it: cut as it is read, or refused by its declared length, and told to the page as too large for Lumiverse's proxy", async () => {
     const rig = await new Rig().start();
     const limit = 25 * 1024 * 1024;
     /** `size` bytes of answer in megabyte chunks, its length declared where `declare` says. */
@@ -123,7 +123,7 @@ describe("a page's request", () => {
     };
     for (const [id, path] of [["streamed", "/api/v1/streamed"], ["declared", "/api/v1/declared"]] as const) rig.ext.fromFrontend({ rpe: "request", id, method: "GET", path, headers: { authorization: "Bearer rpp_page" } }, USER, PAGE);
     await until("both answers", () => answers.size === 2);
-    expect(answers.get("streamed")).toMatchObject({ status: 502, body: expect.stringContaining(`Response too large: more than ${limit} bytes`) });
-    expect(answers.get("declared")).toMatchObject({ status: 502, body: expect.stringContaining(`Response too large: ${limit + 1} bytes (max ${limit})`) });
+    expect(answers.get("streamed")).toMatchObject({ status: 413, body: expect.stringContaining(`Response too large: more than ${limit} bytes`) });
+    expect(answers.get("declared")).toMatchObject({ status: 413, body: expect.stringContaining(`Response too large: ${limit + 1} bytes (max ${limit})`) });
   });
 });
