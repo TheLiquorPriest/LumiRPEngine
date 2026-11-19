@@ -8,8 +8,8 @@
 // made around the queue fails where it is made rather than colliding with one made through it.
 
 import { Database } from "bun:sqlite";
-import { AsyncLocalStorage } from "node:async_hooks";
 import { chmodSync } from "node:fs";
+import { type Asking, askingNow, barred, committed, FoldAway, inPlace } from "../store/away";
 import { OWNER_ONLY_FILE } from "./disk";
 
 /** Opens the database file, making it when there is none, for one writer and many readers. */
@@ -34,59 +34,20 @@ export class WritesClosed extends Error {
   override name = "WritesClosed";
 }
 
-/**
- * Where a write threw because something it needs must be done off RPE's thread first (a fold too long for it: `Store.awayFor`): the
- * promise of that work, after which the write runs again; null for any other error.
- */
-export type AwayFor = (error: unknown) => Promise<void> | null;
-
-/** A write that needed work off RPE's thread that failed (a long fold a worker thread could not make): nothing of it was written. */
-export class WriteAway extends Error {
-  override name = "WriteAway";
-}
-
-/** How many times a write is run again after the work off the thread it needed (`AwayFor`). */
+/** How many times a write is run again after a fold too long for RPE's thread was made on a worker thread for it. */
 const WRITE_TRIES = 3;
-
-/** How many times a call is made again after the work off RPE's thread it needed (`againAfterAway`). */
-const CALL_TRIES = 16;
-
-/** A call made through `againAfterAway` (a route's handler, an agent's tool): whether a write of it, or of a call inside it, was committed. */
-interface Call {
-  wrote: boolean;
-  up: Call | undefined;
-}
-
-/** The call each write is asked within, followed through every wait of its work. */
-const calls = new AsyncLocalStorage<Call>();
-
-/**
- * Makes `work` (a route's handler, an agent's tool) and, where it throws an error that asks for work off RPE's thread (`awayFor`: a fold
- * too long for it) before any write of its own was committed, has that work done and makes it again, `CALL_TRIES` times at most. A call
- * that committed a write first is not made again, since what it wrote would be written twice: it throws what it threw, in its words.
- */
-export async function againAfterAway<T>(awayFor: AwayFor, work: () => Promise<T>): Promise<T> {
-  for (let tries = 1; ; tries++) {
-    const call: Call = { wrote: false, up: calls.getStore() };
-    try {
-      return await calls.run(call, work);
-    } catch (error) {
-      const away = call.wrote || tries >= CALL_TRIES ? null : awayFor(error);
-      if (away === null) throw error;
-      await away;
-    }
-  }
-}
 
 interface Job {
   write: (db: Database) => unknown;
   label: string;
   resolve: (value: unknown) => void;
   reject: (error: unknown) => void;
-  /** How many times it was run again after work off the thread it needed. */
+  /** How many times it was run again after a fold of it was made on a worker thread. */
   tries: number;
-  /** The call it was asked within, told once it is committed. */
-  call: Call | undefined;
+  /** Whether it runs with its folds in place, the bar off (`inPlace`): the worker's fold did not serve it, or failed. */
+  inPlace: boolean;
+  /** The work it was asked within, told once it is committed (`committed`). */
+  asking: Asking | undefined;
 }
 
 /**
@@ -94,11 +55,12 @@ interface Job {
  * before it, alone, inside its own transaction, and resolves with what it returned once committed.
  * A write must not wait for anything: one that returns a promise is rolled back and refused. A write
  * that throws is rolled back and rejects; the writes around it are not touched. Writes run back to
- * back for at most `sliceMs` before other work is let in. A write that threw because it needs work
- * done off RPE's thread first (`awayFor`: a long fold the store refuses here) is rolled back whole;
- * the queue waits, every write after it waiting too, while that work is done, and then runs it again,
- * `WRITE_TRIES` times at most before it rejects in words. So a write that can throw so must change
- * nothing outside the database before it throws, or put right what it changed.
+ * back for at most `sliceMs` before other work is let in. A write runs with the store's bar on
+ * (`barred`): one refused a fold too long for RPE's thread (`FoldAway`) is rolled back whole, the
+ * queue waits, every write after it waiting too, while a worker thread folds it, and then runs it
+ * again; after `WRITE_TRIES`, or where the worker's fold failed, it runs once more with its folds in
+ * place, as every write did before the bar. So a write that can be refused must change nothing outside
+ * the database before it is, or put right what it changed.
  */
 export class WriteQueue {
   private jobs: (Job | undefined)[] = [];
@@ -106,13 +68,12 @@ export class WriteQueue {
   private draining = false;
   private closed = false;
   private idle: PromiseWithResolvers<void> | null = null;
-  /** Whether the queue waits for work off the thread that the write at its head needs (`hold`). */
+  /** Whether the queue waits for a worker thread's fold that the write at its head needs (`hold`). */
   private holding = false;
 
   constructor(
     private readonly db: Database,
     private readonly sliceMs: number,
-    private readonly awayFor: AwayFor | null = null,
   ) {
     db.run("PRAGMA query_only = ON");
   }
@@ -125,7 +86,7 @@ export class WriteQueue {
   run<T>(write: (db: Database) => T, label = "a write"): Promise<T> {
     if (this.closed) return Promise.reject(new WritesClosed(`RPE is stopping, so ${label} was not made.`));
     const done = Promise.withResolvers<T>();
-    this.jobs.push({ write, label, resolve: done.resolve as (value: unknown) => void, reject: done.reject, tries: 0, call: calls.getStore() });
+    this.jobs.push({ write, label, resolve: done.resolve as (value: unknown) => void, reject: done.reject, tries: 0, inPlace: false, asking: askingNow() });
     if (!this.draining) {
       this.draining = true;
       queueMicrotask(() => this.drain());
@@ -174,7 +135,8 @@ export class WriteQueue {
     try {
       this.db.run("BEGIN IMMEDIATE");
       try {
-        result = job.write(this.db);
+        // With the bar on, a fold too long for RPE's thread is refused; once that did not serve, the write folds in place.
+        result = job.inPlace ? inPlace(() => job.write(this.db)) : barred(() => job.write(this.db));
         if (typeof (result as PromiseLike<unknown> | null)?.then === "function") {
           // What it does after its first wait would land outside the transaction, where nothing may write.
           Promise.resolve(result).catch(() => undefined);
@@ -186,34 +148,42 @@ export class WriteQueue {
         throw error;
       }
     } catch (error) {
-      // Run again after the work off the thread it needs, `WRITE_TRIES` times at most; then it rejects with what it threw, in its words.
-      const away = job.tries < WRITE_TRIES ? (this.awayFor?.(error) ?? null) : null;
-      if (away === null) job.reject(error);
-      else this.hold(job, away);
+      if (!(error instanceof FoldAway)) job.reject(error);
+      else if (job.tries < WRITE_TRIES) this.hold(job, error.away());
+      else this.again(job);
       return;
     } finally {
       this.db.run("PRAGMA query_only = ON");
     }
-    // The calls it was asked within wrote something: none of them is made again after work off the thread (`againAfterAway`).
-    for (let call = job.call; call !== undefined; call = call.up) call.wrote = true;
+    // The work it was asked within wrote something: none of it is made again after a worker's fold (`awayAgain`).
+    committed(job.asking);
     job.resolve(result);
   }
 
+  /** Puts `job` back at the head, to run next with its folds in place (`inPlace`): the worker's fold did not serve it, or failed. */
+  private again(job: Job): void {
+    job.inPlace = true;
+    this.head--;
+    this.jobs[this.head] = job;
+  }
+
   /**
-   * Runs `job` again, before every write queued after it, once the work off the thread it needs (`away`) is done; until then no write
-   * runs, so the database the work reads is the one the write runs on again. Where that work fails, `job` rejects in words and the
-   * queue goes on.
+   * Runs `job` again, before every write queued after it, once a worker thread has folded what it was refused (`away`); until then no
+   * write runs, so the database the worker reads is the one the write runs on again. Where the worker's fold failed, or none could be
+   * asked for, it runs again with its folds in place.
    */
-  private hold(job: Job, away: Promise<void>): void {
+  private hold(job: Job, away: Promise<void> | null): void {
     job.tries++;
+    if (away === null) {
+      this.again(job);
+      return;
+    }
     this.head--;
     this.jobs[this.head] = job;
     this.holding = true;
     away
-      .catch((cause: unknown) => {
-        this.jobs[this.head] = undefined;
-        this.head++;
-        job.reject(new WriteAway(`${job.label} needed a long fold of a chat's past, which could not be made on a worker thread, so nothing of it was written: ${cause instanceof Error ? cause.message : String(cause)}`));
+      .catch(() => {
+        job.inPlace = true;
       })
       .finally(() => {
         this.holding = false;

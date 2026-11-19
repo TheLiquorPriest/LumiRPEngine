@@ -28,13 +28,12 @@
 // holds it.
 
 import type { Database } from "bun:sqlite";
-import { againAfterAway } from "../app/database";
 import { type Fields, type Guidance, loadGuidance, type TemplatePart } from "../app/guidance";
 import type { AgentRef, AttachMoment, ConsentGrant, ContextBlock, FilesPort, GapCheck, JobView, Log, RuleFiring, RunScope, Scope, TurnEvents } from "rp-harness/contract";
 import { castViews, type MemorySearch, type SourceReader } from "../cast";
 import { mapView, mapWording, noMapWords, rulesetData } from "../iface";
 import { LORE_BATCH, LORE_KNOWN, type LoreIndex, type LoreProposals, loreBatchBlock, loreKnownBlock, loreLines } from "../lore";
-import { awayOf, type DueSource, type Lane, type Part, readPart, type Store, type ViewLine, wordLine, worldState, type WorldStateBlock, worldStateFolds } from "../store";
+import { type DueSource, type Lane, type Part, readPart, type Store, type ViewLine, wordLine, worldState, type WorldStateBlock, worldStateFolds } from "../store";
 import { storyBrief } from "../story";
 import { storyAt } from "../story/path";
 import { StoryRecord } from "../story/record";
@@ -316,12 +315,8 @@ export async function givenViews(deps: EventsDeps, scope: Scope, agent: AgentRef
   const out: { ref: string; text: string | null }[] = [];
   for (const ref of refs) {
     try {
-      // A view whose state is no longer held and too long to fold on RPE's thread has it folded on a worker thread, and is read again.
-      const text = await againAfterAway(awayOf, async () => {
-        const mine = ref === LORE_BATCH ? await loreBatchBlock(deps.loreIndex, scope, inForce(), agent) : ref === LORE_KNOWN ? await knownView(deps, scope, agent, inForce()) : await turnView(reading, ref);
-        return mine !== undefined ? mine : ((await deps.views?.(scope, agent, ref)) ?? (await castNamed(deps, scope, agent, ref, moment)));
-      });
-      out.push({ ref, text });
+      const mine = ref === LORE_BATCH ? await loreBatchBlock(deps.loreIndex, scope, inForce(), agent) : ref === LORE_KNOWN ? await knownView(deps, scope, agent, inForce()) : await turnView(reading, ref);
+      out.push({ ref, text: mine !== undefined ? mine : ((await deps.views?.(scope, agent, ref)) ?? (await castNamed(deps, scope, agent, ref, moment))) });
     } catch (error) {
       deps.log.warn("What an agent was to be given by name could not be read.", { agent: agent.id, ref, error: error instanceof Error ? error.message : String(error) });
       out.push({ ref, text: null });

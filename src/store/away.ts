@@ -1,11 +1,15 @@
 // A long fold, handed to a worker thread (plan §4.1 l.199: "so one turn never stalls another"). Wherever the application gives the store
-// a thread (`StoreAway`: RPE's own store), a fold over more changes than `store.workerFoldAt` is never run on RPE's thread, whoever asks
-// for it: the store throws `FoldAway` naming the fold before it changes anything, a thread opens the database to read, folds as the
-// store does with the same packs and areas, and gives back the states it held and the snapshots it found worth storing, which the store
-// takes as its own (`Store.awayFor`); what threw is then made again and finds the state held. Whoever may wait for it does so
-// (`Store.afar`, `Store.offThread`, the write queue, the server's routes); `afar` also hands over a fold with no state held on its path.
-// The store knows nothing of threads: the application gives it a `StoreAway` that runs a job somewhere.
+// a thread (`StoreAway`: RPE's own store), a fold over more changes than `store.workerFoldAt` is refused on RPE's thread inside work that
+// can be made again exactly once a thread has folded it (`barred`): a read of the store's (`Store.afar`, `Store.offThread`), a walk's
+// item (`inStretches`), the preparing pass's stretch, a queued write (rolled back whole), a page's GET until it commits a write
+// (`awayAgain`). There the store throws `FoldAway` naming the fold before it changes anything, a thread opens the database to read,
+// folds as the store does with the same packs and areas, and gives back the states it held and the snapshots it found worth storing,
+// which the store takes as its own (`Store.awayFor`); what threw is then made again and finds the state held. Where that does not serve
+// (the same fold refused again, the thread's fold failed), and in all other work, the fold runs in place as it always did, and the log
+// names what asked for it and how long it was, for a later pass to find. The store knows nothing of threads: the application gives it
+// a `StoreAway` that runs a job somewhere.
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { SnapshotRows } from "./snapshot";
 import type { Folded } from "./types";
 
@@ -85,9 +89,7 @@ export class FoldAway extends Error {
     super(changes === null ? "A fold with no state held on its path was asked for where it runs on a worker thread." : `A fold over ${changes} changes was asked for on RPE's thread, which runs none that long; it runs on a worker thread for whoever waits for it.`);
     this.name = "FoldAway";
     if (changes === null) return;
-    // The calls by name, which a bundled build keeps where it keeps no file of its own for each.
-    const calls = (this.stack ?? "").split("\n").flatMap((line) => /^\s*at (?:async )?([\w$.#<>]+) \(/.exec(line)?.[1] ?? []);
-    this.message += ` Asked for by ${calls.slice(0, 10).join(" ← ")}.`;
+    this.message += ` Asked for by ${askersOf(this.stack)}.`;
   }
 
   /** The fold run on a thread by the store that refused it, its states held there once it is done. */
@@ -96,9 +98,13 @@ export class FoldAway extends Error {
   }
 }
 
-/** Where `error` is a refused fold (`FoldAway`), its fold run on a thread; null for any other error: what the write queue and every asker is given. */
-export function awayOf(error: unknown): Promise<void> | null {
-  return error instanceof FoldAway ? error.away() : null;
+/** The calls a stack names, innermost first, by name: what asked for a fold, which a bundled build keeps where it keeps no file of its own for each. */
+export function askersOf(stack: string | undefined): string {
+  return (stack ?? "")
+    .split("\n")
+    .flatMap((line) => /^\s*at (?:async )?([\w$.#<>]+) \(/.exec(line)?.[1] ?? [])
+    .slice(0, 10)
+    .join(" ← ");
 }
 
 /** How many times running one asker may be refused the same fold, its thread's fold not serving it, before it gives up (`AwayAsked`). */
@@ -124,5 +130,78 @@ export class AwayAsked {
     this.last = key;
     this.all++;
     return this.same < AWAY_REPEATS && this.all <= AWAY_MOST;
+  }
+}
+
+/** Work that may be made again (`awayAgain`), followed through every wait of it: whether the bar is on, and the work it runs inside. */
+export interface Asking {
+  bar: boolean;
+  up: Asking | undefined;
+}
+
+const asking = new AsyncLocalStorage<Asking>();
+
+/** Synchronous work running with the bar on (`barred`), however deep. */
+let barredNow = 0;
+
+/** Whether a fold over the bar is refused here: inside barred work, synchronous or awaited, that has committed no write yet. */
+export function barOn(): boolean {
+  return barredNow > 0 || asking.getStore()?.bar === true;
+}
+
+/** Runs synchronous `read`, which may be made again exactly, with the bar on. */
+export function barred<T>(read: () => T): T {
+  barredNow++;
+  try {
+    return read();
+  } finally {
+    barredNow--;
+  }
+}
+
+/** Runs `work` with the bar off, as every fold ran before the bar: where it cannot be made again, or making it again did not serve. */
+export function inPlace<T>(work: () => T): T {
+  const was = barredNow;
+  barredNow = 0;
+  try {
+    return asking.run({ bar: false, up: asking.getStore() }, work);
+  } finally {
+    barredNow = was;
+  }
+}
+
+/** The work a write is asked within (the write queue keeps it with the write), to be told when the write is committed (`committed`). */
+export function askingNow(): Asking | undefined {
+  return asking.getStore();
+}
+
+/** A write of `within`'s was committed: the bar is off for it and the work around it, which made again would write it twice. */
+export function committed(within: Asking | undefined): void {
+  for (let at = within; at !== undefined; at = at.up) at.bar = false;
+}
+
+/**
+ * Runs `work` (a page's GET) with the bar on until it commits a write: a fold it is refused runs on a thread, and the work is made again,
+ * for as long as each refusal names another fold (`AwayAsked`); then, or where the thread's fold failed, it is made once more with the
+ * bar off, its folds in place.
+ */
+export async function awayAgain<T>(work: () => Promise<T>): Promise<T> {
+  const asked = new AwayAsked();
+  for (;;) {
+    const at: Asking = { bar: true, up: asking.getStore() };
+    try {
+      return await asking.run(at, work);
+    } catch (error) {
+      const away = error instanceof FoldAway && asked.again(error.job) ? error.away() : null;
+      if (away === null) {
+        if (error instanceof FoldAway) return await inPlace(work);
+        throw error;
+      }
+      try {
+        await away;
+      } catch {
+        return await inPlace(work);
+      }
+    }
   }
 }

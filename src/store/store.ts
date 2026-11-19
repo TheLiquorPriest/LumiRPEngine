@@ -31,7 +31,7 @@ import { chainOf, comparePaths, keptOf, matchTurn, mergeKept, nodeKey, toldWith,
 import { BLANK_REVISION, blankWorld } from "./blank";
 import { UserWorlds, type WorldChange, type WorldRevisionRow } from "./worlds";
 import { KEPT_BY_NODE, migrateStore, missingStoreTables } from "./schema";
-import { AwayAsked, FoldAway, type AwayFold, type AwayHeld, type FoldJob, type StoreAway, type StoreBrief } from "./away";
+import { askersOf, AwayAsked, barOn, barred, FoldAway, inPlace, type AwayFold, type AwayHeld, type FoldJob, type StoreAway, type StoreBrief } from "./away";
 import { TreeView } from "./view";
 import { letGo, STRETCH_MS } from "./prepare";
 import {
@@ -91,8 +91,9 @@ export const STORE_DEFAULTS = Object.freeze({
   holderDepth: WALK_DEFAULTS.holderDepth,
   visitDepth: WALK_DEFAULTS.visitDepth,
   /**
-   * Changes a fold may run over on RPE's thread: past it, wherever a thread is given (`StoreOptions.away`), the fold runs on a worker
-   * thread, whoever asked for it (plan §4.1 l.199). About where folding it here and taking a thread's states back hold RPE alike.
+   * Changes a fold may run over on RPE's thread inside work that can be made again (`barred`): past it, wherever a thread is given
+   * (`StoreOptions.away`), the fold runs on a worker thread (plan §4.1 l.199); anywhere else in place, said in the log. About where
+   * folding it here and taking a thread's states back hold RPE alike.
    */
   workerFoldAt: 500,
 });
@@ -169,8 +170,8 @@ export interface StoreOptions {
   /** The most changes a fold runs over on RPE's thread where a thread is given (`store.workerFoldAt`, 500 by default). */
   workerFoldAt?: number;
   /**
-   * Where a long fold runs, with the database file it reads there: RPE's own store, whose thread runs no fold over `workerFoldAt` changes
-   * (`FoldAway`). None (a thread's store, the tools, the import): every fold runs where it is asked.
+   * Where a long fold runs, with the database file it reads there: RPE's own store, which refuses a fold over `workerFoldAt` changes
+   * inside work that can be made again (`barred`, `FoldAway`). None (a thread's store, the tools, the import): every fold runs where it is asked.
    */
   away?: StoreAway;
   /** This store folds on a worker thread for RPE's (`away-thread.ts`): what it says of a long fold says that RPE's thread was not held. */
@@ -694,10 +695,10 @@ export class Store {
 
   /**
    * Runs `read`, a call that only reads and may be made again, where a long fold runs on a worker thread and not here: one over more
-   * than `workerFoldAt` changes, which no caller's fold runs here, and one with no state held on its path (a stored snapshot read whole,
-   * or the chat's start made). The fold is handed over, the states the thread held are held here when it answers, and the read is made
-   * again, now answered from memory. A read with nothing long in it is made once, as it always was; so is every read where no thread is
-   * given, and where a thread's fold fails (the failure is logged; a fold over `workerFoldAt` is still refused here).
+   * than `workerFoldAt` changes, and one with no state held on its path (a stored snapshot read whole, or the chat's start made). The
+   * fold is handed over, the states the thread held are held here when it answers, and the read is made again, now answered from
+   * memory. A read with nothing long in it is made once, as it always was; so is every read where no thread is given. Where the
+   * thread's fold fails, or the same fold is refused again, the read is made with its folds in place, as before the bar.
    */
   async afar<T>(read: () => T): Promise<T> {
     const away = this.away;
@@ -708,7 +709,9 @@ export class Store {
       try {
         return read();
       } catch (error) {
-        if (!(error instanceof FoldAway) || !asked.again(error.job)) throw error;
+        if (!(error instanceof FoldAway)) throw error;
+        // The same fold refused again: what the thread held did not serve, and the read folds in place, as it did before the bar.
+        if (!asked.again(error.job)) return inPlace(read);
         job = error.job;
       } finally {
         this.guarding = false;
@@ -717,7 +720,7 @@ export class Store {
         await this.foldAway(away, job);
       } catch (error) {
         this.log?.("A long fold could not run on a worker thread, so it runs here.", { error: error instanceof Error ? error.message : String(error) });
-        return read();
+        return inPlace(read);
       }
     }
   }
@@ -734,26 +737,27 @@ export class Store {
   }
 
   /**
-   * Runs `read`, a call that only reads and may be made again, holding RPE's thread for no long fold: one the store refuses to run here
-   * runs on a thread (`awayFor`) and the read is made again, for as long as each time it asks for another fold (a walk over many turns
-   * goes on from where it was refused, the states before held). A fold that is merely cold (a stored snapshot read, the chat's start
-   * made) runs here, unlike `afar`. Where no thread is given, `read` is made once.
+   * Runs `read`, a call that only reads and may be made again, with the bar on (`barred`), holding RPE's thread for no long fold: one the
+   * store refuses to run here runs on a thread (`awayFor`) and the read is made again, for as long as each time it asks for another fold
+   * (a walk over many turns goes on from where it was refused, the states before held). A fold that is merely cold (a stored snapshot
+   * read, the chat's start made) runs here, unlike `afar`. Where that does not serve (the same fold refused again, the thread's fold
+   * failed), the read is made with its folds in place, as before the bar. Where no thread is given, `read` is made once.
    */
   async offThread<T>(read: () => T): Promise<T> {
     for (const asked = new AwayAsked(); ; ) {
       try {
-        return read();
+        return barred(read);
       } catch (error) {
-        const away = error instanceof FoldAway && asked.again(error.job) ? this.awayFor(error) : null;
-        if (away === null) throw error;
-        await away;
+        if (!(error instanceof FoldAway)) throw error;
+        const away = asked.again(error.job) ? this.awayFor(error) : null;
+        if (away === null || !(await away.then(() => true, () => false))) return inPlace(read);
       }
     }
   }
 
-  /** @internal Whether a fold over `workerFoldAt` changes is refused here: wherever a thread is given, the preparing pass's own included. */
+  /** @internal Whether a fold over `workerFoldAt` changes is refused here: where a thread is given, inside work that may be made again (`barred`, `afar`). */
   refusesLong(): boolean {
-    return this.away !== null;
+    return this.away !== null && (this.guarding || barOn());
   }
 
   /**
@@ -2932,6 +2936,7 @@ export class UserStore {
     // Refused, where it is too long for RPE's thread, before the snapshot is read: the turns after where it starts, and what is placed along them.
     const ahead = chain.slice(startsAt + 1);
     this.guardLong(
+      node,
       ahead.map((c) => c.turn),
       ahead.reduce((n, c) => n + (placed.get(c.key)?.length ?? 0) + (owner.get(c.key)?.length ?? 0), 0),
       job,
@@ -3029,6 +3034,7 @@ export class UserStore {
     const run = nodes.map(([key, , turn, depth]) => ({ key, chat: turns.get(turn)?.chat ?? chat, created: turns.get(turn)?.created ?? 0, depth }));
     const owner = this.ownerIn(chat) ? this.placeOwner(deepest >= 0 ? run.slice(deepest) : run, deepest >= 0, null).before : new Map<string, OwnerChange[]>();
     this.guardLong(
+      end,
       rest.map(([, , t]) => t),
       rest.reduce((n, [key]) => n + (placed.get(key)?.length ?? 0) + (owner.get(key)?.length ?? 0), 0),
       () => ({ user: this.id, end, turn, nodes }),
@@ -3079,15 +3085,17 @@ export class UserStore {
   }
 
   /**
-   * Throws `FoldAway` for a fold about to run over the turns `turns`, and `placed` changes placed along them (jobs', his own), where
-   * those and the turns' own changes are more than `workerFoldAt` and the store refuses such a fold on RPE's thread
-   * (`Store.refusesLong`): before it reads a snapshot or changes anything, so whoever asked may make the call again once a thread has
-   * folded it.
+   * Where a fold to `node` about to run over the turns `turns`, and `placed` changes placed along them (jobs', his own), would run over
+   * more than `workerFoldAt` changes on RPE's thread: throws `FoldAway` where the store refuses it there (`Store.refusesLong`), before it
+   * reads a snapshot or changes anything, so whoever asked may make the call again once a thread has folded it; else lets it run in
+   * place, as before the bar, and says so in the log with what asked for it, for a later pass to find.
    */
-  private guardLong(turns: readonly string[], placed: number, job: () => FoldJob): void {
-    if (!this.store.refusesLong()) return;
+  private guardLong(node: string, turns: readonly string[], placed: number, job: () => FoldJob): void {
+    if (this.store.thread !== "rpe") return;
     const n = placed + (this.db.query<{ n: number }, [string, string]>("SELECT COUNT(*) AS n FROM change WHERE user = ?1 AND turn IN (SELECT value FROM json_each(?2)) AND job IS NULL").get(this.id, JSON.stringify(turns))?.n ?? 0);
-    if (n > this.store.workerFoldAt) throw new FoldAway(job(), n, this.store);
+    if (n <= this.store.workerFoldAt) return;
+    if (this.store.refusesLong()) throw new FoldAway(job(), n, this.store);
+    this.store.log?.("A fold over the bar ran on RPE's thread: what asked for it cannot wait for a worker thread.", { node, changes: n, asked: askersOf(new Error().stack) });
   }
 
   /** The state at a stored node held in memory under its node's mark (or its chat's), folding nothing; null where none is held. */

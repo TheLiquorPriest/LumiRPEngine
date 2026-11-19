@@ -11,8 +11,8 @@
 // for `server.idleSeconds` is closed: a reply's stream and the live socket stay open by what they send, and a
 // reply asked for whole lifts the bound from itself. A route marked long is answered at once over TCP with an
 // id, and its answer read when ready (`answers.ts`), so nothing a page asks through the relay fails for time.
-// A route's handler that needed a fold too long for RPE's thread (`awayFor`) has it made on a worker thread and is asked again,
-// unless a write of its was committed first, which a second asking would write twice (`againAfterAway`).
+// A page's GET runs with the store's bar on until it commits a write: a fold too long for RPE's thread is made on a worker thread and
+// the GET asked again (`awayAgain`). Every other route's folds run where they are asked, as they always did.
 //
 // Two kinds of listener. TCP, where pages, Lumiverse and the extension reach RPE, serves every route but
 // the command line's. The command socket, a Unix socket in the data folder that only the owner's account
@@ -37,7 +37,7 @@ import { bodyProblem, JOINED_STATUS, problemsOf, readQuery, RouteError, shape, s
 import { RefusedSignIns } from "./refusals";
 import { LUMIVERSE_SIGNIN_PATH } from "./signin-routes";
 import type { Workers } from "./workers/pool";
-import { againAfterAway, type AwayFor } from "./database";
+import { awayAgain } from "../store/away";
 import type { ChatNamedHook, ChatPreparingHook, ChatReadyHook } from "./hooks";
 import type { PreparingShown } from "../shared/preparing";
 
@@ -65,8 +65,6 @@ export interface ServerParts {
   chatReady?: ChatReadyHook;
   /** How far RPE is with preparing a chat: a page's read of a chat being prepared is answered at once with an id, each read of which says how far it is; absent, nothing is told. */
   chatPreparing?: ChatPreparingHook;
-  /** Work off RPE's thread that a handler's error asks for (a fold too long for it), after which the handler may be asked again; absent, every error is what it is. */
-  awayFor?: AwayFor;
 }
 
 export interface RunningServer {
@@ -278,8 +276,6 @@ interface Asked {
   late: { ms: number; preparing(): boolean; start(work: Promise<Response>): Response } | null;
   /** What is done before the route's handler is given the call: the chat it names waited for and taken on (`chatReady`, `chatNamed`). */
   before: () => Promise<void>;
-  /** Work off RPE's thread that a handler's error asks for (`ServerParts.awayFor`); null where none is given. */
-  away: AwayFor | null;
 }
 
 /**
@@ -332,11 +328,10 @@ async function answerDeclared(route: DeclaredRoute<any, any, any, any, any, any>
     const answered = route.paged !== undefined && isRecord(reply) && typeof reply.next === "string" ? { ...reply, next: cursorOf(cursorKey, at, asked.params, reply.next) } : reply;
     return Response.json(answered, { headers: { "cache-control": "no-store" } });
   };
-  // A handler that needed a fold too long for RPE's thread has it made on a worker thread (`away`) and is asked again, whatever its method,
-  // unless a write of its was committed before (`againAfterAway`).
+  // A GET, which only reads, has a fold too long for RPE's thread made on a worker thread and is asked again (`awayAgain`).
   const handled = async (signal: AbortSignal): Promise<unknown> => {
-    const handle = (): Promise<unknown> => Promise.resolve(route.handle({ params: asked.params, query, body, user: asked.user, auth: asked.auth, signal }));
-    return asked.away === null ? await handle() : await againAfterAway(asked.away, handle);
+    const handle = async (): Promise<unknown> => await route.handle({ params: asked.params, query, body, user: asked.user, auth: asked.auth, signal });
+    return route.method === "GET" ? await awayAgain(handle) : await handle();
   };
   // A long route's work outlives the request it was asked by: it is never aborted with it.
   if (route.long === true && asked.later !== null) return asked.later(run);
@@ -469,7 +464,7 @@ export function startServer(parts: ServerParts): RunningServer {
       const start = (work: Promise<Response>): Response => parts.answers.start(work.catch((error: unknown) => failure(error, path, at, placed.area)), waiting);
       const later = on === "tcp" ? (work: (signal: AbortSignal) => Promise<Response>): Response => start(work(new AbortController().signal)) : null;
       const late = on === "tcp" && route.access === "page" ? { ms: config.server.answerLateSeconds * 1000, preparing: () => (waiting?.() ?? null) !== null, start } : null;
-      const asked: Asked = { path, params: rest === null ? params : { ...params, "*": rest.decoded ?? "" }, search: url.searchParams, user, auth: call, bytes, signal: request.signal, json: json(true), later, late, before, away: parts.awayFor ?? null };
+      const asked: Asked = { path, params: rest === null ? params : { ...params, "*": rest.decoded ?? "" }, search: url.searchParams, user, auth: call, bytes, signal: request.signal, json: json(true), later, late, before };
       return withCors(await answerDeclared(route, asked, cursorKey), origin);
     } catch (error) {
       // A Lumiverse sign-in that RPE or Lumiverse refused is told in the log, by the address it came from and never its password.

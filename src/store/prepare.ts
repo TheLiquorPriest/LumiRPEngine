@@ -8,7 +8,7 @@
 
 import type { JsonValue } from "../shared/json";
 import type { ChatPreparing } from "../shared/preparing";
-import { AwayAsked, FoldAway } from "./away";
+import { AwayAsked, barred, FoldAway, inPlace } from "./away";
 import type { Store } from "./store";
 
 /** How long a reading over many turns works before it lets the thread go (`inStretches`). */
@@ -27,8 +27,9 @@ export function letGo(): Promise<void> {
 
 /**
  * `work` over each of `items` in order, letting the thread go every `STRETCH_MS` (`letGo`); `around` runs each stretch inside it (the
- * chat's lines a stretch is worded in, which hold only while synchronous work runs). An item whose fold is too long for RPE's thread
- * (`FoldAway`) has it folded on a thread, and the walk goes on from that item, the states before it held. What each item gave, in order.
+ * chat's lines a stretch is worded in, which hold only while synchronous work runs). Each item runs with the store's bar on (`barred`):
+ * one whose fold is too long for RPE's thread (`FoldAway`) has it folded on a thread, and the walk goes on from that item, the states
+ * before it held; where that did not serve, that item runs with its folds in place, as before the bar. What each item gave, in order.
  */
 export async function inStretches<I, T>(items: readonly I[], work: (item: I) => T, around: (stretch: () => void) => void = (stretch) => stretch()): Promise<T[]> {
   const out: T[] = [];
@@ -39,15 +40,22 @@ export async function inStretches<I, T>(items: readonly I[], work: (item: I) => 
     const refused: { by: FoldAway | null } = { by: null };
     around(() => {
       try {
-        for (; at < items.length && (at === 0 || performance.now() - began < STRETCH_MS); at++) out.push(work(items[at] as I));
+        for (; at < items.length && (at === 0 || performance.now() - began < STRETCH_MS); at++) out.push(barred(() => work(items[at] as I)));
       } catch (error) {
-        if (!(error instanceof FoldAway) || !asked.again(error.job)) throw error;
+        if (!(error instanceof FoldAway)) throw error;
         refused.by = error;
       }
     });
-    const away = refused.by?.away() ?? null;
-    if (away !== null) await away;
-    else if (at < items.length) await letGo();
+    if (refused.by === null) {
+      if (at < items.length) await letGo();
+      continue;
+    }
+    const away = asked.again(refused.by.job) ? refused.by.away() : null;
+    if (away !== null && (await away.then(() => true, () => false))) continue;
+    around(() => {
+      out.push(inPlace(() => work(items[at] as I)));
+    });
+    at++;
   }
   return out;
 }
@@ -151,23 +159,21 @@ export class Preparer {
     let longest = 0;
     let after: string | null = null;
     let left = Number.POSITIVE_INFINITY;
-    let refused = 0;
+    const asked = new AwayAsked();
     this.progress = { done: 0, of: null };
     while (!this.stopped) {
       const at = performance.now();
       let step;
       try {
-        step = s.prepareNext(chat, after, STRETCH_MS);
+        step = barred(() => s.prepareNext(chat, after, STRETCH_MS));
       } catch (error) {
-        // A stretch that starts where no state is held and folds more changes than RPE's thread runs (a chat's heavy first turn) is
-        // folded on a thread, and the stretch is asked for again, now from the state the thread held.
-        const away = refused < 3 ? this.deps.store.awayFor(error) : null;
-        if (away === null) throw error;
-        refused++;
-        await away;
-        continue;
+        // A step over the bar (a chat's heavy first turn, a heavy turn of an import) is folded on a thread, and the stretch asked for
+        // again, now from the state the thread held; where that did not serve, the stretch runs with its folds in place.
+        if (!(error instanceof FoldAway)) throw error;
+        const away = asked.again(error.job) ? error.away() : null;
+        if (away !== null && (await away.then(() => true, () => false))) continue;
+        step = inPlace(() => s.prepareNext(chat, after, STRETCH_MS));
       }
-      refused = 0;
       longest = Math.max(longest, performance.now() - at);
       if (step.at === null) break;
       // A stretch that ends where the one before it ended, with as many snapshots wanting, made none: its snapshot could not be stored.

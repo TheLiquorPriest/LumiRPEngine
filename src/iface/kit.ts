@@ -13,8 +13,6 @@ import type { NumberSettings, Setting } from "../app/setting-list";
 import type { MapConfig } from "../shared/map-config";
 import type { GridMoves, MapView } from "./map/ports";
 import type { UserStore } from "../store/store";
-import { awayOf } from "../store/away";
-import { againAfterAway } from "../app/database";
 import type { FoldEnv } from "../store/fold";
 import type { ChangeInput, Lane, StoreState } from "../store/types";
 import type { Part } from "../store/words";
@@ -478,8 +476,7 @@ export function hostTool<C extends AreaCall>(spec: AreaSpec<C>, text: ToolText, 
       const lines = use.lines;
       const call = area.call({ scope, agent: ctx.agent, callId: ctx.callId, signal: ctx.signal, tool: spec.name, lines, reply: () => new Reply(lines) });
       try {
-        // A read of its too long for RPE's thread (a state no longer held) is folded on a worker thread, and the call made again, where it wrote nothing first.
-        return (await againAfterAway(awayOf, async () => await spec.run(given, call))).result();
+        return (await spec.run(given, call)).result();
       } catch (error) {
         if (ctx.signal.aborted) throw error;
         const told = area.told?.(error, call);

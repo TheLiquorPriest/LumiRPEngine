@@ -17,7 +17,7 @@ import { mapRoutes } from "../iface/map/routes";
 import { harnessSettings } from "../app/setting-list";
 import type { LoreBooks, LoreProposals, ProjectionBooks } from "../lore";
 import { MEANING_TABLE } from "../search/meaning";
-import { awayOf, Preparer, type Store } from "../store";
+import { Preparer, type Store } from "../store";
 import { storyCoverage } from "../story";
 import { historyWindow } from "../story/window";
 import { buildTurns, MACHINE_CLOCK, openAppStore, type Turns, type TurnsOptions } from "./lane";
@@ -145,8 +145,6 @@ export function turnArea(takes: TurnTakes): TurnArea {
       },
       // How far it is, which a page whose read waits is told.
       chatPreparing: (user, chat) => preparer?.preparing(user, chat) ?? null,
-      // A fold too long for RPE's thread that a write or a route's handler asked for, made on a worker thread by the store that refused it.
-      awayFor: awayOf,
       door: {
         // A generation in a chat RPE is making ready for this build waits for it, as a page's read does, and for the chat's changes told
         // before it and waiting with it, so it overtakes none; a generation stopped meanwhile waits no more, and its run ends at once.
