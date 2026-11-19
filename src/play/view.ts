@@ -12,16 +12,20 @@
 // not a world's.
 
 import { playedWorld } from "../engine/places-in-play";
-import { readPass } from "../engine/read-pass";
+import { passInStretches } from "../engine/read-pass";
+import { placeOfEntity } from "../engine/scope";
+import type { ReadContext } from "../engine/registry";
+import type { WorldState } from "../engine/state";
 import { definitionsLag } from "../engine/upgrade";
 import type { PackId, PanelId } from "../shared/ids";
 import type { JsonValue } from "../shared/json";
 import type { MapConfig } from "../shared/map-config";
+import type { WorldDoc } from "../shared/world";
 import type { JournalNote } from "../shared/ledger";
 import type { OffstageSettings } from "../shared/offstage";
 import type { CallMeterView, Chip, PendingMark, StagedPress, StateView } from "../shared/state-view";
 import type { RequestRecord } from "../turn/requests";
-import type { Store, UserStore } from "../store";
+import { inStretches, type Folded, type Store, type UserStore } from "../store";
 import { questSliceOf, questViews } from "../quests/record";
 import { trailsOf, withPast, withTrails } from "../quests/trail";
 import { replyClocks } from "./panel-reads";
@@ -85,8 +89,18 @@ export function headTurn(s: UserStore, chat: string): string | null {
   return s.path(chat).findLast((e) => e.node === row.head)?.turn ?? null;
 }
 
-/** What a state view builds from the state it shows and the settings that shape it, never from the ask: kept while that state stands (`built`). */
-interface Built {
+/**
+ * What a state view builds from the state it shows and the settings that shape it, never from the ask, with what the rest of the view
+ * reads of that state (the world as it plays it, its revision, how far its definitions lag, where his character is): kept (`built`).
+ */
+interface Built extends ViewParts {
+  world: WorldDoc;
+  revision: string;
+  lag: ReturnType<typeof definitionsLag>;
+  place: string | null;
+}
+
+interface ViewParts {
   panels: Record<PanelId, JsonValue>;
   hud: StateView["hud"];
   scene: StateView["scene"];
@@ -95,81 +109,143 @@ interface Built {
 }
 
 /**
- * Each state's built parts, by what else shaped them: the chat's head node (the path its quests' trails were read along), the turn shown,
- * the time it moved the clock by and the chat's settings the parts read. A state is the store's held object, made anew by any fold that
- * changes what it holds, so a part kept under one is true until it is let go; a second page, a second tab and every `state` event after
- * the first read them, and build nothing. Read them, never change them.
+ * The latest states' built parts, by the store's key for the state (`stateKey`, another once anything its fold reads changes) and what
+ * else shaped them: the chat's head node (the path its quests' trails were read along), the turn shown, the time it moved the clock by
+ * and the chat's settings the parts read. Kept by key, never by the state object, so the store letting the state go (to fold the states
+ * of other replies) loses nothing; a second page, a second tab and every `state` event after the first read them, and build nothing.
+ * Read them, never change them. The newest asked are kept, `VIEWS_KEPT` of them.
  */
-const built = new WeakMap<object, Map<string, Built>>();
+const built = new Map<string, Built>();
+const VIEWS_KEPT = 4;
 
-export function chatView(input: ChatViewInput): StateView {
+/**
+ * What a state view builds from a state, as one read pass run in stretches that let RPE's thread go between them (DESIGN §9.6: one
+ * pass, so what one panel reads the others find): a panel a stretch, and a panel of many pages alike (`PanelViewDef.items`) a page at a
+ * time; then the quests' trails, the scene, the HUD (which reads the panels), the palette and the controls.
+ */
+async function buildParts(input: ChatViewInput, s: UserStore, folded: Folded, world: WorldDoc, state: WorldState, elapsed: number): Promise<ViewParts> {
+  const registry = input.store.env.registry;
+  const pass = passInStretches();
+  const ctx: ReadContext = registry.context(world, state);
+  const panels: Record<PanelId, JsonValue> = {};
+  // The map's display is the chat's own `map.display`, in the map settings the grids are drawn at.
+  const prefs = { mapDisplay: null, mapConfig: input.map };
+  const failed = (error: unknown): JsonValue => ({ error: error instanceof Error ? error.message : String(error) });
+  const steps: (() => void)[] = [];
+  for (const view of registry.views) {
+    const items = view.items;
+    if (items === undefined) {
+      steps.push(() => {
+        try {
+          panels[view.panel] = view.build(ctx, prefs);
+        } catch (error) {
+          panels[view.panel] = failed(error);
+        }
+      });
+      continue;
+    }
+    // A page a step, into one record in the order of its ids; one that fails fails the panel, as its whole build would have.
+    const record: Record<string, JsonValue> = {};
+    let broken = false;
+    const page = (id: string) => (): void => {
+      if (broken) return;
+      try {
+        const built = items.build(ctx, prefs, id);
+        if (built !== null) record[id] = built;
+      } catch (error) {
+        broken = true;
+        panels[view.panel] = failed(error);
+      }
+    };
+    const pages = (): void => {
+      let ids: readonly string[];
+      try {
+        ids = items.ids(ctx);
+      } catch (error) {
+        panels[view.panel] = failed(error);
+        return;
+      }
+      panels[view.panel] = record;
+      // The pages go right after this step, before the steps of the panels after this one.
+      steps.splice(steps.indexOf(pages) + 1, 0, ...ids.map(page));
+    };
+    steps.push(pages);
+  }
+  let shown: StateView["scene"] | null = null;
+  const parts: Partial<ViewParts> = {};
+  steps.push(() => {
+    // The quest log lists, under each world quest it holds, the stages that quest was moved past: the pages' own reading of them (`withTrails`).
+    const log = panels["story.quests"];
+    if (log !== undefined) panels["story.quests"] = withPast(log, withTrails(questViews(world.tracks, questSliceOf(folded.state)), world.tracks, trailsOf(s, input.store.env, input.chat, input.turn, world.tracks, state.tracks)));
+  });
+  steps.push(() => {
+    shown = scene(world, state, elapsed, registry);
+    parts.hud = hud(world, state, panels, ctx);
+  });
+  steps.push(() => {
+    parts.palette = palette(world, state, registry);
+  });
+  steps.push(() => {
+    parts.controls = controls(world, state, shown?.sceneType ?? "", registry, input.knowledge, input.offstage);
+  });
+  // Each step is taken when it is reached, so the pages a panel's first step adds run in their place.
+  await inStretches(steps, (step) => step(), (stretch) => pass.run(stretch));
+  if (shown === null || parts.hud === undefined || parts.palette === undefined || parts.controls === undefined) throw new Error("the state view's parts were not all built");
+  return { panels, scene: shown, hud: parts.hud, palette: parts.palette, controls: parts.controls };
+}
+
+export async function chatView(input: ChatViewInput): Promise<StateView> {
   const { store, chat } = input;
   const s = store.user(input.user);
   const row = s.chat(chat);
   if (row === null || row.world === null) return notWorldView(chat);
-  const folded = input.turn === null ? s.headState(chat) : s.stateAt(input.turn);
-  const state = folded.state.world;
-  const doc = store.env.worlds(state.revision) ?? (row.revision === null ? undefined : store.env.worlds(row.revision));
-  if (doc === undefined) return notWorldView(chat);
-  // The world as the state plays it (ITEMS-SPEC §6.2): with the places play made.
-  const world = playedWorld(doc, state);
   const registry = store.env.registry;
-  // The scene's elapsed time is what the turn shown moved the clock by.
-  const at = input.turn ?? headTurn(s, chat);
-  const elapsed = at === null ? 0 : state.clock - s.startOf(at).state.world.clock;
-  const key = JSON.stringify([row.head, input.turn, elapsed, input.map, input.knowledge, input.offstage]);
-  let byKey = built.get(folded.state);
-  let parts = byKey?.get(key);
-  if (parts === undefined) {
-    // Everything here only reads the state, many times over: one read pass (DESIGN §9.6).
-    parts = readPass((): Built => {
-      const ctx = registry.context(world, state);
-      const panels: Record<PanelId, JsonValue> = {};
-      // The map's display is the chat's own `map.display`, in the map settings the grids are drawn at.
-      const prefs = { mapDisplay: null, mapConfig: input.map };
-      for (const view of registry.views) {
-        try {
-          panels[view.panel] = view.build(ctx, prefs);
-        } catch (error) {
-          panels[view.panel] = { error: error instanceof Error ? error.message : String(error) };
-        }
-      }
-      // The quest log lists, under each world quest it holds, the stages that quest was moved past: the pages' own reading of them (`withTrails`).
-      const log = panels["story.quests"];
-      if (log !== undefined) panels["story.quests"] = withPast(log, withTrails(questViews(world.tracks, questSliceOf(folded.state)), world.tracks, trailsOf(s, store.env, chat, input.turn, world.tracks, state.tracks)));
-      const shown = scene(world, state, elapsed, registry);
-      return { panels, hud: hud(world, state, panels, ctx), scene: shown, palette: palette(world, state, registry), controls: controls(world, state, shown.sceneType, registry, input.knowledge, input.offstage) };
-    });
-    if (byKey === undefined) {
-      byKey = new Map();
-      built.set(folded.state, byKey);
+  const key = JSON.stringify([s.stateKey(chat, input.turn), row.head, input.map, input.knowledge, input.offstage]);
+  let kept = built.get(key);
+  if (kept !== undefined) {
+    // The newest asked last: the first is the one let go.
+    built.delete(key);
+    built.set(key, kept);
+  } else {
+    const folded = input.turn === null ? s.headState(chat) : s.stateAt(input.turn);
+    const state = folded.state.world;
+    const doc = store.env.worlds(state.revision) ?? (row.revision === null ? undefined : store.env.worlds(row.revision));
+    if (doc === undefined) return notWorldView(chat);
+    // The world as the state plays it (ITEMS-SPEC §6.2): with the places play made.
+    const world = playedWorld(doc, state);
+    // The scene's elapsed time is what the turn shown moved the clock by.
+    const at = input.turn ?? headTurn(s, chat);
+    const elapsed = at === null ? 0 : state.clock - s.startOf(at).state.world.clock;
+    kept = { ...(await buildParts(input, s, folded, world, state, elapsed)), world, revision: state.revision, lag: definitionsLag(state), place: placeOfEntity(state, world.pov) };
+    built.set(key, kept);
+    for (const old of built.keys()) {
+      if (built.size <= VIEWS_KEPT) break;
+      built.delete(old);
     }
-    byKey.set(key, parts);
   }
   const packs: Record<PackId, number> = {};
   for (const pack of registry.packs) packs[pack.id] = pack.version;
-  const lag = definitionsLag(state);
   return {
     v: 1,
     chatId: chat,
     worldId: row.world,
-    revision: state.revision,
-    ...(lag !== null ? { definitionsFrom: lag } : {}),
+    revision: kept.revision,
+    ...(kept.lag !== null ? { definitionsFrom: kept.lag } : {}),
     status: input.turning ? "in_flight" : "idle",
-    hud: parts.hud,
-    scene: parts.scene,
+    hud: kept.hud,
+    scene: kept.scene,
     chips: input.chips,
-    replyClocks: replyClocks(s, chat, world, state, input.clocksMost),
+    replyClocks: replyClocks(s, chat, kept.world, kept.place, input.clocksMost),
     journal: input.journal,
     keepReport: [],
     pending: input.pending,
     staged: input.staged,
     notCarried: input.notCarried,
-    panels: parts.panels,
-    palette: parts.palette,
-    controls: parts.controls,
+    panels: kept.panels,
+    palette: kept.palette,
+    controls: kept.controls,
     meter: input.meter,
     packs,
-    currency: world.currency,
+    currency: kept.world.currency,
   };
 }

@@ -499,10 +499,15 @@ export function buildOrgList(ctx: ReadContext): OrgListView {
   };
 }
 
+/** The ids of every page the home opens (`orgs.org`): the party's and each organization it lists. */
+export function orgPageIds(ctx: ReadContext): EntityId[] {
+  return [partyIdOf(ctx).id, ...shownOrgs(ctx).map((o) => o.id)];
+}
+
 /** Every page the home opens (`orgs.org`): the party's and each organization it lists, by id, as the player character may see them. */
 export function buildOrgPages(ctx: ReadContext): Record<EntityId, OrgView> {
   const out: Record<EntityId, OrgView> = {};
-  for (const id of [partyIdOf(ctx).id, ...shownOrgs(ctx).map((o) => o.id)]) {
+  for (const id of orgPageIds(ctx)) {
     const view = buildOrgView(ctx, id, ctx.world.pov);
     if (view) out[id] = view;
   }

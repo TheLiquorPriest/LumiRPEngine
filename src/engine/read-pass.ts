@@ -20,7 +20,27 @@ let kept: WeakMap<object, Kept> | null = null;
  * read that returns one is refused.
  */
 export function readPass<T>(read: () => T): T {
-  if (depth === 0) kept = new WeakMap();
+  return inPass(depth === 0 ? new WeakMap() : null, read);
+}
+
+/**
+ * One pass read in stretches, the thread let go between them: what one stretch's `passMemo` kept the
+ * next finds, as in one pass. Only for reads of states nobody changes in between (the store's held
+ * ones, which are frozen): its stretches share what they read from the same objects.
+ */
+export interface PassInStretches {
+  /** Runs one stretch of the pass (`read`, synchronous), with what the stretches before it kept. */
+  run<T>(read: () => T): T;
+}
+
+export function passInStretches(): PassInStretches {
+  const mine = new WeakMap<object, Kept>();
+  return { run: (read) => inPass(mine, read) };
+}
+
+function inPass<T>(own: WeakMap<object, Kept> | null, read: () => T): T {
+  // Inside a pass already, its stretch reads with what that pass keeps.
+  if (depth === 0) kept = own ?? new WeakMap();
   depth++;
   try {
     const out = read();

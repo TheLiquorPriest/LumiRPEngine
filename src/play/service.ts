@@ -303,8 +303,7 @@ export class PlayService {
     // A turn joined to another is answered as a fact, naming the turn it joined, whatever kind of chat this is.
     if (turn !== null && row?.joined != null) throw new JoinedTurnError(turn, row.joined);
     // Asks of the same state at once share one view: the store's key for that state names it (a write between them makes another).
-    const at = turn ?? headTurn(s, chat);
-    const key = `${user}\u0000${chat}\u0000${turn ?? ""}\u0000${at === null ? "" : s.foldKey(at)}`;
+    const key = s.stateKey(chat, turn);
     const going = this.building.get(key);
     if (going !== undefined) return await going;
     const work = this.stateView(user, chat, turn);

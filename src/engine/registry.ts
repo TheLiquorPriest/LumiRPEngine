@@ -378,6 +378,11 @@ export interface ViewPrefs {
 export interface PanelViewDef {
   panel: PanelId;
   build(ctx: ReadContext, prefs: ViewPrefs): JsonValue;
+  /**
+   * A panel that is a record of many items alike (the organisations' pages, by id), built one item at a time where the builder lets
+   * the thread go between them: the items' ids, and one item's value (null: left out), so that the record they make is what `build` makes.
+   */
+  items?: { ids(ctx: ReadContext): readonly string[]; build(ctx: ReadContext, prefs: ViewPrefs, id: string): JsonValue | null };
 }
 
 /**

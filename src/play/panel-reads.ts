@@ -7,8 +7,6 @@
 
 import type { Database } from "bun:sqlite";
 import { calendarOf, formatClock, placeOffset } from "../engine/calendar";
-import { placeOfEntity } from "../engine/scope";
-import type { WorldState } from "../engine/state";
 import { isRecord } from "../shared/json";
 import type { CallMeterView, Chip, PendingMark } from "../shared/state-view";
 import type { WorldDoc } from "../shared/world";
@@ -91,10 +89,9 @@ export function chipsOf(db: Database, s: UserStore, user: string, chat: string):
   return out;
 }
 
-/** The world's date and time at the end of each of the newest `most` replies' turns on the path, local to where his character is now. */
-export function replyClocks(s: UserStore, chat: string, world: WorldDoc, state: WorldState, most: number): Record<string, string> {
+/** The world's date and time at the end of each of the newest `most` replies' turns on the path, local to where his character is now (`place`). */
+export function replyClocks(s: UserStore, chat: string, world: WorldDoc, place: string | null, most: number): Record<string, string> {
   const cal = calendarOf(world);
-  const place = placeOfEntity(state, world.pov);
   const out: Record<string, string> = {};
   for (const entry of s
     .path(chat)

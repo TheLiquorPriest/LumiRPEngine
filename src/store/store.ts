@@ -2091,6 +2091,19 @@ export class UserStore {
   }
 
   /**
+   * What names the chat's state at `turnId` (null: the chat's own reading at its head, `headState`) as it is read now: the turn's
+   * `foldKey` (at the head, its head turn's) with the chat's own fold mark, which his changes of the chat and its ended jobs renew too;
+   * at a chat's start, the world revision it starts from. A reader that keeps something worked out from that state keeps it under this
+   * key, and holds no state for it, so what it keeps outlives the store letting the state go.
+   */
+  stateKey(chat: string, turnId: string | null): string {
+    const row = this.chatRead(chat);
+    const at = turnId ?? (row.head === null ? null : (this.db.query<{ turn: string }, [string, string]>("SELECT turn FROM path_node WHERE user = ? AND key = ?").get(this.id, row.head)?.turn ?? null));
+    const mark = this.store.markOf(this.id, chat);
+    return at === null ? `${this.id}\u0000${chat}\u0000~${row.revision ?? ""}\u0000${mark}` : `${this.foldKey(at)}\u0000${chat}\u0000${turnId === null ? "head" : "turn"}\u0000${mark}`;
+  }
+
+  /**
    * State as one reading sees it at a turn (plan §10.9): a job's (`job`) has the job's own changes so
    * far on top of the turn's state (`stateAt`), in the order it recorded them, each that applied when
    * recorded checked again there; nobody else sees them until the job ends on the path (`jobsPlaced`).
