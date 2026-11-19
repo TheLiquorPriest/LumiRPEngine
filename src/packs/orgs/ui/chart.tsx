@@ -14,7 +14,7 @@ import { orgRoute, type SheetRoute } from "../../../frontend/app";
 import { Badge, Button, Section } from "../../../frontend/components";
 import { Icon } from "../../../ui/icons";
 import type { OrgView } from "../../../shared/org-view";
-import { controlChain, controlTree, defaultOpen, reportingTree, rerooted, rowMenu, rowPress, treeRows, type ChartAction, type ChartNode, type OwnershipTab, type TreeRow } from "./chart-model";
+import { controlChain, controlTree, defaultOpen, reportingTree, rerooted, rowMenu, rowPress, treeRows, type ChartAction, type ChartNode, type ChartPage, type OwnershipTab, type TreeRow } from "./chart-model";
 import { orgEditRoute, rulesControls } from "./edit";
 import { linkWords } from "./words";
 
@@ -262,8 +262,8 @@ export function Tree(props: Omit<TreeViewProps, "state" | "onState">) {
 
 export interface OrgChartProps {
   org: OrgView;
-  /** Every page the reader holds, by id (Play's `orgs.org`, GM → Orgs' every one). */
-  pageOf(id: string): OrgView | null;
+  /** Every other organization the reader holds, by id (Play's summaries, `orgs.summary`; GM → Orgs' every page). */
+  pageOf(id: string): ChartPage | null;
   /** The tab drawing a page's Ownership, where its forms are. */
   ownershipTab: OwnershipTab;
   open(route: SheetRoute): void;

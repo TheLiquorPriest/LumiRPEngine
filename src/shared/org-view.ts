@@ -1,19 +1,22 @@
 // Organizations as the player's Orgs tab reads them (ORG-SPEC §4): the `orgs.list` panel (the party,
-// where you belong, the organizations you know of) and the `orgs.org` panel (each organization's page:
+// where you belong, the organizations you know of), the `orgs.org` panel (each organization's page:
 // your place there, who runs it, its people, positions and delegations, and the packs' sections, each
-// behind its power). Names the player can't see never reach these: such members are counted and stand
-// in under an opaque id no action takes (§3.16). Pure.
+// behind its power), read one page at a time when one opens, and the `orgs.summary` panel, what the
+// state view carries of every page. Names the player can't see never reach these: such members are
+// counted and stand in under an opaque id no action takes (§3.16). Pure.
 
 import type { EntityId, PlaceId } from "./ids";
 import type { JsonValue } from "./json";
 import type { Audience, DUES_EVERY, MemberHow, OrgBasis, OrgLimits, OrgPower, OrgType, PositionScope, TrusteesDecide } from "./org";
 import type { OwnerRole } from "./finance";
+import type { OrgAlertView, OrgPlanView } from "./org-feed";
 import { DECISIONS_SECTION } from "./org-motions";
 import type { PartyTier } from "./party";
 
-/** The panels' ids. */
+/** The panels' ids. `orgs.org` is no part of the state view: a page reads one of its pages when it opens (`GET /api/v1/chats/:chat/state/orgs/:org`). */
 export const ORGS_LIST_PANEL = "orgs.list";
 export const ORGS_ORG_PANEL = "orgs.org";
+export const ORGS_SUMMARY_PANEL = "orgs.summary";
 
 /** Someone the reader can see, named. */
 export interface OrgRef {
@@ -197,6 +200,44 @@ export interface OrgView {
   trust: OrgTrustView | null;
   /** A company that is a nonprofit (no owners of its worth). */
   nonprofit: boolean;
+}
+
+/** Someone on an organization's page as its summary carries them: the title they go by there, the position they hold (its title), and whether they are the reader, and with the player character. */
+export interface OrgSummaryPerson {
+  id: EntityId;
+  name: string;
+  title: string;
+  position: string | null;
+  you: boolean;
+  here: boolean;
+}
+
+/**
+ * What the state view carries of one organization's page (`orgs.summary`, by id), for what draws it while that page is not open: the
+ * alerts that need the reader (the home's Needs you, Now's glance), the title the reader goes by there (Cast's Your groups), the people
+ * the reader can see there (a person's organizations), the party's Plan (Now's line), and the Chart's ownership tree, which walks
+ * the organizations above and below the one open by their summaries. The page itself is read when it opens.
+ */
+export interface OrgSummary {
+  id: EntityId;
+  name: string;
+  type: OrgType;
+  /** The header's type badge, as its page has it. */
+  badge: string;
+  /** The title the reader goes by there; null where they don't belong. */
+  title: string | null;
+  /** Everyone the reader can see there, in id order, as its page lists them. */
+  people: OrgSummaryPerson[];
+  /** Its alerts that need the reader. */
+  needs: OrgAlertView[];
+  /** The party's Plan as its page shows it; null for any other organization, and while there is none. */
+  plan: OrgPlanView | null;
+  /** The organizations holding it and those it holds, as its page shows them; those below it the reader can't see, counted. */
+  above: OrgLinkView[];
+  below: OrgLinkView[];
+  belowHidden: number;
+  /** The reader may sell part of a company it holds a stake in, or put more in, on its Ownership tab: they hold `shares.manage` there and its page shows them its Ownership. */
+  stakes: boolean;
 }
 
 /** A row of the Orgs home: an organization, the reader's title there, and one figure they may see. */

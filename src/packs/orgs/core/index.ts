@@ -1,7 +1,8 @@
 // The orgs pack (ORG-SPEC): organizations as the player's Orgs tab reads them. It declares the
 // delegation link (`acts_for`, §3.5), the organizations' lint (§6.4) and the panels `orgs.list` (the
-// home) and `orgs.org` (each organization's page), over the engine's model (`engine/org.ts`) and the
-// sections other packs register (`r.orgSection`); GM → Orgs' read (`orgs.gm`, §6.1); an
+// home), `orgs.org` (each organization's page, read a page at a time when one opens) and
+// `orgs.summary` (what the state view carries of each page), over the engine's model
+// (`engine/org.ts`) and the sections other packs register (`r.orgSection`); GM → Orgs' read (`orgs.gm`, §6.1); an
 // organization's own records (`packs.orgs`): its History (`orgs.log`) and what each person spent for
 // it by month (`orgs.spent`), which other packs' acts for it write through `orgs.acted`; its own
 // actions (`org_*`: members, positions, titles, delegation, renaming); the party's own actions and
@@ -14,7 +15,7 @@
 import type { JsonValue } from "../../../shared/json";
 import type { LedgerEvent } from "../../../shared/ledger";
 import { ACTS_FOR, type OrgAct } from "../../../shared/org";
-import { ORGS_LIST_PANEL, ORGS_ORG_PANEL, type OrgGmView } from "../../../shared/org-view";
+import { ORGS_LIST_PANEL, ORGS_ORG_PANEL, ORGS_SUMMARY_PANEL, type OrgGmView } from "../../../shared/org-view";
 import { strOf } from "../../../engine/pack-kit";
 import type { PackDef, ReadContext } from "../../../engine/registry";
 import { registerAccess } from "./access";
@@ -32,7 +33,7 @@ import { registerPlan } from "./agenda";
 import { registerFollow } from "./follow";
 import { ORGS_CONFIG_EVENT, SEATS_PROCESS, SUCCESSION_EFFECT } from "./seats";
 import { registerStory } from "./story";
-import { buildOrgList, buildOrgPages, buildOrgView, orgPageIds } from "./view";
+import { buildOrgList, buildOrgPages, buildOrgSummaries, buildOrgSummary, buildOrgView, orgPageIds } from "./view";
 import { registerWind } from "./wind";
 import { say } from "../../../shared/lines";
 
@@ -77,7 +78,9 @@ export const orgsPack: PackDef = {
     // A History line the GM writes, beside a change made in GM → Orgs or by an agent's org op (§6.1, §7.2), with the people its words name (`names`), as `orgLog` keeps them.
     r.effect({ type: "orgs.note", args: ["org", "text", "by?", "names?"], gm: true, resolve: (a, ctx) => (strOf(a.org) !== "" && strOf(a.text) !== "" ? [orgLog(ctx, strOf(a.org), strOf(a.text), { ...(strOf(a.by) !== "" ? { by: strOf(a.by) } : {}), names: Array.isArray(a.names) ? a.names.filter((n): n is string => typeof n === "string" && n !== "") : [] })] : { code: "bad_args", reason: say("why_a_history_line_needs_an_organization_and") }) });
     r.view({ panel: ORGS_LIST_PANEL, build: (ctx) => buildOrgList(ctx) as unknown as JsonValue });
-    r.view({ panel: ORGS_ORG_PANEL, build: (ctx) => buildOrgPages(ctx) as unknown as JsonValue, items: { ids: (ctx) => orgPageIds(ctx), build: (ctx, _prefs, id) => buildOrgView(ctx, id, ctx.world.pov) as unknown as JsonValue | null } });
+    // Each organization's page is read when it opens; the state view carries its summary.
+    r.view({ panel: ORGS_ORG_PANEL, build: (ctx) => buildOrgPages(ctx) as unknown as JsonValue, items: { ids: (ctx) => orgPageIds(ctx), build: (ctx, _prefs, id) => buildOrgView(ctx, id, ctx.world.pov) as unknown as JsonValue | null }, apart: true });
+    r.view({ panel: ORGS_SUMMARY_PANEL, build: (ctx) => buildOrgSummaries(ctx) as unknown as JsonValue, items: { ids: (ctx) => orgPageIds(ctx), build: (ctx, _prefs, id) => buildOrgSummary(ctx, id, ctx.world.pov) as unknown as JsonValue | null } });
     r.query("orgs.gm", (ctx, only) => buildOrgsGm(ctx, only));
     registerOrgActions(r);
     registerParty(r);

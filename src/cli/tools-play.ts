@@ -22,7 +22,7 @@ import { chipStarts } from "../shared/state-view";
 import { atOnceByDefault } from "../shared/offstage";
 import type { ThingRow } from "../shared/thing-view";
 import { sizeLabel, whoseWords } from "../shared/thing-view";
-import { ORG_PARTS, orgPart, ORGS_LIST_PANEL, ORGS_ORG_PANEL, type OrgListView, type OrgView } from "../shared/org-view";
+import { ORG_PARTS, orgPart, ORGS_LIST_PANEL, ORGS_SUMMARY_PANEL, type OrgListView, type OrgSummary, type OrgView } from "../shared/org-view";
 import type { AdjudicationDef } from "../shared/world";
 import { TIME_CONTROLS } from "../engine/events";
 // The one limit on a GM edit's operations: the schemas take no more than the engine accepts.
@@ -389,8 +389,8 @@ async function itemsFind(args: Args, ctx: ToolContext): Promise<ToolResult> {
 /** The words that name the party among organizations, besides its id and name. */
 const PARTY_WORDS: Readonly<Record<string, true>> = { party: true, "your party": true, "the party": true };
 
-/** The organization words name among `pages`: its id, else its name in any case (refused, listing the ids, when several have it); the party is also "party". */
-function orgFound(pages: readonly OrgView[], said: string): OrgView | null {
+/** The organization words name among those the state view summarizes: its id, else its name in any case (refused, listing the ids, when several have it); the party is also "party". */
+function orgFound(pages: readonly OrgSummary[], said: string): OrgSummary | null {
   if (hasOwn(PARTY_WORDS, said.trim().toLowerCase())) return pages.find((p) => p.type === "party") ?? null;
   const found = keyedItem(pages, said.trim(), (p) => p.id, (p) => p.name);
   if (found && "ambiguous" in found) throw new ToolError(`${found.ambiguous.length} organizations are named ${JSON.stringify(said)}: ${found.ambiguous.join(", ")}. Name one by its id.`);
@@ -440,9 +440,10 @@ async function orgsRead(args: Args, ctx: ToolContext): Promise<ToolResult> {
   }
   const { view } = await stateOf(ctx, chatId);
   const home = (view.panels[ORGS_LIST_PANEL] ?? null) as OrgListView | null;
-  const pages = Object.values((view.panels[ORGS_ORG_PANEL] ?? {}) as unknown as Record<string, OrgView>);
   if (said === undefined) return answer({ chatId, ...(home ? (JSON.parse(JSON.stringify(home)) as JsonObject) : { note: "This chat's world has no organizations." }) }, `the Orgs home of chat ${chatId}`);
-  const page = orgFound(pages, said);
+  // The state view carries each page's summary; the page itself is read on its own.
+  const known = orgFound(Object.values((view.panels[ORGS_SUMMARY_PANEL] ?? {}) as unknown as Record<string, OrgSummary>), said);
+  const page = known === null ? null : (await ask(ctx, chatId, "lre.org", { chatId, org: known.id })).page;
   if (!page) throw new ToolError(`The player character knows no organization ${JSON.stringify(said)} in chat ${chatId}: lre_orgs without org lists those they belong to and know of.`);
   return shown(page);
 }

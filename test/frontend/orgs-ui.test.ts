@@ -394,7 +394,7 @@ describe("Organizations elsewhere in Play", () => {
     const w = portAlder("pov", (world) => {
       world.entities.danny_okafor?.relations.push({ type: "travels_with", to: "pov", fields: { tier: "companion" } });
     });
-    const pages = panel(w, "orgs.org");
+    const pages = panel(w, "orgs.summary");
     expect(personOrgs(pages, "danny_okafor")).toEqual([
       { id: SHOP, name: "Alder Automotive", badge: "Company · LLC", title: "Mechanic", position: null },
       { id: "party_pov", name: "Your party", badge: "Party", title: "Companion", position: null },
@@ -409,7 +409,7 @@ describe("Organizations elsewhere in Play", () => {
     const cast = decodeCastView(panel(w, "castlife.cast"));
     if (!cast) throw new Error("no cast");
     const opened: string[] = [];
-    const tree = YourGroups({ groups: [...cast.mine, { id: "book_club", name: "Book club", kind: "Club" }], pages: panel(w, "orgs.org"), onOpen: (id) => opened.push(id) });
+    const tree = YourGroups({ groups: [...cast.mine, { id: "book_club", name: "Book club", kind: "Club" }], summaries: panel(w, "orgs.summary"), onOpen: (id) => opened.push(id) });
     expect(find(tree, ListRow).map((p) => [p.title, p.value, p.chevron])).toEqual([
       ["Alder Automotive", "Mechanic", true],
       ["Book club", "member", false],

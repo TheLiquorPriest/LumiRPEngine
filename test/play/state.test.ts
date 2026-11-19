@@ -47,7 +47,8 @@ describe("the panels of a chat", () => {
     expect({ chatId: view.chatId, worldId: view.worldId, revision: view.revision, status: view.status }).toEqual({ chatId: CHAT, worldId: doc.id, revision, status: "idle" });
     // No engine of today's plays the chat: today's pages draw none of today's harness parts for it.
     expect("engine" in view).toBe(false);
-    expect(Object.keys(view.panels).sort()).toEqual(registry().views.map((v) => v.panel).sort());
+    // A panel read an item at a time when a page opens one (the organizations' pages) is no part of the view.
+    expect(Object.keys(view.panels).sort()).toEqual(registry().views.filter((v) => v.apart !== true).map((v) => v.panel).sort());
     // Each built by its pack, none failing.
     expect(Object.entries(view.panels).filter(([, p]) => isObject(p) && "error" in p)).toEqual([]);
     expect(view.packs).toEqual(Object.fromEntries(registry().packs.map((p) => [p.id, p.version])));

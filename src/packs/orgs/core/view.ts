@@ -11,8 +11,9 @@ import { opaqueId } from "../../../shared/hash";
 import { STRUCTURE_LABELS } from "../../../shared/finance";
 import type { EntityId } from "../../../shared/ids";
 import { isRecord, type JsonValue } from "../../../shared/json";
-import { DUES_EVERY, MERGED_INTO_FIELD, NONPROFIT_STRUCTURE, ORG_POWER_FAMILIES, ORG_POWERS, trusteesDecideIn, type Delegation, type MemberHow, type OrgGrant, type OrgMember, type OrgPower, type OrgType, type Position } from "../../../shared/org";
-import type { OrgDelegationView, OrgDuesView, OrgEndedView, OrgHistoryLineView, OrgLinkView, OrgListView, OrgPersonView, OrgPositionView, OrgPowerView, OrgRef, OrgRowView, OrgTrustView, OrgView, PartyMemberView } from "../../../shared/org-view";
+import { DUES_EVERY, MERGED_INTO_FIELD, NONPROFIT_STRUCTURE, ORG_POWER_FAMILIES, ORG_POWERS, powerCovers, trusteesDecideIn, type Delegation, type MemberHow, type OrgGrant, type OrgMember, type OrgPower, type OrgType, type Position } from "../../../shared/org";
+import { ALERTS_SECTION, PLAN_SECTION, type OrgAlertView, type OrgPlanView } from "../../../shared/org-feed";
+import type { OrgDelegationView, OrgDuesView, OrgEndedView, OrgHistoryLineView, OrgLinkView, OrgListView, OrgPersonView, OrgPositionView, OrgPowerView, OrgRef, OrgRowView, OrgSummary, OrgSummaryPerson, OrgTrustView, OrgView, PartyMemberView } from "../../../shared/org-view";
 import { isPartyTier, PARTY_KIND, PARTY_SECTION } from "../../../shared/party";
 import { formatMoney } from "../../../shared/world";
 import { calendarOf, clockAt, dateAt, dayIndexOf, formatClock } from "../../../engine/calendar";
@@ -21,7 +22,7 @@ import { acts } from "../../../engine/life";
 import { optionalQuery, own } from "../../../engine/pack-kit";
 import { povMayKnow } from "../../../engine/player-events";
 import { together } from "../../../engine/presence";
-import type { ReadContext } from "../../../engine/registry";
+import type { OrgSectionDef, ReadContext } from "../../../engine/registry";
 import { isGone, kindDef, kindIs, placeOfEntity } from "../../../engine/scope";
 import { isMemberOf, membersOf } from "../../../engine/selector";
 import { canSeeEntity } from "../../../engine/visibility";
@@ -169,15 +170,20 @@ class Page {
   }
 }
 
-/** The people on a page, each once with every way they belong, and the organizations seated in its positions (entity officers and directors); those the reader can't see, apart. A member group or an owning organization is no row of its own: its people count through it, and its hold shows among the organizations above. */
-function peopleOf(page: Page): { people: OrgPersonView[]; hidden: EntityId[] } {
+/** The people on a page, each once with every way they belong, in id order, and the organizations seated in its positions (entity officers and directors). A member group or an owning organization is no row of its own: its people count through it, and its hold shows among the organizations above. */
+function rowsByPerson(page: Page): [EntityId, OrgMember[]][] {
   const byWho = new Map<EntityId, OrgMember[]>();
   for (const row of page.subject.rows) byWho.set(row.who, [...(byWho.get(row.who) ?? []), row]);
   for (const [who, rows] of byWho) if (orgTypeOf(page.ctx, who) !== null && (rows.some((r) => r.via !== undefined) || page.positionsHeld(who).length === 0)) byWho.delete(who);
+  return [...byWho].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+}
+
+/** The people on a page (`rowsByPerson`); those the reader can't see, apart. */
+function peopleOf(page: Page): { people: OrgPersonView[]; hidden: EntityId[] } {
   const people: OrgPersonView[] = [];
   const hidden: EntityId[] = [];
-  for (const who of [...byWho.keys()].sort()) {
-    if (page.seen(who)) people.push(page.person(who, byWho.get(who) ?? []));
+  for (const [who, rows] of rowsByPerson(page)) {
+    if (page.seen(who)) people.push(page.person(who, rows));
     else hidden.push(who);
   }
   return { people, hidden };
@@ -311,6 +317,16 @@ function candidatesOf(ctx: ReadContext, subject: Subject, viewer: EntityId | nul
     .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
 }
 
+/**
+ * One of the packs' sections of a page (`r.orgSection`) as `viewer` may see it; null where it is not shown to them. The party's page is
+ * there before its entity is (§3.12): then only the sections no power guards build for it (its own `party`), since every power over it
+ * needs its entity.
+ */
+function sectionOf(ctx: ReadContext, subject: Subject, viewer: EntityId | null, def: OrgSectionDef): JsonValue | null {
+  if (def.power !== undefined && (!subject.exists || (viewer !== null && orgPower(ctx, viewer, subject.id, def.power) === null))) return null;
+  return def.build(ctx, subject.id, viewer);
+}
+
 /** One organization's page as `viewer` may see it; null for an id that is no organization. */
 export function buildOrgView(ctx: ReadContext, id: EntityId, viewer: EntityId | null): OrgView | null {
   const subject = subjectOf(ctx, id);
@@ -329,11 +345,8 @@ export function buildOrgView(ctx: ReadContext, id: EntityId, viewer: EntityId | 
   const above = subject.exists ? linksOf(page, holdersOf(ctx, subject.id), (h) => h.holder) : { links: [], hidden: 0 };
   const below = subject.exists ? linksOf(page, holdsOf(ctx, subject.id), (h) => h.org) : { links: [], hidden: 0 };
   const sections: Record<string, JsonValue> = {};
-  // The party's page is there before its entity is (§3.12): then only the sections no power guards
-  // build for it (its own `party`), since every power over it needs its entity.
   for (const def of ctx.registry.orgSections) {
-    if (def.power !== undefined && (!subject.exists || (viewer !== null && orgPower(ctx, viewer, subject.id, def.power) === null))) continue;
-    const built = def.build(ctx, subject.id, viewer);
+    const built = sectionOf(ctx, subject, viewer, def);
     if (built !== null) sections[def.id] = built;
   }
   const authored = subject.exists ? positionsOf(ctx, subject.id) : [];
@@ -374,6 +387,48 @@ export function buildOrgView(ctx: ReadContext, id: EntityId, viewer: EntityId | 
     belowHidden: below.hidden,
     trust: trustOf(page),
     nonprofit: subject.type === "company" && own(ctx.state.entities, subject.id)?.fields.structure === NONPROFIT_STRUCTURE,
+  };
+}
+
+/** The economy's section of a company's owners and holdings (`r.orgSection` "ownership"): the Chart offers a stake held from the page that shows it. */
+const OWNERSHIP_SECTION = "ownership";
+
+/**
+ * What the state view carries of one organization's page as `viewer` may see it (`OrgSummary`), each part as `buildOrgView` builds it
+ * and nothing the page alone draws; null for an id that is no organization. Its Ownership is built only to tell whether the Chart offers
+ * a stake it holds: where it holds a stake in a company and the reader holds `shares.manage` there.
+ */
+export function buildOrgSummary(ctx: ReadContext, id: EntityId, viewer: EntityId): OrgSummary | null {
+  const subject = subjectOf(ctx, id);
+  if (!subject) return null;
+  const page = new Page(ctx, subject, viewer);
+  const section = (sid: string): JsonValue | null => {
+    const def = ctx.registry.orgSections.find((d) => d.id === sid);
+    return def === undefined ? null : sectionOf(ctx, subject, viewer, def);
+  };
+  const { name, badge } = header(ctx, subject);
+  const mine = subject.rows.filter((r) => r.who === viewer);
+  const people: OrgSummaryPerson[] = [];
+  for (const [who, rows] of rowsByPerson(page)) {
+    if (page.seen(who)) people.push({ id: who, name: page.name(who), title: page.titleOf(who, rows), position: page.positionsHeld(who)[0]?.position.title ?? null, you: who === viewer, here: page.here(who) });
+  }
+  const alerts = section(ALERTS_SECTION);
+  const above = subject.exists ? linksOf(page, holdersOf(ctx, subject.id), (h) => h.holder) : { links: [], hidden: 0 };
+  const below = subject.exists ? linksOf(page, holdsOf(ctx, subject.id), (h) => h.org) : { links: [], hidden: 0 };
+  const stakes = below.links.some((l) => l.type === "company" && l.share !== null && l.share > 0) && page.powersOf(viewer).some((p) => powerCovers(p.power, "shares.manage")) && section(OWNERSHIP_SECTION) !== null;
+  return {
+    id: subject.id,
+    name,
+    type: subject.type,
+    badge,
+    title: mine.length > 0 ? page.titleOf(viewer, mine) : null,
+    people,
+    needs: Array.isArray(alerts) ? (alerts as unknown as OrgAlertView[]).filter((a) => a.needsYou) : [],
+    plan: subject.type === "party" ? (section(PLAN_SECTION) as unknown as OrgPlanView | null) : null,
+    above: above.links,
+    below: below.links,
+    belowHidden: below.hidden,
+    stakes,
   };
 }
 
@@ -510,6 +565,16 @@ export function buildOrgPages(ctx: ReadContext): Record<EntityId, OrgView> {
   for (const id of orgPageIds(ctx)) {
     const view = buildOrgView(ctx, id, ctx.world.pov);
     if (view) out[id] = view;
+  }
+  return out;
+}
+
+/** What the state view carries of every page the home opens (`orgs.summary`), by id, as the player character may see them. */
+export function buildOrgSummaries(ctx: ReadContext): Record<EntityId, OrgSummary> {
+  const out: Record<EntityId, OrgSummary> = {};
+  for (const id of orgPageIds(ctx)) {
+    const summary = buildOrgSummary(ctx, id, ctx.world.pov);
+    if (summary) out[id] = summary;
   }
   return out;
 }

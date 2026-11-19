@@ -1,11 +1,12 @@
 // Readers for the orgs pack's views as `StateView.panels` carries them: the Orgs home (`orgs.list`),
-// the organizations' pages (`orgs.org`) and their life's sections (alerts, Coming up and the Plan).
+// what the view carries of each organization's page (`orgs.summary`), a page as it is read when it
+// opens (`orgs.org`) and their life's sections (alerts, Coming up and the Plan).
 // Each answers null when the shape isn't the one drawn, and the shell shows the generic view instead.
 
 import { isOwnerRole } from "../../../shared/finance";
 import { isRecord, type JsonValue } from "../../../shared/json";
 import { DUES_EVERY, isOrgPower, limitsIn, MEMBER_HOWS, ORG_BASES, ORG_TYPES, POSITION_SCOPES, powersIn, TRUSTEES_DECIDE, type MemberHow } from "../../../shared/org";
-import type { OrgDelegationView, OrgDuesView, OrgHistoryLineView, OrgLinkView, OrgListView, OrgPersonView, OrgPositionView, OrgPowerView, OrgRef, OrgRowView, OrgStartView, OrgTrustView, OrgView, PartyMemberView } from "../../../shared/org-view";
+import type { OrgDelegationView, OrgDuesView, OrgHistoryLineView, OrgLinkView, OrgListView, OrgPersonView, OrgPositionView, OrgPowerView, OrgRef, OrgRowView, OrgStartView, OrgSummary, OrgSummaryPerson, OrgTrustView, OrgView, PartyMemberView } from "../../../shared/org-view";
 import { ALERT_KINDS, ALERT_TABS, COMING_KINDS, PLAN_STATUSES, type OrgAlertView, type OrgComingView, type OrgPlanView, type PlanClosedView, type PlanGoalView, type PlanOrderView } from "../../../shared/org-feed";
 import { isPartyTier } from "../../../shared/party";
 import { MOTION_STATUSES, STANDING_VOTES, VOTE_BASES, VOTE_HOWS, VOTES, type DecisionsView, type MotionView, type RequestView, type Tally } from "../../../shared/org-motions";
@@ -154,6 +155,40 @@ export function decodeOrgView(value: unknown): OrgView | null {
 export function decodeOrgPage(pages: unknown, id: string): OrgView | null {
   const page = isRecord(pages) ? decodeOrgView(pages[id]) : null;
   return page?.id === id ? page : null;
+}
+
+function summaryPerson(p: Obj): OrgSummaryPerson | null {
+  return typeof p.id === "string" ? { id: p.id, name: str(p.name, p.id), title: str(p.title), position: text(p.position), you: p.you === true, here: p.here === true } : null;
+}
+
+/** What the state view carries of one organization's page; null for a shape it isn't. */
+export function decodeOrgSummary(value: unknown): OrgSummary | null {
+  if (!isRecord(value) || typeof value.id !== "string" || !Array.isArray(value.people)) return null;
+  return {
+    id: value.id,
+    name: str(value.name, value.id),
+    type: oneOf(value.type, ORG_TYPES, "group"),
+    badge: str(value.badge),
+    title: text(value.title),
+    people: list(value.people, summaryPerson),
+    needs: decodeAlerts(value.needs),
+    plan: decodePlan(value.plan),
+    above: list(value.above, link),
+    below: list(value.below, link),
+    belowHidden: num(value.belowHidden),
+    stakes: value.stakes === true,
+  };
+}
+
+/** Every page's summary the state view carries (`orgs.summary`), in its order; none for a shape it isn't. */
+export function decodeOrgSummaries(panel: unknown): OrgSummary[] {
+  return isRecord(panel) ? Object.values(panel).flatMap((v) => decodeOrgSummary(v) ?? []) : [];
+}
+
+/** The summary of `id` among those the state view carries (`orgs.summary`); null when there is none. */
+export function decodeOrgSummaryOf(panel: unknown, id: string): OrgSummary | null {
+  const summary = isRecord(panel) ? decodeOrgSummary(panel[id]) : null;
+  return summary?.id === id ? summary : null;
 }
 
 function row(r: Obj): OrgRowView | null {

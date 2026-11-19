@@ -30,6 +30,7 @@ import type { NarratorView } from "./narrator-view";
 import type { TableUpdate } from "./tables";
 import type { QuickestWay, TravelWay } from "./travel";
 import type { GM_OUTLINE, GmPartReply, GmReadPart, QueuedOn } from "./gm-parts";
+import type { OrgView } from "./org-view";
 
 // Moved to homes of their own (PlanSwap-13): today's files take them from here until PlanSwap-10 removes this protocol.
 export type { EditOp } from "./edit-ops";
@@ -363,6 +364,12 @@ export interface UiRequest extends Request<"lre.ui"> {
  * list of places; `travel`: every way to one place, for its sheet. Neither is in the state view.
  */
 export type MapRequest = Request<"lre.map"> & { chatId: ChatId } & ({ op?: "display"; display: MapDisplay } | { op: "walk"; x: number; y: number } | { op: "ways" } | { op: "travel"; to: PlaceId });
+
+/** One organization's page as Orgs draws it, read when its page or one of its editors opens (`orgs.org`): the state view carries only each page's summary (`orgs.summary`). */
+export interface OrgPageRequest extends Request<"lre.org"> {
+  chatId: ChatId;
+  org: EntityId;
+}
 
 /**
  * GM → This chat → Knowledge (DESIGN §6.11): the chat's own knowledge choices, knowledge tracking
@@ -843,6 +850,7 @@ export type FrontendToBackend =
   | WorldRequest
   | UiRequest
   | MapRequest
+  | OrgPageRequest
   | JobRequest
   | LoreRequest
   | SecrecyRequest
@@ -927,6 +935,8 @@ export interface ResultBodies {
   "lre.world": { worlds?: WorldIndex[]; world?: WorldDoc; revision?: RevisionId; lint?: LintIssue[]; file?: JsonValue; packKinds?: Record<string, KindDef>; packRelations?: Record<string, RelationTypeDef>; packLabels?: Record<string, string>; functions?: string[]; sheet?: SheetSectionView[] | null; templates?: TemplateInfo[]; chats?: WorldChatInfo[]; history?: RevisionNote[]; pending?: boolean; updates?: TableUpdate[]; undo?: string; undone?: boolean; words?: string; limits?: { editOps: number; patchOps: number; noteChars: number }; revisions?: WorldRevisionInfo[]; next?: string | null; changes?: WorldChangesInfo };
   "lre.ui": { done: true };
   "lre.map": { display?: MapDisplay; walk?: { minutes: number; disabled?: string }; ways?: QuickestWay[]; travel?: TravelWay[] };
+  /** The page; null where the player character knows of no such organization. */
+  "lre.org": { page: OrgView | null };
   /** The chat's own knowledge choices after the request, null where it follows; `tidy`, its own Tidy up switch (absent: the world's). `engine` and `harnessBlocked` are retired: nothing sets them, for RPE plays every chat itself. */
   "lre.chat.knowledge": { knowledge: boolean | null; narrator: NarratorView | null; engine?: "agents" | "harness"; tidy?: boolean; harnessBlocked?: string };
   /** `start`, `cancel` and `dismiss` name the job; `list` returns the world's kept jobs. */

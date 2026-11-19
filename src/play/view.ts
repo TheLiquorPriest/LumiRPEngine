@@ -12,7 +12,7 @@
 // not a world's.
 
 import { playedWorld } from "../engine/places-in-play";
-import { passInStretches } from "../engine/read-pass";
+import { passInStretches, readPass } from "../engine/read-pass";
 import { placeOfEntity } from "../engine/scope";
 import type { ReadContext } from "../engine/registry";
 import type { WorldState } from "../engine/state";
@@ -134,6 +134,8 @@ async function buildParts(input: ChatViewInput, s: UserStore, folded: Folded, wo
   const failed = (error: unknown): JsonValue => ({ error: error instanceof Error ? error.message : String(error) });
   const steps: (() => void)[] = [];
   for (const view of registry.views) {
+    // A panel read an item at a time when a page opens one is no part of the view (`chatViewItem`).
+    if (view.apart === true) continue;
     const items = view.items;
     if (items === undefined) {
       steps.push(() => {
@@ -203,7 +205,7 @@ export async function chatView(input: ChatViewInput): Promise<StateView> {
   const registry = store.env.registry;
   // The panels word some lines with the application's lines in force (`say`): they shape the view as the state does.
   const lines = linesGiven();
-  const key = JSON.stringify([s.stateKey(chat, input.turn), row.head, row.revision, lines, input.map, input.knowledge, input.offstage]);
+  const key = viewKey(s, row, lines, input);
   let kept = built.get(key);
   if (kept !== undefined) {
     // The newest asked last: the first is the one let go.
@@ -254,4 +256,56 @@ export async function chatView(input: ChatViewInput): Promise<StateView> {
     packs,
     currency: kept.world.currency,
   };
+}
+
+/** What shapes a view's parts beside the state they show: an item read apart (`chatViewItem`) is kept under the key its view is. */
+export type ViewKeyInput = Pick<ChatViewInput, "store" | "user" | "chat" | "turn" | "map" | "knowledge" | "offstage">;
+
+/** The key a view's parts are kept under (`built`): the store's key for the state, and what else shaped them. */
+function viewKey(s: UserStore, row: { head: string | null; revision: string | null }, lines: number, input: ViewKeyInput): string {
+  return JSON.stringify([s.stateKey(input.chat, input.turn), row.head, row.revision, lines, input.map, input.knowledge, input.offstage]);
+}
+
+/**
+ * The items of the panels no view carries, read one at a time as pages open them (`chatViewItem`), by the key the view of the same
+ * state is kept under, then by panel and item: the newest asked keys, `VIEWS_KEPT` of them, as the views are kept.
+ */
+const itemsKept = new Map<string, Map<string, JsonValue | null>>();
+
+/**
+ * One item of a panel the state view does not carry (`PanelViewDef.apart`: an organization's page), as a page reads it when it opens it:
+ * built in a read pass of its own from the state the chat's view at the same key is built from, and kept under that key, so a second open
+ * builds nothing and a change to the state builds it again. Null where the panel has no such item, or the chat plays no world.
+ */
+export function chatViewItem(input: ViewKeyInput, panel: PanelId, id: string): JsonValue | null {
+  const { store, chat } = input;
+  const s = store.user(input.user);
+  const row = s.chat(chat);
+  const items = store.env.registry.views.find((v) => v.panel === panel && v.apart === true)?.items;
+  if (row === null || row.world === null || items === undefined) return null;
+  const lines = linesGiven();
+  const key = viewKey(s, row, lines, input);
+  const at = `${panel}\n${id}`;
+  const kept = itemsKept.get(key);
+  if (kept !== undefined) {
+    itemsKept.delete(key);
+    itemsKept.set(key, kept);
+    if (kept.has(at)) return kept.get(at) ?? null;
+  }
+  const state = (input.turn === null ? s.headState(chat) : s.stateAt(input.turn)).state.world;
+  const doc = store.env.worlds(state.revision) ?? (row.revision === null ? undefined : store.env.worlds(row.revision));
+  if (doc === undefined) return null;
+  const world = playedWorld(doc, state);
+  const item = readPass(() => items.build(store.env.registry.context(world, state), { mapDisplay: null, mapConfig: input.map }, id));
+  // An item worded with lines given again while it was built is answered once and not kept, as a view is.
+  if (linesGiven() === lines) {
+    const into = kept ?? new Map<string, JsonValue | null>();
+    into.set(at, item);
+    itemsKept.set(key, into);
+    for (const old of itemsKept.keys()) {
+      if (itemsKept.size <= VIEWS_KEPT) break;
+      itemsKept.delete(old);
+    }
+  }
+  return item;
 }

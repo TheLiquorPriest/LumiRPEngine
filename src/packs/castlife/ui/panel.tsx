@@ -10,7 +10,7 @@
 import { useState } from "preact/hooks";
 import { withinValue } from "../../../shared/classes";
 import { isRecord } from "../../../shared/json";
-import { ORGS_ORG_PANEL } from "../../../shared/org-view";
+import { ORGS_SUMMARY_PANEL } from "../../../shared/org-view";
 import { openAt, orgRoute, pushSheet, useApp } from "../../../frontend/app";
 import { Avatar, Badge, Button, Disclosure, Empty, Field, JsonView, List, ListRow, Section } from "../../../frontend/components";
 import { list, oneOf, optNum, optStr, str, strings } from "../../../frontend/decode";
@@ -271,23 +271,24 @@ export function CastPanel(props: PanelProps) {
           </Section>
         </div>
       ))}
-      {view.mine.length > 0 ? <YourGroups groups={view.mine} pages={props.state.panels[ORGS_ORG_PANEL]} onOpen={(id) => app.ui.update((ui) => openAt(ui, "orgs", orgRoute(id)))} /> : null}
+      {view.mine.length > 0 ? <YourGroups groups={view.mine} summaries={props.state.panels[ORGS_SUMMARY_PANEL]} onOpen={(id) => app.ui.update((ui) => openAt(ui, "orgs", orgRoute(id)))} /> : null}
     </div>
   );
 }
 
 /**
  * The POV's own groups, closing Cast: each with the title it goes by there. One with a page in Orgs
- * (`orgs.org`, ORG-SPEC §4.1) opens it there, its title read from that page.
+ * (ORG-SPEC §4.1) opens it there, its title read from what the state view carries of that page
+ * (`orgs.summary`).
  */
-export function YourGroups(props: { groups: readonly CastGroup[]; pages: unknown; onOpen(id: string): void }) {
-  const pages = isRecord(props.pages) ? props.pages : {};
+export function YourGroups(props: { groups: readonly CastGroup[]; summaries: unknown; onOpen(id: string): void }) {
+  const summaries = isRecord(props.summaries) ? props.summaries : {};
   return (
     <Section title="Your groups" flush>
       <List>
         {props.groups.map((g) => {
-          const page = pages[g.id];
-          const titled = isRecord(page) && isRecord(page.you) && typeof page.you.title === "string" && page.you.title !== "" ? page.you.title : null;
+          const page = summaries[g.id];
+          const titled = isRecord(page) && typeof page.title === "string" && page.title !== "" ? page.title : null;
           return (
             <ListRow
               key={g.id}

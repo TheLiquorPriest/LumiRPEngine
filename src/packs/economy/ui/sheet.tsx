@@ -2,8 +2,8 @@
 // stack, whose money it is and the page in the sheet's id (`routes.ts`), the POV's account page as
 // an `account` sheet. The POV's own pages draw their money from the state, each control an
 // in-world action, as on the segments. An organization's draw its own money from its page in Orgs
-// (`orgs.org`'s money section), read only, and what it shares with the POV opens the POV's own
-// page.
+// (`orgs.org`'s money section, the page read when the sheet opens), read only, and what it shares
+// with the POV opens the POV's own page.
 
 import { useEffect } from "preact/hooks";
 import type { SheetKind } from "../../../frontend/app";
@@ -13,8 +13,8 @@ import type { SheetProps } from "../../../frontend/registry";
 import type { FinanceView } from "../../../shared/finance";
 import type { EntityId } from "../../../shared/ids";
 import { isRecord } from "../../../shared/json";
-import { ORGS_ORG_PANEL } from "../../../shared/org-view";
-import type { StateView } from "../../../shared/state-view";
+import type { OrgView } from "../../../shared/org-view";
+import { useOrgPage } from "../../../frontend/org-page";
 import { decodeFinanceView } from "./decode";
 import type { HubControls, PlayerControls, Reader } from "./hub";
 import type { HubPage } from "./nav";
@@ -23,9 +23,7 @@ import { playElsewhere, usePlayerControls } from "./panel";
 import { pageOf, routeFrom } from "./routes";
 
 /** An organization's own money as its page in Orgs carries it (`orgs.org`'s money section): there only for a reader who may see it. */
-function orgMoney(state: StateView, org: EntityId): FinanceView | null {
-  const pages = state.panels[ORGS_ORG_PANEL];
-  const page = isRecord(pages) ? pages[org] : undefined;
+function orgMoney(page: OrgView | null): FinanceView | null {
   const sections = isRecord(page) ? page.sections : undefined;
   return isRecord(sections) ? decodeFinanceView(sections.money) : null;
 }
@@ -57,12 +55,15 @@ function HubSheet(props: SheetProps & { kind: SheetKind }) {
   const route = pageOf(props.kind, props.id);
   const raw = props.state.panels["economy.money"];
   const pov = raw === undefined || raw === null ? null : decodeFinanceView(raw);
-  const shown = route === null ? null : sheetMoney(route, pov, controls, (org) => orgMoney(props.state, org));
+  // An organization's money is its page's, read when the sheet opens (the state view carries only each page's summary).
+  const org = route !== null && route.party !== null && route.party !== pov?.party ? route.party : null;
+  const read = useOrgPage(props.chatId, org, props.state);
+  const shown = route === null ? null : sheetMoney(route, pov, controls, () => (read.status === "read" ? orgMoney(read.page) : null));
   if (!route || !shown) {
     return (
       <div class="lre-money-page">
         <PageHeader title="Money" onBack={props.close} />
-        <Empty icon="coins">{!route ? "Nothing to show here." : route.party === null || route.party === pov?.party ? "Money is off in this world." : "You don't see its money any more."}</Empty>
+        <Empty icon={org !== null && read.status === "reading" ? "hourglass" : "coins"}>{!route ? "Nothing to show here." : org === null ? "Money is off in this world." : read.status === "reading" ? "Reading its money…" : read.status === "failed" ? "Its money could not be read." : "You don't see its money any more."}</Empty>
       </div>
     );
   }

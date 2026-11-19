@@ -18,7 +18,7 @@ import type { SheetProps } from "../../../frontend/registry";
 import { whereFixTarget } from "../../../frontend/requests";
 import type { ChatId, EntityId } from "../../../shared/ids";
 import { isRecord } from "../../../shared/json";
-import { ORGS_ORG_PANEL } from "../../../shared/org-view";
+import { ORGS_SUMMARY_PANEL } from "../../../shared/org-view";
 import type { PlayerBlock, RoutinePlayerView } from "../../../shared/routines";
 import { toastQueued } from "../../../frontend/queued";
 import { decodeCastView, SLOT_KINDS, whereabouts, type CastPerson, type CastView, type SlotKind } from "./panel";
@@ -182,19 +182,19 @@ export interface PersonOrg {
 }
 
 /**
- * The organizations someone is in, as the Orgs pages (`orgs.org`, ORG-SPEC §4.1) show them to the
- * POV: every page that lists them among its people, by name. A page only lists people the POV may
- * see, so their titles follow the same masking.
+ * The organizations someone is in, as the Orgs pages (ORG-SPEC §4.1) show them to the POV, read from
+ * what the state view carries of each page (`orgs.summary`): every one that lists them among its
+ * people, by name. A page only lists people the POV may see, so their titles follow the same masking.
  */
-export function personOrgs(pages: unknown, who: EntityId): PersonOrg[] {
-  if (!isRecord(pages)) return [];
-  return Object.values(pages)
+export function personOrgs(summaries: unknown, who: EntityId): PersonOrg[] {
+  if (!isRecord(summaries)) return [];
+  return Object.values(summaries)
     .flatMap((page): PersonOrg[] => {
       if (!isRecord(page) || typeof page.id !== "string") return [];
       const them = list(page.people, (p) => (p.id === who ? p : null))[0];
       if (!them) return [];
       const title = str(them.title);
-      const position = isRecord(them.position) ? str(them.position.title) : "";
+      const position = str(them.position);
       return [{ id: page.id, name: str(page.name, page.id), badge: str(page.badge), title, position: position !== "" && position.toLowerCase() !== title.toLowerCase() ? position : null }];
     })
     .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
@@ -222,7 +222,7 @@ export function PersonSheet(props: SheetProps) {
     );
   }
   const pending = props.state.pending.some((mark) => mark.entity === person.id);
-  const orgs = personOrgs(props.state.panels[ORGS_ORG_PANEL], person.id);
+  const orgs = personOrgs(props.state.panels[ORGS_SUMMARY_PANEL], person.id);
   const classes = Object.entries(person.classes).flatMap(([facet, values]) => values.map((value) => ({ facet, value })));
   const facetLabel = (id: string): string => view.facets.find((f) => f.id === id)?.label ?? id;
   const where = whereabouts(person);

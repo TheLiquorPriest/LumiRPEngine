@@ -3,8 +3,9 @@
 // (where it has positions of its own or organizations above or below it, item 8) and Rules, drawn
 // here, and the packs' tabs (`r.orgTab`: Money, Ownership, Taxes…), each while the page holds the
 // section it draws, which the backend builds only for a reader who holds its power. A pack's part of
-// one of the shell's tabs (People's Payroll) follows that tab's own content. The page is the
-// `orgs.org` view's, as the player character may see the organization, opened on the tab its route
+// one of the shell's tabs (People's Payroll) follows that tab's own content. The page is one of the
+// `orgs.org` view's, read when the sheet opens (the state view carries only each page's summary), as
+// the player character may see the organization, opened on the tab its route
 // names (`orgRoute`), else on Overview. The header's overflow holds Rename where you may govern it
 // and Leave where you're a member of your own (each done at once, off screen, with Undo: DESIGN §11)
 // and Open in GM, which opens RPE's World page at it, behind the spoiler gate.
@@ -18,13 +19,14 @@ import type { OrgShellTab, OrgTabDef, Send, SheetProps } from "../../../frontend
 import type { ChatId } from "../../../shared/ids";
 import type { JsonObject } from "../../../shared/json";
 import { ORG_ACTIONS } from "../../../shared/org";
-import { ORGS_LIST_PANEL, ORGS_ORG_PANEL, type OrgView } from "../../../shared/org-view";
+import { ORGS_LIST_PANEL, ORGS_SUMMARY_PANEL, type OrgView } from "../../../shared/org-view";
 import type { StateView } from "../../../shared/state-view";
 import { OFFSTAGE_NOTE } from "../../../shared/offstage";
 import { toastQueued } from "../../../frontend/queued";
-import { hasChart } from "./chart-model";
+import { useOrgPage } from "../../../frontend/org-page";
+import { hasChart, isWholePage, type ChartPage } from "./chart-model";
 import { OrgChart } from "./chart";
-import { decodeOrgList, decodeOrgPage } from "./decode";
+import { decodeOrgList, decodeOrgSummaryOf, decodeOrgView } from "./decode";
 import { OrgOverview } from "./overview";
 import type { PartyAct } from "./party";
 import { OrgPeople } from "./people";
@@ -68,8 +70,8 @@ export interface OrgPageProps {
   above?: ComponentChildren;
   /** Plays one of the party's own controls (Play's sheet); absent, the party's page reads only, as GM → Orgs draws it. */
   act?: PartyAct;
-  /** Another organization's page as the reader holds it, for the Chart's ownership tree (Play's `orgs.org`, GM → Orgs' every page); absent, only this one's. */
-  pageOf?(id: string): OrgView | null;
+  /** Another organization as the reader holds it, for the Chart's ownership tree (Play's summaries, `orgs.summary`; GM → Orgs' every page); absent, only this one. */
+  pageOf?(id: string): ChartPage | null;
 }
 
 /** What the header's overflow does, as the sheet wires it. */
@@ -130,15 +132,16 @@ export function OrgPage(props: OrgPageProps) {
   const def = tabs.find((t) => t.id === current)?.def ?? null;
   const draw = (d: OrgTabDef) => <d.component chatId={props.chatId} org={org} section={org.sections[d.section] ?? null} state={props.state} send={props.send} open={props.open} />;
   const ownership = tabs.find((t) => t.def?.section === "ownership")?.id;
-  // Where another page's Ownership forms are: the tab drawing the economy's `ownership` section, while that page holds it.
+  // Where another page's Ownership forms are: the tab drawing the economy's `ownership` section, while that page holds it (a summary says
+  // so by `stakes`, which also holds that the reader manages its stakes there).
   const ownershipDef = defs.find((d) => d.section === "ownership" && d.within === undefined);
-  const pageOf = (id: string): OrgView | null => (id === org.id ? org : (props.pageOf?.(id) ?? null));
+  const pageOf = (id: string): ChartPage | null => (id === org.id ? org : (props.pageOf?.(id) ?? null));
   const body = def ? (
     draw(def)
   ) : current === "people" ? (
     <OrgPeople org={org} ownership={ownership === undefined ? null : () => props.onTab(ownership)} open={props.open} />
   ) : current === "chart" ? (
-    <OrgChart key={org.id} org={org} pageOf={pageOf} ownershipTab={(o) => (ownershipDef && o.sections[ownershipDef.section] !== undefined ? ownershipDef.id : null)} open={props.open} onTab={props.onTab} />
+    <OrgChart key={org.id} org={org} pageOf={pageOf} ownershipTab={(o) => (ownershipDef && (isWholePage(o) ? o.sections[ownershipDef.section] !== undefined : o.stakes) ? ownershipDef.id : null)} open={props.open} onTab={props.onTab} />
   ) : current === "rules" ? (
     <OrgRules org={org} currency={props.state.currency ?? null} open={props.open} />
   ) : (
@@ -181,7 +184,11 @@ export function playOrgAction(app: App, chatId: ChatId): PartyAct {
     });
 }
 
-/** The `org` sheet: the page of the organization the route names, opened on the tab it names (Overview while the page doesn't show that one), the tab chosen kept while the sheet is open, and the header's overflow. */
+/**
+ * The `org` sheet: the page of the organization the route names, read when the sheet opens and again when the state it shows changes
+ * (the state view carries only each page's summary), opened on the tab the route names (Overview while the page doesn't show that
+ * one), the tab chosen kept while the sheet is open, and the header's overflow.
+ */
 export function OrgSheet(props: SheetProps) {
   const app = useApp();
   const target = orgRouteOf(props.id);
@@ -189,12 +196,14 @@ export function OrgSheet(props: SheetProps) {
   const [renaming, setRenaming] = useState(false);
   const [busy, run] = useBusy();
   const panelId = useId();
-  const org = decodeOrgPage(props.state.panels[ORGS_ORG_PANEL], target.org);
+  const read = useOrgPage(props.chatId, target.org, props.state);
+  const summaries = props.state.panels[ORGS_SUMMARY_PANEL];
+  const org = read.status === "read" ? decodeOrgView(read.page) : null;
   if (!org) {
     return (
       <div class="lre-stack">
-        <PageHeader title="Organization" onBack={props.close} />
-        <Empty icon="briefcase">You don't know of it any more.</Empty>
+        <PageHeader title={decodeOrgSummaryOf(summaries, target.org)?.name ?? "Organization"} onBack={props.close} />
+        <Empty icon={read.status === "reading" ? "hourglass" : "briefcase"}>{read.status === "reading" ? "Reading its page…" : read.status === "failed" ? "Its page could not be read." : "You don't know of it any more."}</Empty>
       </div>
     );
   }
@@ -213,10 +222,10 @@ export function OrgSheet(props: SheetProps) {
     openInGm: () => app.open?.({ page: "world", chat: props.chatId, at: [`entity:${org.id}`] }),
   });
   const above = renaming ? <OrgRenameForm name={org.name} busy={busy} onSave={(name) => act(ORG_ACTIONS.rename, { org: org.id, name }, () => setRenaming(false))} onCancel={() => setRenaming(false)} /> : null;
-  // The other pages the Chart's ownership tree walks, each read once a render.
-  const pages = new Map<string, OrgView | null>();
-  const pageOf = (id: string): OrgView | null => {
-    if (!pages.has(id)) pages.set(id, decodeOrgPage(props.state.panels[ORGS_ORG_PANEL], id));
+  // The other organizations the Chart's ownership tree walks, each read once a render.
+  const pages = new Map<string, ChartPage | null>();
+  const pageOf = (id: string): ChartPage | null => {
+    if (!pages.has(id)) pages.set(id, decodeOrgSummaryOf(summaries, id));
     return pages.get(id) ?? null;
   };
   return <OrgPage org={org} figure={figure} defs={app.catalog.orgTabs} tab={tab} panelId={panelId} onTab={setTab} onBack={props.close} chatId={props.chatId} state={props.state} send={props.send} open={props.open} menu={menu} above={above} act={playOrgAction(app, props.chatId)} pageOf={pageOf} />;

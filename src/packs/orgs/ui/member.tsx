@@ -22,11 +22,12 @@ import type { SheetProps } from "../../../frontend/registry";
 import { PAY_BASES, PAY_CHOICE_LABELS, PAY_CHOICES } from "../../../shared/finance";
 import { OFFSTAGE_NOTE } from "../../../shared/offstage";
 import { toastQueued } from "../../../frontend/queued";
+import { useOrgPage } from "../../../frontend/org-page";
 import { formatMoneyInput } from "../../../shared/money";
 import type { OrgPowerView, OrgPersonView, OrgView } from "../../../shared/org-view";
-import { ORGS_ORG_PANEL } from "../../../shared/org-view";
+import { ORGS_SUMMARY_PANEL } from "../../../shared/org-view";
 import { DEFAULT_CURRENCY } from "../../../shared/world";
-import { decodeOrgPage } from "./decode";
+import { decodeOrgSummaryOf, decodeOrgView } from "./decode";
 import {
   admitAction,
   appointAction,
@@ -301,17 +302,18 @@ function PayoutSheet(props: { org: OrgView; host: PlayHost }) {
   );
 }
 
-/** The `org_edit` sheet: the editor its route names, over the organization's page as the player character may see it. */
+/** The `org_edit` sheet: the editor its route names, over the organization's page as the player character may see it, read when the sheet opens and again when the state it shows changes. */
 export function OrgEditSheet(props: SheetProps) {
   const app = useApp();
   const [busy, run] = useBusy();
   const target = orgEditOf(props.id);
-  const org = target ? decodeOrgPage(props.state.panels[ORGS_ORG_PANEL], target.org) : null;
+  const read = useOrgPage(props.chatId, target?.org ?? null, props.state);
+  const org = read.status === "read" ? decodeOrgView(read.page) : null;
   if (!target || !org) {
     return (
       <div class="lre-stack">
-        <PageHeader title="Organization" onBack={props.close} />
-        <Empty icon="briefcase">You don't know of it any more.</Empty>
+        <PageHeader title={(target ? decodeOrgSummaryOf(props.state.panels[ORGS_SUMMARY_PANEL], target.org)?.name : undefined) ?? "Organization"} onBack={props.close} />
+        <Empty icon={target && read.status === "reading" ? "hourglass" : "briefcase"}>{target && read.status === "reading" ? "Reading its page…" : target && read.status === "failed" ? "Its page could not be read." : "You don't know of it any more."}</Empty>
       </div>
     );
   }

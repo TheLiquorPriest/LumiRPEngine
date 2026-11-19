@@ -17,7 +17,7 @@
 import { orgRoute, type SheetRoute } from "../../../frontend/app";
 import type { IconName } from "../../../ui/icons";
 import { OWNER_ROLE_LABELS, type OwnerRole } from "../../../shared/finance";
-import type { OrgLinkView, OrgPersonView, OrgPositionView, OrgRef, OrgView } from "../../../shared/org-view";
+import type { OrgLinkView, OrgPersonView, OrgPositionView, OrgRef, OrgSummary, OrgView } from "../../../shared/org-view";
 import { isPartyTier, PARTY_TIERS } from "../../../shared/party";
 import { appointable, holds, isGmPage, mayRevoke, orgEditRoute, rulesControls } from "./edit";
 import { count, linkWords, pct, powersText, seatWords, TIER_HEADINGS, TYPE_ICON } from "./words";
@@ -316,10 +316,21 @@ export function mainHolder(above: readonly OrgLinkView[]): OrgLinkView | null {
   return [...above].sort((a, b) => Number(b.controlled) - Number(a.controlled) || (b.share ?? 0) - (a.share ?? 0) || a.id.localeCompare(b.id))[0] ?? null;
 }
 
+/**
+ * A page the Ownership and control tree walks to: the one open, or another organization as the reader holds it (in Play, what the
+ * state view carries of its page, `orgs.summary`; GM → Orgs, its page).
+ */
+export type ChartPage = OrgView | OrgSummary;
+
+/** Whether a page the tree walks to is a whole page, not a summary. */
+export function isWholePage(page: ChartPage): page is OrgView {
+  return "sections" in page;
+}
+
 /** The chain up to the ultimate parent, the ultimate parent first and `org` last, as far as the pages the reader holds go (8 deep, a loop stopping it). */
-export function controlChain(org: OrgView, pageOf: (id: string) => OrgView | null): OrgRef[] {
+export function controlChain(org: OrgView, pageOf: (id: string) => ChartPage | null): OrgRef[] {
   const chain: OrgRef[] = [{ id: org.id, name: org.name }];
-  let at: OrgView | null = org;
+  let at: ChartPage | null = org;
   while (at && chain.length <= CONTROL_DEPTH) {
     const up = mainHolder(at.above);
     if (!up || chain.some((c) => c.id === up.id)) break;
@@ -338,19 +349,20 @@ function linkBadges(link: OrgLinkView): ChartNode["badges"] {
   ];
 }
 
-/** Where the Ownership forms are: the tab drawing the economy's `ownership` section, when the page has it. */
-export type OwnershipTab = (org: OrgView) => string | null;
+/** Where the Ownership forms are: the tab drawing the economy's `ownership` section, when the page has it (a summary's `stakes`: it has it, and the reader manages its stakes there). */
+export type OwnershipTab = (org: ChartPage) => string | null;
 
 /**
  * What may be done to a holding from its holder: in Play, sell part of it or put more in, as the
  * holder (`shares.manage`), on the holder's Ownership tab; in GM → Orgs, edit its owners on its own
  * People tab.
  */
-function holdingActions(holder: OrgView | null, child: OrgLinkView, here: OrgView, ownershipTab: OwnershipTab): ChartAction[] {
+function holdingActions(holder: ChartPage | null, child: OrgLinkView, here: OrgView, ownershipTab: OwnershipTab): ChartAction[] {
   if (!holder || child.share === null || child.share <= 0) return [];
-  if (isGmPage(holder)) return [{ id: "owners", label: "Edit its owners", icon: "users", route: orgRoute(child.id, "people") }];
+  if (isWholePage(holder) && isGmPage(holder)) return [{ id: "owners", label: "Edit its owners", icon: "users", route: orgRoute(child.id, "people") }];
   const tab = ownershipTab(holder);
-  if (child.type !== "company" || tab === null || !holds(holder, "shares.manage")) return [];
+  // A summary's tab is there only where the reader holds `shares.manage` there (`stakes`).
+  if (child.type !== "company" || tab === null || (isWholePage(holder) && !holds(holder, "shares.manage"))) return [];
   return [holder.id === here.id ? { id: "stake", label: "Sell part, or put more in", icon: "coins", tab } : { id: "stake", label: "Sell part, or put more in", icon: "coins", route: orgRoute(holder.id, tab) }];
 }
 
@@ -370,11 +382,11 @@ function foundActions(org: OrgView, ownershipTab: OwnershipTab): ChartAction[] {
  * page as far as the reader's pages go (8 deep, never round a loop), those the reader doesn't know
  * counted ("1 you don't know"); `org`'s own row marked current.
  */
-export function controlTree(org: OrgView, pageOf: (id: string) => OrgView | null, root: string, ownershipTab: OwnershipTab): ChartNode[] {
-  const pageFor = (id: string): OrgView | null => (id === org.id ? org : pageOf(id));
+export function controlTree(org: OrgView, pageOf: (id: string) => ChartPage | null, root: string, ownershipTab: OwnershipTab): ChartNode[] {
+  const pageFor = (id: string): ChartPage | null => (id === org.id ? org : pageOf(id));
   const top = pageFor(root);
   if (!top) return [];
-  const walk = (page: OrgView | null, ref: { id: string; name: string; type: OrgView["type"] }, key: string, link: OrgLinkView | null, holder: OrgView | null, seen: ReadonlySet<string>, depth: number): ChartNode => {
+  const walk = (page: ChartPage | null, ref: { id: string; name: string; type: OrgView["type"] }, key: string, link: OrgLinkView | null, holder: ChartPage | null, seen: ReadonlySet<string>, depth: number): ChartNode => {
     const below = page && depth < CONTROL_DEPTH ? page.below.filter((l) => !seen.has(l.id)) : [];
     const children = below.map((l) => walk(pageFor(l.id), l, `${key}/o:${l.id}`, l, page, new Set([...seen, l.id]), depth + 1));
     const hidden = page && page.belowHidden > 0 ? [node(`${key}/hidden`, `${page.belowHidden} you don't know`, "briefcase", { muted: true })] : [];

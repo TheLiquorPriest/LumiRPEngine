@@ -16,7 +16,7 @@ import { MoneyInput } from "../../../frontend/money-input";
 import type { PanelProps } from "../../../frontend/registry";
 import { parseMoneyInput } from "../../../shared/money";
 import { ORG_ACTIONS, type OrgType } from "../../../shared/org";
-import { ORGS_ORG_PANEL, type OrgListView, type OrgRowView } from "../../../shared/org-view";
+import { ORGS_SUMMARY_PANEL, type OrgListView, type OrgRowView } from "../../../shared/org-view";
 import { PARTY_TIERS, TIER_NOUNS } from "../../../shared/party";
 import type { WorldCurrency } from "../../../shared/world";
 import type { ChartNode } from "./chart-model";
@@ -344,6 +344,6 @@ export function OrgsPanel(props: PanelProps) {
   if (props.view === null || props.view === undefined) return <Empty icon="briefcase">No organizations here.</Empty>;
   const list = decodeOrgList(props.view);
   if (!list) return <JsonView value={props.view} />;
-  const needs = new Set(needsYouOf(props.state.panels[ORGS_ORG_PANEL]).map((n) => n.org));
+  const needs = new Set(needsYouOf(props.state.panels[ORGS_SUMMARY_PANEL]).map((n) => n.org));
   return <OrgsHome list={list} onOpen={(id) => app.ui.update((ui) => pushSheet(ui, orgRoute(id)))} act={playOrgAction(app, props.chatId)} currency={props.state.currency} needs={needs} />;
 }

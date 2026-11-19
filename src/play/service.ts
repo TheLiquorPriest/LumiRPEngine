@@ -48,6 +48,7 @@ import { isRecord, type JsonObject, type JsonValue, safeKey } from "../shared/js
 import type { FixOp, LedgerEvent, MarkerBody } from "../shared/ledger";
 import { OFFSTAGE_ORIGIN, ORIGIN_FIELD, playsOffstage } from "../shared/offstage";
 import type { ErrorCode } from "../shared/protocol";
+import { ORGS_ORG_PANEL, type OrgView } from "../shared/org-view";
 import type { StateView } from "../shared/state-view";
 import type { MapConfig } from "../shared/map-config";
 import { type ItemFix, parseItemFix } from "../shared/things";
@@ -68,7 +69,8 @@ import { playerReason } from "./state/requirement-words";
 import { unfitRef } from "./state/unfit-ref";
 import { unfitWords } from "./unfit";
 import { missingWords } from "../engine/param-words";
-import { chatView, headTurn, pressedLine, pressOf, stagedOf } from "./view";
+import { chatView, chatViewItem, headTurn, pressedLine, pressOf, stagedOf } from "./view";
+import type { ControlsKnowledge } from "./state/controls";
 
 /** The prompt part this area's words are in, under the guidance folder's `.prompts/`. */
 export const PLAY_ANSWERS = "play-answers";
@@ -247,6 +249,11 @@ function pathTurns(s: UserStore, chat: string, turning: boolean): string[] {
   return turning ? turns.slice(0, -1) : turns;
 }
 
+/** The controls' knowledge choices of the chat as its view shapes them: his own, the chat's, and the chat's tidy-up switch. */
+function knowledgeOf(taps: TapSettings): ControlsKnowledge {
+  return { ...taps.choices, chat: { ...taps.choices.chat, ...(taps.tidy.on === null ? {} : { tidy: taps.tidy.on }) } };
+}
+
 /** Who an action names: the one acting, and whoever its references name, as today's resolver takes them in. */
 function partiesOf(params: Readonly<Record<string, ParamDef>>, actor: string, given: JsonObject): string[] {
   return [
@@ -327,7 +334,7 @@ export class PlayService {
     const journal = await journalNotes(this.deps.store, user, chat, taps.journalMost, { texts, code: (code) => own(keys, code) ?? code, key: hashParts("journal-words", JSON.stringify(texts), JSON.stringify(keys)) });
     const turning = this.deps.turning(user, chat);
     const { db } = this.deps;
-    const knowledge = { ...taps.choices, chat: { ...taps.choices.chat, ...(taps.tidy.on === null ? {} : { tidy: taps.tidy.on }) } };
+    const knowledge = knowledgeOf(taps);
     // From now on, a run of the chat that ends tells the page to read it again.
     this.runEnds.follow(chat);
     return chatView({
@@ -350,6 +357,16 @@ export class PlayService {
       // out while a run of the chat goes on, for it may still act. A turn of the past shows none.
       notCarried: turn === null ? this.deps.requests.notCarried(user, chat, pathTurns(s, chat, turning)).flatMap((r) => pressOf(r) ?? []) : [],
     });
+  }
+
+  /**
+   * One organization's page at the chat's head as the player character may see it, for Orgs' page of it, its tabs and editors (the view
+   * carries only each page's summary): built from the state the view is built from and kept with it (`chatViewItem`); null where they
+   * know of no such organization, or the chat plays no world.
+   */
+  async orgPage(user: string, chat: string, org: string): Promise<OrgView | null> {
+    const { taps, map } = await this.deps.settings(user, chat);
+    return chatViewItem({ store: this.deps.store, user, chat, turn: null, offstage: taps.tell, map, knowledge: knowledgeOf(taps) }, ORGS_ORG_PANEL, org) as unknown as OrgView | null;
   }
 
   /** What `turn`'s time brought due, or the chat's newest turn's where none is named (`due.ts`); a chat RPE does not hold has no turn yet. */

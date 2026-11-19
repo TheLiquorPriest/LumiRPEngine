@@ -1,6 +1,7 @@
 // What each part of a chat's state view costs, worked out in this process from a copy of RPE's database, opened read-only: the head's
 // state, the Journal's notes, the quests' trails, each panel's builder, the HUD, the scene, the palette, the controls, the reply clocks,
-// the chips and the state at the head's start, each timed on its own, and the whole view twice more. Prints one line of JSON per part,
+// the chips and the state at the head's start, each timed on its own, the whole view twice more, and the organizations' pages as Orgs
+// reads them apart. Prints one line of JSON per part,
 // slowest first: milliseconds of the first ask (cold) and of the second (warm), and the size of what it made. Nothing is written.
 // Usage: bun scripts/perf/state-parts.ts <copy of rpe.db> <chat id> [build id the server folds under]
 
@@ -19,11 +20,13 @@ import { controls } from "../../src/play/state/controls";
 import { hud } from "../../src/play/state/hud";
 import { palette } from "../../src/play/state/palette";
 import { scene } from "../../src/play/state/scene";
-import { chatView, headTurn } from "../../src/play/view";
+import { chatView, chatViewItem, headTurn } from "../../src/play/view";
 import { questSliceOf, questViews } from "../../src/quests/record";
 import { trailsOf } from "../../src/quests/trail";
 import { MAP_DEFAULTS } from "../../src/shared/map-config";
 import type { JsonValue } from "../../src/shared/json";
+import { ORGS_ORG_PANEL, ORGS_SUMMARY_PANEL } from "../../src/shared/org-view";
+import type { StateView } from "../../src/shared/state-view";
 import { openStore, storedWorlds } from "../../src/store";
 import { STORE_AREAS } from "../../src/turn/store-areas";
 
@@ -78,7 +81,8 @@ for (let ask = 0; ask < 2; ask++) {
   readPass(() => {
     const ctx = registry.context(world, state);
     const panels: Record<string, JsonValue> = {};
-    for (const view of registry.views) {
+    // A panel read apart is no part of the view: its items are timed below, as Orgs reads them.
+    for (const view of registry.views.filter((v) => v.apart !== true)) {
       try {
         panels[view.panel] = timed(`panel ${view.panel}`, () => view.build(ctx, { mapDisplay: null, mapConfig: MAP_DEFAULTS }));
       } catch (error) {
@@ -96,6 +100,8 @@ for (let ask = 0; ask < 2; ask++) {
 }
 // The whole view as the state route makes it (its built parts kept while the state stands): a first ask of this state, then a second,
 // with the longest RPE's thread was held in one piece while it was made (a timer's longest wait between its ticks).
+const knowledge = { chat: {}, tracking: TAP_DEFAULTS.choices.tracking, narrator: TAP_DEFAULTS.choices.narrator };
+let view: StateView | null = null;
 for (let ask = 0; ask < 2; ask++) {
   const journal = await journalNotes(store, user, chat, TAP_DEFAULTS.journalMost, { texts, code: (c) => c, key: "probe" });
   let last = performance.now();
@@ -105,14 +111,34 @@ for (let ask = 0; ask < 2; ask++) {
     longest = Math.max(longest, now - last);
     last = now;
   }, 1);
-  await timedAsync("the whole state view", () =>
-    chatView({ store, user, chat, turn: null, turning: false, offstage: TAP_DEFAULTS.tell, map: MAP_DEFAULTS, knowledge: { chat: {}, tracking: TAP_DEFAULTS.choices.tracking, narrator: TAP_DEFAULTS.choices.narrator }, journal, chips: chipsOf(db, s, user, chat), meter: null, pending: [], clocksMost: TAP_DEFAULTS.clocksMost, staged: null, notCarried: [] }),
+  view = await timedAsync("the whole state view", () =>
+    chatView({ store, user, chat, turn: null, turning: false, offstage: TAP_DEFAULTS.tell, map: MAP_DEFAULTS, knowledge, journal, chips: chipsOf(db, s, user, chat), meter: null, pending: [], clocksMost: TAP_DEFAULTS.clocksMost, staged: null, notCarried: [] }),
   );
   clearInterval(tick);
   longest = Math.max(longest, performance.now() - last);
   timed("the whole state view: longest hold of the thread", () => null);
   const row = times.get("the whole state view: longest hold of the thread");
   if (row !== undefined) times.set("the whole state view: longest hold of the thread", ask === 0 ? { ...row, cold: Math.round(longest) } : { ...row, warm: Math.round(longest) });
+}
+// An organization's page as Orgs reads it when it opens, after the view of the same state (`chatViewItem`): every page's first read
+// (all of them, and the slowest alone, each one piece on the thread), then a second read of the slowest, which the view's key keeps.
+const pages = Object.keys((view?.panels[ORGS_SUMMARY_PANEL] ?? {}) as object);
+const at = { store, user, chat, turn: null, offstage: TAP_DEFAULTS.tell, map: MAP_DEFAULTS, knowledge };
+let slowest = { id: "", ms: -1, kb: 0 };
+let all = { ms: 0, kb: 0 };
+for (const id of pages) {
+  const began = performance.now();
+  const page = chatViewItem(at, ORGS_ORG_PANEL, id);
+  const ms = performance.now() - began;
+  const kb = JSON.stringify(page).length / 1024;
+  all = { ms: all.ms + ms, kb: all.kb + kb };
+  if (ms > slowest.ms) slowest = { id, ms, kb };
+}
+if (slowest.id !== "") {
+  const began = performance.now();
+  chatViewItem(at, ORGS_ORG_PANEL, slowest.id);
+  times.set(`one organization's page, the slowest of ${pages.length}`, { cold: Math.round(slowest.ms), warm: Math.round(performance.now() - began), kb: Math.round(slowest.kb) });
+  times.set(`every organization's page, one read each (${pages.length})`, { cold: Math.round(all.ms), warm: null, kb: Math.round(all.kb) });
 }
 const rows = [...times].map(([part, t]) => ({ part, ...t })).sort((a, b) => (b.warm ?? b.cold) - (a.warm ?? a.cold));
 for (const row of rows) console.log(JSON.stringify(row));

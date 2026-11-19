@@ -1189,7 +1189,7 @@ Its own: `orgs.answer`, `orgs.ask`, `orgs.config`, `orgs.entry`, `orgs.goal`, `o
 
 ### Panels and slots
 
-Panels: `orgs.list`, `orgs.org`. Slots it writes: `people`, `quest`.
+Panels: `orgs.list`, `orgs.org`, `orgs.summary`. Slots it writes: `people`, `quest`.
 
 ### Simulation
 

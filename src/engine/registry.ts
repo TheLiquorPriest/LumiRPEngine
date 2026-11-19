@@ -379,10 +379,16 @@ export interface PanelViewDef {
   panel: PanelId;
   build(ctx: ReadContext, prefs: ViewPrefs): JsonValue;
   /**
-   * A panel that is a record of many items alike (the organisations' pages, by id), built one item at a time where the builder lets
-   * the thread go between them: the items' ids, and one item's value (null: left out), so that the record they make is what `build` makes.
+   * A panel that is a record of many items alike (the organisations' summaries or pages, by id), built one item at a time where the
+   * builder lets the thread go between them: the items' ids, and one item's value (null: left out), so that the record they make is what
+   * `build` makes.
    */
   items?: { ids(ctx: ReadContext): readonly string[]; build(ctx: ReadContext, prefs: ViewPrefs, id: string): JsonValue | null };
+  /**
+   * No part of the state view: a page reads one of its items (`items.build`) when it opens it, and the view carries what the page
+   * draws without it in a panel of its own (the organisations' pages, and their summaries). `build` is every item, as it stands.
+   */
+  apart?: true;
 }
 
 /**

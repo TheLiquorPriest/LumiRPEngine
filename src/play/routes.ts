@@ -1,13 +1,17 @@
 // The routes of a chat's play panels (plan §14): the chat's state view, at its head or at one of its
-// turns, in the shape today's pages take; what a turn's time brought due; a tap that manages and its
+// turns, in the shape today's pages take; one organization's page, which the view carries only a summary
+// of, read when Orgs opens it; what a turn's time brought due; a tap that manages and its
 // Undo; the HUD's time controls; a panel's tap held for his next message, and a tap that plays now.
 // Every route is a page's: it answers only for the user this RPE belongs to.
 
+import { isRecord } from "../shared/json";
+import type { OrgView } from "../shared/org-view";
 import { route, shape, stateView } from "../app";
 import { requestShown } from "../turn/shapes";
 import type { PlayService } from "./service";
 
 export const STATE_PATH = "/api/v1/chats/:chat/state";
+export const ORG_PAGE_PATH = "/api/v1/chats/:chat/state/orgs/:org";
 export const DUE_PATH = "/api/v1/chats/:chat/state/due";
 export const TAPS_PATH = "/api/v1/chats/:chat/taps";
 export const EDIT_UNDO_PATH = "/api/v1/chats/:chat/edits/:edit/undo";
@@ -102,6 +106,8 @@ const dueReply = shape.named(
   }),
 );
 
+const orgPage = shape.carried<OrgView>("OrgView", "../org-view", "One organization's page as Orgs draws it: the reader's place there, who runs it, its people, positions and delegations, the organizations holding it and held by it, and the packs' sections the reader may see.", "an organization's page", (value): value is OrgView => isRecord(value));
+
 export function playRoutes(play: PlayService) {
   return [
     route({
@@ -114,6 +120,15 @@ export function playRoutes(play: PlayService) {
       reply: stateView,
       joined: true,
       handle: ({ user, params, query }) => play.state(user, params.chat, query.turn ?? null),
+    }),
+    route({
+      method: "GET",
+      path: ORG_PAGE_PATH,
+      access: "page",
+      group: "state",
+      does: "One organization's page at the chat's head as the player's character may see it, read when Orgs opens it (the state view carries only a summary of each page): built from the state the view is, and kept with it while that state stands. The page is null where the character knows of no such organization.",
+      reply: shape.object({ page: shape.nullable(orgPage) }),
+      handle: async ({ user, params }) => ({ page: await play.orgPage(user, params.chat, params.org) }),
     }),
     route({
       method: "POST",

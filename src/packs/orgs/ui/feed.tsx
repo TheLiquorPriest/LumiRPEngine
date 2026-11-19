@@ -11,11 +11,10 @@ import { formatCents } from "../../../frontend/format";
 import type { IconName } from "../../../ui/icons";
 import { GLANCE_ROWS, GlanceCard } from "../../../frontend/play/glance";
 import type { PanelProps } from "../../../frontend/registry";
-import { isRecord } from "../../../shared/json";
-import { ALERTS_SECTION, isPlanStatusLive, PLAN_SECTION, PLAN_TAB, type AlertTab, type ComingKind, type OrgAlertView, type OrgComingView } from "../../../shared/org-feed";
+import { isPlanStatusLive, PLAN_TAB, type AlertTab, type ComingKind, type OrgAlertView, type OrgComingView } from "../../../shared/org-feed";
 import { DECISIONS_TAB } from "../../../shared/org-motions";
-import { ORGS_LIST_PANEL, ORGS_ORG_PANEL, type OrgView } from "../../../shared/org-view";
-import { decodeAlerts, decodeOrgList, decodeOrgPage, decodePlan } from "./decode";
+import { ORGS_LIST_PANEL, ORGS_SUMMARY_PANEL, type OrgSummary } from "../../../shared/org-view";
+import { decodeOrgList, decodeOrgSummaries, decodeOrgSummaryOf } from "./decode";
 import { andList, count } from "./words";
 
 /** The tab an alert's Open goes to: the shell's own, the economy's Money, the Plan, or Decisions. */
@@ -85,16 +84,11 @@ export interface NeedsYou {
   alert: OrgAlertView;
 }
 
-/** Every alert that needs the reader, page by page (by name), from the pages the home opens (`orgs.org`). */
-export function needsYouOf(pages: unknown): NeedsYou[] {
-  if (!isRecord(pages)) return [];
-  const out: NeedsYou[] = [];
-  for (const [org, page] of Object.entries(pages)) {
-    if (!isRecord(page) || !isRecord(page.sections)) continue;
-    const name = typeof page.name === "string" ? page.name : org;
-    for (const alert of decodeAlerts(page.sections[ALERTS_SECTION])) if (alert.needsYou) out.push({ org, name, alert });
-  }
-  return out.sort((a, b) => a.name.localeCompare(b.name) || a.org.localeCompare(b.org));
+/** Every alert that needs the reader, organization by organization (by name), from what the state view carries of each page (`orgs.summary`). */
+export function needsYouOf(summaries: unknown): NeedsYou[] {
+  return decodeOrgSummaries(summaries)
+    .flatMap((s) => s.needs.map((alert) => ({ org: s.id, name: s.name, alert })))
+    .sort((a, b) => a.name.localeCompare(b.name) || a.org.localeCompare(b.org));
 }
 
 /**
@@ -102,13 +96,13 @@ export function needsYouOf(pages: unknown): NeedsYou[] {
  * it, or how many goals it has while it gives no orders, and who is away on one ("Plan: 1 of 3 done ·
  * Danny away"); null while it has nothing on it.
  */
-export function planGlanceLine(page: OrgView): string | null {
-  const plan = decodePlan(page.sections[PLAN_SECTION]);
+export function planGlanceLine(party: OrgSummary): string | null {
+  const { plan } = party;
   if (!plan || (plan.goals.length === 0 && plan.orders.length === 0)) return null;
   const orders = [...plan.goals.flatMap((g) => g.orders), ...plan.orders];
   const done = orders.filter((o) => o.status === "done").length;
   const onOrders = new Set(orders.filter((o) => isPlanStatusLive(o.status)).flatMap((o) => o.to.map((t) => t.id)));
-  const away = page.people.filter((p) => !p.you && !p.here && onOrders.has(p.id)).map((p) => p.name.split(/\s+/)[0] || p.name);
+  const away = party.people.filter((p) => !p.you && !p.here && onOrders.has(p.id)).map((p) => p.name.split(/\s+/)[0] || p.name);
   const head = orders.length > 0 ? `Plan: ${done} of ${orders.length} done` : `Plan: ${count(plan.goals.length, "goal", "goals")}`;
   return away.length > 0 ? `${head} · ${andList(away.length > 2 ? [...away.slice(0, 2), count(away.length - 2, "other", "others")] : away)} away` : head;
 }
@@ -130,10 +124,10 @@ export function OrgsGlanceCard(props: { needs: readonly NeedsYou[]; plan: { org:
 /** The `orgs.alerts` glance on Now (over the Orgs home's panel); nothing while no alert needs the player character and the party's plan is empty. */
 export function OrgsGlance(props: PanelProps) {
   const app = useApp();
-  const pages = props.state.panels[ORGS_ORG_PANEL];
-  const needs = needsYouOf(pages);
+  const summaries = props.state.panels[ORGS_SUMMARY_PANEL];
+  const needs = needsYouOf(summaries);
   const party = decodeOrgList(props.view)?.party.id;
-  const page = party === undefined ? null : decodeOrgPage(pages, party);
+  const page = party === undefined ? null : decodeOrgSummaryOf(summaries, party);
   const line = page ? planGlanceLine(page) : null;
   if (needs.length === 0 && line === null) return null;
   return <OrgsGlanceCard needs={needs} plan={line !== null && page ? { org: page.id, line } : null} onOpen={(org, tab) => app.ui.update((ui) => openAt(ui, "orgs", orgRoute(org, tab === "overview" ? undefined : tab)))} />;

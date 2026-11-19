@@ -27,7 +27,7 @@ import type { OrgTabDef, OrgTabProps } from "../../src/frontend/registry";
 import { buildCatalog } from "../../src/frontend/ui-registry";
 import { orgLog } from "../../src/packs/orgs/core/log";
 import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
-import { decodeAlerts, decodeComing, decodeOrgList, decodeOrgPage, decodePlan } from "../../src/packs/orgs/ui/decode";
+import { decodeAlerts, decodeComing, decodeOrgList, decodeOrgPage, decodeOrgSummaryOf, decodePlan } from "../../src/packs/orgs/ui/decode";
 import { ALERT_TAB_IDS, ComingUp, comingValue, needsYouOf, OrgAlerts, OrgsGlanceCard, planGlanceLine } from "../../src/packs/orgs/ui/feed";
 import { homeTree, OrgsHome } from "../../src/packs/orgs/ui/home";
 import type { ChartNode } from "../../src/packs/orgs/ui/chart-model";
@@ -38,7 +38,7 @@ import { PartyOverview, PartyRoster } from "../../src/packs/orgs/ui/party";
 import { goalControls, goalDraft, orderControls, orderDraft, PlanBoard, PlanControls, PlanGoalForm, PlanOrderForm, PlanOrderItem, planChange, planOps, planProblem, statusChange, teamLine, type PlanBoardProps, type PlanDraft } from "../../src/packs/orgs/ui/plan";
 import type { JsonObject, JsonValue } from "../../src/shared/json";
 import { ALERTS_SECTION, PLAN_SECTION, PLAN_TAB, type OrgPlanView, type PlanStatus } from "../../src/shared/org-feed";
-import type { OrgView } from "../../src/shared/org-view";
+import { ORGS_SUMMARY_PANEL, type OrgView } from "../../src/shared/org-view";
 import type { StateView } from "../../src/shared/state-view";
 import { DEFAULT_CURRENCY, type WorldDoc } from "../../src/shared/world";
 import { startState } from "../packs/support";
@@ -194,8 +194,7 @@ describe("alerts under the Overview's headline (ORG-SPEC §3.14, §4.4)", () => 
     expect([banner?.title, textOf(banner?.children)]).toEqual(["Needs you", alert?.text]);
     expect(banner?.actions).toBeUndefined();
     // The home: Needs you on the Thornes' row, and on no other.
-    const pages = panel(w, "orgs.org");
-    const needs = needsYouOf(pages);
+    const needs = needsYouOf(panel(w, ORGS_SUMMARY_PANEL));
     expect(needs.map((n) => [n.org, n.name, n.alert.short])).toEqual([[THORNES, "The Thornes", "your delegation ends soon"]]);
     const list = decodeOrgList(panel(w, "orgs.list"));
     if (!list) throw new Error("the home didn't read");
@@ -401,7 +400,9 @@ describe("the Plan tab (assess-party §6.2, for any organization)", () => {
       ["Maddie Kowalczyk", expect.stringContaining("On: Paint the new signs"), expect.any(String)],
       ["Danny Okafor", expect.stringContaining("On: Sweep the bays and stack the tyres"), expect.any(String)],
     ]);
-    const line = planGlanceLine(party);
+    const summary = decodeOrgSummaryOf(panel(w, ORGS_SUMMARY_PANEL), PARTY);
+    if (!summary) throw new Error("no summary of the party");
+    const line = planGlanceLine(summary);
     const away = party.people.filter((p) => !p.you && !p.here).map((p) => p.name.split(" ")[0]);
     expect(line).toBe(away.length > 0 ? `Plan: 0 of 2 done · ${away.join(" and ")} away` : "Plan: 0 of 2 done");
     const opened: [string, string][] = [];
@@ -409,7 +410,7 @@ describe("the Plan tab (assess-party §6.2, for any organization)", () => {
     expect(rows(glance).map((r) => r[0])).toEqual([line]);
     (find(glance, ListRow)[0]?.onClick as () => void)();
     expect(opened).toEqual([[PARTY, PLAN_TAB]]);
-    expect(planGlanceLine({ ...party, sections: {} })).toBeNull();
+    expect(planGlanceLine({ ...summary, plan: null })).toBeNull();
   });
 
   test("GM → Orgs' Plan: each change is one edit of the effect it plays, as the GM's", () => {

@@ -4,6 +4,7 @@
 // the MCP server. Do not edit it: a route's declaration is where a type changes, and `bun run api`
 // writes this again. The reference for people is docs/api.md, written beside it.
 
+import type { OrgView } from "../org-view";
 import type { StateView } from "../state-view";
 
 /** Any JSON value. */
@@ -5394,6 +5395,16 @@ export interface ApiRoutes {
     query: Record<string, never>;
     body: undefined;
     reply: NotAppliedReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** One organization's page at the chat's head as the player's character may see it, read when Orgs opens it (the state view carries only a summary of each page): built from the state the view is, and kept with it while that state stands. The page is null where the character knows of no such organization. */
+  "GET /api/v1/chats/:chat/state/orgs/:org": {
+    params: { chat: string; org: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: { page: OrgView | null };
     paged: false;
     long: false;
     joined: false;

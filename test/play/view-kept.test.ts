@@ -1,6 +1,6 @@
 // What a chat's state view builds from a state: built in stretches as one read pass, a panel of many pages a page at a time, it comes
-// to what one pass builds whole; it is kept under the store's key for the state, so a second ask builds nothing, the store letting the
-// state go to fold others loses it not, and a turn makes another.
+// to what one pass builds whole, and an organization's page, read apart, to what that pass builds of it; it is kept under the store's
+// key for the state, so a second ask builds nothing, the store letting the state go to fold others loses it not, and a turn makes another.
 
 import { describe, expect, test } from "bun:test";
 import { playedWorld } from "../../src/engine/places-in-play";
@@ -26,11 +26,15 @@ describe("a chat's state view", () => {
       const ctx = registry.context(world, state);
       return Object.fromEntries(registry.views.map((v): [string, JsonValue] => [v.panel, v.build(ctx, { mapDisplay: null, mapConfig: MAP_DEFAULTS })]));
     });
-    // The organisations' pages are built a page at a time: more than one here.
-    expect(Object.keys(view.panels["orgs.org"] as object).length).toBeGreaterThan(1);
+    // The organisations' summaries are built a page at a time: more than one here. Their pages are no part of the view.
+    expect(Object.keys(view.panels["orgs.summary"] as object).length).toBeGreaterThan(1);
+    expect(view.panels["orgs.org"]).toBeUndefined();
+    // Each page is read apart, as one pass builds it.
+    const pages = whole["orgs.org"] as Record<string, JsonValue>;
+    for (const id of Object.keys(pages)) expect(JSON.parse(JSON.stringify(await bed.service.orgPage(USER, CHAT, id)))).toEqual(JSON.parse(JSON.stringify(pages[id])));
     // The quest log takes the quests' trails after it is built; every other panel is as its pack builds it.
     const built = Object.fromEntries(Object.entries(view.panels).filter(([panel]) => panel !== "story.quests"));
-    const asWhole = Object.fromEntries(Object.entries(whole).filter(([panel]) => panel !== "story.quests"));
+    const asWhole = Object.fromEntries(Object.entries(whole).filter(([panel]) => panel !== "story.quests" && panel !== "orgs.org"));
     expect(JSON.parse(JSON.stringify(built))).toEqual(JSON.parse(JSON.stringify(asWhole)));
   });
 
@@ -41,6 +45,9 @@ describe("a chat's state view", () => {
     for (let i = 0; i < 12; i++) turns.push(await bed.turn());
     const first = await bed.state();
     expect((await bed.state()).panels).toBe(first.panels);
+    const org = Object.keys(first.panels["orgs.summary"] as object)[0] ?? "";
+    const page = await bed.service.orgPage(USER, CHAT, org);
+    expect(page).not.toBeNull();
     // Reading every turn's state and start folds more states than the store holds for a chat: the head's is let go.
     const s = bed.store.user(USER);
     const head = s.headState(CHAT);
@@ -50,9 +57,11 @@ describe("a chat's state view", () => {
     }
     expect(s.headState(CHAT)).not.toBe(head);
     expect((await bed.state()).panels).toBe(first.panels);
+    expect(await bed.service.orgPage(USER, CHAT, org)).toBe(page);
     await bed.turn();
     const next = await bed.state();
     expect(next.panels).not.toBe(first.panels);
+    expect(await bed.service.orgPage(USER, CHAT, org)).not.toBe(page);
     expect(next.hud?.clock.minutes).toBe(s.headState(CHAT).state.world.clock);
   });
 

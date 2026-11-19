@@ -6,8 +6,9 @@ import { calls as gmCalls } from "./gm";
 import { calls as jobsCalls } from "./jobs";
 import { calls as loreCalls } from "./lore";
 import { calls as mapCalls } from "./map";
+import { calls as orgsCalls } from "./orgs";
 import { calls as playCalls } from "./play";
 import { calls as thingsCalls } from "./things";
 import { calls as worldsCalls } from "./worlds";
 
-export const CALLS: readonly CallFile[] = [gmCalls, jobsCalls, loreCalls, mapCalls, playCalls, thingsCalls, worldsCalls];
+export const CALLS: readonly CallFile[] = [gmCalls, jobsCalls, loreCalls, mapCalls, orgsCalls, playCalls, thingsCalls, worldsCalls];

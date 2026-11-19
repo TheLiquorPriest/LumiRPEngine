@@ -756,6 +756,20 @@ What no longer applies at the chat's head on the swipes now showing: each change
 | Reply | [`NotAppliedReply`](#notappliedreply) |
 | The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
+### `GET /api/v1/chats/:chat/state/orgs/:org`
+
+One organization's page at the chat's head as the player's character may see it, read when Orgs opens it (the state view carries only a summary of each page): built from the state the view is, and kept with it while that state stands. The page is null where the character knows of no such organization.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat`, `org` |
+| Query | none |
+| Body | none |
+| Reply | `{ page: OrgView | null }` |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
+
 ### `GET /api/v1/chats/:chat/state/systems`
 
 A level's typed systems, at the chat's head or as it stood at a turn: each game system that keeps something there as that system keeps it (accounts with their postings and balance, a thing's four facts, a group's positions and ranks, the day, the sky, a vehicle's driver, a sheet), named as the source; what the player could not see is marked secret.
@@ -10608,6 +10622,12 @@ export interface WorldRevisionRow {
   chats: { chat: string; name: string }[];
 }
 ```
+
+### `OrgView`
+
+One organization's page as Orgs draws it: the reader's place there, who runs it, its people, positions and delegations, the organizations holding it and held by it, and the packs' sections the reader may see.
+
+Carried as the previous build wrote it: the type `OrgView` of `src/shared/org-view.ts`.
 
 ### `StateView`
 
