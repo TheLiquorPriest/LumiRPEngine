@@ -17887,15 +17887,9 @@ function vehicleTrips(ctx, ask, targets) {
   const startMinutes = Math.round(tuning.startMinutes);
   const parkMinutes = Math.round(tuning.parkMinutes);
   const searches = new Map;
-  const places = Object.keys(ctx.world.places).sort();
-  const parks = new Map;
-  const parksAt = (p) => {
-    let ok = parks.get(p);
-    if (ok === undefined)
-      parks.set(p, ok = ask.canPark(p));
-    return ok;
-  };
-  const walks = new Map;
+  const places = passMemo([ctx.world], "space.place_ids", () => Object.keys(ctx.world.places).sort());
+  const parksAt = ask.canPark;
+  const walks = passMemo([ctx.state, ctx.state.entities, ctx.world], "space.walk_weather", () => new Map);
   const walkAt = (p) => {
     let factor = walks.get(p);
     if (factor === undefined)
@@ -26742,52 +26736,58 @@ function mayPayFrom(ctx, who, from) {
   return from === who || isParty(ctx, from) && managesParty(ctx.state, from, who) || managesAccount(ctx, from, who);
 }
 function worthHolders(ctx, id) {
-  return holdersOf3(ctx.state, id).filter((h) => rightsOf(ctx.state, id, h)?.worth === true);
+  return passMemo([ctx.state, ctx.state.entities], `economy.worth_holders\x00${id}`, () => holdersOf3(ctx.state, id).filter((h) => rightsOf(ctx.state, id, h)?.worth === true));
 }
 var WORTH_DEPTH = 4;
 function interestsOf(ctx, who) {
-  const household = householdOf2(ctx, who);
-  const kin = household === null ? [who] : [who, household, ...membersOf(ctx.registry, ctx.world, ctx.state, household)];
-  const out = new Set(kin);
-  const parties = Object.keys(ctx.state.entities).filter((id) => !out.has(id) && isParty(ctx, id));
-  let reached2 = out;
-  for (let depth2 = 0;depth2 < WORTH_DEPTH && reached2.size > 0; depth2++) {
-    const next = new Set(parties.filter((id) => !out.has(id) && worthHolders(ctx, id).some((h) => reached2.has(h))));
-    for (const id of next)
-      out.add(id);
-    reached2 = next;
-  }
-  return out;
+  return passMemo([ctx.state, ctx.state.entities, ctx.world], `economy.interests\x00${who}`, () => {
+    const household = householdOf2(ctx, who);
+    const kin = household === null ? [who] : [who, household, ...membersOf(ctx.registry, ctx.world, ctx.state, household)];
+    const out = new Set(kin);
+    const parties = Object.keys(ctx.state.entities).filter((id) => !out.has(id) && isParty(ctx, id));
+    let reached2 = out;
+    for (let depth2 = 0;depth2 < WORTH_DEPTH && reached2.size > 0; depth2++) {
+      const next = new Set(parties.filter((id) => !out.has(id) && worthHolders(ctx, id).some((h) => reached2.has(h))));
+      for (const id of next)
+        out.add(id);
+      reached2 = next;
+    }
+    return out;
+  });
 }
 function whoseMoney(ctx, side) {
-  const all = new Set;
-  const last = new Set;
-  let next = isParty(ctx, side) ? [side] : worthHolders(ctx, side);
-  for (let depth2 = 0;depth2 < WORTH_DEPTH && next.length > 0; depth2++) {
-    const deeper = [];
-    for (const p of next.filter((q) => !all.has(q))) {
-      all.add(p);
-      const holders = worthHolders(ctx, p);
-      if (holders.length === 0 || depth2 === WORTH_DEPTH - 1)
-        last.add(p);
-      else
-        deeper.push(...holders);
+  return passMemo([ctx.state, ctx.state.entities, ctx.world], `economy.whose_money\x00${side}`, () => {
+    const all = new Set;
+    const last = new Set;
+    let next = isParty(ctx, side) ? [side] : worthHolders(ctx, side);
+    for (let depth2 = 0;depth2 < WORTH_DEPTH && next.length > 0; depth2++) {
+      const deeper = [];
+      for (const p of next.filter((q) => !all.has(q))) {
+        all.add(p);
+        const holders = worthHolders(ctx, p);
+        if (holders.length === 0 || depth2 === WORTH_DEPTH - 1)
+          last.add(p);
+        else
+          deeper.push(...holders);
+      }
+      next = deeper;
     }
-    next = deeper;
-  }
-  return { all, last };
+    return { all, last };
+  });
 }
 function personal(ctx, id) {
   const kind = own(ctx.state.entities, id)?.kind ?? "";
   return kind !== "" && (kindIs(ctx.registry, ctx.world, kind, "person") || kindIs(ctx.registry, ctx.world, kind, "household"));
 }
 function moneyOf(ctx, who, from) {
-  const { all, last } = whoseMoney(ctx, from);
-  return {
-    forHolder: new Set([...all].filter((p) => p !== who)),
-    people: new Set([...last].filter((p) => p !== who)),
-    wholly: last.size > 0 && [...last].every((p) => p === who)
-  };
+  return passMemo([ctx.state, ctx.state.entities, ctx.world], `economy.money_of\x00${who}\x00${from}`, () => {
+    const { all, last } = whoseMoney(ctx, from);
+    return {
+      forHolder: new Set([...all].filter((p) => p !== who)),
+      people: new Set([...last].filter((p) => p !== who)),
+      wholly: last.size > 0 && [...last].every((p) => p === who)
+    };
+  });
 }
 function inReach(ctx, who, account, people) {
   if (!canSpend(ctx.state, account, who))
@@ -31338,7 +31338,7 @@ function registerEmployment(r) {
   core.effect({ type: "economy.job_position", args: ["job", "position?", "by?"], resolve: (args, ctx) => setPosition(args, ctx) });
   core.effect({ type: "economy.job_title", args: ["job", "title?", "by?"], resolve: (args, ctx) => setTitle(args, ctx) });
   core.effect({ type: "economy.pay_schedule", args: ["org", "every", "weekday?", "anchor?", "days?", "by?"], resolve: (args, ctx) => paySchedule(args, ctx) });
-  core.formula("employs", (ctx, employer, who) => allJobs(ctx).some((j) => j.party === String(employer ?? "") && j.worker === String(who ?? "") && j.status !== "ended"));
+  core.formula("employs", (ctx, employer, who) => passMemo([ctx.state, ctx.state.entities, ctx.world], "economy.employs", () => new Set(allJobs(ctx).flatMap((j) => j.party !== null && j.status !== "ended" ? [`${j.party}\x00${j.worker}`] : []))).has(`${String(employer ?? "")}\x00${String(who ?? "")}`));
   const talks = { observable: "talks business" };
   const decides = (power) => `job.employer == self or may(self, job.employer, '${power}')`;
   core.action({ id: "job_hire", pack: "economy", params: { business: { type: "ref", of: { kind: [...PARTY_KINDS] } }, worker: { type: "ref", ref: "person" }, title: { type: "text", optional: true }, basis: { type: "text", optional: true }, rate: { type: "money", optional: true }, hours_per_week: { type: "number", optional: true }, pay_every: { type: "text", optional: true }, position: { type: "text", optional: true } }, requires: ["business == self or may(self, business, 'staff.hire')", "not employs(business, worker)", "level.money >= 3"], outcomes: { default: [{ type: "economy.hire", args: { business: "business", worker: "worker", title: "=params.title", basis: "=params.basis", rate: "=params.rate", hours_per_week: "=params.hours_per_week", pay_every: "=params.pay_every", position: "=params.position", by: "self" } }] }, duration: "15", lexicon: ["hire", "take on", "give a job to"], ...talks });
@@ -43733,7 +43733,14 @@ function tripsFor(ctx, vehicle, from, targets) {
   const cls = strOf(own(ctx.state.entities, vehicle)?.fields.class);
   const speed = cls === "" ? undefined : own(travelTuningOf(ctx.world).vehicleSpeeds, cls);
   const pov = ctx.world.pov;
-  return plan2(ctx, { from, at, modes: modesOf(ctx, vehicle), ...speed !== undefined ? { speed } : {}, canPark: (p) => canSeePlace(ctx.registry, ctx.world, ctx.state, pov, p) }, targets);
+  const parks = passMemo([ctx.state, ctx.state.entities, ctx.world], "vehicles.parks", () => new Map);
+  const canPark = (p) => {
+    let ok = parks.get(p);
+    if (ok === undefined)
+      parks.set(p, ok = canSeePlace(ctx.registry, ctx.world, ctx.state, pov, p));
+    return ok;
+  };
+  return plan2(ctx, { from, at, modes: modesOf(ctx, vehicle), ...speed !== undefined ? { speed } : {}, canPark }, targets);
 }
 function tripFor(ctx, vehicle, from, to) {
   return passMemo([ctx.state, ctx.state.entities, ctx.world], `vehicles.trip\x00${vehicle}\x00${from}\x00${to}`, () => tripsFor(ctx, vehicle, from, [to]).get(to) ?? null);
@@ -99517,7 +99524,7 @@ I then re-measured with the engine's own \`extract\` step as shipped (strict rul
 | **Drawer tab "LumiRPEngine"** | Designed for ≥320 px.<br>- **Play:** six destinations along the bottom, Now · Me · People · Orgs · Places · Story, each 57 px for its icon and label at 390 px, a destination left out while it has nothing to show (Now, Orgs and Story always show). Now holds the Encounter (while a fight is under way), the Scene, Needs you, Here and the glances; Me holds You, Needs, Money (below), Garage and Gear (Owned/Worn/Carried/Stored); People is Cast (timelines, agendas, regard, the organizations each belongs to); Orgs is the organizations (below); Places the map; Story holds Quests, What you know, the Journal (with Montages) and the Calendar (clock, pause, Timelapse, this chat's time controls). GM mode holds the GM view (everything, secrets included, and the GM editor) and the Context inspector.<br>- **Build:** the schema-driven editors, a Tiers editor (add, rename, reorder, band, agent default, description, the tier new people join), and the Ruleset part's **How checks are decided** card (a preset told in plain lines; Custom with every value labelled and helped; beside it the world's default for **inferred checks**, switched on or off, off leaving new chats to the user's setting, its skills the draft's sheet's as edited, from \`lre.world sheet\`); the world home's entity lists People, Organizations (§29.11), Things and Money.<br>- **Settings:** model-use preset and budgets; "Use my settings instead of a world's defaults for new chats"; **realism** (per-domain sliders on the host range slider, band caps under the band labels, presets, migration preview, and **Player claims**: the three modes and the cap switch, one control shared with GM → This chat → Realism, which applies it as a \`claims\` marker, and Build's Realism defaults, §9.1); **checks** (new chats: the user's own policy and "Use my check rules instead of a world's for new chats", and inferred checks By the chat's realism, \`inferred: null\`, or the user's own; this chat: the policy in force, applied as an \`adjudicate\` marker, and the inferred-checks policy in force, previewed, then applied as an \`infer\` marker); **time** (ticks per scene type, time scale, interrupt policy, Speed through per activity, Montage granularity, unit cap); steps, connections, pins; swipe default; caveats.<br>- **Inferred checks** (§11) is one control in its three places (\`frontend/inferred-form.tsx\`): the mode, which attempts, who rolls, every skill or a pick from the world's sheet's skills (\`ControlsView.skills\`; Settings lists the open world chat's, and a picked skill the sheet lacks stays listed to be taken off), the easiest and hardest difficulty band (one moved past the other takes it along), what the narrator is told, others' numbers, the pass and fail guidance lines with their placeholders explained and Reset, and the most rolls a turn. Under Off the rest is greyed out and keeps its values. |
 | **Money** | One party's money (\`FinanceView\`, §25.11) as segments under a row of tabs, Summary · Accounts · In & out · Books · Assets · Credit, each where the party has something there (\`moneySegments\`: Accounts where it has the accounts part, In & out its flows, jobs, household or a business's invoices, Books a business's own books, Assets its investments, property or stakes, Credit its credit), with no row when Summary is alone; a dot on a segment comes from its parts. One set of components (\`MoneyHub\`, hook-free; the frame keeps the segment, Activity's filter and the panel id) serves Play → Me → Money (the POV's own, \`player\` controls), an organization's Money tab (the organization's own, \`read\` controls, beside the POV's own \`Reader\`), GM → Money (a person's) and GM → Orgs (an organization's), the last two with \`gm\` controls. **Summary:** the hero (net worth with the band; a household's own money, its shared costs a month; else the band or cash), cash, assets and owed, the first three alerts and All alerts, Coming up within seven days of the HUD clock, Trades at for a business, cash flow over the last 30 days with the next 30 in the full books, and for the GM the notes and Their organizations. **Accounts:** Move money (Transfer, Pay a card or loan, Cash out, Cash in, each picking the account first), the accounts by group, cards on others' accounts, Activity (every line the view carries, newest first, by account and category, with pending lines and holds where holds run, \`activityOf\`) and How you pay. **In & out:** a household's shared costs; Income (each job, "Mechanic at Alder Automotive", its next payday and last net, opening the job: pay, payslip, deductions, where pay goes, Quit); standing payments by status, except those a job, an invoice, autopay or a business makes; invoices to pay; a business's issued invoices; the Household row, which opens the household in Orgs (GM: GM → Orgs, or Not in a household); Autopay. **Books:** a business's profit this year, its months and its sales. **Assets:** what it's made of (the full books), investments, property owned and for sale, stakes in organizations (opening the company's Ownership in Orgs, \`orgRoute(org, "economy.ownership")\`; in GM, a stake page), and the vehicles' worth (the net worth lines marked \`vehicle\`), opening the Garage. **Credit:** as before. A route names its party, \`money:<party>\\|<type>:<path>\` (\`routes.ts\`), and depth is segment → detail → action, so a card's page is one action page (its details, then the change to pick) and nothing lies more than three levels from its segment. Requests are unchanged (\`lre.action\`, \`lre.edit\`, \`lre.view.open\`). |
 | **Orgs** | §29.11: the home (\`orgs.list\`), an organization's page (sheet \`org\`) with Overview, People and Rules and the packs' tabs (\`r.orgTab\`: Money 40, Property 50, Ownership 60, Taxes 70, Payroll within People), the editors over it (sheet \`org_edit\`), and GM → Orgs. |
-| **Map** | One scope at a time: a place's own map, drawing only the places directly inside it, at their cells on its grid (the grid drawn behind them from Space 2; from Space 3 the POV's dot on the cell it stands on, on whichever drawn grid holds it, its own place's or a parent's; places without a cell in a row below), else at their node-map positions, else on a ring. It opens on the place around the POV: the POV's own place when places lie inside it, else the nearest place around it with a grid or a map, else its parent, else the world (the top-level places). Breadcrumbs lead out, and a place with places inside it or a grid opens from its card. A scope draws the places the POV can see and those it is inside (\`known\` marks which it knows; one it is inside but can't see is "Somewhere", under a stand-in id, §7); travel options reach every place the POV can see, whatever scope is open. Fullscreen float widget (\`setFullscreen\`, feature-detected), falling back to the drawer. Pointer Events; pan, zoom, tap-to-move or drive. On narrow viewports the drawer stacks above float widgets, even fullscreen, so opening the map closes the drawer. Phone and desktop save its size and position under separate keys, so a size saved on a phone never shrinks the desktop map (480 × 520 at most). Place names never overlap: each sits outward beside its dot, or a little further out on a leader line, on two lines, or shortened with an ellipsis (the full name shows in the place's card on tap); as a last resort a name is left off and its dot stays tappable. The names of side places stay on their own half, the map's buttons, title bar and breadcrumbs stay clear, and a tap on a name selects its place (a 40 px tap area). |
+| **Map** | One scope at a time: a place's own map, drawing only the places directly inside it, at their cells on its grid (the grid drawn behind them from Space 2; from Space 3 the POV's dot on the cell it stands on, on whichever drawn grid holds it, its own place's or a parent's; places without a cell in a row below), else at their node-map positions, else on a ring. It opens on the place around the POV: the POV's own place when places lie inside it, else the nearest place around it with a grid or a map, else its parent, else the world (the top-level places). Breadcrumbs lead out, and a place with places inside it or a grid opens from its card. A scope draws the places the POV can see and those it is inside (\`known\` marks which it knows; one it is inside but can't see is "Somewhere", under a stand-in id, §7); travel options reach every place the POV can see, whatever scope is open. Fullscreen float widget (\`setFullscreen\`, feature-detected), falling back to the drawer; the panel's **Full screen** opens it filling the window at any width. Pointer Events; pan, zoom, tap-to-move or drive. The drawer stacks above float widgets, even fullscreen, on narrow viewports over all of them and on wide ones over the map's place at the right edge, so opening the map closes the drawer at any width (on a wide viewport a drawer that would not close leaves the map shown beside it). Phone and desktop save its size and position under separate keys, so a size saved on a phone never shrinks the desktop map (480 × 520 at most). Place names never overlap: each sits outward beside its dot, or a little further out on a leader line, on two lines, or shortened with an ellipsis (the full name shows in the place's card on tap); as a last resort a name is left off and its dot stays tappable. The names of side places stay on their own half, the map's buttons, title bar and breadcrumbs stay clear, and a tap on a name selects its place (a 40 px tap area). |
 | **Map display and the grid** | **Known** and **Fog** at the map's bottom left switch the display for this chat (\`lre.map\`; the world's \`mapSettings.display\` until the player picks), and the map is built for the one in force. By knowledge, a place known of but never visited is a dashed ring and its card says so; in fog, unvisited places are dimmed and the cells the POV hasn't seen (with the grid system), or else the areas of rooms it hasn't been in, go out blank and lie under fog. By knowledge a room the POV can't see is solid nothing; in fog, where the POV hasn't seen it, it is fog like any other unseen cell. Things lying in cells are amber diamonds, shown only where the POV sees them now: within its sight on the grid it stands on with the grid system, else in the place it is in. A thing it saw before isn't shown where it has gone since, nor kept where it was. With the grid system, a tap on a cell of the grid the POV stands on picks it: its card names what lies there and offers **Walk here** with the walk's minutes, or why not ("No way there from here."). The backend judges the walk as the step will run, on the real ground (\`lre.map\` \`walk\`): the page's grid lacks what fog hides, walls included, so it can't. |
 | **HUD pill** | Time (⏸ when paused; the scale when not 1×), place, weather, cash. Docking; collapsed below 760 px; ✎ fixes. Phone and desktop save its position under separate keys, and it stays centred as its content sizes it until the player moves it. The host restores saved geometry only when it creates a widget, so a viewport that crosses the phone breakpoint rebuilds the pill under the other layout's key (\`frontend/hud-float.ts\`). |
 | **✎ fixes** | Each writes where its value lives, as a \`fix\` post entry with one \`set\` (§4.3), so undo, Keep, swipes, Re-narrate and Re-run treat them alike. A fix is checked as that \`set\` against the field's definition: its type, enum values, min and max (a pool's evaluated max included); a value outside them is refused with the reason, never clamped, and a locked field is never offered. Each fix on the latest reply has a **Corrected** chip, worded for the player, with **Undo**. A fix is the player's directive, so it wins over the story as a GM edit does (§7): the entry keeps what it asked for (\`edit\`), and one made during a reply is held (P2) and then lands over whatever the reply changed, resolved again from that request (a time set lands at that time, after any the reply narrated); one the reply already made so is kept with that request and nothing of its own. A later read of a reply written before the fix (a Re-read edit, a Retry read, a Re-run carrying it) folds before it, and the fix is resolved again after it; a Re-read of an earlier reply leaves the later reply holding the fix a rebased view, which works it out again from its request (§4.3). Only a fix that can't be made at all after the reply (a time set once an edit held with it turned Calendar & time off) gets a "… didn't apply after the reply" chip, until dismissed, and the GM view keeps the raw reason. **Time** (Calendar ≥1): a date and a time of day in the world's calendar (a date picker in a Gregorian one, the calendar's own months otherwise), local to the POV's place and starting from now; \`lre.fix\` sends it as \`time\`, and the backend runs it as §9.2's clock fix, a later time as an applied advance and an earlier one set back (L48). Its chip, Journal line and GM edit lead with how it moved the clock ("Clock moved on 5 h 15 min", "Clock set back 3 h"). **Place:** the POV's \`place\`. **Weather** (Weather ≥2): the \`weather\` field of the region over the POV, picked from its climate's states (the \`weather.fix\` query). The climate process still steps the region, so a fix holds until the climate next changes the sky, or, under a scripted hold, until the hold ends. **Scene type:** the POV's \`scene\` field, picked from the engine's four scene types and those of the places the POV can see (§7), or "" to follow the place again; it wins over the place default until an action, rule or fix sets it. |
@@ -101251,7 +101258,7 @@ A bar of six places runs along the page: **Now**, **Me**, **People**, **Orgs**, 
 
 Everything here is shown as your character knows it. Someone your character cannot know of is never listed, and a place stays hidden until your character has been there or heard of it. A secret stays out of every place, sheet and Journal line until the story reveals it.
 
-On this page, **Act** and **Timelapse…** say "The actions sheet (Act, Actions, Timelapse) does not open in this build of RPE", and the map's **Full screen** says Places shows it here. In the chat, the actions sheet and the map open over the chat (see [The HUD](#the-hud)).
+On this page, **Act**, **Timelapse** and **Actions** in the HUD's details open the actions sheet, **Map** in the HUD's details opens the map, and the map's **Full screen** opens it filling the window: the same sheet and map the chat's own entries open (see [The HUD](#the-hud)). In Lumiverse the drawer closes first for the map, which it would cover; in RPE's own web page they open over the page.
 
 ### What a press does
 
@@ -101373,7 +101380,7 @@ Tap a place for its sheet: whether you are here, have been or have only heard of
 
 Where the world uses the grid system, you stand on a square: tap a square of your grid and its card offers **Walk here** with the time it takes, around the walls and through the doors, or says "No way there from here."; the walk waits for your next message, its square marked on the map, and the card then offers **Take back Walk here**. Walls and doors are drawn as thin lines; a place you know may carry a mark (**Home**, **Yours**, **For sale**), named in the legend under **The map shows**.
 
-In the chat, **World map** and **Map** open the same map over the chat.
+In the chat, **World map** and **Map** open the same map over the chat; **Full screen** on Places opens it filling the window. Where Lumiverse's drawer is open, it closes first, since it would cover the map.
 
 ## Time, needs and routines
 
@@ -101387,7 +101394,7 @@ A chat has one clock. With a world, it runs on the world's calendar, and the HUD
 
 - **Pause clock** and **Resume clock** (in the World details, the actions sheet, the composer's action bar and **Story → Calendar**) pause the clock for the scene. The pause is a mark, not a lock: an agent that moves the clock while it is paused is told so, and the move stands.
 - **✎ on the time** sets the clock (see [Fixing a value](#fixing-a-value)). Moving it on decides nothing about what the time in between brought: that is the Author's, at the next turn.
-- **Timelapse**, in the actions sheet in the chat: **For** (lengths, with **Custom**), **Until** (the next morning or another part of the day, your next shift, the end of a trip, a date), **Follow my routine** for your own character, and **Interrupts for this run**. What you pick goes with your next message: the Author is told the length or the target and your choices, and plays the stretch of time.
+- **Timelapse**, in the actions sheet in the chat: **For** (lengths, with **Custom**), **Until** (the next morning or another part of the day, your next shift, the end of a trip, a date), **Follow my routine** for your own character, and **Interrupts for this run**. What you pick goes with your next message: the Author is told the length or the target and your choices, and moves the clock by it with \`pass_time\`, which answers with what the time brought due. The clock stops short where something you set to stop a skip comes due (an arrival, a need reaching its line, a change in the weather), and the answer says so; what you set to be ignored is not listed, and with **Follow my routine** off, where your own routine would put you is not listed either.
 
 ### Needs
 
@@ -102982,7 +102989,9 @@ var stateOf2 = async (ctx, chatId) => ask(ctx, chatId, "lre.state.get", { chatId
 async function chatState(args, ctx) {
   const chatId = chatIdOf(args);
   const { view, activity } = await stateOf2(ctx, chatId);
-  return readOut({ ...view, activity }, `the state view of chat ${chatId} (world ${view.worldId ?? "none"}, revision ${view.revision ?? "none"}, ${view.status})`, args);
+  const pointer = textArg(args, "pointer") ?? "";
+  const journal = pointer === "/journal" || pointer.startsWith("/journal/") ? { journal: (await ask(ctx, chatId, "lre.journal", { chatId })).notes } : {};
+  return readOut({ ...view, ...journal, activity }, `the state view of chat ${chatId} (world ${view.worldId ?? "none"}, revision ${view.revision ?? "none"}, ${view.status})`, args);
 }
 async function chips(args, ctx) {
   const chatId = chatIdOf(args);
@@ -103454,7 +103463,7 @@ var ROUTINE_OPS = Object.keys(ROUTINE_OP);
 var PLAY_TOOLS = [
   {
     name: "lre_chat_state",
-    description: "Read a chat's state view at a JSON Pointer: what the player sees in Play, the same view the chat's page is sent. /hud (clock, place, weather, cash, and its ✎ fixes at /hud/fixes), /scene (who is present), /chips, /journal, /keepReport (when status is paused), /palette (the actions at /palette/entries, the timelapse at /palette/timelapse), /controls (realism, time controls, player claims and the checks policy the chat plays by), /panels (each pack's panel, the inspector at /panels/core.context), /currency, and activity: what the engine is doing for the chat now (null when idle). Only what the player can know: lre_gm has the rest. A large part comes back as an outline to read deeper from.",
+    description: "Read a chat's state view at a JSON Pointer: what the player sees in Play, the same view the chat's page is sent. /hud (clock, place, weather, cash, and its ✎ fixes at /hud/fixes), /scene (who is present), /chips, /journal (the Journal's notes, no part of the view: read only at that pointer, and the first read after the engine starts may take a while), /keepReport (when status is paused), /palette (the actions at /palette/entries, the timelapse at /palette/timelapse), /controls (realism, time controls, player claims and the checks policy the chat plays by), /panels (each pack's panel, the inspector at /panels/core.context), /currency, and activity: what the engine is doing for the chat now (null when idle). Only what the player can know: lre_gm has the rest. A large part comes back as an outline to read deeper from.",
     inputSchema: object({ chatId: CHAT_ID, pointer: POINTER, offset: OFFSET, from: FROM, limit: LIMIT }, ["chatId"]),
     write: false,
     run: chatState,
@@ -103951,7 +103960,7 @@ var package_default = {
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "e1de5492";
+var BUILD = "2fa6baf7";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;

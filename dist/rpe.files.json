@@ -1,5 +1,5 @@
 {
-  "build": "e1de5492",
+  "build": "2fa6baf7",
   "files": {
     "guidance-harness/.hooks/examples/check-source.sh": "01d3b0b7afd186aaa7e50ae8d919df0b934253c7629fb16004de8638aded683f",
     "guidance-harness/.hooks/examples/hooks.yml": "1b1e09469e866c2e93498cb1262b4108bbd845c1a89492611cb66efef5e6791d",
@@ -102,7 +102,7 @@
     "guidance/.prompts/compaction.md": "2860d671006ee3cb61ec928546a85cd7da4ed0c9985555cb6d8e602cde94d930",
     "guidance/.prompts/continue-after-rule.md": "4af5b4ee7cfe7b2592ebccacd9b0056b1188ba53f1acde9fbdb8003ec71fc2e3",
     "guidance/.prompts/delegate-brief.md": "c5dc72845b737e9a5f47cf6e9dda33737132bdbc74477e072d68e1ee7a5e07f3",
-    "guidance/.prompts/engine-answers.md": "70dbeb49ba359e107265c59300de1bb849b69b9212cda2732c236e7b415a746c",
+    "guidance/.prompts/engine-answers.md": "758653ee7fbf8abf006b10e41df80ea9130c56bb18aaa5a25c7ccbeb3c4ad36e",
     "guidance/.prompts/history-actions.md": "1da9c54fe00ede51d6e602513b9e3dcdfd8739fe47abfc20c2ea062ebf92d67c",
     "guidance/.prompts/history-build.md": "930b742aba32b4c4f3d18ca158ee4dc251e1d3236928cd3d71eeb77f5d1963f2",
     "guidance/.prompts/history-calendar.md": "6145d0708a477d6f8799ced1afe4cddbe865e73216097409b6b11060309c81f7",
@@ -128,7 +128,7 @@
     "guidance/.prompts/map-answers.md": "8a6cae91bdca79b0d886daeb19e467a29346765609fcb8967a5d8b4ef2f2172f",
     "guidance/.prompts/map-layout.md": "c3f1695dd5c6657f3fbad88d0399f828147aace060a383e2090e29619fdf0dcb",
     "guidance/.prompts/migrated.md": "515195c181426927128711619065cd8ebc34a17ea0aa7e666c1b471eed3ec1d8",
-    "guidance/.prompts/notices.md": "258302ddd1992164e3a09d0dd347acebd3778c635b9ddf5e46b3cb01784baa93",
+    "guidance/.prompts/notices.md": "fc4debd3dc8037d24347db7ab64eb8d0f059509f1546337d85cbe2d8548dd563",
     "guidance/.prompts/play-answers.md": "43b0198ea2758ccf14538246a5f27a447b2d7bc767fe48e9921322f8bb4f2681",
     "guidance/.prompts/progress.md": "43deee62b8c10dd996f7b9366153d420f5f102a1c227620e91ac1a6329dd54d9",
     "guidance/.prompts/prompt-frame.md": "5616dd05024c6ebca08193c7b9d91dd49ae9e1fb35039ee5ec8513fabbb6fbd1",
@@ -171,7 +171,7 @@
     "guidance/.rules/perceptions-missing.md": "862b4341a05f73e86d0c2b4de2b28120419c5a0aaedb4ec9d88a8b8dc31bdfe4",
     "guidance/.rules/perceptions-owed.md": "eadad3d4790dff55012a9dab246e600e8b3730017051b965c054fb478174d1b0",
     "guidance/.rules/perceptions.md": "c1b7b406e790ff26dbc33aa8dcbe2db25d1b80bd8703b2e259c153bc1acc0696",
-    "guidance/.rules/press-owed.md": "3a4b941b78bb25e78352e9957f1de254114f4112c20826d62e3ea35513c822bd",
+    "guidance/.rules/press-owed.md": "54519cb2cc17508d5ee21ecbf2df37618920565ed0b2e2a30e7bf50a8eeec8ff",
     "guidance/.rules/reply-missing.md": "253e58dac4800f6f402751a67258d8c630f9b0b4b2ef719a2d024cda52c5ccc5",
     "guidance/.rules/save-before-compaction.md": "2d00b5a0d81870d4f624897c8a15564eac89f65bbe691b3729ff98aef7b01b2f",
     "guidance/.rules/unsourced.md": "99f32bcca35adb23ff39e4dd69225c8e936226c88172031467b89111c7c69cf2",
@@ -297,7 +297,7 @@
     "guidance/.tools/weather_clear.md": "408ce805e48282044a4bd97ca8c6c23644f12bb4fd4801dbad0fbcc292632d9c",
     "guidance/.tools/weather_set.md": "76be8bf350970b886a29fbe22b31088e60b35ea5e5b860bc2b0920eb38c855ad",
     "guidance/.tools/world.md": "797fb9d317495beaa82e7df40e93d2d03c79f74d9b68a5327fe1e2a68cccb183",
-    "guidance/.tools/world_apply.md": "11b0e619f8b42a4ac864139b5e215462ddb9c90556429498d4aab622a942a101",
+    "guidance/.tools/world_apply.md": "6fc9b0d610d993b708fbcb240488b99a28256872e54d85c6ec5181505e692450",
     "guidance/.tools/world_commit.md": "f4d6dd738aee4bb9450c3cf072b10cac3708e037674022033f5364d047ab6053",
     "guidance/.tools/world_discard.md": "309b8594b4e35c1082922d484c946eea2e0e236a3efabdd7f73c455be678cf49",
     "guidance/.tools/world_history.md": "39bdbc706c8c349cfcef4fcf8cbc370614fa350b0fab7c31a2c3373bbf5b3638",
@@ -325,13 +325,13 @@
     "guidance/chat-defaults/PRESET.md": "168e44f197313eea3d601000d722964aa0670b1057a870e96611ffc7f7974c99",
     "guidance/chat-defaults/SIMULATION.md": "1bfa617fbdd2021b085bd5444e616b305dc079d8530d03a9e306521f21d89bbf",
     "guidance/chat-defaults/SWIPE.md": "8dffad3947cfc969dbe350a88c0c3a4ac4cb7f90a2afd9d3daf6e2a4ae25be44",
-    "guidance/chat-defaults/TURN.md": "f2ebe38d8b6ed963bb7dbcae4aa03f96cd8e6f47c12c4bf4c52b649cb1ec80c9",
+    "guidance/chat-defaults/TURN.md": "ade3094d92d74f3d471ebb9f0995b272b5153797c66fbfab5331a0cedfe77352",
     "guidance/chat-defaults/WORLD.md": "77aff17066410f92bfb51e9cdb35238aa0c06a9ec6a6a05bd730174870fa342a",
     "guidance/chat-defaults/WRITING.md": "182f7c1cd7d0145edb629fe0ee478d697be12e2847428d061b55958139d0f450",
-    "rpe.js": "c711a768c03d9e16989a99e342fa931f7c25a1c9abde767cba979d3d4d418f48",
-    "ui/chunk-4fb7w0v5.js": "7187cc84297da314654be2e0bc4f707ecdb1fa6e9c7f671e88ccaa0f9e351843",
-    "ui/chunk-bb78806b.js": "abbf338b30b50fc03ecb672303eecda692a9c8b8ea14b9889fafca1ae0320a0d",
-    "ui/chunk-vtmnhwhm.js": "542c9d06a202760a980351993a8716563f8cb4ff5c5843c4e7902ce028ccc2c1",
-    "ui/index.html": "76d6f5af089a1a776b4461e1ca5c5d7dcfaeda9807712a61a5e943d6d2f74579"
+    "rpe.js": "7add5c0a4c92fbcc6cefeabc735b9cd0cb72aa979b7b464a697ac0e9f77d9579",
+    "ui/chunk-8hf56bsy.js": "b00fc97cf479eff0993b8db02280d548e20d0134bb2b040ce36a242950e45586",
+    "ui/chunk-pp8kea79.js": "34c2e9506aec300d0959ab3ec3c7180e8693155cbadb9def6ccd3ffcaaf5f9c5",
+    "ui/chunk-vsfce886.js": "eb1006804e76576cb2369dea8e2b517cb09833b4f227e5887a4950255298db2a",
+    "ui/index.html": "f4c1e78b227e1d6eb8413ae4b2910ef46d1d6384a604d1be20a6acd7c610f7d5"
   }
 }
