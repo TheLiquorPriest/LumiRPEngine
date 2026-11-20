@@ -735,7 +735,7 @@ var DEFAULT_PLACE_CAPS = Object.freeze({ turn: 2, chat: 64 });
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "2fa6baf7";
+var BUILD = "b8d565a3";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;

@@ -1,5 +1,5 @@
 {
-  "build": "2fa6baf7",
+  "build": "b8d565a3",
   "files": {
     "guidance-harness/.hooks/examples/check-source.sh": "01d3b0b7afd186aaa7e50ae8d919df0b934253c7629fb16004de8638aded683f",
     "guidance-harness/.hooks/examples/hooks.yml": "1b1e09469e866c2e93498cb1262b4108bbd845c1a89492611cb66efef5e6791d",
@@ -328,10 +328,10 @@
     "guidance/chat-defaults/TURN.md": "ade3094d92d74f3d471ebb9f0995b272b5153797c66fbfab5331a0cedfe77352",
     "guidance/chat-defaults/WORLD.md": "77aff17066410f92bfb51e9cdb35238aa0c06a9ec6a6a05bd730174870fa342a",
     "guidance/chat-defaults/WRITING.md": "182f7c1cd7d0145edb629fe0ee478d697be12e2847428d061b55958139d0f450",
-    "rpe.js": "7add5c0a4c92fbcc6cefeabc735b9cd0cb72aa979b7b464a697ac0e9f77d9579",
-    "ui/chunk-8hf56bsy.js": "b00fc97cf479eff0993b8db02280d548e20d0134bb2b040ce36a242950e45586",
-    "ui/chunk-pp8kea79.js": "34c2e9506aec300d0959ab3ec3c7180e8693155cbadb9def6ccd3ffcaaf5f9c5",
+    "rpe.js": "42114ed5f9a1b09893c9bdc4a126a515d6656c01d8c6ac3cfae92e5ab506e527",
+    "ui/chunk-qpk1j33h.js": "22aee3ada0313e1851245a2c36d8c21c1719052875ad7f669e91f71ee7c1f583",
+    "ui/chunk-tn5a8cg7.js": "191a54fb1ff8d3a1cfd41093ba2f13cd3ddbcb96da11e3d82183bb02756c1a91",
     "ui/chunk-vsfce886.js": "eb1006804e76576cb2369dea8e2b517cb09833b4f227e5887a4950255298db2a",
-    "ui/index.html": "f4c1e78b227e1d6eb8413ae4b2910ef46d1d6384a604d1be20a6acd7c610f7d5"
+    "ui/index.html": "14f80d825cad4ab470f33c9cd45ed3153094ce4277af10afe32909901ce5750b"
   }
 }
