@@ -2816,17 +2816,29 @@ export class UserStore {
     if (await this.store.offThread(() => this.holdHead(chat))) await write(() => this.storeHeld());
   }
 
-  /** @internal Holds the state at the chat's head for storing (`storeHead`), where its turn is ended and none is stored there: whether it held one. */
+  /**
+   * @internal Holds the state at the chat's head for storing (`storeHead`), where its turn is ended and none is stored there: whether it
+   * held one. None where it would not stay stored: with `turnStatesKept` 0 a head off the every-`snapshotEvery` nodes (the same flush
+   * would let it go), or while a job of the chat that has recorded changes is running, each of whose writes lets the head's stored
+   * state go though it changes no node's fold. A job stops running in the table as it ends: done, failed, cancelled, at a limit, off the
+   * path (RPH keeps its state, and `endJob` records its end, naming the chat, so the chat's writes settle again and the head is stored);
+   * stopped with RPE (kept as interrupted, or, where its record could not be written then, found running by the next start, which keeps
+   * it as interrupted and records its end). A job that is waiting (queued, held by him) or asking him writes nothing meanwhile, and holds
+   * nothing back.
+   */
   holdHead(chat: string): boolean {
     const head = this.chatRead(chat).head;
     if (head === null) return false;
     const at = this.db
-      .query<{ chat: string; status: string; mark: string | null; stored: number }, [string, string, string]>(
-        `SELECT t.chat, t.status, m.mark, EXISTS(SELECT 1 FROM snapshot s WHERE s.user = n.user AND s.node = n.key AND (s.kind = 'base' OR s.fingerprint = ?3)) AS stored
+      .query<{ chat: string; status: string; depth: number; mark: string | null; stored: number; writing: number }, [string, string, string]>(
+        `SELECT t.chat, t.status, n.depth, m.mark,
+           EXISTS(SELECT 1 FROM snapshot s WHERE s.user = n.user AND s.node = n.key AND (s.kind = 'base' OR s.fingerprint = ?3)) AS stored,
+           EXISTS(SELECT 1 FROM job e WHERE e.user = n.user AND e.chat = t.chat AND e.state = 'running' AND e.ended IS NULL AND EXISTS(SELECT 1 FROM change c WHERE c.user = e.user AND c.job = e.id)) AS writing
          FROM path_node n JOIN turn t ON t.user = n.user AND t.id = n.turn LEFT JOIN fold_mark m ON m.user = t.user AND m.chat = t.chat WHERE n.user = ?1 AND n.key = ?2`,
       )
       .get(this.id, head, this.store.fingerprint);
-    if (!at || at.stored === 1 || at.status === "open") return false;
+    if (!at || at.stored === 1 || at.status === "open" || at.writing === 1) return false;
+    if (this.store.turnStatesKept === 0 && (at.depth + 1) % this.store.snapshotEvery !== 0) return false;
     const { folded, upto } = this.foldNode(head);
     const doc: SnapshotDoc = { state: folded.state, notApplied: folded.notApplied, rebased: folded.rebased };
     this.store.hold(this.id, [[head, upto, () => snapshotRows(doc), at.chat, this.store.nodeMark(this.id, at.chat, head, at.mark ?? "")]]);

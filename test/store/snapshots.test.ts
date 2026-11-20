@@ -149,7 +149,7 @@ describe("snapshots", () => {
     expect(hashJson(reopened(ts).user(USER).headState("c").state.world)).toBe(hashJson(warm));
   });
 
-  test("a turn's end stores the chat's head once its writes settle, again after a job of it ends, and a restart reads it folding nothing", async () => {
+  test("a turn's end stores the chat's head once its writes settle, not while a job of it writes, again once the job ends, and a restart reads it folding nothing", async () => {
     let at = 0;
     const ts = testStore({ snapshotEvery: 25, now: () => ++at });
     const { s, store } = ts;
@@ -166,12 +166,17 @@ describe("snapshots", () => {
     expect(stored()).toBe(false);
     await settled.promise;
     expect(stored()).toBe(true);
-    // A job of the turn, ended after its reply, lets the state stored at the turn's node go (its change stands from the next turn's
-    // start), and the end stores it again as it now stands, with no write of his.
+    // A job of the turn, running after its reply as RPH keeps it: each of its writes lets the state stored at the turn's node go, and
+    // while it runs the head is not stored again, its writes settled or not.
+    store.db.run("INSERT INTO job (user, id, started, chat, turn, state, value) VALUES (?, 'job-after', 0, 'c', ?, 'running', '{}')", [USER, head.id]);
     settled = Promise.withResolvers<void>();
     s.addChanges(head.id, engine(goTo(POV, "common_room")).map((c) => ({ ...c, job: "job-after" })));
-    s.endJob("job-after");
+    await settled.promise;
     expect(stored()).toBe(false);
+    // Its end, which names the chat, stores it again as it now stands, with no write of his.
+    settled = Promise.withResolvers<void>();
+    store.db.run("UPDATE job SET state = 'done' WHERE user = ? AND id = 'job-after'", [USER]);
+    s.endJob("job-after");
     await settled.promise;
     expect(stored()).toBe(true);
     stop();
