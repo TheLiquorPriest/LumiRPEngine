@@ -932,8 +932,13 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const done = work.catch((error: unknown) => this.#d.log.error("A change Lumiverse told of could not be recorded; the chat's next turn finds it again.", { chat: change.chat, change: change.kind, error: words(error) }));
     this.#recording.add(done);
     void done.finally(() => this.#recording.delete(done));
-    // A change of the path (a delete, a swipe, an edit, an insert, a branch) brings the projection book into step with it.
-    if (change.kind === "message-deleted" || change.kind === "message-edited" || change.kind === "message-swiped" || change.kind === "message-inserted" || change.kind === "chat-forked") void done.then(() => this.#project(user, change.chat));
+    // A change of the path (a delete, a swipe, an edit, an insert, a branch) brings the projection book into step with it, and the chat's
+    // followers are told its state changed: the head of the path may now be another turn, and a page shows the state it last read.
+    if (change.kind === "message-deleted" || change.kind === "message-edited" || change.kind === "message-swiped" || change.kind === "message-inserted" || change.kind === "chat-forked")
+      void done.then(() => {
+        this.#stateChanged(change.chat);
+        this.#project(user, change.chat);
+      });
   }
 
   /**
