@@ -31,6 +31,7 @@
 // A scope naming a past turn reads every one of them as that turn would have (C-10): its line, its changes, its runs.
 
 import type { AgentRef, FactDef, FactsPort, FactValue, Scope } from "rp-harness/contract";
+import { TIMELAPSE_ACTION } from "../engine/turn";
 import { pairMarks } from "../quests/thread";
 import { byAgent, type ChangeRow, type Store } from "../store";
 import { storyAt } from "../story/path";
@@ -124,8 +125,8 @@ export function turnFacts(store: Store, deps: TurnFactsDeps): FactSource {
       { name: "turns.without.intent", counts: "Turns RPE played on this turn's own line before this one, counting back from the newest, that took no intent record, up to the newest that took one; a turn a migration carried is passed over." },
       {
         name: "asked.unanswered",
-        counts: "The player's presses from a panel of one of the world's actions this turn was told, that no `act` of that action has reached the engine for in this turn, carried out or refused with the world's reason; named by what was pressed and on what. asked: each with what was pressed (what), on what (on) and the action's id (action).",
-        fields: ["asked", "asked.what", "asked.on", "asked.action"],
+        counts: "The player's presses from a panel of one of the world's actions this turn was told, that no `act` of that action has reached the engine for in this turn, carried out or refused with the world's reason; named by what was pressed and on what. asked: each with what was pressed (what), on what (on), the action's id (action), and whether it was a skip of time, which `pass_time` carries out (skip).",
+        fields: ["asked", "asked.what", "asked.on", "asked.action", "asked.skip"],
       },
       { name: "previous.run.stopped", counts: "Runs of the turn before that this turn stopped at the wait's limit as it began, their work left as it stood." },
       { name: "story.from", counts: "Whose messages are the chat's story: 1 in the group the chat's setting story.from names.", by: [...STORY_FROM] },
@@ -199,7 +200,7 @@ export function turnFacts(store: Store, deps: TurnFactsDeps): FactSource {
       }
       if (names.includes("asked.unanswered")) {
         const asked = turn === null ? [] : deps.unanswered(scope.user, turn);
-        out["asked.unanswered"] = { count: asked.length, names: asked.map((a) => (a.on === null ? a.what : `${a.what}, on ${a.on}`)), fields: { asked: asked.map((a) => ({ what: a.what, on: a.on, action: a.action })) } };
+        out["asked.unanswered"] = { count: asked.length, names: asked.map((a) => (a.on === null ? a.what : `${a.what}, on ${a.on}`)), fields: { asked: asked.map((a) => ({ what: a.what, on: a.on, action: a.action, ...(a.action === TIMELAPSE_ACTION ? { skip: true } : {}) })) } };
       }
       if (names.includes("threads.quests.split")) {
         const record = at === null ? null : StoryRecord.read(store, scope.user, at);

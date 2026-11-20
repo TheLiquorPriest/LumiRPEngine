@@ -18,6 +18,7 @@ import { clockPaused, writtenTime } from "../engine/time";
 import { minutesBetween } from "../engine/world-state";
 import type { WorldState } from "../engine/state";
 import type { LedgerEvent } from "../shared/ledger";
+import { isRecord } from "../shared/json";
 import type { WorldDoc } from "../shared/world";
 import { clockRecorded, settingClock } from "../store/blank";
 import type { StoreState } from "../store/types";
@@ -25,6 +26,7 @@ import type { DueListing } from "./kit";
 import type { Reading } from "./reading";
 import { findOptional, isUnread, named, notAs, type OpContext, type OpDef, type Unread } from "./ops";
 import { roundsClock } from "./map/time";
+import { classOf, firstStop, listedOf, PRESS_ARGS, readInterrupts, readRoutine, readTarget, timelapsePass } from "./time-press";
 import type { Lines } from "./texts";
 
 /** The clock a date and time of the calendar (`YYYY-MM-DD HH:MM`) names at `place`; null when `said` is not one. */
@@ -149,11 +151,19 @@ function ranOver(o: OpContext, made: readonly LedgerEvent[]): { lines: JsonObjec
   return { lines: all.slice(0, most), total, more: Math.max(0, all.length - most) };
 }
 
+/**
+ * `pass_time`: the one operation that moves the clock. A span is said as a count (`minutes`, `seconds`, `rounds`), in words (`for`, `until`),
+ * or as a skip the player asked for from a sheet: its `target` (the sheet's own: a duration, a part of the day, the next shift or commitment,
+ * a trip's end, the next interruption), `routine` (false: the player holds their character where the story has them, so where their own
+ * routine would put them is not listed) and `interrupts` (what the player set to stop a skip, class by class: the clock stops where the
+ * first thing of a class set to stop falls due, and what a class set to ignore is not listed). Given `interrupts`, the call is a skip
+ * of theirs (`time-press.ts`); without it, no setting of theirs is applied.
+ */
 const passTime: OpDef = {
   name: "pass_time",
   lane: "engine",
   needs: [],
-  takes: ["minutes", "seconds", "rounds", "for", "until", "at"],
+  takes: ["minutes", "seconds", "rounds", "for", "until", "at", ...PRESS_ARGS],
   example: { op: "pass_time", for: "two hours", at: "thornbury", source: { from: "prose", message: "m-0017" } },
   run(o) {
     const w = o.draft.w;
@@ -165,12 +175,13 @@ const passTime: OpDef = {
     // Each way of saying how far the clock goes that the call gives, read; the end it names first, then a count of minutes, seconds or rounds, then words for a span.
     const read: { field: string; to: number }[] = [];
     const unread: Unread[] = [];
-    for (const field of ["until", "minutes", "seconds", "rounds", "for"]) {
+    for (const field of ["target", "until", "minutes", "seconds", "rounds", "for"]) {
       const said = o.args[field];
       if (said === undefined || said === null || said === "") continue;
       const counted = typeof said === "number" && Number.isFinite(said);
       let to: number | Unread | undefined;
-      if (field === "minutes") to = counted ? clockPlus(now, said) : notAs(o, field, said, "minutes");
+      if (field === "target") to = readTarget(o, said);
+      else if (field === "minutes") to = counted ? clockPlus(now, said) : notAs(o, field, said, "minutes");
       else if (field === "seconds") to = counted ? clockPlus(now, said / 60) : notAs(o, field, said, "seconds");
       else if (field === "rounds") {
         // Rounds are counted by the scene's grid; where it has none that counts them, they cannot be read.
@@ -182,25 +193,37 @@ const passTime: OpDef = {
       else read.push({ field, to });
     }
     const [used, ...others] = read;
-    if (used === undefined) return unread[0] ?? { line: "needs_any", fields: { n: o.n, op: o.op, fields: ["minutes", "seconds", "rounds", "for", "until"] } };
+    if (used === undefined) return unread[0] ?? { line: "needs_any", fields: { n: o.n, op: o.op, fields: ["minutes", "seconds", "rounds", "for", "until", "target"] } };
+    // What the player set for a skip: what stops it and whether their routine runs; read before anything is applied.
+    const policy = readInterrupts(o);
+    if (isUnread(policy)) return policy;
+    const routine = readRoutine(o);
+    if (isUnread(routine)) return routine;
     // What could be read is applied; what could not, or reads as another time, is reported with what was applied.
     for (const u of unread) o.reply.report("time_left_out", { ...u.fields, used: used.field });
     for (const other of others) if (other.to !== used.to) o.reply.report("time_differs", { n: o.n, op: o.op, field: other.field, other: clockText(o, other.to), used: used.field, to: clockText(o, used.to) });
-    const to = used.to;
+    const asked = used.to;
+    // The skip stops where the first thing of a class the player set to stop it falls due, if that is before the end it was asked for.
+    const stop = policy === undefined || asked <= now ? undefined : firstStop(o, policy, { from: now, to: asked }, at?.ref ?? (scene === null ? null : `place:${scene}`));
+    const to = stop === undefined ? asked : stop.at;
     const from = w.events.length;
     const failed = setClock(o, to);
     if (failed) return failed;
     o.draft.record(o.n, o.op, "engine", o.prov, from);
     const reached = w.state.clock;
+    if (stop !== undefined && reached === stop.at) o.reply.report("time_stopped", { n: o.n, op: o.op, reached: clockText(o, reached), asked: clockText(o, asked), kind: classOf(stop) ?? stop.kind });
+    if (routine === false) o.reply.line("time_routine_held", { n: o.n, op: o.op });
     // What the world's own records did over the span, in the words the GM view words a change in; the Author is told, and decides none of it.
     const ran = ranOver(o, w.events.slice(from).filter((e) => e.type !== "clock"));
     if (ran.total > 0) o.reply.line("ran_said", { n: o.n, op: o.op, total: ran.total, one: ran.total === 1 });
     if (ran.more > 0) o.reply.line("ran_more", { n: o.n, op: o.op, listed: ran.lines.length, more: ran.more });
     const due = o.call.deps.due;
+    const pov = w.ctx.world.pov;
     // Told of the state as recorded: once this has set the clock, its times are dates.
     o.after((state): JsonObject => {
       const span: JsonObject = { from: clockText(o, Math.min(now, reached), state), to: clockText(o, Math.max(now, reached), state) };
-      const listing = due.due(state, { from: Math.min(now, reached), to: Math.max(now, reached) }, at?.ref ?? null, o.call.settings.dueItems);
+      const found = due.due(state, { from: Math.min(now, reached), to: Math.max(now, reached) }, at?.ref ?? null, o.call.settings.dueItems);
+      const listing = { items: listedOf(found.items, policy, routine, pov), more: found.more };
       const listed = listDue(o, listing, { n: o.n, op: o.op }, state);
       // What is listed has not happened: the Author is told which of it is its own to record.
       if (listing.items.length > 0) o.reply.line("due_open", { n: o.n, op: o.op });
@@ -209,6 +232,16 @@ const passTime: OpDef = {
     return undefined;
   },
 };
+
+/**
+ * One of the world's actions that is no action of the world's: the timelapse the player pressed on a sheet, carried out by `pass_time` from the
+ * press's own values (`timelapsePass`), so it moves the clock as `pass_time` does for the same span and is answered as `pass_time` answers.
+ */
+export function carryOutTimelapse(o: OpContext): Unread | undefined {
+  const given = o.args.params ?? {};
+  if (!isRecord(given)) return notAs(o, "params", given, "fields");
+  return passTime.run({ ...o, args: timelapsePass(given) });
+}
 
 /** The operations on time. */
 export const TIME_OPS: readonly OpDef[] = [passTime];

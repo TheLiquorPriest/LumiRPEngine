@@ -34,7 +34,7 @@ import { type LiveHub, liveKind, shape } from "../app";
 import { CAST_VIEWS, castPresentViews, castViews, type CastViewName, chatLine, findCharacter, type MemorySearch, type SourceReader } from "../cast";
 import { calendarOf, formatClock } from "../engine/calendar";
 import { placeOfEntity } from "../engine/scope";
-import { mapView, mapWording } from "../iface";
+import { mapView, mapWording, timelapseOperation } from "../iface";
 import { knowledgeChange, type Lore, type LoreIndex, loreLines, loreMapFields, type LoreProjection, scanMark, type SecretSettingsFor } from "../lore";
 import { placeLinesAt } from "../places";
 import { tidyHolds } from "../play/path-events";
@@ -779,7 +779,10 @@ export class TurnLane implements TurnPlayer, ChatChanges {
           // A tap played now went into the chat as his message: the line marks it so (`sent`), with the values the message may not carry.
           const tap = r.asked as PanelAsk;
           const values = Object.entries(tap.values).map(([key, value]) => `${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`);
-          return said(lines(notices)?.line("panel_request", { what: tap.what, from: tap.from, ...(tap.on !== null ? { on: tap.on } : {}), ...(tap.action !== null ? { action: tap.action } : {}), ...(values.length > 0 ? { values: values.join(", ") } : {}), ...(r.played ? { sent: true } : {}) }));
+          // A skip of time is told as the operation that carries it out and its values as that operation reads them, in place of the press's own action and values.
+          const pass = timelapseOperation(tap.action, tap.values);
+          const how = pass !== null ? { pass: JSON.stringify(pass) } : { ...(tap.action !== null ? { action: tap.action } : {}), ...(values.length > 0 ? { values: values.join(", ") } : {}) };
+          return said(lines(notices)?.line("panel_request", { what: tap.what, from: tap.from, ...(tap.on !== null ? { on: tap.on } : {}), ...how, ...(r.played ? { sent: true } : {}) }));
         });
         // The feedback he typed in Lumiverse's regenerate dialog, where the door told it apart for certain (R-198): a line of `asked` too,
         // before the Author's first call. Not told apart, it stands where Lumiverse put it in the prompt, and no line comes from it.

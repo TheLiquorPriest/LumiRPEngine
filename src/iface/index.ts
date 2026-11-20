@@ -26,6 +26,7 @@ export {
   type Writes,
 } from "./kit";
 export { MARKS } from "./source";
+export { timelapseOperation } from "./time-press";
 export { MAP_TOOLS } from "./maptools";
 export type { GridMoves, MapLayer, MapPrinted, MapView } from "./map/ports";
 export { gridMoves, MAP_ANSWERS, mapLines, mapView, mapWording, NO_WORDING, noMapWords, type MapWording } from "./map/index";

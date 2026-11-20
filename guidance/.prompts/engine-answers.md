@@ -47,6 +47,9 @@ wants_time: a date and time, YYYY-MM-DD HH:MM; a clock time, such as 22:00, 10pm
 wants_minutes: a number of minutes, a part of one counted in seconds (0.5 is thirty seconds)
 wants_seconds: a number of seconds
 wants_rounds: a whole number of rounds above 0, counted by the grid of the scene, which counts rounds only on a room-scale map; otherwise give seconds or minutes
+wants_timelapse_target: an object with a type: duration (and minutes), day_part (and dayPart, the part's id), at (and at, a clock reading), shift, commitment, arrival or interrupt
+wants_interrupts: an object of class: stop, note or ignore, the classes being invitation, bill, decline, incident, quest, rule, arrival, overdue, needs and weather
+wants_action: an id of one of the world's actions, which world_query at ruleset lists. The passing of time is no action of the world's: record it with the pass_time operation, whatever the player pressed for it
 wants_dice: dice such as 1d20+3 or 2d6
 wants_square: [column, row], two whole numbers counted from 1 at the top left, as the map prints them
 wants_fields: an object of field: value
@@ -139,6 +142,8 @@ time_left_out: Operation {{n}} ({{op}}): {{field}} cannot be read, you sent {{va
 time_differs: Operation {{n}} ({{op}}): {{field}} reads as {{other}} and {{used}} as {{to}}; the clock was set by {{used}}.
 clock_paused: Operation {{n}} ({{op}}): the clock was paused for this scene, and it was moved as given; the pause still holds.
 standing_cut: Operation {{n}} ({{op}}): the clock stopped at {{reached}}, short of {{asked}}: what the world's own records arrange (pay, bills, standing payments) runs over a year at most, and over so many changes at most, in one go, so it ran as far as that and no further. Pass the rest of the time with another pass_time.
+time_stopped: Operation {{n}} ({{op}}): the clock stopped at {{reached}}, short of {{asked}}, where something of a kind the player set to stop a skip of time came due ({{kind}}). It is listed with what fell due: decide it, and pass the rest of the time with another pass_time.
+time_routine_held: Operation {{n}} ({{op}}): the player holds their character where the story has them over this span, so where their own routine would put them is not listed.
 before_start: Operation {{n}} ({{op}}): the story starts at {{start}}, and the clock was set back to a time before it.
 due_more: {{#n}}Operation {{n}} ({{op}}): {{/n}}only the first {{listed}} of what this span brings due are listed; {{more}} more fall due later in it.
 due_more_uncounted: {{#n}}Operation {{n}} ({{op}}): {{/n}}only the first {{listed}} of what this span brings due are listed; more fall due later in it.

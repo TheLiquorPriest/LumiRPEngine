@@ -20,13 +20,14 @@ import { companionCandidates, findAction, paramCandidates, resolveAction } from 
 import { createRng } from "../engine/rng";
 import { isGone, kindIs } from "../engine/scope";
 import { selectorMatches } from "../engine/selector";
+import { TIMELAPSE_ACTION } from "../engine/turn";
 import { canSeeEntity } from "../engine/visibility";
 import { downsOf } from "../packs/combat/core/flow";
 import { fightById, fighterOf, fightsOf, rulesOf as fightRulesOf } from "../packs/combat/core/model";
 import { costKeys } from "../packs/d20/core/procedures";
 import { isAlready, notApplicable } from "./families/run";
 import { find, isUnread, minorUnits, named, notAs, type OpContext, type OpDef, textArg, type Unread } from "./ops";
-import { clockText } from "./ops-time";
+import { carryOutTimelapse, clockText } from "./ops-time";
 import { openAuthored } from "./ops-values";
 import { nearestOf, type Reading, type Want } from "./reading";
 import { textOf } from "./texts";
@@ -153,7 +154,7 @@ function actionNamed(o: OpContext): ActionDef | Unread {
   const all = [...offeredActions(reg, o.draft.w.ctx).keys()].sort();
   const near = nearestOf(said, all, o.call.settings).slice(0, o.call.settings.nearMatches);
   const choices = near.length > 0 ? near : all;
-  return { line: "unreadable_op", fields: { n: o.n, op: o.op, field: "action", value: JSON.stringify(said), choices: textOf(choices) }, data: { field: "action", choices } };
+  return { line: "unreadable_op", fields: { n: o.n, op: o.op, field: "action", value: JSON.stringify(said), choices: textOf(choices), wants: o.call.lines.line("wants_action") ?? "" }, data: { field: "action", choices } };
 }
 
 /**
@@ -191,6 +192,8 @@ const act: OpDef = {
   run(o) {
     const reg = o.reading.registry;
     const w = o.draft.w;
+    // A skip of time the player pressed on a sheet is no action of the world's: it is `pass_time`'s, carried out by it from the press's own values.
+    if (textArg(o.args, "action") === TIMELAPSE_ACTION) return carryOutTimelapse(o);
     const action = actionNamed(o);
     if (isUnread(action)) return action;
     let actor = w.world.pov;

@@ -39,10 +39,11 @@ async function worldBed(options: TurnBedOptions): Promise<TurnBed> {
 const PRESS_OWED = "rules/press-owed";
 
 /** A panel's press that waits for the player's next message, on its own route: the Timelapse, which the palette offers, by its label. */
-const press = (b: TurnBed, label: string) => b.page<{ request: { id: string } | null }>("POST", `/api/v1/chats/${CHAT}/requests/panel`, { action: TIMELAPSE_ACTION, values: { label }, from: "palette" });
+const press = (b: TurnBed, label: string) => b.page<{ request: { id: string } | null }>("POST", `/api/v1/chats/${CHAT}/requests/panel`, { action: TIMELAPSE_ACTION, values: { label, target: { type: "duration", minutes: 60 }, overrides: {}, followRoutine: false }, from: "palette" });
 
 /** What a press is told to the Author as, in the notices part's words. */
-const pressedAs = (label: string): string => `From a panel (palette): ${label}, with label: ${label} (action ${TIMELAPSE_ACTION})`;
+const pressedAs = (label: string): string =>
+  `From a panel (palette): ${label}. This is a skip of time, and the pass_time operation of world_apply carries it out: ${JSON.stringify({ op: "pass_time", minutes: 60, interrupts: {}, routine: false, source: { from: "player" } })}. It moves the clock as asked and lists what falls due; the player's own settings decide what stops it.`;
 
 const CARRIED = "This chat was carried over from the earlier build.";
 
@@ -284,7 +285,8 @@ describe("what has happened in the chat since the last turn", () => {
     await settledTurn(b, await play(b, "normal", "I go down."));
     await settledTurn(b, await play(b, "swipe"));
     await settledTurn(b, await play(b, "normal", "I stop."));
-    const told = pressedAs("Walk here");
+    // What the model was sent is JSON: the operation's own quotes are escaped in it.
+    const told = JSON.stringify(pressedAs("Walk here")).slice(1, -1);
     expect(sent(b, 0)).not.toContain(told);
     expect(sent(b, 1)).toContain(told);
     expect(sent(b, 2)).toContain(told);

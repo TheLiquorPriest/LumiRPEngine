@@ -6,6 +6,7 @@
 // `run_started`. Nothing here waits for, holds or orders anything RPH does: it only notes when things came.
 
 import type { TraceDelta, TraceRecord } from "rp-harness/contract";
+import { TIMELAPSE_ACTION } from "../engine/turn";
 import { isRecord } from "../shared/json";
 import type { Run, Runs, Span } from "./runs";
 
@@ -27,7 +28,8 @@ interface Followed {
 /** The action ids a `world_apply` call's `act` operations name, as written; none for another call. */
 function actionsOf(tool: string, args: unknown): string[] {
   if (tool !== "world_apply" || !isRecord(args) || !Array.isArray(args.operations)) return [];
-  return args.operations.flatMap((op) => (isRecord(op) && op.op === "act" && typeof op.action === "string" && op.action.trim() !== "" ? [op.action.trim()] : []));
+  // A skip of time the player pressed is carried out by `pass_time` (the notice names it), as an `act` of the timelapse action is too.
+  return args.operations.flatMap((op) => (isRecord(op) && op.op === "pass_time" ? [TIMELAPSE_ACTION] : isRecord(op) && op.op === "act" && typeof op.action === "string" && op.action.trim() !== "" ? [op.action.trim()] : []));
 }
 
 export class RunTimes {
