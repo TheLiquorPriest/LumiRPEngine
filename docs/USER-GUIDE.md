@@ -284,7 +284,7 @@ A chat has one clock. With a world, it runs on the world's calendar, and the HUD
 
 - **Pause clock** and **Resume clock** (in the World details, the actions sheet, the composer's action bar and **Story → Calendar**) pause the clock for the scene. The pause is a mark, not a lock: an agent that moves the clock while it is paused is told so, and the move stands.
 - **✎ on the time** sets the clock (see [Fixing a value](#fixing-a-value)). Moving it on decides nothing about what the time in between brought: that is the Author's, at the next turn.
-- **Timelapse**, in the actions sheet in the chat: **For** (lengths, with **Custom**), **Until** (the next morning or another part of the day, your next shift, the end of a trip, a date), **Follow my routine** for your own character, and **Interrupts for this run**. What you pick goes with your next message: the Author is told the length or the target and your choices, and plays the stretch of time.
+- **Timelapse**, in the actions sheet in the chat: **For** (lengths, with **Custom**), **Until** (the next morning or another part of the day, your next shift, the end of a trip, a date), **Follow my routine** for your own character, and **Interrupts for this run**. What you pick goes with your next message: the Author is told the length or the target and your choices, and moves the clock by it with `pass_time`, which answers with what the time brought due. The clock stops short where something you set to stop a skip comes due (an arrival, a need reaching its line, a change in the weather), and the answer says so; what you set to be ignored is not listed, and with **Follow my routine** off, where your own routine would put you is not listed either.
 
 ### Needs
 
