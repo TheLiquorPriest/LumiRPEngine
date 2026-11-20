@@ -320,11 +320,11 @@ Lane: engine. Takes its provenance.
 | `for` | text | pay: what it was for. pass_time: how long, in words. |
 | `until` | text | give: when a loan ends. pass_time: until when: YYYY-MM-DD HH:MM, a time of day (22:00, noon), or words (two days). |
 | `at` | text | place, spawn: the place (a place made with place: the place it is inside). set: someone, something, a place, or world for the time. |
-| `target` | object | pass_time: where a skip of time the player asked for from a sheet goes, as it was pressed: {"type": "day_part", "dayPart": the part's id}, {"type": "shift"} (their next shift), {"type": "commitment"}, {"type": "arrival"} (the end of the trip they are on), {"type": "interrupt"} (until something the player set to stop a skip comes due), {"type": "at", "at": a clock reading}, or {"type": "duration", "minutes": n}. |
+| `target` | object | pass_time: where a skip of time the player asked for from a sheet goes, as it was pressed: {"type": "day_part", "dayPart": the part's id}, {"type": "shift"} (their next shift), {"type": "commitment"}, {"type": "arrival"} (the end of the trip they are on), {"type": "interrupt"} (to the first time something the player set to stop a skip comes due, by their own settings or by interrupts; where nothing does within the next week the clock stands and the answer says so), {"type": "at", "at": a clock reading}, or {"type": "duration", "minutes": n}. |
 | `routine` | true or false | pass_time: false when the player holds their character where the story has them over a skip they asked for, so where their own routine would put them is not listed; left out or true, it is. |
 | `interrupts` | object | pass_time: what the player set to stop a skip they asked for, as class: stop, note or ignore (an object, empty for none changed from their own settings). Given, the clock stops where the first thing of a class set to stop falls due, and what a class set to ignore is not listed. Left out, no setting of theirs is applied. |
 
-Reports its code (`src/iface/ops-time.ts`) can give: `before_start`, `clock_paused`, `standing_cut`, `time_back`, `time_differs`, `time_left_out`, `time_stopped`.
+Reports its code (`src/iface/ops-time.ts`) can give: `before_start`, `clock_paused`, `standing_cut`, `time_back`, `time_differs`, `time_interrupted`, `time_left_out`, `time_stopped`.
 
 Worked example:
 

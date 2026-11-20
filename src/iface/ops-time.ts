@@ -22,7 +22,7 @@ import { isRecord } from "../shared/json";
 import type { WorldDoc } from "../shared/world";
 import { clockRecorded, settingClock } from "../store/blank";
 import type { StoreState } from "../store/types";
-import type { DueListing } from "./kit";
+import type { DueItem, DueListing } from "./kit";
 import type { Reading } from "./reading";
 import { findOptional, isUnread, named, notAs, type OpContext, type OpDef, type Unread } from "./ops";
 import { roundsClock } from "./map/time";
@@ -173,15 +173,22 @@ const passTime: OpDef = {
     if (isUnread(at)) return at;
     const scene = at !== undefined ? (at.ref.startsWith("place:") ? at.id : placeOfEntity(w.state, at.id)) : placeOfEntity(w.state, w.ctx.world.pov);
     // Each way of saying how far the clock goes that the call gives, read; the end it names first, then a count of minutes, seconds or rounds, then words for a span.
-    const read: { field: string; to: number }[] = [];
+    const read: { field: string; to: number; item?: DueItem }[] = [];
     const unread: Unread[] = [];
+    // Where the scene is, as a part of the tree a skip looks for what falls due in: the place the call names, else where the point of view is.
+    const sceneRef = at?.ref ?? (scene === null ? null : `place:${scene}`);
     for (const field of ["target", "until", "minutes", "seconds", "rounds", "for"]) {
       const said = o.args[field];
       if (said === undefined || said === null || said === "") continue;
       const counted = typeof said === "number" && Number.isFinite(said);
+      if (field === "target") {
+        const landed = readTarget(o, said, sceneRef);
+        if (isUnread(landed)) unread.push(landed);
+        else read.push({ field, ...landed });
+        continue;
+      }
       let to: number | Unread | undefined;
-      if (field === "target") to = readTarget(o, said);
-      else if (field === "minutes") to = counted ? clockPlus(now, said) : notAs(o, field, said, "minutes");
+      if (field === "minutes") to = counted ? clockPlus(now, said) : notAs(o, field, said, "minutes");
       else if (field === "seconds") to = counted ? clockPlus(now, said / 60) : notAs(o, field, said, "seconds");
       else if (field === "rounds") {
         // Rounds are counted by the scene's grid; where it has none that counts them, they cannot be read.
@@ -203,15 +210,16 @@ const passTime: OpDef = {
     for (const u of unread) o.reply.report("time_left_out", { ...u.fields, used: used.field });
     for (const other of others) if (other.to !== used.to) o.reply.report("time_differs", { n: o.n, op: o.op, field: other.field, other: clockText(o, other.to), used: used.field, to: clockText(o, used.to) });
     const asked = used.to;
-    // The skip stops where the first thing of a class the player set to stop it falls due, if that is before the end it was asked for.
-    const stop = policy === undefined || asked <= now ? undefined : firstStop(o, policy, { from: now, to: asked }, at?.ref ?? (scene === null ? null : `place:${scene}`));
+    // The skip stops where the first thing of a class the player set to stop it falls due, if that is before the end it was asked for; the next interruption is that thing itself.
+    const stop = used.item !== undefined || policy === undefined || asked <= now ? undefined : firstStop(o, policy, { from: now, to: asked }, sceneRef);
     const to = stop === undefined ? asked : stop.at;
     const from = w.events.length;
     const failed = setClock(o, to);
     if (failed) return failed;
     o.draft.record(o.n, o.op, "engine", o.prov, from);
     const reached = w.state.clock;
-    if (stop !== undefined && reached === stop.at) o.reply.report("time_stopped", { n: o.n, op: o.op, reached: clockText(o, reached), asked: clockText(o, asked), kind: classOf(stop) ?? stop.kind });
+    if (used.item !== undefined && reached === used.item.at) o.reply.report("time_interrupted", { n: o.n, op: o.op, reached: clockText(o, reached), kind: classOf(used.item) ?? used.item.kind });
+    else if (stop !== undefined && stop.at < asked && reached === stop.at) o.reply.report("time_stopped", { n: o.n, op: o.op, reached: clockText(o, reached), asked: clockText(o, asked), kind: classOf(stop) ?? stop.kind });
     if (routine === false) o.reply.line("time_routine_held", { n: o.n, op: o.op });
     // What the world's own records did over the span, in the words the GM view words a change in; the Author is told, and decides none of it.
     const ran = ranOver(o, w.events.slice(from).filter((e) => e.type !== "clock"));

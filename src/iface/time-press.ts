@@ -9,14 +9,14 @@
 // process of the old turn raised, so nothing of them is ever listed to stop at.
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
-import { clockPlus } from "../engine/calendar";
+import { clockPlus, MINUTES_PER_DAY } from "../engine/calendar";
 import { interruptPolicy } from "../engine/simulate";
 import { TIMELAPSE_ACTION } from "../engine/turn";
-import { parseOverrides, parseTarget, resolveTarget } from "../engine/time";
+import { DEFAULT_HORIZON, parseOverrides, parseTarget, resolveTarget } from "../engine/time";
 import { INTERRUPT_CLASSES, type InterruptClass, type InterruptPolicy } from "../shared/ids";
 import { isRecord } from "../shared/json";
 import type { DueItem } from "./kit";
-import { notAs, type OpContext, type Unread } from "./ops";
+import { isUnread, notAs, type OpContext, type Unread } from "./ops";
 
 /** The arguments of `pass_time` that only a skip the player asked for gives: where it goes, whether their routine runs, what stops it. */
 export const PRESS_ARGS = ["target", "routine", "interrupts"] as const;
@@ -55,20 +55,37 @@ export function timelapseOperation(action: string | null, values: JsonObject): J
   return action === TIMELAPSE_ACTION ? { op: "pass_time", ...timelapsePass(values), source: { from: "player" } } : null;
 }
 
-/** What the clock reads where a sheet's target lands, by the engine's own reading of a target (`resolveTarget`); a target this build cannot run or one that names no time is answered as such. */
-export function readTarget(o: OpContext, said: JsonValue): number | Unread {
+/** Where a sheet's target lands: the clock reading, and for the next interruption the thing that the skip goes to. */
+export interface Landing {
+  to: number;
+  item?: DueItem;
+}
+
+/**
+ * Where a sheet's target lands, by the engine's own reading of a target (`resolveTarget`): each lands on its own time or is answered as it
+ * cannot be, none on a bound. The next interruption is as far as the first thing of a class the player set to stop a skip falls due, over the
+ * engine's horizon, by their own settings where the call gives none; where nothing of the kind falls due there, there is none to skip to and
+ * the clock stands. A target this build cannot run or one that names no time is answered as such.
+ */
+export function readTarget(o: OpContext, said: JsonValue, at: string | null): Landing | Unread {
   const target = parseTarget(said);
   // A stage is reached by the story's own record of it, which nothing runs here.
   if (target === null || target.type === "stage") return notAs(o, "target", said, "timelapse_target");
   const now = o.draft.w.state.clock;
-  if (target.type === "duration") return clockPlus(now, target.minutes);
+  if (target.type === "duration") return { to: clockPlus(now, target.minutes) };
+  if (target.type === "interrupt") {
+    const given = readInterrupts(o);
+    if (isUnread(given)) return given;
+    const item = firstStop(o, given ?? interruptPolicy(o.draft.w.state, {}), { from: now, to: clockPlus(now, DEFAULT_HORIZON) }, at);
+    return item === undefined ? { line: "time_no_interruption", fields: { n: o.n, op: o.op, field: "target", value: JSON.stringify(said), days: DEFAULT_HORIZON / MINUTES_PER_DAY } } : { to: item.at, item };
+  }
   const resolved = resolveTarget(o.reading.registry, o.draft.w.world, o.draft.w.state, target);
   if ("code" in resolved) {
     o.draft.note(resolved);
     return { line: "not_applicable", fields: { n: o.n, op: o.op, code: resolved.code } };
   }
   // The target as far as it lies: a skip here is not run in steps, so the rest of the way is not left for a Continue.
-  return resolved.goal ?? resolved.to;
+  return { to: resolved.goal ?? resolved.to };
 }
 
 /** What the player set to stop a skip, class by class, over their own settings; none where the call gives no `interrupts`. */

@@ -4,6 +4,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { timelapseOperation } from "../../src/iface/time-press";
+import type { JsonObject } from "../../src/shared/json";
 import { rig, texts, wordsFromFiles, type Rig } from "./rig";
 
 const SRC = { from: "player" };
@@ -42,11 +43,11 @@ describe("a skip of time the player pressed", () => {
     expect(texts(bad).join(" ")).toContain("target cannot be read");
   });
 
-  test("what the player set to stop a skip stops it where it falls due, and what they set to ignore is not listed", async () => {
+  test("a stop set for a skip with an end stops it where it falls due, and what they set to ignore is not listed", async () => {
     // The test's list of what falls due has an arrival an hour into any span.
     const stopped = await rig();
     const start = clockOf(stopped);
-    const a = await stopped.call("world_apply", { operations: [{ op: "act", action: "timelapse", params: { target: { type: "interrupt" }, overrides: { arrival: "stop" } }, source: SRC }] });
+    const a = await stopped.call("world_apply", { operations: [{ op: "act", action: "timelapse", params: { minutes: 600, overrides: { arrival: "stop" } }, source: SRC }] });
     expect(clockOf(stopped)).toBe(start + 60);
     expect(a.reports).toEqual([expect.stringContaining("the clock stopped at")]);
     expect(texts(a).join(" ")).toContain("the carter from the far road");
@@ -54,5 +55,31 @@ describe("a skip of time the player pressed", () => {
     const b = await ignored.call("world_apply", { operations: [{ op: "act", action: "timelapse", params: { minutes: 120, overrides: { arrival: "ignore" } }, source: SRC }] });
     expect(clockOf(ignored)).toBe(start + 120);
     expect(texts(b).join(" ")).not.toContain("the carter from the far road");
+  });
+
+  test("the next interruption is the first thing the player set to stop a skip, by their own settings where the call gives none, and where there is none no clock moves", async () => {
+    const sheet = { target: { type: "interrupt" }, overrides: {}, followRoutine: false };
+    // An arrival falls due an hour in, and the player's own settings stop a skip for it: the clock goes there, whichever way the Author records it.
+    const start = clockOf(await rig());
+    const through = await rig();
+    const a = await through.call("world_apply", { operations: [{ op: "act", action: "timelapse", params: sheet, source: SRC }] });
+    expect(clockOf(through)).toBe(start + 60);
+    expect(a.reports).toEqual([expect.stringContaining("the clock went to")]);
+    expect(texts(a).join(" ")).toContain("the carter from the far road");
+    const told = await rig();
+    await told.call("world_apply", { operations: [{ op: "pass_time", target: { type: "interrupt" }, source: SRC }] });
+    expect(clockOf(told)).toBe(start + 60);
+    const said = await rig();
+    await said.call("world_apply", { operations: [{ ...(timelapseOperation("timelapse", sheet) ?? {}) }] });
+    expect(clockOf(said)).toBe(start + 60);
+    // Nothing of a kind they set to stop a skip falls due: the clock stands, and the answer says why, in words, with nothing recorded.
+    const refused: JsonObject[] = [{ op: "act", action: "timelapse", params: { ...sheet, overrides: { arrival: "ignore" } }, source: SRC }, { op: "pass_time", target: { type: "interrupt" }, interrupts: { arrival: "ignore" }, source: SRC }];
+    for (const operation of refused) {
+      const none = await rig();
+      const r = await none.call("world_apply", { operations: [operation] });
+      expect(clockOf(none)).toBe(start);
+      expect(texts(r).join(" ")).toContain("there is no next interruption to skip to, and the clock stands");
+      wordsFromFiles(r);
+    }
   });
 });
