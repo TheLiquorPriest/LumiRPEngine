@@ -3,7 +3,7 @@
 // of the page: the line that says which road the page reaches RPE by, what the extension lacks and what
 // went wrong (`Frame`). A page is offered by both shells by its own entry, with no edit here.
 
-import { useEffect, useId, useRef, useState } from "preact/hooks";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Icon, type IconName } from "./icons";
 import { useSelect } from "./store";
 import { LIVE_USER, type ExtensionStatusReply, type MissingPermissionShown } from "../shared/api";
@@ -34,19 +34,46 @@ export interface PagesBarProps {
 }
 
 /**
+ * The room a list hanging from a bar has before the edge of what shows it: the window's, or that of a panel which clips what overflows
+ * it (Lumiverse's drawer). Down from the list's top, or up from its foot for the bar at the foot of the screen.
+ */
+function roomFor(list: HTMLElement, upward: boolean): number {
+  const at = list.getBoundingClientRect();
+  let top = 0;
+  let bottom = window.innerHeight;
+  for (let el = list.parentElement; el !== null; el = el.parentElement) {
+    if (getComputedStyle(el).overflowY === "visible") continue;
+    const box = el.getBoundingClientRect();
+    top = Math.max(top, box.top);
+    bottom = Math.min(bottom, box.bottom);
+  }
+  return Math.max(0, Math.floor(upward ? at.bottom - top : bottom - at.top));
+}
+
+/**
  * A shell's bar of pages. Where room is short (at the foot of the web shell at phone width, atop the
  * drawer, and across the top of the web shell where its every page would not fit) it keeps the pages
  * used most, then More, which opens a list of the rest and shows as current while one of them is. The
  * top bar holds every page, and the width rule in styles.ts decides whether the rest or More shows.
  * Choosing a page, More again, Escape (which gives More the focus back), a tap anywhere else or another
- * page coming up closes the list.
+ * page coming up closes the list. The list is no taller than the room it has (`roomFor`, which the
+ * style rule reads as `--rpe-more-room`) and scrolls within it, so on a phone its last pages are reached.
  */
 export function PagesBar(props: PagesBarProps) {
   const { place, current } = props;
   const [open, setOpen] = useState(false);
   const more = useRef<HTMLButtonElement>(null);
+  const listed = useRef<HTMLDivElement>(null);
   const listId = useId();
   useEffect(() => setOpen(false), [current]);
+  useLayoutEffect(() => {
+    const list = listed.current;
+    if (!open || list === null) return;
+    const fit = (): void => list.style.setProperty("--rpe-more-room", `${roomFor(list, place === "foot")}px`);
+    fit();
+    window.addEventListener("resize", fit);
+    return () => window.removeEventListener("resize", fit);
+  }, [open, place]);
   const items = (props.pages ?? PAGES).filter((item) => item.shells.includes(place === "drawer" ? "drawer" : "web"));
   const rest = items.filter((item) => !item.often);
   const go = (id: string): void => {
@@ -78,7 +105,7 @@ export function PagesBar(props: PagesBarProps) {
   const list = open ? (
     <>
       <div class="rpe-more-away" onClick={() => setOpen(false)} />
-      <div id={listId} class="rpe-more-list" role="group" aria-label="More pages">
+      <div ref={listed} id={listId} class="rpe-more-list" role="group" aria-label="More pages">
         {rest.map((item) => (
           <button key={item.id} type="button" aria-current={item.id === current ? "page" : undefined} disabled={props.disabled(item)} onClick={() => go(item.id)}>
             <Icon name={item.icon} size={16} />

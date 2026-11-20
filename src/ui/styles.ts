@@ -163,9 +163,9 @@ const OWN_CSS = `
 .rpe-drawer-nav .lre-tabs>button[aria-current=page]{background:var(--lre-accent-soft);color:var(--lre-accent-text);border-color:color-mix(in srgb,var(--lre-accent) 35%,transparent);font-weight:600}
 
 .rpe-more-away{position:fixed;inset:0;z-index:-1}
-.rpe-more-list{position:absolute;right:0;top:calc(100% + var(--lre-s1));z-index:1;display:flex;flex-direction:column;min-width:200px;max-width:calc(100vw - 2 * var(--lre-s2));padding:var(--lre-s1);border:1px solid var(--lre-border);border-radius:var(--lre-r-lg);background:var(--lre-bar-bg);box-shadow:var(--lre-shadow-lg)}
-.rpe-web-bottom>.rpe-more-list{top:auto;right:var(--lre-s1);bottom:calc(100% + var(--lre-s1))}
-.rpe-more-list>button{display:flex;align-items:center;gap:var(--lre-s2);min-height:var(--lre-tap-lg);padding:0 var(--lre-s3);border:0;border-radius:var(--lre-r);background:transparent;color:inherit;font-weight:500;text-align:left;transition:background-color var(--lre-fast)}
+.rpe-more-list{position:absolute;right:0;top:calc(100% + var(--lre-s1));z-index:1;display:flex;flex-direction:column;min-width:200px;max-width:calc(100vw - 2 * var(--lre-s2));max-height:calc(var(--rpe-more-room,100vh) - var(--lre-s2) - env(safe-area-inset-bottom,0px));overflow-y:auto;overscroll-behavior:contain;padding:var(--lre-s1);border:1px solid var(--lre-border);border-radius:var(--lre-r-lg);background:var(--lre-bar-bg);box-shadow:var(--lre-shadow-lg)}
+.rpe-web-bottom>.rpe-more-list{top:auto;right:var(--lre-s1);bottom:calc(100% + var(--lre-s1));max-height:calc(var(--rpe-more-room,100vh) - var(--lre-s2) - env(safe-area-inset-top,0px))}
+.rpe-more-list>button{display:flex;flex:none;align-items:center;gap:var(--lre-s2);min-height:var(--lre-tap-lg);padding:0 var(--lre-s3);border:0;border-radius:var(--lre-r);background:transparent;color:inherit;font-weight:500;text-align:left;transition:background-color var(--lre-fast)}
 .rpe-more-list>button:hover:not(:disabled){background:var(--lre-hover)}
 .rpe-more-list>button[aria-current=page]{background:var(--lre-accent-soft);color:var(--lre-accent-text);font-weight:600}
 `;
