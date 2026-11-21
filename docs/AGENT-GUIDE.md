@@ -1,0 +1,678 @@
+# Writing LumiRPEngine worlds: a guide for agents
+
+> The world format and the engine's rules this page describes are RPE's. The tools and commands it names (`lre_*`, `lumirpengine`) are those of the command line and MCP server for outside harnesses, which this build does not serve and a later build brings back; in this build a world is edited in Build ([Worlds in RPE](world.md)).
+
+Read this before you touch a LumiRPEngine world through the `lumirpengine` MCP server or command line ([MCP.md](MCP.md)): the world model, how to work on a user's worlds, and the mistakes that are easy to make and hard to see. Every kind, field, effect and formula function is in the reference (`lre_docs`); complete worlds to learn from are the starters (`lre_template`). How outside agents reach LumiRPEngine is DESIGN §23.
+
+## The world model
+
+A world is one JSON document in the `lre-world-v1` format, with a published JSON Schema (`lre_schema`). Each commit makes an immutable **revision**, named by its content hash; the newest is the world's **head**, and a chat plays the revision it was started on until the player upgrades it. Changes go to a **draft** first: a working copy that a commit turns into the next revision.
+
+- **Collections** are objects keyed by id: `kinds`, `relations`, `entities`, `places`, `routes`, `grids`, `maps`, `rules`, `actions`, `checks`, `schedules`, `tracks`, `tables`, `sections`, `steps`, `packs`, `lore`, `classifications`, `tiers`, and `lifeStates` and `routines` when the world has them.
+- **Parts** are single values: `calendar`, `realism`, `time`, `start` (`{place, at}`), `pov` (the entity the player plays), `currency`, `loreIndex`, `pins`, and the optional `ruleset`, `mapSettings`, `spawnTier`, `spawnCap`, `routineSettings`, `sectionTemplates` and `narrator` (the narrator's knowledge in the world's chats, whole: `{"knowledge": "scene" or "pov", "secrets": "marked" or "omit"}`; left out, each user's Settings → Narrator decides, and a chat's own choice beats either).
+- **Checks:** `ruleset.adjudication` decides how checks are decided, and `ruleset.inferred` how a typed attempt no action with its own check covers is read as a check of the world's sheet (`mode`, `when`, `who`, `skills`, `difficulty`, `detail`, `others`, `guidance`, `most`; it must name its `mode`). A world without one leaves inferred checks to each chat's realism preset. The skills it rolls are the world's own: the rows of a skill action's table (Use a skill, Make a save) or the Sheets pack's stats, so give an attempt that matters to the story its own action with its own check, which keeps it.
+- **Kinds** are types with fields and single inheritance (`extends`). The packs define the common ones: `thing` (with `owner` and `place`), `person`, `item`, `container`, `kit`, `vehicle`, `region`, the money kinds (`account`, `card`, `flow`, `job`, `holding`, `property`, `business`, `trust`, `invoice`, `project`), and `group`, which `faction`, `family`, `household`, `company`, `party`, `business` and `trust` extend, each of them an organization (see Organizations). A world kind with a pack kind's id replaces it whole, so extend a pack kind rather than redefine it.
+- **Entities** are the people and things: `{id, kind, name, tier, fields, relations}`, plus `life`, `lifeKnownBy`, `agent`, `cues`, `class`, `tags`, `visibility` and `knownBy` as needed. Fields hold values; relations are `{type, to, fields?}` links to other entities.
+- **Actions** need a one-line `description`: typed messages are read against each action's label and description.
+- **Formulas** are strings in a small, safe expression language (`lre_docs` with `doc: "expressions"`): `at(pov, 'archive')`, `stage.hale_debt == 'revealed'`, `hour >= 18`. Dice are notation strings (`1d20`).
+- **Money** is always a whole number of the currency's minor units: 4250 is $42.50 in a dollar world. **Times** are local ISO date-times (`2026-09-14T18:30`).
+
+## How to work on a user's world
+
+1. **Read before you write.** `lre_worlds` lists the worlds and whether each has a draft stored. A draft that is already there when you start is the user's work in progress: ask them before you edit, commit or discard it. `lre_world` reads one at a JSON Pointer: `""` gives an outline of the whole world (collections with their ids), `/entities/mara` one item. `lre_search` finds an item by what it says.
+2. **Edit the draft.** `lre_edit` takes JSON Patch (RFC 6902) operations whose paths point into the whole world: `add` creates an item or a field, `replace` changes one that exists, `remove` deletes, `test` guards a value. All the operations of one call apply, or none do. Pass `expectVersion`, the draft version from your last read (`lre_world`, `lre_draft` and `lre_worlds` give it even with no draft stored; each `lre_edit` answers the new one): if the draft has changed since, the edit is refused.
+3. **Check.** Every `lre_edit` answers the lint the draft has now and any macro hazard the edit brought in. `lre_draft` sums up the draft against the head; `lre_diff` shows field by field what changed. `lre_playtest` plays typed turns and `lre_check_world` simulates whole days, both with the bundled engine and no model.
+4. **Commit, or discard.** `lre_commit` with a short note makes the draft the head; the note goes into the world's history (`lre_history`). It is refused while the draft has lint errors, which it lists. `lre_discard` throws the draft away. Pass both the `expectVersion` you last saw, as for `lre_edit`.
+
+**The draft is the user's Build draft.** Build edits the same single draft: the user sees your changes as you make them, and you see theirs. Don't leave a draft behind: commit what you finished, discard what you didn't, and say which you did. If an edit is refused because the version moved, read the draft again: the user may be editing it.
+
+**A commit takes the whole draft.** When the user presses Commit in Build, your unfinished changes go into that revision with theirs; when you commit, their changes go in with yours. So finish one change before you start the next, and tell the user what you are in the middle of. With `expectVersion`, `lre_commit`, `lre_discard` and `lre_restore` are refused if the draft moved since you read it. A commit is refused, too, when the head is no longer the revision the draft began from: compare with `lre_diff`, discard, and redo the change on the new head.
+
+**Chats keep their revision.** Committing changes no running chat. `lre_chats` says which chats are behind; `lre_upgrade` with `preview` shows what an Upgrade would bring in; without it, it applies the default picks: what play never touched takes the new revision, what play changed stays. So keep every id a chat uses: a renamed id is a new thing, and the old one stays in the chat.
+
+**Offline work.** Without a Lumiverse, write the world as a file: start from a starter (`lumirpengine template <id> --out world.json`), check it with `lre_check` after each change, run it with `lre_playtest` and `lre_check_world`, and bring it in with `lre_world_import` (or Build's Import) once it is clean.
+
+## JSON Patch on a world
+
+- An item is added whole: `{"op": "add", "path": "/entities/mara", "value": {"id": "mara", "kind": "person", …}}`. Adding to a key that exists replaces it, so to change one field, point at the field: `/entities/mara/fields/place`.
+- `replace` and `remove` need something there; `add` needs the parent to exist (`/entities/mara/fields` must be an object before `/entities/mara/fields/place` can be added).
+- In a list, a number is the index and `-` is the end: `{"op": "add", "path": "/entities/mara/relations/-", "value": {"type": "knows", "to": "pov"}}`.
+- In a key, `~1` stands for `/` and `~0` for `~`: the table `economy.catalog` is `/tables/economy.catalog`, and a key `a/b` is `/x/a~1b`.
+- `test` makes an edit conditional on what you read: `{"op": "test", "path": "/entities/mara/name", "value": "Mara"}` first, and the whole patch is refused if Mara was renamed meanwhile.
+- `/id`, `/format`, `/engineVersion`, `/suppressed` and `/pins` are the engine's: a patch may not change them.
+- One patch carries at most 500 operations and brings in at most 4 MiB of JSON (what it adds, replaces and copies), and the world may nest at most 64 levels deep. An item the engine can't read (`/lore/x` set to `{}`) is refused before anything is written, so add items whole.
+
+## Ids and keys
+
+- Every item's `id` repeats its key. A new item you write without an `id` (a collection write, or `lre_edit`'s `add` of a new key) takes its key, so you needn't type it twice; one written with an `id` other than its key is still refused by lint as `id_mismatch` (entities, lore entries, step templates and classifications). Maps and pack settings carry no `id`.
+- Ids are lower snake_case by convention (`old_bram`, `quay_to_market`) and are what everything else refers to: `fields.place`, `fields.owner`, relation targets, track ids in formulas, lore `links`. Look them up rather than guess them; every reference to an id the world doesn't have is a lint error or a dead link.
+- An item's key must be 1 to 200 characters and never `__proto__`, `constructor` or `prototype`; the engine refuses any other.
+- A world's own id (`w_…`) is the host's: `lre_world_create` and import assign it.
+
+## People
+
+- **The POV** (`pov`) is the entity the player plays, a `person` on a lead tier, never capped by realism. `start` is where and when play begins, and the POV stands there unless its `fields.place` says otherwise.
+- **Tiers** say how deeply someone is simulated: by default `principal` (Leads), `supporting` and `background`. `"agent": true` makes someone pursue their own agenda off-screen, and live the plans the story gives them. Anyone else only follows their schedules: their plans are never lived and lapse, so mark `agent` on whoever should act on their own plans. An agent's ordinary day comes from their routine (see Routines and schedules).
+- **Who knows the POV.** Everyone who has met the POV holds a `knows` relation toward the POV, or a `regard`. The narrator learns from exactly that whether Mara knows you, so a friend without either greets the player as a stranger.
+- **Regard** is one directed relation with `warmth`, `trust` and `respect` from −100 to 100; write each direction that matters. Kinship (`parent_of` and `child_of`, `sibling_of`, `spouse_of`, `partner_of`) is kept two-sided: write both sides.
+- **Life and death.** `life` is the state someone starts in: `alive` when unset, `dying`, `dead`, or one of the world's own `lifeStates`. The dead keep their place: give a body a `fields.place` where it lies, and no schedule (someone who doesn't act follows none).
+
+### lifeKnownBy: who knows how someone starts
+
+When someone starts dead or dying, `lifeKnownBy` lists the ids of the people who know it; everyone else, the POV included, takes them for alive until they see the body or are told. **Left out or empty, everyone knows**, which tells the player at once. So:
+
+- a death the player hasn't learned of lists who does know, including everyone who starts in the same place as the body;
+- when nobody else knows yet, list the person themself (the list is then not empty, and no one else learns it);
+- on someone who starts alive it changes nothing (lint warns), and every id in it must be an entity of the world.
+
+```json
+{ "id": "old_bram", "kind": "person", "name": "Old Bram", "tier": "supporting", "life": "dead", "lifeKnownBy": ["corin"], "fields": { "place": "net_loft" }, "relations": [] }
+```
+
+## Character minds
+
+A character can have a **mind**: a model call made as that character alone, on what they know (their entity's fields, never a Lumiverse character card; the lore they may read, the turns they were there for, their notes and commitments, their money and their day). It answers with their private read of the moment and what they intend; the narrator then depicts it. Minds are blind to each other; Playtest and Check world call no model, so they play a world without minds. So write who someone is into their fields (`description`, `traits` and the rest): no character card fills it in. A mind knows the truths of the tracks its character owns, of a secret their cue stands for, and of secret lore whose `holders` name them; a secret held from the start goes on the agenda's start stage (entering a stage tells the player its truth).
+
+Who gets a mind is decided each turn by a **focus score**: points for being in the POV's scene or close by, being named, a relation with the POV, a stake in tracks and rules under way, plans with the POV, and their tier. The score puts each character on a ladder: **Live** (a mind every turn), **Near** and **Far** (a mind on their refresh), **Background** (routine only). The world tunes the ladder and what minds remember in its `minds` part:
+
+```json
+[{ "op": "add", "path": "/minds", "value": {
+  "secrecy": "brief",
+  "weights": { "mentioned": 50 },
+  "thresholds": { "live": 60, "near": 35, "far": 15 },
+  "always": { "ids": ["marcus_delgado"] },
+  "never": { "tag": ["crowd"] },
+  "memory": { "notes": { "show": 10, "keep": 30 }, "salience": { "halfLifeDays": 14 } },
+  "holdings": { "marcus_delgado": { "track:s_shop_trouble:truth": { "keptFrom": "everyone" } } } } }]
+```
+
+- **`secrecy`** decides what the narrator gets. `full` (the default, for a world that says nothing): the monologue, intent, reactions and mood too, to depict and never state. `brief`: only a depiction, written as behaviour anyone present could see and withheld when it would give away a secret or a name the POV can't know, while the monologue stays in the GM view. A mind knows its own character's secrets, so set `brief` where a private thought reaching the narrator would give one away.
+- **`weights`** are the points each input adds, from −100 to 200: `here` 45, `nearby` 20, `mentioned` 40, `regard` 10, `knows` 10, `owner` (owns a track under way) 15, `track` (named in one) 8, `rule` 5, `pending` (an invitation, appointment or plan with the POV) 15, `recent` 10, `band` 15, 5 and 0 for principal, supporting and background, and `roles` by classification value id (`antagonist` 20). A role weight counts only where one of the world's classifications has that value (lint warns about one that none has), and a world's `roles` replaces the default map whole.
+- **`thresholds`** are the lowest scores for Live, Near and Far (60, 35 and 15); below Far is Background. Live is only for someone at hand: in the POV's scene or named this turn. Being close by adds points but never makes someone Live; anyone not at hand is Near at most, whatever their score.
+- **`always`** and **`never`** are selectors (`ids`, `kind`, `tier`, `memberOf`, `tag`, `class`): `always` keeps people Live wherever they are; `never` keeps them Background, mindless, and wins over `always`. A GM's pin in a chat wins over both. An id, kind, tier, group or classification the world doesn't have is a lint error.
+- **`memory`** is what a mind is shown and how long a note lasts, in entries unless named: `witness.show` (what they saw lately, 8), `recall.recent` and `recall.relevant` (their latest turns and those best matching the moment, 4 each) within `recall.tokens` (1200), `notes.show` (8) and `notes.keep` (24 before the oldest are folded into their summary), `commitments.show` (8; open ones are kept until resolved), `salience.halfLifeDays` (a note's weight halves every 7 game days) and `salience.floor` (below 0.5 it has faded), and `consolidate.enabled` (true: faded and surplus notes fold into the summary, not lost). The user's own settings win over the world's.
+- **`holdings`** is what each person, the POV included, knows from the start: by entity id, each fact by its id, `lore:<entry>`, `track:<track>:<stage>` (a stage's truth) or `field:<entity>:<field>`, with `belief` (`"true"`, `"false"` or `"uncertain"`; true when left out), `confidence` (0 to 1; 1 when left out) and `keptFrom` (`"everyone"` or a list of people; no one when left out). They seed each chat's knowledge. A World Info entry's secret marks name their own holders, so don't list those here; lint (`minds.holdings`) flags a holder who isn't a person and a fact the world doesn't have.
+- Every part is optional; one left out or out of range reads as its default, and lint says so. The user decides in their settings whether minds run at all, and how many Live minds a turn may have.
+
+**Prompts.** The five minds steps, `mind`, `memory`, `skip` (a time skip's turning points), `consolidate` (folding old notes into a summary) and `knowledge` (after each reply, while the chat tracks who knows what: who learned which fact, by seeing it or being told, what someone worked out and how sure, and what someone now doubts), take world step templates as the other steps do, with `"output": "text"` and `"signals": []`: minds run on their own cadence, so signals are ignored (lint notes any as info). The template is the step's instructions only, with `{{character}}` the character's name (empty for a `knowledge` call about the whole scene, the default) and `{{world}}` the world's: the engine appends the answer's format itself, which no template replaces, so write how to think, never the JSON. The engine checks a `knowledge` answer whatever the template says: no one witnesses what they weren't there for, a teller holds what they tell, an inference rests on what its person holds or saw, and the player character never infers or doubts. The player's own prompt wins over the world's template, which wins over the built-in; give each purpose one at most (lint warns of a second, and a blank one is skipped).
+
+```json
+[{ "op": "add", "path": "/steps/mind_port_alder", "value": { "id": "mind_port_alder", "purpose": "mind", "output": "text", "signals": [],
+  "template": "You are the private mind of {{character}} in {{world}}, a lake town where everyone knows everyone's business and says less than they mean. Think as {{character}}, from only what they know below. Decide how they read this moment and what they intend; never script anyone else, and keep to what a neighbour would notice." } }]
+```
+
+## Routines and schedules
+
+A **routine** is what someone can be relied on to do on an ordinary day; a **schedule** is a commitment with set hours (a shift, school). Both are defaults the world leans on, never authority over the story: what the story established (a place or activity an action, the narration or the GM set, a trip, the GM's intent) always comes first, then schedules and appointments, then story plans, then the routine, then the basic needs (sleep, breakfast, lunch, dinner), then chores and agenda steps. Nothing else fills a day. A routine never moves anyone out of a scene with the POV and never moves a Live or Near character; it matters most for the Background cast off screen. So write a routine as a person's habits, not a timetable they must keep: leave people with no routine at all when the world says nothing about their days, and they live on the story, their commitments and their basic needs.
+
+A routine is one item of `routines`: `{id, label?, owner?, inherit?, blocks, source?}`. Its **owner** is read as a schedule's is: an entity, a group (its members), a kind, a selector, or none for the world's default for everyone. For each block id the most specific owner wins (their own, a group's, a kind's, a selector's, the world's, then the basic needs), and `inherit: false` drops the less specific routines' blocks for whom it covers. Each block has an `id`, a `label`, an `activity` (`work`, `socialize`, `leisure`, a meal, `sleep` or the world's own), `minutes`, and a `kind`:
+
+- **`fixed`** starts at `at` (`HH:MM`);
+- **`flexible`** takes its minutes somewhere in its `window` (`{from, to}`, `HH:MM`; a `to` at or before `from` runs past midnight), and `perWeek` makes it a floating block ("the gym three times a week");
+- **`optional`** is flexible by `chance` (above 0, at most 1): the first thing a busy day leaves out.
+
+The rest is optional: `days` (`weekdays` with 0 for Sunday, `off: "only"` or `"never"` for days off, `holidays` and `except` by the calendar's ids, `birthday`, `seasons`, `weather`), `place` (`home`, the default, `work`, `here`, `with` its company's home, `{place}` or `{nearest: sceneType}`), `company` (`{who: selector, invite?}`), `priority` (1 to 5), `needs`, `private` (the player reads it as "Busy") and `source`. Give a block its ground when the world has one: `{"type": "lore", "entry": …, "quote": …}` or `{"type": "sheet", "entity": …, "field": …, "quote": …}`, with the short quote it rests on, so the GM sees why it's there. `{"id": "lunch", "off": true}` turns off a less specific block or a basic need.
+
+```json
+[{ "op": "add", "path": "/routines", "value": { "dale_mornings": {
+  "id": "dale_mornings", "label": "Dale at the marina", "owner": "dale_whitcomb",
+  "blocks": [
+    { "id": "open_marina", "label": "Opens the marina", "activity": "work", "kind": "fixed", "at": "06:30", "minutes": 90, "place": { "place": "alder_harbor_marina" }, "days": { "weekdays": [1, 2, 3, 4, 5, 6] },
+      "source": { "type": "lore", "entry": "lore_marina", "quote": "Dale Whitcomb has run it for twenty-five years." } },
+    { "id": "coffee", "label": "Coffee at the Bluebird", "activity": "socialize", "kind": "flexible", "window": { "from": "09:00", "to": "11:00" }, "minutes": 30, "perWeek": 3, "place": { "place": "bluebird_coffee" } }
+  ] } } }]
+```
+
+A block that asks someone along makes an invitation only when the world's settings allow it: here the POV, on Thursday evenings, from the Rusty Anchor's trivia night the lore tells of.
+
+```json
+[{ "op": "add", "path": "/routines/marcus_trivia", "value": {
+  "id": "marcus_trivia", "owner": "marcus_delgado",
+  "blocks": [{ "id": "trivia", "label": "Trivia night at the Anchor", "activity": "socialize", "kind": "fixed", "at": "19:30", "minutes": 120, "days": { "weekdays": [4] }, "place": { "place": "rusty_anchor" },
+    "company": { "who": { "ids": ["pov"] }, "invite": true },
+    "source": { "type": "lore", "entry": "lore_anchor", "quote": "a Thursday trivia night that gets competitive" } }] } }]
+```
+
+**Tuning** is the `routineSettings` part; each part left out keeps its default, and the defaults are no part at all:
+
+- **`awareness`**: how long someone the story put somewhere stays there against their routine. `story_first` keeps them until the story or the GM releases them; `balanced` (the default) until their night, with Background characters keeping their routine and Far ones bending for story plans and the GM's intent; `routine_first` lets the routine's next edge take them back.
+- **`invitations`**: `off`, `player` (the default: routine blocks may invite the POV) or `everyone` (people's days take each other's invitations too). Story plans and the GM invite under any setting.
+- **`sociability`**: `reserved`, `usual` or `outgoing`, how fast NPCs' social and fun needs grow.
+- **`planBend`**: which story plans take their time from work and school: `must`, `strong`, `standard` (the default) or `ordinary`.
+
+```json
+[{ "op": "add", "path": "/routineSettings", "value": { "awareness": "story_first" } }]
+```
+
+**Editing.** `lre_routine_put` and `lre_routine_delete` write one routine whole, and `lre_routine_settings` the settings, each at the version you read; `lre_edit` works on `/routines` and `/routineSettings` as above. A routine whose shape the engine can't read, or a setting or value it doesn't take, is refused before anything is written, with a message naming the field (`window`, `kind`, `minutes`, `awareness`…), exactly as Build's save is: fix that field and send it again. What a routine names that the world lacks (a place, an owner who matches nobody, a lore entry) is a lint warning after the write. `lre_schedules`, `lre_schedule`, `lre_schedule_put` and `lre_schedule_delete` do the same for schedules.
+
+**In a chat** the world's routines are only where it starts. Change someone's routine in one chat with `lre_routine_edit` (`routine_follow` for whether and how strictly they keep it, `routine_block` for one block, `schedule_override` for a schedule; each is one Undo-able fix), read their day and why each block is there with `lre_day`, and what the chat changed with `lre_routine_changes`. Change the world's routine only for what is true of the world; what happened in one story belongs to that chat.
+
+## Things and who owns them
+
+A thing (an `item`, or a kind built on one: a `container`, a `kit`, a `vehicle`) has four facts the engine keeps apart and never guesses one from another (DESIGN §28):
+
+- **Where it is**: exactly one of `fields.place` (lying at a place) or an `in` relation (`{"type": "in", "to": "rhea"}`: carried by a person, or inside a container or a vehicle). Never both: lint (`gear.two_places`) flags it, and play reads the place.
+- **Who has it** follows from `in`: the nearest person up the chain.
+- **Whose it is** lives in `fields.owner`: the id of a person, a household, a business or a group. That puts it on their gear, a vehicle in their garage and at their levels, and lets them use it. The `owns` relation only changes how the Journal words a change: an item with an `owns` link and no `fields.owner` belongs to no one. Left unset, an owner is presumed when it is needed, and never written: on a person, theirs; in a holder, the holder's owner's; at a place, the business trading there, else whoever lives there, else nobody's. So leave a home's furniture unowned and it reads as the household's; set `fields.owner` on what someone owns outright. Money is owned differently: see Money.
+- **Who may use it** follows from the owner, the `uses` grants on it (a relation from the user to the thing, `fields.basis` `hold`, `loan` or `assign`, `until` for a loan's end), the `permits` relations of its owner (`{"type": "permits", "to": "<who>", "fields": {"scope": "all" or "home"}}`, from the owner) and the world's implied rules (household, housemates, partners, staff, customers), unless the thing's own `access` says otherwise (`owner`, `members`, `staff`, `customers` or `public`, each admitting those before it).
+
+The rest of a thing:
+
+- **`size`**, one of `pocket`, `hand`, `armful`, `heavy`, `furniture` and `builtin`. Leave it out when its `catalog` row has one (a refrigerator row is Furniture), when it is `fixed` (Built-in) or `part` (built into what holds it, a glovebox), or when its `volume_l` or its category says; lint notes (`gear.size_unknown`) a thing nothing sizes. A person carries up to the world's ceiling (Armful by default), so a thing above it on a person is a warning with a one-press fix (`gear.too_big`), and so is one both lying at a place and in a holder; nothing goes into a holder smaller than it (a holder's `holds`: the largest size it takes).
+- **`home`**, where it is kept and goes back to: a place id, a holder id, or `"owner"` (on its owner). Left out, an authored thing rests where you put it.
+- **`aliases`** (other names the story may use: "mug", "the fridge"), **`description`**, **`sleep`** (can be slept in or on) and **`part`**.
+- **Never write** `got`, `made`, `maybe_same_as` or `merged_into`: they are the engine's record of how a thing was had and made in play.
+
+A mug Marcus keeps at the shop, and a fridge in the Kowalczyks' kitchen that nobody owns outright (it reads as the household's, its size and what it holds from its catalog row):
+
+```json
+[{ "op": "add", "path": "/entities/marcus_mug", "value": { "id": "marcus_mug", "kind": "item", "name": "Chipped mug", "tier": "background",
+  "fields": { "place": "alder_automotive", "owner": "marcus_delgado", "size": "hand", "home": "alder_automotive", "aliases": ["mug", "coffee mug"], "description": "A chipped mug, always half full of cold coffee." },
+  "relations": [] } },
+ { "op": "add", "path": "/entities/harbor_fridge", "value": { "id": "harbor_fridge", "kind": "container", "name": "Refrigerator", "tier": "background",
+  "fields": { "place": "harbor_street_114", "catalog": "refrigerator", "aliases": ["fridge"] },
+  "relations": [] } }]
+```
+
+Danny lets Jordan use his things at home, without lending any one of them:
+
+```json
+[{ "op": "add", "path": "/entities/danny_okafor/relations/-", "value": { "type": "permits", "to": "pov", "fields": { "scope": "home" } } }]
+```
+
+**The world's things config** is the gear pack's (`packs.gear.config`, Build → Packs → gear): `sizes` (`ceiling`, `byCategory`, `byVolume`), `access` (the implied rules, each `true` or `false`), `carry` (everyday carry: `[{"who": selector, "types": [catalog ids]}]`, by default people carry a wallet, keys and a phone; `[]` carries nothing), `fetchMinutes`, `putAway` (`on`, `hours`, `minLevel`), `tidy` (`auto`) and `notWithYou`. Each part left out reads as its default, so set only what the world changes:
+
+```json
+[{ "op": "add", "path": "/packs/gear/config/access", "value": { "family": true } },
+ { "op": "add", "path": "/packs/gear/config/fetchMinutes", "value": 5 }]
+```
+
+**In a chat**, move, hand over or make a thing with item ops rather than field edits: `lre_gm_edit` takes `{"op": "item", "change": {"do": "move", "item": "marcus_mug", "to": {"in": "pov"}, "why": "…"}}` and the other ops ([MCP.md](MCP.md)), and `lre_items_find` finds a thing by the story's words. The older `put`, `move`, `link in` and `set place` on a thing go through the same move, with its size rules.
+
+## Money
+
+Money is entities, a few fields and the economy pack's config. Amounts are whole minor units (4250 is $42.50 in a dollar world) and percentages are percent units (22 is 22 %). What runs for someone depends on their Money level: the world's `realism.levels.money`, capped by their tier's band (the POV is never capped). At 0 money is off; at 1 a person's `wealth` band is all there is; at 2 their cash and one everyday account are real, and a payment they can't cover is declined; from 3 all their accounts, and more as below.
+
+| From | What runs | Its feature ids |
+|---|---|---|
+| Money 3 | flows (so bills, pay and a business's takings), cards, payment preferences, household shares, living costs, property, withholding at a flat rate, interest (deposits earn, loans and cards charge, a card on its statement day where statements don't run) | `flows`, `cards`, `payment_prefs`, `households`, `living_costs`, `property`, `withholding`, `interest` |
+| Money 4 | statements and minimum payments, interest on the average daily balance where an account asks for it, fees, late payments and collections, credit scores, cash only at a machine or a branch, holds, daily card limits, overdraft policies, withholding through the tax brackets, sales tax, business taxes, unemployment taxes (FUTA and SUTA) on an employer's payroll, investments, options, capital gains | `statements`, `average_daily`, `fees`, `delinquency`, `credit`, `atm`, `holds`, `daily_limits`, `overdraft`, `tax_brackets`, `sales_tax`, `business_tax`, `unemployment_tax`, `investments`, `options`, `capital_gains` |
+
+A world switches a feature on or off for itself in `packs.economy.config.features` by its id (`{"sales_tax": true}`), down to its floor: Money 2 for `flows`, `cards`, `payment_prefs`, `households`, `living_costs`, `atm`, `daily_limits` and `overdraft`, Money 3 for the rest. Lint warns about an id it doesn't know.
+
+### Who owns money
+
+A **party** is a person, or an entity of kind `business`, `trust`, `household` or any other group (a `faction`, a `family`, the `party`). An account, a business, a holding or a property names its holders in `owners`, each with a role: `[{"party": "pov", "role": "owner"}]`.
+
+| Role | Spends from it | Counts toward their net worth | Manages it |
+|---|---|---|---|
+| `owner`, `joint` | yes | yes | yes |
+| `custodian`, `trustee` | yes | no | yes |
+| `beneficiary` | no | yes | no |
+| `authorized_user` | yes | no | no |
+
+`share` divides the worth between the holders whose role counts it, in percent; given by none, they share equally. A **household** is the relationships pack's `household` group: its members hold a `member_of` relation to it, and it shares flows between them (below).
+
+### Accounts and products
+
+An `account` entity is one purse, wallet, bank account, card account, loan or investment account: `owners`, `product`, `opening` (the balance at the start, from the holder's side: a debt is negative) and `institution`. `product` is an account class, each a built-in product with the finance tables' terms (`cash`, `checking`, `business_checking`, `savings`, `money_market`, `cd`, `trust`, `escrow`, `credit_card`, `charge_card`, `line_of_credit`, `loan`, `mortgage`, `brokerage`, `retirement`, `note`), or one of the world's own products, `packs.economy.config.products` by id. A `note` is a loan its holder made: an asset and a receivable, never cash, which nothing pays from and nothing pays into but its borrower's payments. An account's own `limit`, `apr_pct`, `apy_pct`, `statement_day`, `due_day`, `payment`, `months_left`, `overdraft` and the rest win over its product's; `autopay` (`minimum`, `statement`, `full` or `fixed`) with `autopay_from` pays a credit account by itself.
+
+Read `/packs/economy/config` before adding to it; the modern starter's has no `products` map yet. Where the world has none, add the map whole with the first product in it, as below (JSON Patch adds into a map only once it exists); where it has one, add each product by its own path, `/packs/economy/config/products/<id>`, since adding the whole map replaces it and drops every product already in it. `assets` works the same, and in the modern starter it is added to by id, as further down. The same goes for entities: `add` on an id that is taken replaces that item whole, so look an id up before you use it.
+
+```json
+[
+  { "op": "add", "path": "/packs/economy/config/products", "value": { "lakeshore_rewards": { "label": "Lakeshore Rewards Visa", "class": "credit_card", "institution": "Lakeshore Credit Union", "limit": 300000, "apr_pct": 21.9, "rewards_pct": 1.5 } } },
+  { "op": "add", "path": "/entities/acct_pov_rewards", "value": { "id": "acct_pov_rewards", "kind": "account", "name": "Rewards Visa", "tier": "background", "fields": { "owners": [{ "party": "pov", "role": "owner" }], "product": "lakeshore_rewards", "opening": -12500, "autopay": "statement", "autopay_from": "acct_pov_checking" }, "relations": [] } }
+]
+```
+
+A **card** is its own entity, kind `card`: the `account` it draws on, its `holder`, its `network` (`debit`, `credit` or `charge`), its `state` (`active`, `frozen`, `lost` or `cancelled`) and `item`, the physical card in the holder's gear. An authorized user holds a card on someone else's account.
+
+### When a loan bills
+
+A loan (`product` an installment class: a personal or auto loan, a mortgage) bills only while its holders are at Money 3 or more, it is open (its authored opening has posted and it isn't closed, paid off, matured or charged off) and it owes: author it with a **negative `opening`**, the amount owed from the holder's side. It bills once a month at 00:01 on `due_day`, else on its product's `statement_day`, at the first such instant after the chat's clock, so one added after 00:01 on its due day first bills next month. Each bill posts the month's interest (owed × APR ÷ 12), then sets the payment: `payment` if the loan gives one, else the amortized payment over `months_left` (else `remaining_months`, else the product's `term_months`, else one month: due whole), the last month taking what's left; the minimum due adds anything past due and is due by 23:59 that day. `autopay` with `autopay_from` pays it then; otherwise it is late after 23:59, with a late fee and the delinquency stages. Lint warns about a liability opened positive and notes an installment loan that sets none of `due_day`, `payment` or `months_left`.
+
+### Loans between parties
+
+One party lends another in play, never by authoring the pair: the action `lend_money {to, amount, apr?, months?, from?, as?}` (Tell group Credit; `as` an organization the actor may spend for), the GM effect `economy.lend {to, cents, from?, into?, apr?, months?, payment?, due_day?, who?, by?}`, or the org op `lend`. It is one unit: the lender's `note` (its `loan` naming the borrower's loan) and the borrower's `loan` (its `note` naming the note, autopay `minimum` from where the money landed), and the cash moved. `apr` is 0, `months` 12 and `due_day` today's (at most the 28th) unless given; `from` is the lender's first account that covers it, `into` the borrower's deposit account. The loan bills as any loan does, its interest posting against the note, with no late fee, delinquency or credit report; each night what the note holds beyond what the loan owes lands with the lender, so a payment reaches them the day it is made, and once the loan owes nothing both close as paid off. The borrower must agree: the actor borrows for themselves or for an organization where they hold `money.borrow`. Within a group the two cancel out. Lint (`economy.notes`) holds a note and its loan to naming each other.
+
+### Flows: money that moves on its own
+
+A **flow** is every scheduled or one-off movement of money: rent, bills, a transfer to savings, an allowance, a loan payment. It is an entity of kind `flow`:
+
+- **`flow_kind`**: `transfer`, `bill`, `rent`, `utility`, `subscription`, `premium`, `loan_payment`, `card_payment`, `savings`, `income`, `payroll`, `allowance`, `living`, `tax`, `distribution`, `invoice`, `draw` or `other`.
+- **`from` and `to`**: an account; a party, paying as their preferences choose, or paid into their deposit account; or an outside payer or payee by name, in words (`"Harbor Mutual"`). A name shaped like an id (`acct_pov_chequing`) that names no entity draws a lint warning: it would be read as an outside party, so money would come from or go to nowhere.
+- **The amount**, the first of: `amount_cents`; `amount_formula`; `amount_table` (`table.row`, or `table.row.column`); `amount_min` and `amount_max`, a seeded draw between them; `amount_pct` of `amount_of`'s balance; `amount_due` (`minimum`, `statement` or `balance`, of the credit account it pays); or `revenue`, a revenue stream's model (below).
+- **When**: `every` (`day`, `week`, `month` or `year`) with `interval` (biweekly is `week` with 2), `weekdays` (0 is Sunday), `days` of the month (31 is the last day of a short month, −1 always the last), `months`, `except` (holiday ids), `roll` (`before` or `after`, for a day that isn't a business day) and `at` (`HH:MM`, 09:00 by default); or `once`, a local date-time. `start`, `end` and `count` bound it.
+- **When the money isn't there**, `shortfall`: `skip` this time, pay what there is (`partial`), `retry` after `retry_days` up to `retries` times, pay from `fallback`, let the account `overdraft` as its policy allows, or `defer` the amount to the next time.
+- `splits` sends parts elsewhere (fixed `cents` first, then `pct` of the rest); `shares` splits a household's flow between its members by `pct`; `link` ties it to what it belongs to (a property, a job, a loan); `status` is `active`, `paused` or `ended`.
+- **A revenue stream** is a flow whose `revenue` (a one-record list, `[{"type": …}]`) works out each payment where an amount would stand, `to` the earner (an account, or a party: a business's operating account, a person's deposit account) and `from` a payer by name or one in the world. Its `type`: `product` (`units` × `price` × `buyers`, each a number or a formula, with `margin_pct` and a tax `category`), `catalog` (up to 50 `items`, each `{name, price, units, season?, margin_pct?, category?}`, times `buyers`), `royalty` (a share of a production month: `production` a number, a month-by-month list or an Arps decline `{qi, di_pct, b}`; `price` minor units, a list or `{asset}`; `share_pct`, `deductions_pct`, `severance_pct`, `lag_months`; monthly), `fees` (units × price × clients) or `custom` (its `formula`, minor units). Product, catalog and fees take a `season` (twelve monthly factors, or a table's rows `1`…`12`), `weekdays` (seven factors, Sunday first), `growth_pct` and `spread_pct` (0: the same in every run). A formula reads the payment's own instant, with `self` the earner and `season`, `growth`, `weekday_factor` and `t` (months since it started). `ai: "bounded"` lets the agents adjust it in play (DESIGN §26.2); Build's editor previews its first twelve months.
+
+```json
+[{ "op": "add", "path": "/entities/flow_pov_boat_fund", "value": { "id": "flow_pov_boat_fund", "kind": "flow", "name": "Boat fund", "tier": "background", "fields": { "flow_kind": "savings", "from": "acct_pov_checking", "to": "acct_pov_savings", "amount_cents": 4000, "every": "week", "interval": 2, "weekdays": [5], "start": "2026-09-18", "shortfall": "skip", "category": "savings" }, "relations": [] } }]
+```
+
+### Businesses and invoices
+
+A **business** is an entity of kind `business`, a party with `owners` (and their `share`s) and a `structure`: `sole_proprietorship`, `partnership`, `llc` (the default), `s_corp`, `c_corp` or `nonprofit` (no owner row holds its worth; in play, starting one seats its founder in a Director position with every power, and no change of structure leads into or out of it).
+
+- **Where it sells:** a purchase at one of its `places` (else where it stands) pays it. `daily_sales` is what walk-in customers from outside the world spend there on each of its `trading_days` (0 is Sunday; Monday to Friday when left out), give or take `sales_spread_pct` (30 when left out), paid at closing and never on a day-off holiday.
+- **Its money** is in the accounts it owns. `operating_account`, one of them, is where takings land and payroll comes from (else its best deposit account). It keeps `margin_pct` of a sale (all of it when left out) and owes the rest to its suppliers, paid on the 10th; the sales tax it collects is paid on the 20th. Its rent, bills and loan payments are flows from its accounts.
+- **Its owners** take draws in play, except from a `c_corp`. `distribution_pct` pays that share of each period's profit out to the owners by share, every `distribution_every` (`month`, `quarter` (the default) or `year`), on the 10th after the period closes.
+- **Its shares** may be counted in units: give every owner row with a share of the worth `units` (a whole number), and set each `share` to its units over all of them, which lint holds you to (`orgs.units_share`). A row's `class` names one of the business's `share_classes` (`[{"id", "label", "votes"}]`, the votes a unit carries; one class, Common with a vote a unit, when left out). Ownership decisions in play need more than `decide_pct` (50 when left out) of the votes. An owner may be another business: the one it owns is its subsidiary. Profit owned by a household or a group, directly or through companies that pass it on, is taxed to no one, which lint warns of (`orgs.profit_untaxed`); a trust holding it pays as trusts do (Taxes).
+- **Its books**, month by month, are kept by the engine from all of that: there is nothing to write.
+
+A business's own Money level is its tier's cap, as a person's is: it decides whether the business collects sales tax and pays business taxes (Money 4) and whether its invoices go late (Money 3). Its payroll, takings and other flows go through its accounts, and an account runs at the highest level of those who may spend from it (the business and its authorized users), whatever the account's own tier. So give a business the `principal` tier, as the modern starter does, for all of it to run.
+
+Dale's marina has run on his own account so far, its takings flowing into it and its bills out. Making it a business moves the account to the business, with Dale still able to spend from it as an authorized user, and a purchase at the marina then pays it. The account was all Dale had, so he gets a checking account of his own as well: without one, his own spending and bills would come out of the business's.
+
+```json
+[
+  { "op": "add", "path": "/entities/alder_harbor_marina_co", "value": { "id": "alder_harbor_marina_co", "kind": "business", "name": "Alder Harbor Marina", "tier": "principal", "fields": { "owners": [{ "party": "dale_whitcomb", "role": "owner" }], "structure": "sole_proprietorship", "places": ["alder_harbor_marina"], "operating_account": "acct_dale_marina", "industry": "marina", "margin_pct": 70, "late_fee_pct": 1.5 }, "relations": [] } },
+  { "op": "replace", "path": "/entities/acct_dale_marina/fields/owners", "value": [{ "party": "alder_harbor_marina_co", "role": "owner" }, { "party": "dale_whitcomb", "role": "authorized_user" }] },
+  { "op": "add", "path": "/entities/acct_dale_checking", "value": { "id": "acct_dale_checking", "kind": "account", "name": "Dale's checking account", "tier": "background", "fields": { "owners": [{ "party": "dale_whitcomb", "role": "owner" }], "product": "checking", "opening": 640000, "institution": "Great Lakes Bank" }, "relations": [] } }
+]
+```
+
+An **invoice** is an entity of kind `invoice`: the `business` that issued it, the `customer` (a party's id, or an outside customer by name), `cents`, `memo`, `issued`, `due` (30 days after `issued` when left out), `state` (`open` when left out, `paid`, `late` or `void`) and `paid`, what is paid of it so far. Lint requires the business, the customer and an amount above zero. An open invoice is paid as a bill from the customer's accounts on its due date and every week after until it is paid; an outside customer pays on the due date. Unpaid when its due day ends, it goes `late` and takes the business's `late_fee_pct` of the amount, and the fee again every 30 days. A business's `invoice_days` (30 when left out) are the terms of the invoices it issues in play.
+
+```json
+[{ "op": "add", "path": "/entities/inv_pov_winter_storage", "value": { "id": "inv_pov_winter_storage", "kind": "invoice", "name": "Winter storage", "tier": "background", "fields": { "business": "alder_harbor_marina_co", "customer": "pov", "cents": 48000, "memo": "Winter storage for the fishing boat", "issued": "2026-09-14", "due": "2026-10-14", "state": "open" }, "relations": [] } }]
+```
+
+### Work and pay
+
+A **job** is an entity of kind `job`, one worker's employment:
+
+- **Who and where:** `worker`; `employer`, any party in the world (a business, paying from its operating account; a household, a group, a trust, the party or a person, paying from its `payroll_account` or else its deposit account), a place (the business trading there, else an outside employer) or an outside employer named in words, an id-shaped one that names no one and no place drawing a lint warning; `workplace`, the place the work is (else the business's `places`); `title`; `position`, one of the employer's positions (see Organizations); and `occupation`, a row of the occupations table (else the worker's own `occupation`).
+- **Pay:** `basis`, which is `salary` (a year), `hourly`, `per_shift`, `commission`, `tips` or `stipend` (a period), and `rate`, both from the occupation's row when left out; `commission_pct` of the sales credited to the worker; `tips_per_hour` on top of hourly pay.
+- **When it pays:** `pay_every`, the occupation's when left out: `weekly` or `biweekly` on the weekday of `pay_anchor` (the first payday), else of `pay_weekday` (Friday); `semimonthly` on `pay_days` (the 15th and the last); `monthly` on one day (the last); `per_job`, each evening at 21:00 for that day's work; or `custom`, a flow's schedule with `pay_` before each part (`pay_unit`, `pay_interval`, `pay_weekdays`, `pay_days`, `pay_months`, `pay_except`). A payday on a weekend or a day-off holiday moves to the business day before it (`pay_roll`: `before`, `after` or `none`).
+- **What it pays for:** the days from `start` to `end`, and inside the season (`season_from` to `season_to`, `MM-DD`, which may wrap the new year). Hourly and per-shift pay count what `hours` names: the worker's scheduled commitments at the workplace (`scheduled`, laid out by `shift_pattern`, a row of the `calendar.shifts` table), the shifts the POV turns up for (`attended`), or `hours_per_week` and `shifts_per_week` over `weeks_per_year` (`contract`). Left out, it is `attended` for the POV and `scheduled` for anyone else while they have a routine at the job, and `contract` without one. `status` is `active`, `leave` (paid nothing) or `ended`.
+- **The paycheck:** `deductions` come off the gross first, each `{label, cents or pct, pretax, kind, to, match_pct}`. A `pretax` one comes off income-tax wages (a `retirement` one still counts as wages for Social Security and Medicare; any other doesn't). `to` is an account of the worker's, else an outside payee by name, and an employer in the world adds `match_pct` of the gross, up to the deduction, to that account. Withholding follows (Taxes, below), and none for a `contractor` (the occupation's `self_employed` when left out). `splits` route the net among the worker's own accounts, each `{to, cents}` or `{to, pct}`: fixed amounts first, then percentages of the rest, and what's left to their deposit account.
+
+Each job pays through a flow from its employer to the worker. A paycheck covers the work since the last one paid, so a payday the employer can't cover is paid with the next. In play, whoever holds the employer's staff powers (its owner, a position, a delegation; see Organizations) hires, ends jobs and raises pay; a GM edit of the job's fields does the same.
+
+A second job beside the POV's work at the garage: one shift a week on the marina's fall haul-out crew, paid on Fridays with half of each check into savings, and nothing outside the season:
+
+```json
+[{ "op": "add", "path": "/entities/job_pov_haulout", "value": { "id": "job_pov_haulout", "kind": "job", "name": "Haul-out crew at Alder Harbor Marina", "tier": "background", "fields": { "worker": "pov", "employer": "alder_harbor_marina_co", "workplace": "alder_harbor_marina", "title": "Haul-out crew", "basis": "per_shift", "rate": 11000, "hours": "contract", "shifts_per_week": 1, "season_from": "09-15", "season_to": "11-15", "pay_every": "weekly", "pay_anchor": "2026-09-18", "splits": [{ "to": "acct_pov_savings", "pct": 50 }] }, "relations": [] } }]
+```
+
+And a 401(k) at the garage: 5 % of the POV's pay before income tax into a retirement account of theirs, which the shop matches up to 3 % of pay:
+
+```json
+[
+  { "op": "add", "path": "/entities/acct_pov_401k", "value": { "id": "acct_pov_401k", "kind": "account", "name": "Your 401(k)", "tier": "background", "fields": { "owners": [{ "party": "pov", "role": "owner" }], "product": "retirement", "opening": 0, "institution": "Great Lakes Bank" }, "relations": [] } },
+  { "op": "add", "path": "/entities/job_pov_mechanic/fields/deductions", "value": [{ "label": "401(k)", "kind": "retirement", "pretax": true, "pct": 5, "match_pct": 3, "to": "acct_pov_401k" }] }
+]
+```
+
+### Paying: preferences, cash machines and credit
+
+- **`pay_prefs`**, a person field, orders how they pay: tiers of `use` (`cash`, `debit`, `credit`, `charge`, `checking`, `savings`, or a card or account id), each for an amount from `min` to `max` and `categories`, but not those in `except`. A payment tries the tiers that fit it in order, then cash, debit, credit and charge; the first that covers it pays, and with none it is declined. Left out, the tiers follow their wealth band and their `traits`: a frugal or careful person keeps to cash and debit longer, an impulsive or flashy one reaches for credit first, a business pays by debit, then credit.
+- **Cash machines and branches** are place fields: `atm`, `{"bank", "fee", "limit", "deposits"}` (`fee` is the machine's own surcharge, `limit` the most one withdrawal takes), and `branch`, `{"bank"}`, a counter where that bank's customers withdraw and deposit. Where cash machines run (Money 4), cash comes out and goes in only at one of the two; at another bank's machine the product's `fees.atm` comes on top of the surcharge, a card's `daily_atm_limit` caps a day's withdrawals, and a deposit at a machine stays on hold for the account's `hold_days`. This applies only once the world places at least one `atm` or `branch`; place none and cash moves freely at every level.
+- **Credit** is played, not written: each person's report and monthly score (300 to 850) come from how their credit accounts are used and paid, and set the rates they are offered. An account's `opened` date counts toward its age.
+
+**Player claims.** A typed action on a thing the player says they have that the world doesn't may make it (the chat's Player claims setting): an item with `fields.claimed: true`, the POV's, priced against `economy.catalog`. It is never money and never an authored thing: a requirement or gate on an id (`carries(self, 'shop_office_key')`) never passes on a claimed key, while `has_item` by name counts one, so test ids for what must be earned. Keys, weapons and documents always ask the player first; `packs.economy.config.claimCap` (minor units; unset, twice `meals_out`'s typical price) caps what a capped policy makes without asking.
+
+## Taxes
+
+- **On pay**, withholding runs from Money 3 at a flat rate: the occupation's withholding rate (federal tax, Social Security and Medicare together) and the worker's state rate, plus their region's local rate when they have `local_tax: true`. At Money 4 it goes through the federal brackets and standard deduction for their `filing_status` (`single` when left out, `married_filing_jointly` or `head_of_household`), with Social Security and Medicare, then the state and local rates.
+- **Regions** are rows of the regions table (`mi`, `il`…), with their state, local and sales tax rates. The economy config's `region` is the world's own (the modern starter's is `mi`); without one, what it would cover runs at the national row's rates. A party's income tax follows its own `region` field, else the config's.
+- **Income nobody withholds from** is paid as estimated tax on 15 April, June and September and 15 January: a contractor's pay, and an owner's share of the profit of any business but a `c_corp` where that business pays business taxes, through any companies between that aren't `c_corp`s too, up to four owners up. A `c_corp` pays corporate tax on its own profit and on what such companies pass up to it, at the config's `taxes.corporatePct` (21 when left out) plus the state rate.
+- **Sales tax** runs only at the top level, Money 4 (or from 3 where the world switches `sales_tax` on), and at the buyer's level: below it a price is as listed, and a business below it neither collects nor remits. The rate at a place is its `sales_tax_pct` (or an enclosing place's), else that of its tax region: a `tax_region` on it or an enclosing place, else the config's `region`. Nothing is charged on a category in the config's `taxes.exempt` (the modern starter's holds `groceries_staples`, `groceries_baskets` and `medical`) or in a place's `tax_exempt`, nor on what a business with `collects_sales_tax: false` sells.
+- **Unemployment taxes** (`unemployment_tax`: Money 4, or from 3 where the world switches it on) are an employer's own cost on its staff's pay, never withheld from it, accrued with each paycheck from an employer in the world: FUTA at the finance table's 6 % less its 5.4 % credit for state tax (0.6 %) on each worker's first $7,000 a year, a credit-reduction state's `futa_credit_reduction_pct` paid apart with January's return; SUTA at the employer's own `suta_pct`, else the config's `taxes.sutaPct`, else its state's `suta_new_employer_pct`, on its state's `suta_wage_base_cents`. The config's `taxes.futaPct`, `futaWageBase`, `futaCreditPct`, `sutaPct` and `sutaWageBase` (bases in minor units) override the tables. Both are paid on the last day of January, April, July and October from the account the employer's payroll is paid from. A world made before the tables carried them accrues none until its author takes the Data update; from then, each worker's bases count what their employer already paid them that year, where no other employer paid them too.
+- **An exempt organization**: `tax_exempt` on a company, a group or a trust (never a household or the party) names a row of `economy.exempt` (`charity`, `church`, `club` or `private_foundation`). It pays no income tax, no one is taxed on its profit or on a share of a pass-through company it holds, and it owes FUTA and SUTA as its row says: a charity or a private foundation SUTA only, a church neither, a club both. A person's gift to a charity or a church (`donate`, or the GM effect `economy.donate`) is deductible: on top of the standard deduction up to $1,000 ($2,000 married filing jointly), or, when more, the gifts themselves up to 60 % of their income; at Money 4 what it saved is refunded each 15 April. A gift to a private foundation counts up to 30 % of income, within what the 60 % leaves, and an exempt giver may `donate` to a person (a grant, which nobody deducts). A private foundation's assets are marked each month; it must grant out 5 % of their average a year, less its 1.39 % excise on its net investment income, last year's shortfall first, a shortfall still ungranted a year late taxed 30 %, both paid with its return on 15 May. Lint flags a status the table doesn't hold, one on a household or the party, and an exempt company whose owners hold its worth. A business with `structure: "nonprofit"` has no owners of its worth and is taxed as a corporation unless its exempt status spares it.
+- **A consolidated return**: a C corporation that isn't exempt with `consolidated_return: true` (the `tax_consolidate` action, or the org op `consolidate`) files one federal return with every C corporation it and the others included hold 80 % or more of, by votes and by worth (`taxes_federal.consolidated_return_ownership_pct`), four deep: the federal rate on their combined profit, losses offsetting, and each one's state rate on its own. The corporations it includes pay nothing of their own while included. Wound up or merged away, a corporation pays the income tax it still owes as it goes: an included one its own on its own profit, a parent the group's, its members credited with their own.
+- **A C corporation's year**: its taxable income adds back the dividends from its stakes and takes their deduction off (50 % under a 20 % stake, 65 % from 20 %, 100 % from 80 % or within its consolidated return), charges its net capital gains with the September–December period, deducts its gifts only up to 10 % of its income (the rest carried five years) and its net operating loss only up to 80 % of what is left. The year closes at midnight on 1 January, recording what it carries, the dividends it paid, its passive income and its five largest individual holders, and its earnings and profits from its `opening_ep` (what it had kept when the story begins, minor units). With the economy config's `taxes.penaltyTaxes: true` (off by default), it pays on 15 April for the year before the personal holding company tax (20 % of what it kept, when 60 % or more of its gross income was passive and five or fewer people held over half) or else the accumulated earnings tax (20 % above its $250,000 credit). A consent dividend (the action `consent_dividend {org, amount, year?}`, or the GM effect `economy.consent_dividend {org, cents, year?, by?}`) moves no money: it counts as paid for the year, and each holder takes their part as that year's dividend.
+- **Trusts**: a revocable trust a person settled (`revocable`, `settlor`) pays no tax, its income and gains its settlor's; any other trust pays the trust brackets on what it keeps, and what it pays out (`distribute_profit`) carries its income to its beneficiaries, pro rata, character kept. A royalty is a person's ordinary income, as interest is. An S corporation's holders (at most 100) may only be people, eligible trusts (a grantor trust, or one whose beneficiaries are all people) and organizations whose exempt row says `s_corp_holder`; anything that would give it another is refused, and lint warns of an authored one (`economy.scorp_holders`).
+
+The modern starter's economy is in Michigan, so a purchase in Chicago is taxed at Michigan's rate. To tax it for Illinois at Chicago's own combined rate, and the POV's pay at Michigan's typical local rate:
+
+```json
+[
+  { "op": "add", "path": "/places/chicago_il/fields/tax_region", "value": "il" },
+  { "op": "add", "path": "/places/chicago_il/fields/sales_tax_pct", "value": 10.25 },
+  { "op": "add", "path": "/entities/pov/fields/local_tax", "value": true }
+]
+```
+
+## Holdings and property
+
+Everything a party owns besides the money in its accounts: positions in assets, real estate and stakes in businesses, each counted in its net worth. Prices, payouts, trades and gains run where the `investments` feature does (Money 4), options where `options` does (Money 4), and property from Money 3 (`property`). The examples here build on the marina business of Money.
+
+### Assets
+
+An **asset** is defined once, in `packs.economy.config.assets` by id (the modern starter lists `broad_us_equity_index`, `glbd`, `lkfr`, `tnote_2030` and `btc`): a `label`, a `class` (`security`, `fund`, `bond`, `option`, `property`, `business_stake`, `crypto` or `other`), a `symbol` to show, and its `price` per unit at the start (100.00 when left out).
+
+- **How its price moves:** each class follows a recipe row of the finance table's `investing` section: securities and funds the stock index (`broad_us_equity_index`), bonds `bonds_aggregate`, crypto `crypto`. `model` names another row (`cash` holds its price), and an asset's own `annual_return_pct` (its total return), `annual_volatility_pct` and `correlation` (0 to 1, how closely it moves with its market) override the recipe. Prices are marked at 16:00 on each business day, every day for crypto.
+- **What it pays:** `yield_pct` of its value a year, paid `pays_per_year` times (4 for securities and funds, 12 for a bond fund, none for crypto). A payout comes out of the total return, so it is never counted twice. A single bond has a `face`, a `coupon_pct` and a `maturity`: it pays its coupon twice a year and is redeemed at its face on its maturity date.
+- **An option** names its `underlying` (an asset the world lists), `strike` (per unit), `expiry` (`YYYY-MM-DD`), `right` (`call` or `put`), `multiplier` (100 units a contract) and `settlement` (`physical`, the default, or `cash`). It is priced from its underlying, so it takes no `price`.
+
+Lint (`economy.assets`) requires a class, an option's terms, a bond's maturity with its face and a price above zero, and warns about a `model` the table doesn't list. A regional fund with its own return and twice-yearly payouts, and a December call on Lakefront Freight:
+
+```json
+[
+  { "op": "add", "path": "/packs/economy/config/assets/glix", "value": { "label": "Great Lakes Index Fund", "class": "fund", "symbol": "GLIX", "price": 11240, "annual_return_pct": 8, "annual_volatility_pct": 18, "yield_pct": 2.2, "pays_per_year": 2 } },
+  { "op": "add", "path": "/packs/economy/config/assets/lkfr_c4500_dec26", "value": { "label": "LKFR December 2026 45 call", "class": "option", "underlying": "lkfr", "strike": 4500, "expiry": "2026-12-18", "right": "call" } }
+]
+```
+
+### Holdings, trades and payouts
+
+A **holding** is an entity of kind `holding`, a position in one asset: in an `account` (a brokerage or retirement account, its owners the holding's by their shares) or held directly by its `owners`. Its `lots` are its purchases, oldest first, each `qty`, its whole `cost` and when it was bought (`at`); for an option, `qty` counts contracts. Lint (`economy.holdings`) requires an asset the world lists, an account that is one, owners for a holding in none, and lots as a list.
+
+- **Trades are played** (the `trade` action): buy or sell an asset or a holding, in units or for an amount (a sale with neither sells it all), held in an `account` (else directly), paid `from` an account (else the investment account's own cash, else the buyer's deposit account), with the proceeds `to` an account (else the holding's account, else the seller's deposit account). Units go first in, first out, and each sale realises its gain, short term on lots held under a year. A retirement account keeps a sale's proceeds.
+- **Options** trade whole contracts. Before expiry, a holder exercises in play (`exercise_option`): a call pays the strike for 100 units of the underlying, which land in the same account. At the close on its expiry date a contract in the money settles in cash at what it is worth, and one out of the money expires worthless.
+- **Payouts** are flows: dividends mid-month in evenly spaced months ending in December (quarterly: March, June, September and December), a bond fund's monthly, a bond's on its coupon dates, each the units held then times what a unit pays. One lands where the holding's `route` says: `reinvest` buys more units at that day's price, as a new lot; an account id pays it there; left out, it goes to the holding's account, else each owner's deposit account by share. A retirement account keeps what its holdings pay unless they reinvest. In play, `route_distributions` changes a holding's route.
+
+Twenty units of the fund, its payouts reinvested, and two of the calls, in the POV's brokerage account:
+
+```json
+[
+  { "op": "add", "path": "/entities/hold_pov_glix", "value": { "id": "hold_pov_glix", "kind": "holding", "name": "Great Lakes Index Fund", "tier": "background", "fields": { "account": "acct_pov_brokerage", "asset": "glix", "lots": [{ "qty": 20, "cost": 196000, "at": "2025-03-02" }], "route": "reinvest" }, "relations": [] } },
+  { "op": "add", "path": "/entities/hold_pov_lkfr_calls", "value": { "id": "hold_pov_lkfr_calls", "kind": "holding", "name": "LKFR December calls", "tier": "background", "fields": { "account": "acct_pov_brokerage", "asset": "lkfr_c4500_dec26", "lots": [{ "qty": 2, "cost": 37000, "at": "2026-08-20" }] }, "relations": [] } }
+]
+```
+
+### Property
+
+A **property** is an entity of kind `property`, real estate tied to a `place`, with `owners` (and their `share`s):
+
+- **Its value** is `value` now. It moves on the 1st of each month at its `appreciation_pct` a year with its `volatility_pct` swings (else the finance table's home prices); `purchase_price` and `purchased` are what it cost and when, for the gain on a sale.
+- **Its costs** are flows its owners pay by share: property tax at `tax_pct` of its value a year (else the regions table's rate for its `region`, else its first owner's, else the economy's), in `tax_installments` bills (2 a year); `insurance` a month (else the table's typical, scaled to its value); and upkeep, `upkeep_pct` of its value a year (1 when left out), each month.
+- **A mortgage** is an account of the `mortgage` product, with its own `apr_pct`, `payment`, `months_left` and the rest as any loan has, whose `secured_by` names the property; the property's `mortgage` names it back, and lint warns when the two don't. Equity is the value less what it secures.
+- **A lease** is a `rent` flow from the tenant to an owner (or into an account of theirs), `link`ed to the property, with `start` and `end` for its term. Each lease covers one of its `units` (1 when left out). With `managed: true`, each unit no lease covers is let to outside tenants at `market_rent`, lease after lease of `lease_months` (12) with about `vacancy_months` (1) empty between, from `let_from` (else the world's start), their rent into `rent_to` (else the owners' deposit accounts by share).
+- **A mineral interest** is a property with `property_type: "mineral"` (`building` and `land` are the others): it pays its property tax, but no insurance or upkeep, and no housing market moves it. Its royalty streams `link` to it (Flows, above).
+- **Valued from income**: `valuation` (a one-record list, `[{"method": "pv"}]`: `method` `pv`, `cap` or `multiple`; `discount_pct` 10, `cap_rate_pct` 8, `multiple` 5, `horizon_months` 360) makes it worth what the streams linked to it are projected to pay, net, revalued on the 1st of each month: `pv` discounts each month's income at `discount_pct` a year, `cap` is the next twelve months' income over the cap rate, `multiple` that times the multiple. A mineral interest with streams and no `valuation` is valued at PV10 over 30 years.
+- **Depreciation**, where its owner's books depreciate (the economy config's `depreciation`, `none` by default or `straight_line`, which a business's or a trust's own `depreciation` field, `world` by default, overrides): `capital_cost` (else `purchase_price`), `life_months`, `in_service` and `salvage` give straight-line, month by month from the month after it went into service; a mineral interest's `reserves` give cost depletion by the units its royalties produce. A project builds these in (Organizations).
+- In play, `property_buy` buys one with an `asking_price` or nobody's, `property_sell` sells a share, and `lease_start` and `lease_end` let a unit and end a lease. `property_buy` takes `live` too: the buyer's home becomes the place. `economy.property_make {place, name?, value?, owner?, asking_price?}` (a GM effect) makes a property of a place, and `economy.property_buy` also takes a place id: the property it is, else one made of it, valued at the price. A story purchase with no price, asking price or value is the buyer's with nothing charged, and takes the unpriced chip.
+
+The marina's grounds, owned by the marina business, with a mortgage it pays from its operating account and its bait shop let to an outside tenant:
+
+```json
+[
+  { "op": "add", "path": "/entities/prop_alder_harbor_marina", "value": { "id": "prop_alder_harbor_marina", "kind": "property", "name": "Alder Harbor Marina grounds", "tier": "background", "fields": { "place": "alder_harbor_marina", "owners": [{ "party": "alder_harbor_marina_co", "role": "owner" }], "value": 65000000, "appreciation_pct": 2.5, "purchase_price": 41000000, "purchased": "2001-03-15", "mortgage": "acct_marina_mortgage", "insurance": 42000, "upkeep_pct": 1.2 }, "relations": [] } },
+  { "op": "add", "path": "/entities/acct_marina_mortgage", "value": { "id": "acct_marina_mortgage", "kind": "account", "name": "Marina mortgage", "tier": "background", "fields": { "owners": [{ "party": "alder_harbor_marina_co", "role": "owner" }], "product": "mortgage", "institution": "Great Lakes Bank", "opening": -18000000, "apr_pct": 5.1, "payment": 191800, "months_left": 120, "due_day": 1, "autopay": "minimum", "autopay_from": "acct_dale_marina", "secured_by": "prop_alder_harbor_marina" }, "relations": [] } },
+  { "op": "add", "path": "/entities/lease_marina_bait_shop", "value": { "id": "lease_marina_bait_shop", "kind": "flow", "name": "Rent, bait shop", "tier": "background", "fields": { "flow_kind": "rent", "from": "Gull Point Bait & Tackle", "to": "alder_harbor_marina_co", "amount_cents": 65000, "every": "month", "days": [1], "start": "2026-05-01", "end": "2027-04-30", "shortfall": "skip", "link": "prop_alder_harbor_marina" }, "relations": [] } }
+]
+```
+
+### Business stakes and net worth
+
+**A stake** is an owner's share of a business: of its `value` when one is set, else of its book value (its own net worth from its accounts, holdings, property and stakes, plus what its customers owe it less what it owes) plus its last twelve months' profit times its `valuation_multiple` (3 when left out). Each owner's share of a profit distribution lands where they route it in play (`route_distributions`; `reinvest` keeps it in the business, adding to the stake), and `stake_sell` sells part of a stake.
+
+**In units**, a business's stake has a value a unit: its value over all its units, the price shares issued or bought back in play take when none is given. In play its owners issue units (`shares_issue`), buy them back (`shares_buy_back`) and set its classes (`shares_classes`), `stake_sell` sells by the unit, and a business starts a subsidiary as itself (`org_found` with `as`), its capital from the business's own accounts.
+
+**Listed.** A C corporation lists its units on the world's market in play (`shares_list`: new units sold to the public, the market paying into its account, at no more than they are worth: its books a unit, or listed its market price, times the economy config's `listingOfferCap`, 1 by default), and goes off it (`shares_delist`: every public unit bought back). Its `listing` field (`{asset, symbol, float, since, price, class?}`) records the asset its units trade as (`stock:<company>`), its ticker and its float (the units the public holds); a world doesn't author one, and lint `economy.listing` checks one that does. While it is listed, a row's share is its units over all of them, the float's included, its value its price a unit times all its units, and its stock trades as any asset (`trade`, within the float; no options are written on it). Its price moves each trading day around its books a unit, the stock market moving it: Build → Packs → economy → **Shares** sets how fast it returns to the books (`listingReversion`, 2 a year), its swings (`listingVolatility`) and how closely it follows the market (`listingCorrelation`; 1 makes its path the same in every chat). The GM and agents list, delist and trade with the org ops `list`, `delist` and `trade` (`gm_org`, `lre_gm_edit`), and `orgs_read` part `ownership` reads its market (`listing`) and its holders on the market.
+
+**Net worth** is a party's share of the accounts it holds with a role that counts worth, plus its share of every holding at market, of every property's value and of every stake. A mortgage is one of its accounts, so a property's debt counts once. A party with accounts has the wealth band of its net worth; one without keeps its `wealth` field.
+
+The marina, with a waiting list for its slips, is worth four years' profit over its books:
+
+```json
+[{ "op": "add", "path": "/entities/alder_harbor_marina_co/fields/valuation_multiple", "value": 4 }]
+```
+
+And its stake counted in 1,000 units, so its Ownership shows the value a unit and Dale sells by the unit:
+
+```json
+[{ "op": "replace", "path": "/entities/alder_harbor_marina_co/fields/owners", "value": [{ "party": "dale_whitcomb", "role": "owner", "share": 100, "units": 1000 }] }]
+```
+
+## Organizations
+
+Households, groups, companies (`business`), trusts and the player character's party are all organizations: an organization's members, titles, positions, powers and delegations work at every Money level, and its money at its own. Everything here is optional: a world with no positions gives everyone today's rights (an owner who manages a company or a trust holds every power; a household's or a group's members see its money and use its things; a household member titled `head` heads it). Every kind is in the reference (`lre_docs`), and `lre_lint` names each mistake in `orgs.*`.
+
+- **Members** join by `member_of` (`{"type": "member_of", "to": "<org>", "fields": {"role", "position", "rank", "since"}}`): `role` is the title they go by ("Butler", "Anchor"), `position` one of the organization's positions, `rank` a number (higher is more senior) and `since` a date. A company's owners (`owners`) and its staff (every job whose `employer` it is) belong to it without a link, and so do a trust's; a member group's members count through it.
+- **Positions** are the organization's `positions` field, a list of `{id, title, powers, seats?, reports_to?, scope?, limits?, successor?, default?, no_dues?}`. `powers` are ids of the 21 powers (`members.admit`, `members.remove`, `members.appoint`; `staff.hire`, `staff.fire`, `staff.pay`; `money.view`, `money.spend`, `money.manage`, `money.invoice`, `money.payout`, `money.borrow`; `assets.use`, `assets.assign`, `assets.dispose`; `property.manage`, `property.trade`; `shares.manage`; `org.govern`, `orders.give`, `delegate`). `seats` is how many may hold it (1 when left out, 0 for any number); `reports_to` another position's id; `scope` `org` (the default) or `below`, so its staff and member powers reach only the positions under it; `limits` `{payment?, month?, accounts?}` in minor units; `successor` `next`, `vacant` (the default) or a person's id; `default: true` for the one new members join in; `no_dues: true` for one that pays no dues. A member link's or a job's `position` holds it.
+- **Delegation** is an `acts_for` link from the delegate to the organization: `fields` `{powers, payment?, month?, accounts?, by}`, `by` the granter, who must hold every power it gives (lint warns otherwise), and the link's own `until` (game minutes) when it ends.
+- **Money and pay:** `payroll` (`[{every, anchor?, weekday?, days?}]`, the schedule its new hires join), `payroll_account` (the account its payroll pays from), `dues` (`[{cents, every, day?}]`: so much from each member every `week`, `month` or `year`, flowing only while the organization owns a deposit account) and `places` (the places that are its, beyond a business's trading places and a household's homes).
+- **Decisions:** a decision short of the decider's votes (issuing shares, buying back, classes, a change of structure) may be put to a vote in play, and an act over a position's or delegation's limit put up for approval. The fields, each optional with its default left unwritten: `vote_by` (`shares`, a company's way: each unit its class's votes, else each owner's share; or `members`, one vote each, any other organization's), `quorum_pct` (50), `pass_pct` (50: passes with more than this of the votes cast for or against), `motion_days` (7), `vote_rules` (standing votes `[{who, vote: "for" | "against" | "abstain" | "with", with?}]`) and `approval_days` (7). Only those up the requester's chain of command approve: the delegation's granter (`acts_for`'s `by`), the holders of the positions above theirs (`reports_to`), then whoever governs it (`org.govern` as an owner or by a position) or owns it, each within their own limits; so author the `reports_to` chain and each delegation's `by` as the organization's real lines of authority.
+- **Entry** is a place's own: `fields.entry` (`owner`, `members`, `staff`, `customers` or `public`, each admitting those before it) and `fields.keys` (item ids or catalog types that let whoever carries one in). Left unset, a business's place admits customers while it trades (`open_at` and `close_at` on the business, nine to five by default) and its staff after hours, and any other place anyone; a room takes its house's.
+- **Trusts** are a kind of group too: their officers and directors join by `member_of` and hold positions. A trust's terms are its fields `settlor` (a person or an organization), `revocable`, `purpose`, `until` (a day) and `trustees_decide` (`each`, the rule unless set, or `together`: a trustee's payments, transfers, payouts, borrowing and property dealings then wait for another trustee's approval). Its decisions may count `vote_by: "trustees"`, one vote a trustee; trusts settled in play take it.
+- **Entities in seats**: a position may be held by an organization (`member_of` from the organization, with its `position`): it is listed among the page's people, and a dissolved holder holds no seat.
+- **Control** comes last among a power's bases, so it widens no grant authored before it: a power held at an organization passes to what it holds by a controlling stake (more than its `decide_pct` of the votes), a managing role on a trust, a position or a delegation, at most 8 organizations deep, a subsidiary's own seated officers keeping their positions' powers. Nothing is written for it; `lre_orgs` shows it as `under`, `via` and "You run it through …".
+- **Projects** are entities of kind `project`: `org`, `steps` (each `{id, name, days | business_days, cost, paid: start | end | split, after, inputs, crew, capitalize, unlocks}`; an unlock is `make` a thing, `stream` a new flow with a `revenue` model, `flow` one of the world's flows set going, or `set` a field), `account`, `payee`, `status` (`planned` or `active`), `start` and `template`. One started in play copies its template's steps from the world's `economy.projects` table (Build → Data). Lint: `economy.project_org`, `economy.project_steps`, `economy.project_after`, `economy.project_ring`, `economy.project_capitalize`, `economy.project_unlock`, `economy.project_template`. In play the actions `project_start`, `project_pause`, `project_resume` and `project_drop`, the GM effects `economy.project_*` and the org op `project` run them, at most 12 live a party.
+- **The party** is the `travels_with` links to the POV, each with `fields.tier` (`core`, `companion`, `hired` or `ally`; core when left out) and `since`. Its entity (`party_<pov>`, kind `party`, with `leader`) is made in play when the party is named or starts a purse; author one only to give it a name or things from the start.
+
+Marcus makes Danny his shop foreman, who may hire and pay staff and spend up to $500 a payment of the shop's money, with the mechanics reporting to him; and lets Jordan spend up to $200 a payment for the shop:
+
+```json
+[
+  { "op": "add", "path": "/entities/alder_automotive_co/fields/positions/-", "value": { "id": "shop_foreman", "title": "Shop foreman", "powers": ["staff.hire", "staff.pay", "money.view", "money.spend"], "seats": 1, "limits": { "payment": 50000 } } },
+  { "op": "add", "path": "/entities/alder_automotive_co/fields/positions/0/reports_to", "value": "shop_foreman" },
+  { "op": "replace", "path": "/entities/job_danny_mechanic/fields/position", "value": "shop_foreman" },
+  { "op": "add", "path": "/entities/pov/relations/-", "value": { "type": "acts_for", "to": "alder_automotive_co", "fields": { "powers": ["money.spend"], "payment": 20000, "by": "marcus_delgado" } } }
+]
+```
+
+A bowling league Danny captains, which Jordan has joined as its anchor, with monthly dues (they flow once the league owns an account):
+
+```json
+[
+  { "op": "add", "path": "/entities/lakeshore_bowling_league", "value": { "id": "lakeshore_bowling_league", "kind": "group", "name": "Lakeshore Bowling League", "tier": "background",
+    "fields": { "positions": [
+      { "id": "captain", "title": "Captain", "powers": ["members.admit", "members.remove", "members.appoint", "money.spend", "org.govern"], "seats": 1 },
+      { "id": "bowler", "title": "Bowler", "powers": [], "seats": 0, "reports_to": "captain", "default": true } ],
+      "dues": [{ "cents": 1500, "every": "month", "day": 1 }] },
+    "relations": [] } },
+  { "op": "add", "path": "/entities/danny_okafor/relations/-", "value": { "type": "member_of", "to": "lakeshore_bowling_league", "fields": { "position": "captain", "since": "2024-09-01" } } },
+  { "op": "add", "path": "/entities/pov/relations/-", "value": { "type": "member_of", "to": "lakeshore_bowling_league", "fields": { "role": "Anchor", "position": "bowler", "rank": 2, "since": "2026-09-01" } } }
+]
+```
+
+Marcus's house lets in only him, and whoever carries his spare key, which Danny has; and Danny travels with Jordan as a companion:
+
+```json
+[
+  { "op": "add", "path": "/places/birch_lane_12/fields/entry", "value": "owner" },
+  { "op": "add", "path": "/places/birch_lane_12/fields/keys", "value": ["marcus_spare_key"] },
+  { "op": "add", "path": "/entities/marcus_spare_key", "value": { "id": "marcus_spare_key", "kind": "item", "name": "Spare house key", "tier": "background", "fields": { "owner": "marcus_delgado", "size": "pocket", "aliases": ["spare key"] }, "relations": [{ "type": "in", "to": "danny_okafor" }] } },
+  { "op": "add", "path": "/entities/danny_okafor/relations/-", "value": { "type": "travels_with", "to": "pov", "fields": { "tier": "companion", "since": "2026-09-14" } } }
+]
+```
+
+**Mistakes lint catches** (`orgs.*`, most with a one-press fix in Build): a power that isn't one (`power_unknown`), a `reports_to` or a member's position the organization doesn't define (`position_unknown`), a report that comes back to itself (`reports_cycle`), more holders than seats (`seats`), a job's position its employer lacks (`job_position`), a delegation giving more than its granter holds (`delegate_escalation`), owners' `units` that don't match their shares (`units_share`), a business that isn't a `c_corp` held in part by a household, a group or the party, whose share of its profit no one is taxed on (`profit_untaxed`, no fix; only people, trusts and C corporations pay it), a `company` group with owners or staff, which should be a `business` (`company_group`), and a place's `entry` or `keys` of the wrong shape (`entry_unknown`, `keys_shape`). A household member titled `head` with no `head` position is a note (`head_title`): add the position when the Head should be named.
+
+## Places, routes and maps
+
+- Places form a tree through `parent` (a town holds streets, a building its rooms). A place the player hasn't heard of yet is `"visibility": "discoverable"`.
+- Routes join places with minutes per travel mode (`walk`, `road`, `offroad`, `water`), both ways unless `bidirectional` is false.
+- **A map owns what it draws.** A map (`/maps/<id>`, format `lre-map-v1`) draws one place's inside, as a grid of characters or as linked places, and compiles into places, a grid and routes that carry `"map": "<map id>"`. Those are the map's: **edit the map, never them**. A write to a place, grid or route a map draws is refused ("drawn by the map …; edit it there"), and so is setting `map` on anything else. After a change to the map, the engine draws its places, grid and routes again; delete the map and they go with it. A place, grid or route you write yourself with the same id as one a map would make wins over the map's.
+
+## Tracks: quests and secrets
+
+A track is a small state machine: `start` names its first stage, and each stage's `next` lists `{"to": stage, "when": formula}`, taken in order when the formula holds. A stage may carry a `cue` (what the player can know now), `objectives`, `effects` on entering, `rewards` on leaving it onward, `hints`, a `gate` and a `fail`. A stage with no `next` ends the track, and an end stage, which is never left, grants its `rewards` as the track reaches it: put a quest's payout there. Secrets advance only by their formulas, never by a model.
+
+- **Quests** start at the stage the story has reached, not at the beginning: `start` is today's stage.
+- **Secrets** keep a `truth` (what is really so, kept from the player) on the stage that reveals it, and a `cue` (what the player can notice) on the stages before. A cue never states the truth.
+- **Puzzles** an action of yours answers take `story.answer`'s `track`: the puzzle's own id, written out, never a formula.
+- **Hints** on a puzzle stage with an `answer` open up one per wrong answer given at that stage; on any other stage they are all there once the track reaches it. The player opens them one at a time, and the narrator is told only the opened ones.
+- **Every flag a track or a secret's gate reads needs a setter**: a `story.flag` effect in an action's outcomes, a rule or a stage's effects. One nothing sets keeps its starting value for good, and lint warns (`story.unset_flag`).
+- **A story step's action stays out of sight until the story reaches it.** An action whose requirement reads `stage(…)`, `since(…)` or `flag(…)` and none of its params isn't listed anywhere (the Actions sheet, interpret's catalog) while that requirement fails, so gate the steps of a quest or a secret that way (`"stage('s_debt') == 'ledger'"`, `"not flag('ledger_read')"`), and the player is never shown what lies ahead. Requirements on where they are or what they carry still show the action, locked.
+
+### A revealed secret starts one stage earlier
+
+The engine records a reveal only when a track **enters** a stage with a `truth`. A track that starts on its truth stage never enters it, so the truth is never revealed: the Journal never shows it and the narrator is kept from saying it. **Never start a secret track on a stage that has a `truth`.** For a secret the player has already learned, start one stage earlier on a stage that moves on at once, so the first turn reveals it:
+
+```json
+{ "id": "corin_debt", "kind": "secret", "label": "What Corin owes", "visibility": "secret", "owner": "corin", "start": "rumor", "stages": {
+  "rumor": { "label": "Something is off", "next": [{ "to": "known", "when": "true" }] },
+  "known": { "label": "Corin owes the guild", "truth": "Corin borrowed the guild's harbor dues to pay a gambling debt.", "next": [] } } }
+```
+
+### Cues never name the secret
+
+A person's `cues` are what the narrator sees them do while a secret of theirs stays hidden: `{"text": "Changes the subject whenever the guild comes up.", "track": "corin_debt"}`.
+
+- Each cue stands for exactly one secret: a `track` (while it keeps something hidden), a secret `lore` entry (until its gate holds) or a story `flag` (until it is set). A cue keyed to none, or to several, never shows.
+- Write behaviour, never the secret: a cue that holds a track's truth or a phrase of secret lore is a lint error, because it gives the secret away.
+- Name no one the player may not know: such a cue is left out while they don't (lint warns).
+- Only people have cues that show; the stage cues of the tracks a person owns reach the narrator the same way, in Stance only, never as a quest row, while the track keeps something hidden.
+
+## Lore
+
+Lore entries (`/lore/<id>`) are what the world knows, read by the engine's own helpers: `{id, title, content, keys, links, aliases?, topics?}`, where `links` are the ids of the people and places an entry is about.
+
+- `"visibility": "known_by"` keeps an entry back until the player knows every person and place it links.
+- **A secret entry** holds a secret itself: `"secret": true`, a `gate` formula that reveals it (lint refuses a secret without one), and an `audience` of the helpers that may read it before then (`npc.choose`, `puzzle.answer`, `judge`, `interpret`). The helpers that write for the narrator or the player (`brief`, `outline`, `choices`, `extract`) never read it early, even when listed. A mind reads a secret entry only when its `holders` name the character or a cue of theirs stands for it; `links` and an opened gate never do.
+- A public entry must never repeat a track's truth: lint refuses it (`secret_truth`).
+- `loreIndex` routes the helpers' lookups: `terms` maps a lowercase term to entry ids, `topics` gathers entries under a label.
+
+## Data tables
+
+Prices, pay, taxes, occupations, regions, gear and the calendar's holiday rules come from data tables (`/tables/<id>`): typed `columns` and `rows` keyed by row id, read by the packs and by `table(id, key, column)` in formulas.
+
+- Every new world, blank or a starter, carries the seventeen default tables; edit them in place. A new table comes whole, with `id`, `pack`, `schema`, `label`, `columns` and `rows`: adapt one (`lre_template` at `/world/tables/<id>`).
+- Cells follow their column: a `band` is `{"min", "typical", "max"}`, money columns are in the currency's minor units, and a `ref` names a row of another table.
+- A table's `revision` and its pin in `pins.tables` are the engine's: every write that changes a table computes both again (`hashJson` of its schema, columns and rows). Don't write either, and don't patch `/pins`.
+- Each revision of the world keeps its own copy of its tables, so a running chat sees a table change only through an Upgrade.
+
+## Host macros
+
+Lumiverse runs macros (`{{…}}`) in its prompt and acts on its control characters and `<user>`, `<char>` and `<bot>`. LumiRPEngine keeps authored text as written, so in lore and in section and step templates these are hazards:
+
+- A section template may use only `{{lines}}`, where its lines go; anything else in one is a lint error (`section_macro`). A world words a built-in section it doesn't list in `/sectionTemplates` (`{"<slot>": "<text with {{lines}}>"}`), only where it differs from the built-in text; a write whose wording lacks `{{lines}}` is refused.
+- Step templates use the engine's own placeholders (`{{world}}`, `{{pov}}`, `{{place}}`…); lint warns about one it doesn't know.
+- Keep `{{user}}` and `{{char}}` out of lore unless the user put them there on purpose. `lre_edit` and `lre_commit` list every hazard a change brings in; say which ones you added.
+
+## Setup, lore and jobs
+
+Beyond a world's document, the tools reach what the user sets up once and what Build runs for them. Settings and the preset are the user's own, for every chat: change them only when asked, and say what you changed.
+
+### Settings and presets
+
+`lre_settings` reads the settings as Settings shows them; a `section` narrows it to one page's part: `helper` (Helper model), `modelUse` (Model use, and Steps and connections under `steps`), `minds`, `timeouts`, `realism` (Realism, and Player claims under `claims`), `adjudication` (Checks), `time`, `extraction` (Changes from the reply), `swipeDefault`, `swipeAsk` and `swipeTexts` (Swipes: what a swipe does, `"renarrate"` by default or `"rerun"`; whether every plain swipe asks what should change, off by default; and whether a Re-narrate or a Re-run is sent the texts its turn was made with, `"turn"`, or the current ones, `"current"`), `prompts` (Agents → Prompts: `texts`, the user's own text for each editable text by its id, null to bring back the shipped one, and `maxChars`), `hideJsonBlocks` (Preset), `narrator` (Narrator), `retention` (Agents → Retention: how many of each chat's latest turns keep their transcript and for how many days, every one by default; how long agent call texts and unreferenced stored files are kept, and how often they are swept), `diagnostics` (Diagnostics: records kept per chat), and the two switches that make new chats use these over a world's own (`overrideWorldDefaults`, `overrideWorldAdjudication`). Speed's own keys are `gm.duringTurn` (`hold`, the default, or `live`) and `perf.reuseViews` (on). `extractionModes` is read-only: each change type's mode now and where it comes from (pinned, learned on the connection, or the default).
+
+`lre_settings_set` takes a JSON merge patch, as the pages send: objects merge, a list or a value replaces, `null` deletes (unpin a change type with `{"extraction": {"purchase": null}}`). The GM assistant's change types (`gm_spawn`, `despawn`, `destroy`, `money_adjust`, `stage`, `gm_edit` and `workspace`, Settings' "The GM assistant's changes") are listed in `extractionModes` beside the reply's and pinned the same way (`{"extraction": {"despawn": {"mode": "confirm"}}}`), with no max delta.
+
+- A named preset expands: `{"realism": {"preset": "grounded"}}` sets every level and band cap, `{"modelUse": {"preset": "standard"}}` every step, budget and the minds' policy. A change to what a named preset sets makes it `custom`, as Settings does; the answer's `presets` says so.
+- LumiRPEngine keeps every value within what it takes. `adjusted` lists what came out other than sent (a value out of range, a key it doesn't know, a preset's own values): read it, don't assume the patch landed as written.
+- A step's route names a Lumiverse connection by id (`route.connectionId`, null for the helper model's); its template (`template`) is the user's own prompt for the step, which wins over the world's step template for the purpose (the time-skip step's is the skip plan's; a mind's, a memory's and consolidation's are `minds.prompts`). A world's own step templates are its document's `/steps`, written with `lre_edit`.
+- `narrator` is the narrator's knowledge in every chat that sets none and whose world sets none: `knowledge` (`scene`, what everyone in the scene knows, each fact beyond the player character's marked, the default; or `pov`, the player character's only) and `secrets` (`marked`, the default: a line carrying a secret's words goes in marked as a secret; or `omit`: it is left out). It applies from each chat's next turn. How a secret is marked is in `prompts`: the texts `narrator.mark.known`, `narrator.mark.kept` and `narrator.mark.both` (each keeping `{{text}}` and the names it needs, `{{known}}`, `{{kept}}` or both), `narrator.mark.everyone` (the word for everyone) and the narrator rules' sentence on a mark, `narrator.secret_marks` (it keeps `{{forms}}`, every form the others make, and may use `{{everyone}}`); `{"prompts": {"texts": {"narrator.mark.known": null}}}` returns one to the shipped text.
+- `agents.assistant` is the user's GM assistant (GM → Assistant in Lumiverse): `connectionId` and `model` (null: their default connection and its model), `effort`, `apply` (`"ask"`, the default: each change it proposes waits for the user's Apply; `"at_once"`: applied as soon as it answers, with an Undo chip), `historyTokens` (20,000: how much of its conversation goes with each message) and `budget` (limits of its own over `agents.budget`; null on one gives it back). It works outside the story and reads everything, secrets whole. Its conversation, proposals and GM → Workspace are the user's own pages, which no tool of yours reaches: you read and edit the chat yourself.
+- Realism, checks and time seed new chats only. A running chat changes through its own markers (GM → This chat).
+- The answer carries the caveats as they read now; `lre_settings_caveats` reads them alone. They dry-run the chat the user plays, which takes a while on a long chat: "still checking" means ask again in a moment.
+
+`lre_preset` reads the active Lumiverse preset as the engine does: the section outlets its enabled blocks hold (`{{outlet::lre_<section>}}`) and each guidance block ("RPEngine · <step>"): missing, empty (notes only), read (switched off but written: its text goes to that helper) or enabled (switched on, so it also lands in the main prompt; it should be off). `lre_preset_add_blocks` adds the missing ones, switched off, under an RPEngine category, and touches none already there. The engine learns which preset is active from the user's open page or the chat they last played: with neither, it can't tell, and says so.
+
+### Diagnostics
+
+`lre_diag {chatId}` reads a chat's activity line (what the engine is doing now, or the step that failed last) and counts its records. The records themselves (each turn's steps, model calls with connection, model, tokens and finish reason, failures with what to do, the sections each run wrote, slow requests, and agents' calls with role, connection, model, tokens in and out with cached and reasoning parts, outcome and the tools they called) come only with `spoilers: true`: a step's reason can name someone the player hasn't met. Keep them out of anything the player reads. An agent call's text stays behind Diagnostics' curtain in Lumiverse; its record names it only by hash. `failures: true` keeps the failed steps, warnings and errors; `last` the newest n. A failing step's `fix` says what the user can do, often a timeout or a step's model in Settings. `lre_diag_clear` forgets the records; `lre_activity_dismiss` clears a failure from the activity line.
+
+### Lore books, pins and the lore index
+
+A world's lore is its document's (`/lore`, and pins at `/lorePins`), written with `lre_edit`. A pin makes a character's mind calls, or every call at a place, always read an entry: `{"lore": "<id>"}` for the world's own, `{"book": "<bookId>", "entry": "<entryId>"}` for an entry of one of the user's World Info books, either with `"keep": "end"` to keep an entry's end when it must be cut. `lre_lore_books` lists the books a pin may name (with `chatId`, that chat's own first), `lre_lore_entries {bookId}` a book's entries, with the secret marks in each. The helpers also read World Info as lore, live: the chat's books, the user's global ones and the world's `/loreBooks` (a character's or persona's book only when listed there). What in a World Info entry is secret is written in its own text, as a secret mark: `{{// Secret: TEXT}}`, `{{// Secret (known to Marcus Delgado): TEXT}}`, `{{// Secret (kept from Jordan Ellis): TEXT}}` or `{{// Secret (known to Marcus Delgado; kept from Jordan Ellis): TEXT}}`, each name a person's name or id, and "you" or "the player character" the player character. Lumiverse strips a mark from every prompt by itself; in a world chat LumiRPEngine gives the narrator its text marked as a secret, or leaves it out, as the narrator's knowledge says, and its holders' minds read it, no helper. No tool writes an entry's text: a mark is the user's to write, with Build's **Make this entry secret** or **Add a secret line**, or in Lumiverse's own World Info editor, so when an entry should be secret, tell the user which and why. `lre_lore_fields {bookId, entryId, fields}` writes its `visibility`, `links` and `aliases` into the user's book at once, so ask the user first. An entry an earlier build kept secret by its fields (`secret`, `gate`) stays so until the user moves its book's secrecy (Build → Lore → Secrecy in your World Info).
+
+`lre_lore_pins {worldId}` reads every pin of the draft now: its entry's title, its source, and its status (`ok`, `missing`, `pending`: an AI-written entry not reviewed yet, which nothing reads; `off`: switched off in its book, which a pin still reads). With `chatId` it reads the revision the chat plays, as GM → Minds does, and needs `spoilers: true`.
+
+The user's World Info is read live, as each book has it now, and never copied into the world: the books read are those above, narrowed to the ones the user ticks in Settings → Lore (`loreBooks`, "auto" for all). So `lre_edit` refuses a lore entry with a `book` source that the draft didn't already hold (an earlier build's copy stays as it is, and is never read): pin the book entry instead, or write the lore as the world's own, with no book source. `lre_lore_index {worldId}` reads the world's **lore index**, as Build → Lore shows it: every entry anyone may read, book by book, by its **short id** and title, with a line of what it holds; each book with how many entries it lists; and the index entry LumiRPEngine keeps in sync in one of the user's books, if any. A short id is the entry's tag (its own World Info key matching Settings → Lore's tag pattern, by default `^lr\d{4}$`, such as `lr0101`), else an id LumiRPEngine gave it for good (such as `lre0001`); it names the same entry as long as the entry exists. The agents working a chat find World Info the same way: `lore_index` gives them the index (or the user's own index entry, when Settings → Lore names one), every lore tool takes an entry by its short id, its `bookId/entryId` or a world entry's id, and `lore_load`, for an agent working a turn, puts an entry into the reply the turn is writing. Writing an index entry into a book (Build → Lore → **Build an index entry**) is the user's own press.
+
+`lre_lore_save {chatId}` makes the chat's latest reply (or `text`, an excerpt of a message) a new lore entry in the draft of the chat's world, sourced to its message.
+
+### Build's jobs
+
+`lre_job_start {worldId, kind, …}` runs one of Build's jobs on the user's Lumiverse and answers its id at once:
+
+- `import_lore {bookIds}`: entities, places and facts from World Info books;
+- `index_text {text}`: lore entries in the text's own words, marked as written by the AI;
+- `refine {instructions}`: world edits for a request in words;
+- `describe_map {scope, prose, mapId?}`: a map of a place from its description;
+- `propose_routines {owners?, after?}`: routines and schedules for people and groups from the lore and their sheets. Each block or schedule cites the entry or field it rests on, with a quote, and is checked against the draft. It reads people and groups in id order within twelve calls; when `lre_jobs` shows `next`, start the job again with those inputs for the rest;
+- `playtest {turns}` and `check_world {days?}`: the engine alone on the draft, as `lre_playtest` and `lre_check_world`, but on the host.
+
+Model jobs spend the user's helper model calls: start one when the user asked for it. `lre_jobs {worldId}` shows each job's status and progress and what it found in counts (with how many proposals have problems); `lre_job {worldId, jobId, pointer}` reads it whole. `/result/proposals/0` is one proposal: collection, key, the value it writes, source, confidence and note, and for routines and schedules the `owner` it is for and the `problems` the draft check found (a clash with their schedules or routine, a place or person that isn't there, company with no ground). A job proposes; nothing changes until `lre_job_apply {worldId, jobId, proposals?, expectVersion}` writes the ones you accept into the draft in one write, as Build's review does (an AI-written entry then counts as reviewed, and accepted lore joins the lookup table). Without `proposals` it applies every proposal but those with problems. Read each proposal before you apply it, then check the draft with `lre_draft`. A proposal's key replaces an item there by that key, and a schedule's `_activity` and `_place` proposals go together. `lre_job_cancel` stops a job; `lre_job_dismiss` forgets one that ended, with its proposals.
+
+### Profiles, the sheet and lint
+
+- `lre_profile {worldId, profile, preview: true}` says what a ruleset profile (`modern`, `classic`, `fifth`, `custom`) would add, what is the same already, and where it conflicts with the draft; without `preview` it applies in one write. Each conflict keeps the draft's own unless `take` names its path; `values` are people's stored values a taken field can't hold, and what they become.
+- `lre_sheet {worldId}` previews the character sheet a new chat would start with, from the draft's ruleset or one you pass as `ruleset`, on the point of view or `entity`. Nothing is saved.
+- `lre_lint {worldId}` lints the head on the host. `source: "draft"` lints the draft against the head: what's new since the last save first, each `new: true`, with `fixed` counting what the draft cleared; `severity`, `code`, `offset` and `limit` cut and page it. `lre_edit` answers the issues the edit `introduced` and how many it `fixed`, and `lre_draft` `sinceHead`. Fix what you introduced before you commit.
+
+### A chat's map
+
+`lre_map_walk {chatId, x, y}` says what Walk here would take to a cell of the grid the point of view stands on, judged on the real ground; nothing moves. `lre_map_display {chatId, display}` shows the map as what the point of view knows (`knowledge`) or under fog (`fog`): presentation only, kept beside the chat.
+
+### A chat's knowledge
+
+`lre_chat_knowledge {chatId}` reads a chat's own knowledge choices (GM → This chat → Knowledge): `knowledge`, whether the engine tracks what each character knows in it, and `narrator`, the narrator's knowledge (`{"knowledge": "scene" or "pov", "secrets": "marked" or "omit"}`), each null where the chat follows: the narrator's knowledge follows the world's `narrator`, else Settings → Narrator; tracking follows Settings. Pass either to set it, or null to return it to following. They are kept in the chat's metadata, never its story: no recorded turn changes, a Branch keeps them, and they apply from the next turn.
+
+## Playing a chat
+
+The chat tools reach a chat that plays a world as the user's Play does; `lre_chats` gives the chat ids. They see what the player sees, unless you pass `spoilers: true`, and change the chat the way Play's own controls do. The chat is the user's game: change it when they ask, and say what you changed.
+
+A session goes like this:
+1. `lre_chats` for the chat's id, then `lre_chat_state` with pointer `""` for an outline of what Play shows, and the parts you need from there.
+2. Before a turn, read what it can be: `/palette/entries/<i>` for an action's options and their `params`, `/palette/timelapse` for the skips on offer and what interrupts them.
+3. Make the change or post the turn, then read the state again for what it did: the HUD, the journal, the chips.
+4. Tell the user what you did, what is waiting on them (a reply to start, a chip to answer), and the Undo chip that can take a correction back.
+
+**Reading.** `lre_chat_state` reads the chat's state view at a JSON Pointer, the view the chat's page is sent: `/hud` (the clock, place, weather, cash and, at `/hud/fixes`, the ✎ fixes it offers), `/scene` (who is present), `/chips`, `/journal`, `/keepReport`, `/palette` (the actions at `/palette/entries`, the timelapse at `/palette/timelapse`), `/controls` (the realism, time controls, player-claims policy and checks policy the chat plays by), `/panels` (each pack's panel: Money, Gear, Calendar, the map…) and `activity`, what the engine is doing for the chat now (null when idle). It holds only what the player can know. `lre_chips` lists the chips under the messages with their actions; `lre_inspector` reads the context inspector: what the engine put in each of the last ten prompts, what its steps read of the lore, and its warnings.
+
+**Behind the curtain.** `lre_gm` (the GM view: every entity, secrets, hidden places, track truths, everyone's money, the edits in force) and `lre_minds` (each character's fidelity, latest mind, plans, notes and commitments) need `spoilers: true`, and so do the tools that edit them and Run minds now. Pass it only when the user asked to look behind the curtain, and keep what it shows out of anything the player reads: the chat, a message you post, a fix.
+- **Read only what you need of the GM view.** On a large world it is many megabytes, so `lre_gm` with no part answers its outline: how many each part holds, and how to read them; `part: "all"` reads it whole. `lre_gm {part}` builds one part alone (`entities`, `money`, `orgs`, `held`, `minds`…); `entity`, `party` and `org` read one, by id or by name (a name several share is refused, with their ids), and `account` cuts a party's money to one account; `kind` reads the entities of a kind, and `compact` gives each field's definition once per kind. Pointers take keyed tokens: `/money/danny_okafor/accounts`, `/orgs/Alder Automotive`, `/entities/pov`. A long list pages with `from` and `limit`; the outline says where the next page starts. `lre_orgs` pages the same way and takes `account`.
+- **A write made during a turn is queued.** Its answer says `pending: true` and `queued`: `engine` (the engine is preparing the turn), `page` (the turn waits for Lumiverse to start its reply: ask the user to open the chat), or `reply` (a reply is being written). It lands after that turn; `lre_gm` with part `held` lists what waits.
+
+**Changing the chat.** A write lands on the chat's latest message, as Play's do. During a reply it is held (`pending: true`) and lands when the reply finishes. While the engine works on a turn before its reply, a write is held the same way (`pending: true`) until the turn's reply finishes, or the turn stops without one, and the reply starts as planned. A chat whose status is `paused` (the player edited an earlier message of theirs) refuses every write until `lre_keep` settles it, naming the edited message: `keep` re-checks the later turns against the edit and lists what no longer holds in `/keepReport`; `discard` removes the later turns' records for good (their messages stay as plain text, and the world forgets them), so ask the user first; `convert` brings chosen dropped lines of the keep report back.
+- `lre_fix` is the player's ✎: `fix` names a HUD fix (`place`, `weather`, `cash`, `scene`; each at `/hud/fixes` with its type and options), or give `entity` and `field`, with the `value` in the field's type; `time` (`"2026-09-14 18:30"`) sets the clock, running the time between when it is later. A locked field is refused.
+- `lre_gm_edit` is the GM editor: operations in order, all or none, on any entity, locked fields included. They are the engine's own edits, not JSON Patch: each names its `op` and what it touches (the tool lists them all), with ids from `lre_gm`:
+
+```json
+[{ "op": "move", "entity": "pov", "to": "bluebird_coffee" },
+ { "op": "adjust", "account": "acct_pov_checking", "cents": 5000 },
+ { "op": "stage", "track": "q_pontoon_weekend", "to": "diagnose" }]
+```
+
+- A thing changes by `item` ops (`{"op": "item", "change": {"do": "hand", "item": "…", "to": "pov", "basis": "hold", "why": "…"}}`), which keep where it is, who has it and whose it is apart, with the size rules (a thing too big to carry lands where its person stands); find its id first with `lre_items_find {chatId, spoilers, words}` ("Danny's truck keys"). A handover keeps the owner unless its basis is `gift`, `sale` or `trade`. A place made in play is a `place` op (`{"op": "place", "change": {"do": "make", "name": "The back booth", "parent": "rusty_anchor", "as": "spot", "why": "…"}}`), refused as `exists` when one of that name is there already.
+- An `item` op's `make` also takes `class` (a vehicle class: the vehicles pack makes it, with `details` such as make, model, year, colour and plate; it stands where it is made, or where its person stands), `holds` (a container it goes into), `category` and `description`, and its `type` may be a kit. `wear` takes `slot`: `hand_held` readies a thing in hand, and any other slot of the slots table puts it there. `set_save`, `set_apply` and `set_drop` keep a person's saved outfits and loadouts. A vehicle handed over stays where it stands: a gift, a sale or a trade makes it the receiver's and ends its grants, and a hold or a loan lets them use it.
+- An organization changes by `org` ops (`{"op": "org", "change": {"do": "appoint", "org": "alder_automotive_co", "who": "danny_okafor", "position": "shop_foreman", "why": "…"}}`), each one change as the GM makes it, with its History line and no one's powers asked: founding, members and titles, positions and delegations, hiring, firing and pay, shares, entry, dues, party tiers, structure, winding up and merging companies, and name, a tax-exempt status (`tax_status`) and a consolidated return (`consolidate`), and its decisions ([MCP.md](MCP.md) lists them, money in minor units); one this world can't make is refused as `not_available`. `wind_up {org, stage?, property?, to?, why?}` closes a company down (all at once by default, or `begin`, `finish` or `resume`): its debts paid, its real estate and stakes handed to its owners by share (`property: "sell"` sells them), its things to `to` or its largest owner, the rest paid out by share and the company dissolved; it is refused, writing nothing, when the company owes more than it holds. `merge {org, into, ratio?, cash?, from?, keep?, why?}` folds `org` into `into` (its holders get `ratio` of `into`'s units for each of theirs, by their values when left out, and `cash` in all from `into`'s account), or with `keep: true` makes `org` `into`'s wholly owned subsidiary. Read a chat's organizations first with `lre_orgs {chatId, org?, part?}`, the player's Orgs tab, or with `spoilers: true` GM → Orgs, whose ids the ops name and which says who holds each power and why. See [Organizations](#organizations) for positions, powers and delegation.
+- Decisions run by the ids `lre_orgs {chatId, org, part: "decisions", spoilers: true}` gives (`m_…` a motion, `r_…` a request): `propose {by, change, party?}` puts one decision op (an `issue`, `buy_back`, `restructure`, `list`, `delist`, `wind_up` or `merge` change) to a vote for `by`, who lacks the votes to make it alone; `vote {org, motion, who, vote}` casts anyone's vote and carries the motion out once it passes; `end_motion {org, motion, how: "close" | "withdraw"}` settles it now on the votes cast, or withdraws it; `answer {org, request, answer: "approve" | "deny" | "withdraw", by?, why?}` answers a request, as `by` (one up the requester's chain of command, or the requester withdrawing; left out, the GM), approving doing the act then as the requester's; `decisions {org, vote_by?, quorum?, pass?, days?, approval_days?}` sets the rules (`null` puts a default back). The player votes and answers in their Orgs tab, and the story's own votes and answers come from the reply, asking first; an op is for what the GM decides.
+- A `stage` op moves a track as the story would: on to a stage that follows, it plays that stage's entry (rewards, effects, its reveal); back, it only sets the stage. It is made from where the track stands now, so if the reply it waits for, or a swipe or re-read of that reply, moves the track first, it is dropped whole, rewards included, never paid twice, and the chat says it didn't apply.
+- `lre_marker` changes how the chat plays from its latest message on: `resolve` (a domain's realism level, for everyone, a band or one entity), `time` (a control: `tick`, `scale`, `pause`, `interrupt`, `speed_through`, `montage`, `unit_cap`), `claims` (what a typed action's thing the world doesn't have becomes), `adjudicate` (the whole checks policy: read `/controls/adjudication`, change what you need, send it back) and `infer` (when typed attempts roll skill checks, the same way from `/controls/inferred`). `preview: true` says what it would change and writes nothing; read it first, since a lower level freezes what the higher one tracked.
+- `lre_view_open` opens a panel as the player does, which settles detail the chat hadn't decided yet (a balance first looked at); opening `core.context` checks the active preset.
+- `lre_chip` answers a chip with one of its action ids (an amount or a pick in `payload` when the action asks for one).
+- Each ✎ fix and GM edit leaves an Undo chip; tell the user it is there.
+
+**Playing a turn.** `lre_action` plays a palette entry (its `action`, and the picked option's `params`) and `lre_timelapse` a skip (`target` as `/palette/timelapse/until` lists them, or `{"type": "duration", "minutes": 120}`); `text` is the player's words for how they do it. A money or organization action with no text is done at once, off screen: no message, no reply, no clock time; it answers `{applied, pending, undo}`, its Undo on its chip. With text it plays as the player's next turn. Each turn posts the player's message, and the engine prepares the turn at once. **The reply is Lumiverse's to start, not yours:** a page that shows the chat starts it on its own; with none, it waits until the user opens the chat in Lumiverse. So ask the user to open the chat, then read `activity` and the state for what the turn did. The same goes for a chip's Send (a suggested move) and for the actions `lre_chips` marks `regenerates` (Re-narrate, Re-run, Retry read, a claim's Add): those take effect on the reply's next swipe, which the user makes with Regenerate or a swipe, and a plain Regenerate is only that.
+
+While the engine is running a turn, an off-screen action, a ✎ fix or a GM edit answers at once with `{applied: false, pending: true, queued}`, and lands with its Undo once the turn is over.
+
+**Minds.** `lre_minds` reads them; `lre_mind_edit` pins a character's fidelity (`mind_pin`, `level` null to unpin), asks for a fresh mind next turn (`mind_refresh`), edits, adds (`id` null) or deletes (`value` null) a note, commitment or plan (`mind_memory`), or sets what they mean to do now, in words their own mind reads first and works from, and how they go about it (`mind_intent {entity, text?, approach?}`: `approach` `"reactive"`, `"proactive"` or null for their mind to decide; a part left out is kept, and `""` with null clears it); `lre_minds_run` runs Run minds now for `who` (default everyone Live and Near), in the background, with model calls on the user's connection, so ask before you run it; `lre_minds_cancel` stops it, and a cancelled run records nothing. A run, like a GM edit, is one edit with an Undo chip.
+
+**What they know.** `lre_minds` shows the chat's facts at `/knowledge/facts` (each with its holders), the player character's holdings at `/knowledge/pov`, and each character's at `/characters/<n>/holdings`. `lre_mind_edit`'s `mind_knowledge {entity, fact, holding}` sets one person's holding of a fact the chat holds, whole (`{how, by, evidence, since: {msg, at}, belief, confidence, keptFrom?}`; a told one names its teller in `by`), or takes it away with `holding` null. A holding already so, or one taken away that isn't held, changes nothing.
+
+**What they can't do.** A chat tool never starts a generation, regenerates or swipes, and never writes a message but the player's turn: those are the user's, in Lumiverse. An Upgrade is `lre_upgrade`.
+
+**The engine's own agents.** On a chat whose engine is Agents, the engine's agents work each turn by these rules:
+- **run_role:** once a run answered, `run_role` again starts it afresh with your new task (Fresh runs per request, default 1); the fresh run drops what the old staged and starts its revisions again.
+- **Knowledge answers:** learn a fact the turn made by its id; a lore entry by its short id (`L0012`, a mark `L0012#2`), `bookId/entryId` or lore id; an entry the chat holds no fact of is refused — make a new fact in your own words. In one-call-per-character mode each call answers only for its person.
+- **Final review:** you may fix, rewrite or drop an Outcome or Montage line to resolve a problem or misunderstanding; check it first (`money_balances` says where a standing payment came from); the ledger is unchanged and the edit is recorded.
+- **What landed since your last turn:** the main agent's turn task lists the fixes since its last turn apart from what its own runs landed: the player's arrangements told as done (done off screen, for the story), those not for the story, the GM's (an edit, a review card's Apply), and what each Upgrade since then brought in, changed or removed, money first, by the names the player character knows.
+- **The Curator** changes clothes with `item_wear` (what held the slot comes off and stays carried; `off` takes one off), and puts clothes taken off at home into the wardrobe or dresser there (`item_move` into it). `item_wear.slot` readies, holsters or sheathes a thing, or puts it in a quiver, on the back or on a shoulder. `set_save` and `set_apply` save a person's outfit or loadout and change them into one by name. Ammunition is one stack with a count. Packing is several moves in one answer, and things put away at home go into what keeps them. `item_make` takes `class` and `details` (a vehicle) and kit types; a make with a `class` asks first. `vehicles_classes {domain?, search?}` reads the world's vehicle classes. `purchase` takes `class`, `details`, `finance {down, term}`, `property` and `live`. The Curator starts with the Vehicles and Property sections; a stored custom context list stays.
+- **Tools:** no tool is cut from any agent; the Curator keeps its default families (items, places, people, money and organizations). What the change tools share is told once, in the system prompt of an agent given any of them: two texts under **Every agent → What tools share**, *What a change does* (how the engine checks, stages or refuses a change, and what `dry` does) and *How a thing is named* (an id, a name, or words as `items_find` reads them). A place or action argument lists the world's ids up to 40; in a bigger world it is plain text, and the tool resolves an id or a name itself. A Curator that staged or noted changes and then closed with an answer the engine couldn't read keeps that work, and the read's held changes land only for what it didn't stage. The read keeps what the Curator's tools can't make. `agents.pipeline.curatorGate` (`off`, `shadow` by default, or `on`) skips the Curator on a quiet turn.
+- **Revenue streams:** `gm_revenue {stream, factor? | cents?, days?, reason, dry?}` (GM tier) proposes a stream earning more or less for a while, as the GM decides it; it is refused unless the stream's author opened it to the agents (`ai: "bounded"`), within DESIGN §26.2's bounds. `revenue_note {stream, factor? | cents?, days?, said}` (story tier) notes what the reply says of a stream, quoted; it lands with the reply's changes under the `revenue` mode, which asks first.
+- **Projects:** `orgs_read` part `projects` (also `lre_orgs`) reads each project's steps with days, cost, when paid, what they wait on and unlock, where each stands and when it's due to be done, and the templates it may start from. `gm_project {act: start | pause | resume | drop | note, org?, template?, project?, name?, account?, step?, days?, cents?, why?, dry?}` (GM tier) proposes the org op `project`; `project_note {project, step?, days (1–30), amount?, why}` (story tier, the Curator) notes a setback the reply tells under the change type `project_note`. No agent marks a step done.
+- **Speed:** each role's tasks run where `shared/role-routes.ts` says, the route Settings shows (the director's prose where the brief's step runs, else the outline's). With Smart persistence on (`agents.persist {on, turns, minutes}`), a quiet scene's minds and scene notes are kept and marked "Unchanged since the last turn"; a role's `agents.roles.<role>.run` is `smart`, `always` or `off`; `agents.main.stages.<stage>` is `main` or `auto` (a stage on its own: no message to the main agent, whose next message begins with **What ran on its own**, a line each, **A run on its own** or **A run on its own failed**); `agents.finalReview.scope` is `all` or `changed`; a throttle's `atOnce` caps a connection's calls under way, and a connection without one uses `agents.callsAtOnce`. `minds.knowledge.callsAtOnce` (1 to 8, default 1) runs the per-person knowledge calls together. `agents.compaction.when` is `ahead` (the default: the next turn's summary is made in the background) or `before_turn`; `agents.compaction.{connectionId, model, effort, summaryTokens}` route and size it (`summaryTokens` 16,000). `agents.main.sessionKeeps` is `receipts` (the default) or `whole`, with `agents.main.receiptChars` (600). The main agent's `past_turn {reply, message?, offset?, grep?}` reads a past turn's messages whole.
+
+### Trying a chat out in a sandbox
+
+To see what months do to a chat's money (bills, pay, standing payments) or what a typed payment does, without touching the chat: `lre_sandbox_open {chatId, spoilers: true}` copies its head onto this machine; `lre_sandbox_advance {sandbox, days: 62}` fast-forwards it with a digest per month; `lre_sandbox_turns {sandbox, turns: ["send $500 to Danny"]}` plays typed turns; `lre_sandbox_read {sandbox, party: "danny_okafor"}` reads it as `lre_gm` reads a chat, and `part: "log"` every month whole; `lre_sandbox_close` lets it go. On a large world an advance can run out of time for one call: its answer then says `until`, where it was going, and holds a `cursor`; call `lre_sandbox_advance {sandbox, cursor}` with it, and again with each new one, until an answer has none. The days play as one advance would. No model runs, so minds don't, and the chat's own edits, held writes and minds stay the chat's. Tell the user it was a sandbox: nothing in it happened in the chat.
+
+## Before you commit
+
+- `lre_draft` shows no lint errors, and you know what each warning means.
+- The POV exists and stands at the start place; the start time is the story's present.
+- Every id an item names (a place, an owner, a relation target, a track in a formula, a lore link) exists.
+- Everyone who has met the POV holds a `knows` or a `regard` toward them.
+- A death or dying the player hasn't learned of sets `lifeKnownBy`; the dead lie at a `fields.place`.
+- Everything someone owns names them in `fields.owner`; every account, business, holding and property names its holders in `fields.owners`.
+- Every flow pays from and to something that exists, with an amount and a schedule (or `once`); every job names its worker and an existing or worded employer.
+- A business is on a tier whose Money level runs what it does (4 for sales tax and business taxes), and its `operating_account` is one of its own accounts.
+- Every holding names an asset the world lists, and every mortgage and its property name each other.
+- With `"secrecy": "full"`, no character would think a secret openly.
+- No secret track starts on a stage with a `truth`, no cue states its secret, and no public text gives one away.
+- Nothing a map draws was edited outside its map; no `revision` or pin was written by hand.
+- `lre_playtest` and `lre_check_world` run without failures or leaks in their notes.
+- Commit with a note that says what changed, and tell the user what you changed and what you left for them.

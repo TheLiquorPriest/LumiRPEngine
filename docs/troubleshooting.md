@@ -1,0 +1,140 @@
+# Troubleshooting
+
+Start with `rpe status`. It says whether RPE answers, whether its service runs, which builds run, which Lumiverse it belongs to, and which keys are set. With RPE's service, its own log is `journalctl --user -u rpe-<name>.service`.
+
+RPE's tab in Lumiverse's drawer also says, at the top, when its extension does not hold RPE's registration or lacks a permission, with **Check again** to read it afresh. Where a permission is missing, Lumiverse shows a window called "RPE needs permissions" that names each one.
+
+## Chats on RPE's connection are not being played
+
+The banner at the top of RPE's tab says so, with the reason under it. The extension is not installed or not switched on, or it lacks a permission, or RPE is not signed in to Lumiverse. Install the extension and switch it on ([the install page](install.md#the-extension-and-its-five-permissions)), have an admin approve its five permissions, and run `rpe up`. RPE tries its registration again by itself; **Check again** reads it afresh.
+
+| The reason says | What it means |
+|---|---|
+| "RPE has not heard from its extension in Lumiverse since it started." | RPE is not registered. Install and switch on the extension, and run `rpe up`. |
+| "RPE is not set up for a Lumiverse yet: give it Lumiverse's address and your Lumiverse user (rpe up)." | RPE does not know which Lumiverse it serves. Run `rpe up` with `--url` and `--user`, then restart RPE. |
+| A permission named, with the extension's reason for it | Have an admin approve that permission for RPE's extension in Lumiverse's extension settings. |
+
+## A reply fails before RPE plays it
+
+These come back from RPE's connection, so Lumiverse shows them as the provider's error.
+
+**Lumiverse cannot reach the provider at all.** RPE is not running, or not where RPE's connection points.
+Run `rpe status`. Start RPE (`rpe serve`, or its service), and see that it answers at the address in RPE's connection in Lumiverse.
+
+**"This connection's key is not RPE's."** (or "…is not the one RPE pairs with the model …")
+The key in RPE's connection in Lumiverse is not RPE's provider key, or a newer one was made since. Run `rpe up` again, which brings the connection up to date, or make one with `rpe key provider` and put it in the connection as its API key. After the switch from the previous build the key is the one the previous build's connection holds, and none is made: do not change it.
+
+**"RPE stopped this reply rather than send it without RPE: its extension may not add to a reply's request."**
+The extension lacks `generation_parameters`. Grant it in Lumiverse's extension settings.
+
+**"RPE stopped this reply: its extension could not tell whether this chat is one RPE plays …"**
+Neither RPE's registration nor the connection's own record in Lumiverse could be read. Send the message again; RPE's log says what failed.
+
+**"RPE stopped this reply: its extension could not pair this prompt with a generation it heard begin …"**
+Lumiverse started the extension again while the generation was under way. Send the message again.
+
+**"RPE could not read this reply's tag (…). Update the extension and RPE to the same build."**
+The extension and RPE are different builds. `rpe status` shows both on its `Builds:` line. Update the extension in Lumiverse; RPE restarts onto the new build by itself (see [Updating](install.md#updating)).
+
+**"The request could not be passed on: RPE has no connection to pass it on by …"**
+A request on RPE's connection that is not a chat reply (Lumiverse's own small tasks) goes to RPE's default connection, or to the one `turn.passConnection` names. Add a model connection (`rpe connection add`), or name one in `turn.passConnection`.
+
+**"The request was not sent, because something in it cannot be carried by the connection it goes to …"**
+The request holds a part the connection's model does not take (an image, audio or a video). Nothing was sent with that part left out. Use a connection whose model takes it, or leave the part out.
+
+**"A request with no tag arrived while a reply was waiting for its tag."**
+The setting `lumiverse.untagged.whileAwaited` is `fail`, and a request Lumiverse made beside a reply (a title or a summary, say) reached RPE while the reply waited. Set it to `pass`, its default, to have such a request passed on.
+
+## A turn waits before it starts
+
+A turn begins when the run of the turn before it has ended: nothing cuts that wait short unless you set `limits.previousRunSeconds`, past which the earlier run is stopped. A swipe does not wait.
+
+## A turn ends without a reply
+
+RPE played the turn, and it ended with no reply. The chat shows one plain line, from `guidance/.prompts/reply-errors.md` (change the words there if you like), in Lumiverse's own notice of a failed generation; a turn you stopped shows none, as any stopped generation. Where nothing was shown yet, Lumiverse keeps no message. Where the turn had already shown something in the message's thinking block (it usually has: its progress lines, and its agents' thinking as `progress.thinking` lets it go there), Lumiverse keeps the message, empty but for its thinking, and the same line is written there too, so it says why.
+
+What happens to that empty reply depends on the setting `lumiverse.reply.removeEmpty` ("Take away an empty reply a failed or stopped turn left"):
+
+- **Off, as shipped:** the empty reply stays in your chat; RPE writes nothing in your chats to take it away. The line under it in the chat and the turn's page say so, with a press that opens the setting, and so does the HUD's line where the chat plays a world, until the next run begins: it names the setting, and a press opens the turn's page. Swipe it or delete it in Lumiverse. It does no harm where it stays: the next turn does not count it as a reply anyone wrote.
+- **On:** once Lumiverse says the generation ended, RPE deletes that empty reply through Lumiverse's own routes, as you: the whole message where the turn made it, or only the swipe the turn added to a message that has others, and only while its text is still empty. Its thinking block goes with it. This is a write to your chat that RPE makes for nothing else. Where the delete fails, the reply stays, RPE's log says why, and the turn's page says what to do.
+
+The **Turns** page and the turn's own page show what each agent did.
+
+| The line starts | What it means | What to do |
+|---|---|---|
+| "The Author ended this turn without writing a reply." | The lead agent ended its run with no reply. | Look at the turn's page. Swipe or send again. If it keeps happening, the model may not keep to the reply's form: see [A model that does not keep to the reply's tags](install.md#a-model-that-does-not-keep-to-the-replys-tags). |
+| "The turn reached its limit of …" | A limit stopped the turn first, one you set (such as `limits.turn.calls`) or the one that guards against a loop: `limits.repeats`, the same call made that many times in a row (10). No limit on calls, tool rounds, tokens or time is set by default. | Raise or lift the limit in [Settings](settings.md#limits-on-a-turns-work), or swipe. |
+| "The model's provider failed before a reply was written: …" | The provider refused or broke off. The rest of the line is its own words. | Check the connection's key and model (`rpe connection list`), the provider's status, and your account's credit. |
+| "The turn was stopped before a reply was written." | You, or Lumiverse, stopped the generation. | Send again. |
+| "No reply came within … seconds, your setting "Whole reply hold" …" | A reply asked for whole (streaming off) waited as long as your setting **Whole reply hold** allows, and nothing of it was written, most often because the model's provider was not answering. Where the call had been made again, the line says how many times and what broke the last try that failed, and whether the provider had sent anything for the try under way. | Check the provider as above, or turn streaming on so you see the turn as it goes. You can raise the hold, keeping it under Lumiverse's ten-minute cut. |
+| "The turn could not be played: …" | Anything else, in words after the colon: RPE is not set up for a Lumiverse, Lumiverse has no such chat for this RPE's user, no agent is named to lead the chat's turns (`turn.lead`), or an agent's `model:` names a connection RPE does not have, or there is none at all. | Add a connection with `rpe connection add`, or set the agent's `model:` to one you have, or name the lead in `turn.lead`. |
+
+Lumiverse ends a generation that has shown nothing for ten minutes. RPE shows a progress line in the thinking block to keep a turn alive (`progress.silenceSeconds`), and an agent's thinking shown there counts too; a reply asked for whole holds at `lumiverse.reply.holdSeconds`, under that cut.
+
+## The thinking block shows more than you want
+
+As shipped, the reply's thinking block holds every agent's thinking of the turn as it is written, each stretch under its agent's name, between the progress lines. It can say what the story has not shown you yet (RPE's own pages keep the same text behind the spoiler gate), and Lumiverse keeps it with the message. Set **Thinking in the chat** (`progress.thinking`) to `lead` for the Author's alone, or to `lines` for the progress lines alone. RPE never gives any of it to its agents again. Lumiverse itself may send it back with the earlier replies in later prompts (its Reasoning settings' **Keep in history**, or a connection's own reasoning settings); the **Prompt** page says when it did, since another connection you switch the chat to would be sent it. Set Keep in history to 0 in Lumiverse to send none.
+
+RPE's log (`journalctl --user -u rpe-<name>.service`) says why for every run that ends without a reply, or fails after one: a `warn` line, "A turn's run ended failed: …" (or "at a limit", "with no reply", "stopped where it stood"), with the turn, the run, the chat, the kind and the generation, in the line the chat showed. A job that fails or reaches a limit gets a `warn` line of its own, with its id, its chat and its agent. A run that ended well leaves no line above `debug`.
+
+## A turn shows as running after RPE was stopped
+
+RPE stopped (a restart, a crash, the machine going down) while a turn's run was going on. At its next start RPE closes every run still kept as running: the Turns page and the turn's page then show it failed, in the words of `stopped_mid_run` in `guidance/.prompts/turn-errors.md` ("RPE stopped while this run was going on."). Where its reply had already been saved, the turn stays in the chat as it is. To have the agents record what the stopped run did not, use **Settle now** on the Turns page or on the Turn page of the chat's newest turn: it runs the Author on that turn against the chat as it reads now, writes no reply, and adds nothing to the chat.
+
+## A connection's limits say "not known"
+
+The **Connections** page shows each connection's limits, and where each comes from. With "Longest reply: not known", RPE sends that model no cap on a reply. With "Context window: not known", it cannot tell when a session nears the model's window, so a session's earlier turns are summarized only once the provider refuses a call as too long, which costs that call. A connection the migration carried may be like this: the migration gives it no limits of its own. Enter the model's **Context window** and **Longest reply** on the Connections page; **Test it** shows what the provider's list gives (see [A carried connection has no limits of its own](migration.md#a-carried-connection-has-no-limits-of-its-own)).
+
+## A view will not load
+
+**"This view could not be loaded", with "Lumiverse did not serve the extension's second file (it answered …)".** Play, Build, the world's sheets and the HUD load from the extension's second file, `dist/widget.js`. A Lumiverse that does not serve an extension's widget file answers with an error for it. Run a Lumiverse that serves it (the staging branch does), and reload the page.
+
+## A panel on the Play page refuses
+
+Its words come from `guidance/.prompts/play-answers.md` and `request-answers.md`. A press that manages (money, a group, gear, a ✎ correction, a hint) is kept as your change at once, and a notice where you pressed says what was done, with its **Undo**; made while a turn of the chat runs, it is marked pending and takes effect before the next turn begins. Any other press waits for your next message: the HUD shows it ("With your next message: …"), with **Send now** and a ✕ that takes it back, and the same press again takes it back too. Nothing shows a refusal for it, since nothing was refused: it waits.
+
+**"This chat does not play a world in RPE." / "The revision of the world this chat plays is not in RPE, so nothing can be changed in it."** The chat has no world (**Attach** gives it one on the Play page) or the world's revision is gone from RPE.
+
+**"Nothing was undone: …" or "Undone, but not all of it."** An Undo takes back what it still can of a change. Nothing is undone where "the turn this change was kept with is no longer part of this chat's story" (a swipe or a rewind took that turn away), or where what would take it back no longer fits the world. Each part that stays is named, with why: "something has changed it since", "this build keeps no undo for it", you have seen how its roll fell, or the turn has not finished yet.
+
+**"… isn't anyone you know", "… isn't a place you know", "… it needs someone"** and the like. An action names a person, a place or a thing the player's character does not know of or the action does not take. Name one that is known.
+
+**"A turn of this chat is running, so nothing was put in the chat: …"** **Send now** puts a line in the chat as your message and starts a reply; Lumiverse would stop the reply being written to start this one, so RPE sends nothing while a turn runs. Send it once the reply is in, or stop the turn first. What waits still waits.
+
+**"RPE is not connected to a Lumiverse, so it cannot put your line in the chat: …"** RPE writes your line and starts the reply through Lumiverse's own routes, as you, with its sign-in. Connect it with `rpe lumiverse`. What waits still waits.
+
+**"Lumiverse did not take your line, so nothing was sent: …" / "Your line is in the chat as your message, but Lumiverse did not start the reply: …"** Lumiverse's own words follow. In the second, your line stands in the chat: start the reply from the chat. A reply RPE starts is played by RPE only where its extension holds the permissions the reply needs (see [A reply fails before RPE plays it](#a-reply-fails-before-rpe-plays-it)).
+
+**"Nothing waits in this chat to send now: …"** It was sent or taken back already, on this page or another.
+
+## The web app
+
+**It asks for a key.** Make one with `rpe key web` on the machine RPE runs on. The browser lets go of a key RPE no longer takes, and says so: a key stops when a new one is made, or when its days run out, where `auth.webKeyDays` gives it an end.
+
+**"Not connected to RPE".** The page cannot reach RPE (**Try again** reads it afresh). From another device, RPE must be published at an address that device reaches, and that address listed in `server.origins` and `server.hosts` in `files/RPE-global.yml` (see [Install](install.md#the-web-app-and-its-key)).
+
+## RPE holds more memory than you expect
+
+The Runtime page says, under **Memory it holds**, what RPE holds now and at its highest, how much of it is the engine's heap and how much is outside it, and what its parts keep that can grow as you play, each by its name. **Free what can be freed now** makes a full collection and says the figures before and after: if they fall far, the engine was slow to collect what nothing needed; if they do not, something RPE keeps holds the memory, and the named counts say what.
+
+What you can expect: at rest RPE holds about 100-150 MB. While you play, each model call's prompt is built, sent and let go, so RPE's memory rises while a turn's calls run and falls when they stop. On a Mac, one chat played at a model's pace held 200-350 MB, and five chats at once up to about 650 MB; both came back to about 200 MB within a minute of rest. What RPE holds between turns does not grow with the turns you play. If the heap figure rises turn after turn and **Free what can be freed now** does not bring it down, RPE is holding something it should not: the named counts say what, and the script below shows it.
+
+To see what RPE's memory is made of as chats are played, run `bun scripts/perf/memory.ts --built` from RPE's source folder. It bundles RPE as the build does and starts it on a scratch data folder, with a stand-in Lumiverse and a stand-in DeepSeek in a process of its own, so every model call goes out over the network with its whole prompt as a real one does and comes back as a stream of thinking, text and tool calls. It plays turns in one scene (by default two chats at once, twenty calls a turn, a prompt of about 250,000 tokens on every call, a delegate, a note written and read, a job every five turns) and prints RPE's resident size, its heap, what the heap's objects own outside it, what its allocator holds and what its parts keep, after every turn, so you see what grows with the number of turns and what levels off. `bun scripts/perf/memory.ts --built --turns 60 --chats 1 --rest 30` plays sixty turns in one chat and measures again 30 seconds after the last; the file's first lines list what else it takes.
+
+## After an update
+
+`rpe status`'s `Builds:` line says what RPE does about a new build: it is waiting for a turn or job to end, it is restarting, `update.restart` is off, it was started by hand, or the new file does not start. The same line is on the **Runtime** page.
+
+Before RPE restarts onto a new build, the new build checks that it starts on RPE's data (`rpe check`: its config read, its changes to the database tried on a copy). A build that fails the check, or does not finish it within `update.checkWaitSeconds` seconds, is never restarted onto: RPE goes on with the build it runs, and the `Builds:` line says why. Update the extension again, or report it.
+
+Should a build start and then keep failing all the same, RPE's service stops starting it after `update.startTries` starts within `update.startWindowSeconds` seconds, and `systemctl --user status rpe-<name>.service` says it failed. Its log says why (`journalctl --user -u rpe-<name>.service`).
+
+## The migration and the switch
+
+Every refusal of `rpe migrate` and `rpe up` is in the tables of [Moving from the previous build](migration.md): the rehearsal's, the real run's and the switch's, each with what to do. A switch that did not go through puts back what it did and says so; the previous build then plays as before.
+
+**You want to go back.** See [Going back](migration.md#4-going-back).
+
+## What is not in this build
+
+The `lumirpengine` command line and MCP server for outside harnesses, and Talk, the GM assistant chat, come with a later build. Until then the `lumirpengine` commands that read or change worlds and chats answer that the command returns with a later build. See [the README](../README.md#what-is-not-in-this-build).

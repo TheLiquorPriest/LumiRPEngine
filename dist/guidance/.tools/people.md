@@ -1,0 +1,9 @@
+---
+description: How the tools for a person's or a thing's standing in the world are called - gm_set_life, gm_despawn, gm_restore, gm_classify, gm_set_entity, gm_link, gm_unlink and fill_in_detail. It says how to call them, not when. Delete this file and an agent that finds one of them by search is given no such guide.
+---
+Name the person or thing by name or id: `entity` in most of these, `person` in gm_set_life, `who` in fill_in_detail. gm_set_life takes the life `state` (alive, dying, dead or one of the world's own) and `tell`, who else is told besides everyone with them. gm_despawn and gm_restore take a person or thing out of the world and bring it back; its record is kept either way. gm_classify takes `class`, each of the world's facets with the list of its values, and `tags`, both whole, replacing what stood. gm_set_entity takes `tier`, `agent` (true to run their life between scenes) and `levels`, by part. gm_link and gm_unlink take the `relation` as the world names its relation types (employed_by, lives_at, knows), `from` and `to`; gm_link also takes `fields`, the relation's own values, and `until`. fill_in_detail takes `who` and a `part` (money, gear or vehicles; left out, every part), and takes no `source`: what it fills in comes from the world's tables.
+
+What the world's rules would refuse is recorded as you gave it, and the answer reports it; a change that is so already changes nothing, and the answer says so. The others take `source`, and `precision` and `standing` where you know them.
+
+    tool_use {"name": "gm_link", "args": {"relation": "employed_by", "from": "Odile", "to": "Bram", "fields": {"role": "cellar hand"}, "source": {"from": "prose", "message": "m-12"}}}
+    tool_use {"name": "gm_classify", "args": {"entity": "Bram", "class": {"trade": ["innkeeper"]}, "tags": ["local"], "source": {"from": "lore", "lore": "e-12"}}}

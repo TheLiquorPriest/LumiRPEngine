@@ -1,0 +1,56 @@
+---
+name: items-and-wardrobe
+description: Things, and what people wear and carry. How to record a thing made, handed over, put on, put away, used up or lost, so that nobody draws a sword they left at home. Load it when things change hands or clothes change.
+---
+# Keeping track of things
+
+Every thing has four facts, and they are separate:
+
+1. **Where it is:** a place, a container, or on a person.
+2. **Who has it:** in whose hands or on whose body, if anyone's.
+3. **Whose it is.**
+4. **Who may use it.**
+
+A borrowed coat is on one person and belongs to another. A stolen ring is in a thief's pocket and is still its owner's. Change only the facts the story changed.
+
+## The everyday changes
+
+All through `world_apply`:
+
+- **`give`:** a thing passes from one person to another. Say how: handed over to hold, lent, returned, given, sold, traded, stolen. That decides whether whose-it-is changes too.
+- **`wear`:** put on or taken off; a weapon readied, holstered, sheathed or slung.
+- **`store`:** put into a bag, a drawer, a car, a room; or put back where it is kept.
+- **`place`:** set down on a surface or a square, picked up from one.
+- **`spawn`:** a thing that was not in the world before. A thing nothing recorded goes by is `spawn`ed first, with its source, earlier in the same call, and then named. `ALL-AGENTS.md` says what a source is; for a thing that is invented, the consent rule applies.
+
+A thing used up (a potion drunk, arrows shot, a candle burned) is one operation that says how much is left.
+
+## A weapon or armour, where the world has the tabletop rules
+
+When a weapon or armour comes into someone's hands (bought, given, found), make it the catalog's own item, found by its name. It has its numbers already (a weapon's damage, threat range and magazine, an armour's bonus), so the sheet reads it and `attack` works with it at once; a thing you name yourself as a plain item has none of them. `spawn` it with `type` the catalog's own: a type the catalog does not have is answered with the nearest by name. If the catalog lacks the weapon or armour the story needs, add it first as a row of the rules' weapons or armour table with `rules_add`, in one call (the skill `ruleset-and-sheets` says how), and the thing's `catalog` is that row's id.
+
+Rounds for a firearm are things carried too: the catalog's own rounds, a quantity of them, given or bought like any other thing. `reload` fills the magazine from them. The skill `ruleset-and-sheets` says how to tell that the rules are on.
+
+## What someone is wearing
+
+The world state shows what each person present wears and carries. Prose that contradicts it breaks the scene.
+
+- When the story changes someone's clothes, record it in the same turn, even when it is only "she had changed for dinner".
+- When nobody has said, they are still wearing what they wore. That is carried forward as assumed, and it is fine.
+- A saved outfit or loadout puts on a whole set in one call. Find those tools with `tool_search` ("outfit").
+
+## Before a thing is used
+
+If the scene turns on whether someone has a thing with them, look: `world_query` on the person, at full depth. Do not rely on memory of an earlier turn.
+
+If nothing is recorded of what they carry and the story has not said, `fill_in_detail` (find it with `tool_search`) draws their everyday things from the world's tables; what it draws is recorded as assumed, never as established.
+
+## The rest
+
+A thing's condition (broken, worn, mended), its names and description, standing permission to use another's things, two records of one thing merged: each has a tool of its own, found with `tool_search`.
+
+The engine also has an action for each way a person handles a thing, with the ids the player's own actions sheet shows: `take`, `drop`, `give`, `hand_over`, `give_back`, `lend`, `reclaim`, `lose`, `put_in`, `put_away`, `wear`, `remove`, `use`, `search` (a place or a container), `fetch` (something of yours from close by), `take_piece` (one piece out of a kit), and for outfits `set_save`, `set_apply`, `set_drop`. Carry one out with the `world_apply` operation `act`: `who` is the one who does it, and `params` holds what it takes (`item`; `to` for the person it goes to, `into` for what it goes into). The operations above record the same changes; use an action when a press of the player's names one, or when its own minutes matter. `world_query` at `ruleset` lists every action the world has, and a call that leaves out what its action asks for is answered with what it needs. A requirement that does not hold is told in the answer, and the action is carried out all the same (`SIMULATION.md`); `act` passes no time, and the answer gives the action's own minutes.
+
+## What a tool tells you
+
+A tool applies what you give it and reports what does not add up: a thing given by someone who does not hold it, a thing in two places, a container inside itself. `SIMULATION.md` says what to do with a report.
