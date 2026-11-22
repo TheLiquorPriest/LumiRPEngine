@@ -8,4 +8,4 @@ arguments:
   precision: "How exact: exact, approximate, vague or unknown."
   standing: "How it stands: established, proposed or assumed."
 ---
-Merges two records of one thing into one: the count, the leave to use it and what is inside the dropped record go to the kept one, and the dropped one leaves the world. The answer says what changed and how the kept one now stands.
+Merges two records of one thing into one: the count, the leave to use it and what is inside the dropped record go to the kept one, and the dropped one leaves the world. The answer says what changed; given as a receipt, it leaves how the kept one now stands to the file it names.

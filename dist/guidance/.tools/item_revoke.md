@@ -8,4 +8,4 @@ arguments:
   precision: "How exact: exact, approximate, vague or unknown."
   standing: "How it stands: established, proposed or assumed."
 ---
-Takes back someone's leave to use a thing. The answer says what changed and how the thing now stands.
+Takes back someone's leave to use a thing. The answer says what changed; given as a receipt, it leaves how the thing now stands to the file it names.

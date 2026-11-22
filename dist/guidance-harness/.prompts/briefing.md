@@ -74,20 +74,20 @@ Some lines of it could not be read and were passed over, so what this session ca
 {{/prompt_notices}}
 {{#cache}}
 
-## What this session has already looked up
+## What this session has kept that this turn's prompt does not hold
 
 It is kept in the session's cache folder, {{cache.folder}}, to be read from there; nothing writes in it.
 {{#cache.carried}}
-- Carried into this turn as it stood: {{path}}
+- Carried into this turn as it stood: {{path}}{{#tokens}}, {{tokens}} tokens{{/tokens}}
 {{/cache.carried}}
 {{#cache.lore}}
-- Lore entry [{{id}}] {{title}}, read in full: {{path}}
+- Lore entry [{{id}}] {{title}}, whole{{#tokens}}, {{tokens}} tokens{{/tokens}}: {{path}}
 {{/cache.lore}}
 {{#cache.prompt_map}}
-- The prompt map as this session has it: {{cache.prompt_map}}
+- The prompt map as this session has it: {{cache.prompt_map}}{{#cache.prompt_map_tokens}}, {{cache.prompt_map_tokens}} tokens{{/cache.prompt_map_tokens}}
 {{/cache.prompt_map}}
 {{#cache.host}}
-- From the host: {{path}}
+- From the host: {{path}}{{#tokens}}, {{tokens}} tokens{{/tokens}}
 {{/cache.host}}
 {{/cache}}
 {{#turn_files}}

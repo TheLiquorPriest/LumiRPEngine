@@ -15,7 +15,7 @@ If you run the previous build of this extension, read [Moving from the previous 
 
 ## The extension and its five permissions
 
-In Lumiverse, open **Extensions**, tap **Add Extension**, choose **Install from Source**, enter `https://github.com/TheLiquorPriest/LumiRPEngine` with the branch `standalone`, and install it. Then approve its permissions and switch it on.
+In Lumiverse, open **Extensions**, tap **Add Extension**, choose **Install from Source**, enter `https://github.com/TheLiquorPriest/LumiRPEngine` with the branch `alpha`, and install it. Then approve its permissions and switch it on.
 
 The extension is small. It has no settings and keeps no story data. It passes RPE what it needs from Lumiverse, it shows RPE's pages in a tab of Lumiverse's drawer called **RPE**, and it draws RPE's HUD, the line under each reply and the composer's controls in the chat itself ([the pages](#the-pages)). It asks for five permissions:
 
@@ -247,7 +247,7 @@ RPE listens only on this machine unless you change that. To open the web app fro
 
 ## Updating
 
-Update the extension in Lumiverse, as with any extension. Lumiverse replaces the files in the extension's folder, `dist/rpe.js` among them. The built files are part of the repository, so Lumiverse builds nothing and installs nothing. (Moving onto this build from the previous one is not an update: it is Lumiverse's "switch branch", in [Moving from the previous build](migration.md#3-the-switch).)
+Update the extension in Lumiverse, as with any extension. Lumiverse replaces the files in the extension's folder, `dist/rpe.js` among them. The built files are part of the repository Lumiverse installs from, so Lumiverse builds nothing and installs nothing. (Moving onto this build from the previous one is not an update: it is Lumiverse's "switch branch", in [Moving from the previous build](migration.md#3-the-switch).)
 
 The service does not run the file in the extension's folder: it runs RPE's own copy (see [The service](#the-service)), so an update of the extension never changes the running server under it. `bun run build` writes `dist/rpe.files.json`, the hash of the app file and of every file of the folders it reads beside it, and stamps the hash of that statement into the extension's backend. When the extension has been updated it tells RPE that a new app file has arrived, stating that hash. RPE then:
 

@@ -8,4 +8,4 @@ arguments:
   precision: "How exact: exact, approximate, vague or unknown."
   standing: "How it stands: established, proposed or assumed."
 ---
-Changes someone into a saved outfit or loadout of theirs in one call: each piece put on in its slot, what else of the kind they wear taken off and carried, and at home put back where it is kept. The answer says what changed and how they now stand.
+Changes someone into a saved outfit or loadout of theirs in one call: each piece put on in its slot, what else of the kind they wear taken off and carried, and at home put back where it is kept. The answer says what changed; given as a receipt, it leaves how they now stand to the file it names.

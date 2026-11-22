@@ -23,7 +23,7 @@ Below, `rpe` stands for `bun <the folder of the new build>/dist/rpe.js`, and eve
 
 ## Before you start
 
-- **A copy of the new build**, in any folder. It does not need to be installed. For example: `git clone --branch standalone https://github.com/TheLiquorPriest/LumiRPEngine rpe-copy`. The built files are in the repository, so there is nothing to install or build.
+- **A copy of the new build**, in any folder. It does not need to be installed. For example: `git clone --branch alpha https://github.com/TheLiquorPriest/LumiRPEngine rpe-copy`. The built files are in the repository, so there is nothing to install or build.
 - Run every command as the account that runs Lumiverse and the previous runtime, on the same machine.
 - **Lumiverse's data folder**: the folder that holds `lumiverse.db`. Lumiverse keeps the installed extension in `<that folder>/extensions/lumi_rp_engine/repo`.
 - **Your Lumiverse user's id.** Type:
@@ -156,7 +156,7 @@ You can run the migration again at any time, the rehearsal or the real run. For 
 
 Do this only when you are happy with the report. The switch refuses to start until a real run has been made in this data folder and its report passed.
 
-1. **In Lumiverse, switch the installed extension to the `standalone` branch.** Open **Extensions**, find the card of LumiRPEngine, tap **Branch** (its tooltip reads "Switch branch") and choose `standalone`. Lumiverse fetches the branch, checks it out and runs the new build as it comes, built, with nothing to install. **Do not remove the extension to install it again: removing an extension deletes its storage.**
+1. **In Lumiverse, switch the installed extension to the `alpha` branch.** Open **Extensions**, find the card of LumiRPEngine, tap **Branch** (its tooltip reads "Switch branch") and choose `alpha`. Lumiverse fetches the branch, checks it out and runs the new build as it comes, built, with nothing to install. **Do not remove the extension to install it again: removing an extension deletes its storage.**
 2. **Approve the new build's permissions.** It asks for five ([why each one](install.md#the-extension-and-its-five-permissions)). The previous build asked for all five too, so Lumiverse keeps them granted, and withdraws the twelve the previous build had and the new one does not ask for. If one of the five is not granted, `rpe up` names it and stops before it stops anything: an admin grants it on the extension's card, and you run `rpe up` again.
 3. **Let any reply being written finish.** The switch waits for the previous runtime to be idle before it stops it.
 4. **Run the switch,** with the copy the extension now holds:
@@ -188,7 +188,7 @@ Where the switch's run could not carry a chat that holds records of the previous
 | It says | What to do |
 |---|---|
 | `Lumiverse still has the previous build of the extension (…) installed` | Do step 1 and step 2, then run it again. |
-| `Lumiverse has no extension (lumi_rp_engine) installed: it was removed` | Removing an extension deletes its storage, so the switch does not run over storage that is gone (the real run's backup holds a copy). Install the new build's extension in Lumiverse from the `standalone` branch, approve its five permissions, then run it again. |
+| `Lumiverse has no extension (lumi_rp_engine) installed: it was removed` | Removing an extension deletes its storage, so the switch does not run over storage that is gone (the real run's backup holds a copy). Install the new build's extension in Lumiverse from the `alpha` branch, approve its five permissions, then run it again. |
 | `Lumiverse has not granted the extension (…) …` | Grant the permissions it names on the extension's card, then run it again. |
 | `The extension Lumiverse has installed (…) is another build than this rpe (…)` | The extension's `dist/backend.js` is not this build. Switch the branch, or put the new build's files in the extension's folder and switch the extension off and on in Lumiverse, then run it again. |
 | `No real run of your own data has been made in this data folder` (or `The last real run … did not pass its report`) | Run `rpe migrate` and read its report, then run `rpe up` again. |
@@ -221,10 +221,12 @@ After the switch, `rpe up` names each carried connection that has no limits amon
 
 ## 4. Going back
 
-Going back takes four steps, which `rpe down` prints with your own names filled in:
+**Going back is no longer possible from GitHub.** The branch that held the previous build, `before-standalone`, was removed from the install repository on 21 November 2026, so step 2 below cannot be carried out: Lumiverse's branch switch fetches the branch from GitHub. `rpe down` and the Migration page still print these steps as they were.
+
+Going back took four steps, which `rpe down` prints with your own names filled in:
 
 1. **`rpe down`.** It stops and removes RPE's service, takes RPE's mark off each connection the switch took, and leaves RPE's data where it is.
-2. **In Lumiverse, switch the installed extension back to the branch the previous build is kept on, `before-standalone`** (the setting `migration.previousBranch` names it, and `rpe down` and the Migration page print it): on the extension's card, **Branch**, then `before-standalone`. Switching keeps its storage. Do not remove the extension and install it again: removing an extension deletes its storage. (The backup holds a copy, should that ever happen.)
+2. **In Lumiverse, switch the installed extension back to the branch the previous build was kept on, `before-standalone`** (the setting `migration.previousBranch` names it, and `rpe down` and the Migration page print it): on the extension's card, **Branch**, then `before-standalone`. That branch is gone from GitHub (see the note above). Switching keeps its storage. Do not remove the extension and install it again: removing an extension deletes its storage. (The backup holds a copy, should that ever happen.)
 3. **In Lumiverse, approve the permissions the previous build asks for again, then switch the extension off and on again**, so that it starts with them. It asks again for the twelve the new build did not: eight wait for an admin's approval (`context_handler`, `chats`, `world_books`, `presets`, `regex_scripts`, `mcp_servers`, `databanks`, `web_search`) and four come back by themselves. `rpe down` lists all seventeen the previous build asks for, by name.
 4. **Run the previous build's own install line**, the one you use when you update it: `bun <its folder>/dist/lumiah.js up --name <name> --systemd`. It reads its address from its own config, keeps its registration, and takes up its service again (the switch only switched its unit off), with the memory cap it had.
 

@@ -16,4 +16,4 @@ arguments:
   relationships.precision: "How exact it is: exact, approximate, vague or unknown."
   relationships.standing: "How sure it is: established, proposed or assumed."
 ---
-Sets how you feel about each person you name, in your own words, with trust, warmth, respect and fear where they help. What you send for a person stands over what you said before; what you leave out stays as it was. It belongs to this turn: if the turn is swiped or deleted, it goes. The answer gives how you now stand with each.
+Sets how you feel about each person you name, in your own words, with trust, warmth, respect and fear where they help. What you send for a person stands over what you said before; what you leave out stays as it was. It belongs to this turn: if the turn is swiped or deleted, it goes. The answer gives the id each was written under; given as a receipt, it leaves how you now stand with each to the file it names.

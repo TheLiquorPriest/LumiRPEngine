@@ -7,4 +7,4 @@ arguments:
   precision: "How exact: exact, approximate, vague or unknown."
   standing: "How it stands: established, proposed or assumed."
 ---
-Closes an account, and cancels the cards drawn on it. The answer says what changed and how the account now stands.
+Closes an account, and cancels the cards drawn on it. The answer says what changed; given as a receipt, it leaves how the account now stands to the file it names.

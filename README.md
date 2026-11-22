@@ -20,7 +20,7 @@ RPE is an application for roleplay with AI models. It runs beside [Lumiverse](ht
 
 In these steps, `rpe` stands for `bun <the folder of this repository>/dist/rpe.js`. Lumiverse keeps an installed extension's copy in `<Lumiverse's data folder>/extensions/lumi_rp_engine/repo`, so that copy is the one to use once the extension is installed.
 
-1. **Install the extension.** In Lumiverse, open **Extensions**, tap **Add Extension**, choose **Install from Source**, enter `https://github.com/TheLiquorPriest/LumiRPEngine` and the branch `standalone`, and install it. An admin approves its five permissions ([why each one](docs/install.md#the-extension-and-its-five-permissions)). Switch it on.
+1. **Install the extension.** In Lumiverse, open **Extensions**, tap **Add Extension**, choose **Install from Source**, enter `https://github.com/TheLiquorPriest/LumiRPEngine` and the branch `alpha`, and install it. An admin approves its five permissions ([why each one](docs/install.md#the-extension-and-its-five-permissions)). Switch it on.
 2. **Start RPE and sign it in to Lumiverse.** On the machine that runs Lumiverse:
 
    ```sh
@@ -45,7 +45,7 @@ RPE's pages are in a tab of Lumiverse's drawer called **RPE**, and in RPE's own 
 
 ## Already using the previous build?
 
-Do not install over it. Read [Moving from the previous build](docs/migration.md) first. You rehearse the move, run it for real, and only then switch the extension over with Lumiverse's own branch switch. Your chats and their connection keep working, and you can go back to the previous build, which is kept on the branch `before-standalone`.
+Do not install over it. Read [Moving from the previous build](docs/migration.md) first. You rehearse the move, run it for real, and only then switch the extension over with Lumiverse's own branch switch. Your chats and their connection keep working. Going back to the previous build is no longer possible from GitHub: its branch, `before-standalone`, was removed.
 
 ## What is not in this build
 
@@ -69,7 +69,7 @@ RPE never writes your own Lumiverse lore books by itself. It writes an entry onl
 
 ## Building and testing
 
-The built files in `dist/` are part of the repository, so installing the extension or running `dist/rpe.js` needs no build. To build from a clone: `bun install`, then `bun run build`, which builds everything into `dist/`. `bun run test` runs the tests of this build, and `bun run typecheck` checks the types.
+Lumiverse installs RPE from `https://github.com/TheLiquorPriest/LumiRPEngine`, which holds the built files (`dist/`), so installing the extension or running `dist/rpe.js` there needs no build. The source is `https://github.com/TheLiquorPriest/RPEngine`. To build from a clone of it: `bun install`, then `bun run build`, which builds everything into `dist/`. `bun run test` runs the tests of this build, and `bun run typecheck` checks the types. `scripts/release.sh` cuts a build: it builds the committed tree in a clean checkout, checks it, and writes the built files to the install repository on the branch of its channel.
 
 ## Credits
 

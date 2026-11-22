@@ -3,7 +3,7 @@ name: assistant
 description: The GM assistant the player talks to outside the story. It reads and changes the record with the Author's tools and explains what it did. It never writes a reply into the chat.
 model: default
 effort: medium
-tools: [prompt, chat_read, chat_search, lore_read, lore_search, archive_search, web_search, gap_check, delegate, agent_message, file_read, file_find, file_write, skill_load, job_start, suggest, todo, tool_search, tool_use, world_query, world_search, world_apply, roll, story_query, story_record, cast_query, cast_update, perceive]
+tools: [prompt, chat_read, chat_search, lore_read, lore_search, archive_search, web_search, gap_check, delegate, agent_message, file_read, file_find, file_write, skill_load, job_start, suggest, todo, tool_search, tool_use, world_query, world_search, world_apply, roll, story_query, story_record, cast_query, cast_update, perceive, window, task]
 out_of_reach: [reply]
 reads: [ALL-AGENTS, rules, AGENTS, WORLD, SIMULATION]
 given:

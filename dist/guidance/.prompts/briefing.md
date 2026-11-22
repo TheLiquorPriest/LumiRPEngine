@@ -1,8 +1,8 @@
 ---
 description: The layout of the briefing the Author is given at the start of every turn. Each part appears only when there is something to show. Take a part out and it is no longer shown. What the player's hooks added at the turn's start comes after what the rules say, under its own heading. Its last part is the reply contract again, as the files stand now (the opening block holds it as it stood when the session opened), so that it is the last thing read before the reply is written, with the intent file's whole path where the Author writes its intent record to a file itself; take that part out and the contract is in the opening block only. It lays facts out; it asks for nothing. The counts under the turn's own lines are facts the template names - the chat's story choice (story.from, story.newest), a previous run stopped (previous.run.stopped), lore entries not indexed (lore.unindexed), a base older than its source (cast.base.older), growth proposed (cast.growth.proposed) and messages left out of the prompt with no summary (history.unsummarized). A count of 0 is not shown, and a line taken out is a count that is no longer read. Its header's on_stage_views names which of the cast's views of the characters on stage are shown under On stage, in that order - a view by its name (history), or a view of one casting (history:principal); take a name out and that view is no longer given.
 on_stage_views:
-  - history:principal
-  - imported:supporting
+  - history-outline:principal
+  - imported-outline:supporting
 ---
 # Briefing for this turn
 
@@ -142,20 +142,20 @@ Some lines of it could not be read and were passed over, so what this scene carr
 {{/story_brief}}
 {{#cache}}
 
-## What this scene has already looked up
+## What this scene has kept that this turn's prompt does not hold
 
 It is kept in the session's cache folder, {{cache.folder}}, to be read from there; nothing writes in it.
 {{#cache.carried}}
-- Carried into this turn as it stood: {{path}}
+- Carried into this turn as it stood: {{path}}{{#tokens}}, {{tokens}} tokens{{/tokens}}
 {{/cache.carried}}
 {{#cache.lore}}
-- Lore entry [{{id}}] {{title}}, read in full: {{path}}
+- Lore entry [{{id}}] {{title}}, whole{{#tokens}}, {{tokens}} tokens{{/tokens}}: {{path}}
 {{/cache.lore}}
 {{#cache.prompt_map}}
-- The prompt map as this scene has it: {{cache.prompt_map}}
+- The prompt map as this scene has it: {{cache.prompt_map}}{{#cache.prompt_map_tokens}}, {{cache.prompt_map_tokens}} tokens{{/cache.prompt_map_tokens}}
 {{/cache.prompt_map}}
 {{#cache.host}}
-- From the host: {{path}}
+- From the host: {{path}}{{#tokens}}, {{tokens}} tokens{{/tokens}}
 {{/cache.host}}
 {{/cache}}
 {{#turn_files}}

@@ -8,4 +8,4 @@ arguments:
   precision: "How exact: exact, approximate, vague or unknown."
   standing: "How it stands: established, proposed or assumed."
 ---
-Makes one change to a group or organization: founded; a member admitted, removed, given a position or a title; a position made or taken away; powers delegated or revoked; someone hired, fired or paid; shares issued, bought back, transferred or traded; its entry rule, dues, rules and votes; renamed, restructured, merged or wound up. The answer says what changed and how the group and its members now stand.
+Makes one change to a group or organization: founded; a member admitted, removed, given a position or a title; a position made or taken away; powers delegated or revoked; someone hired, fired or paid; shares issued, bought back, transferred or traded; its entry rule, dues, rules and votes; renamed, restructured, merged or wound up. The answer says what changed; given as a receipt, it leaves how the group and its members now stand to the file it names.

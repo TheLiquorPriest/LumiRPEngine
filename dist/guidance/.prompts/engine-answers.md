@@ -1,5 +1,5 @@
 ---
-description: The sentences the engine's tools answer with (world_query, world_search, world_apply, roll and the tools found by search). A tool's answer is data from the store and these lines, filled with that data. One line per name, a name, a colon, then its text. Change the words freely. Delete a line and that answer is given with no words. The lines named want_ (what a name was looked for as) and wants_ (what an argument takes) are words put inside the other lines. So is time_from_now, a time in a chat whose date nobody has set (a chat with no world, until the story sets the clock to a date and time), told as how long it is from now; with ahead or ago in minutes, or now.
+description: The sentences the engine's tools answer with (world_query, world_search, world_apply, roll and the tools found by search). A tool's answer is data from the store and these lines, filled with that data. One line per name, a name, a colon, then its text. Change the words freely. Delete a line and that answer is given with no words. The lines named want_ (what a name was looked for as) and wants_ (what an argument takes) are words put inside the other lines. So is time_from_now, a time in a chat whose date nobody has set (a chat with no world, until the story sets the clock to a date and time), told as how long it is from now; with ahead or ago in minutes, or now. A tool that writes answers with a receipt, which ends with receipt_kept, the line that names the file its whole answer is in; delete that line and those tools answer whole, and delete receipt_left and a long receipt is not cut.
 format: lines
 ---
 no_chat: There is no chat {{id}} in the engine's records.{{#exist}} There are: {{exist}}.{{/exist}}
@@ -8,6 +8,9 @@ scope_gone: This call belongs to {{what}} {{id}}, which takes no more changes: i
 turn_joined: Turn {{id}} was joined to turn {{into}}, which holds its changes now; turn {{id}} itself is not read, so how things stand is not shown. Address turn {{into}}.
 engine_fault: {{tool}} failed in the engine, not in your call: the fault is in RPE's log. Nothing was recorded.
 no_chat_run: {{tool}} works on a chat's world, and this run belongs to no chat: nothing was done.
+question_none: {{tool}} handed your question to nobody: a question is answered by a reader, and you are given none (a reader has none of its own). Call it again without the question and read the answer yourself.
+receipt_kept: This is {{tool}}'s receipt. Its whole answer, {{chars}} characters, is in {{path}}.
+receipt_left: {{left}} of the {{of}} ids {{tool}} wrote under are left out of this receipt, to hold it to its size; the file lists them all.
 nothing_of_kind: Nothing that is {{sought}} is recorded in this world, so there is nothing near it. world_search finds what is recorded, by words.
 needs_field: This call needs {{field}}.
 needs_one_field: This call needs one of {{fields}}, and only one.
@@ -153,6 +156,8 @@ ran_said: Operation {{n}} ({{op}}): what the world's own records arrange over th
 ran_more: Operation {{n}} ({{op}}): only the first {{listed}} lines of what happened are in ran; {{more}} more lines are recorded all the same.
 due_open: Operation {{n}} ({{op}}): nothing in due has happened yet; where people went, what they did, a meal or a night's sleep, the weather and a quest stage met are yours to record, as the story says it went.
 no_map: {{at}} has no map to show.
+shown_of: This shows {{shown}} tokens of the {{whole}} that {{at}} holds in all. world_query at {{id}} with depth full reads all of it; at one of its levels, by name or id, that level alone.
+no_ruleset_entry: The ruleset's {{part}} has nothing called {{id}}{{#entries}} among its {{entries}} entries{{/entries}}. ruleset_read with the part alone reads all of it.
 none_found: Nothing found for {{words}}.
 more_found: Only the first {{shown}} of what {{words}} matches are listed; {{more}} more were found. Narrower words, or a kind, find them.
 carried_none: Turn {{turn}} carries no record of an earlier build: nothing was migrated for it.

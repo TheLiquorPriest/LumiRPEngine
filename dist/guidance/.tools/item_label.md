@@ -14,4 +14,4 @@ arguments:
   precision: "How exact: exact, approximate, vague or unknown."
   standing: "How it stands: established, proposed or assumed."
 ---
-Renames a thing, or sets its other names, its description, its size or a vehicle's specs. The answer says what changed and how the thing now stands.
+Renames a thing, or sets its other names, its description, its size or a vehicle's specs. The answer says what changed; given as a receipt, it leaves how the thing now stands to the file it names.

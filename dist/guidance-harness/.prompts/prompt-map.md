@@ -1,5 +1,5 @@
 ---
-description: The words of the prompt map - what the prompt tool answers, what the answers to a write of the map and to the player's edits of it say, how a part of the prompt is laid out when an agent reads it or is given it, and the views of the prompt written in each turn's folder. The notices about the prompt's shape are worded in the notices part. One line per name, a name, a colon, then its text. Change the words freely. Delete a line and that answer is given with no words; on some connections the model is then shown its provider's own note that the tool gave nothing, such as "(no tool output)". Under views, each file of the turn's folder is given the part of the prompt named beside it, by the names prompt reads; take a file out and it is not written.
+description: The words of the prompt map - what the prompt tool answers, what the answers to a write of the map and to the player's edits of it say, how a part of the prompt is laid out when an agent reads it or is given it, and the views of the prompt written in each turn's folder. The map gives each part its size in tokens, and each lore entry that activated with its size and whether the lead keeps it whole in its window or let it go. Under kind(lore) an entry the lead let go is its entry_line, with its size and the call that reads it whole; a file without entry_line gives it whole. The notices about the prompt's shape are worded in the notices part. One line per name, a name, a colon, then its text. Change the words freely. Delete a line and that answer is given with no words; on some connections the model is then shown its provider's own note that the tool gave nothing, such as "(no tool output)". Under views, each file of the turn's folder is given the part of the prompt named beside it, by the names prompt reads; take a file out and it is not written.
 format: lines
 views:
   assembled-preset-prompt.md: "*"
@@ -10,14 +10,16 @@ views:
 ---
 map_raw: This prompt has no map yet. Its parts are named by the chat application's own block names where it gave them, and by their place where it did not: message[3] is the fourth message.
 map_learned: The parts of this prompt, as the map of {{preset}} names them.
-map_slice: {{marker}} - {{kind}}{{#behaviour}}, {{behaviour}}{{/behaviour}}, {{length}} characters{{#line}}: {{line}}{{/line}}
-map_unclaimed: {{marker}} - text that belongs to no part of the map, {{length}} characters
-map_history: history - {{count}} chat messages, #{{first}} to #{{last}}, {{length}} characters
-map_lore: Lore entries in this prompt, each read as lore[id]: {{ids}}
+map_slice: {{marker}} - {{kind}}{{#behaviour}}, {{behaviour}}{{/behaviour}}, {{tokens}} tokens{{#line}}: {{line}}{{/line}}
+map_unclaimed: {{marker}} - text that belongs to no part of the map, {{tokens}} tokens
+map_history: history - {{count}} chat messages, #{{first}} to #{{last}}, {{tokens}} tokens
+map_lore: Lore entries in this prompt, each read whole as lore[id]:
+map_entry: lore[{{id}}] - {{title}} ({{source}}), {{tokens}} tokens{{#kept}}, kept whole by the lead{{/kept}}{{#let_go}}, let go by the lead{{/let_go}}
 message_head: message[{{index}}] - {{role}}, {{length}} characters{{#images}}, {{images}} pictures{{/images}}
 slice_head: [{{marker}}]
 history_head: #{{index}} ({{id}}){{#name}} {{name}}{{/name}}, {{role}}{{#summarized}}, a summary the chat application put in place of messages{{/summarized}}
 entry_head: [{{id}}] {{title}} ({{source}}){{#known_by}}. Known only to {{known_by}}.{{/known_by}}{{#gate}}. Known only to whoever passes its gate, {{gate.name}}, which {{#gate.open}}holds{{/gate.open}}{{^gate.open}}does not hold{{/gate.open}} now.{{/gate}}
+entry_line: [{{id}}] {{title}} ({{source}}), {{tokens}} tokens, let go by the lead.{{#known_by}} Known only to {{known_by}}.{{/known_by}}{{#gate}} Known only to whoever passes its gate, {{gate.name}}, which {{#gate.open}}holds{{/gate.open}}{{^gate.open}}does not hold{{/gate.open}} now.{{/gate}} lore_read {"ids": ["{{id}}"]} reads it whole.{{#gist}} The lore's index says of it - {{gist}}{{/gist}}
 layout_piece: {{name}} - {{length}} characters{{#role}}, {{role}}{{/role}}{{#history}}, chat message #{{history.index}}{{#summarized}}, a summary the chat application put in place of messages{{/summarized}}{{/history}}{{#lore}}, lore{{/lore}}{{#block}}, the chat application's block {{block.name}} ({{block.type}}){{/block}}
 no_part: This prompt has no part named {{name}}.
 no_prompt: There is no prompt to read: this work is not for a reply.

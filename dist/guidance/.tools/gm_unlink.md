@@ -9,4 +9,4 @@ arguments:
   precision: "How exact: exact, approximate, vague or unknown."
   standing: "How it stands: established, proposed or assumed."
 ---
-Ends a relation between a person or thing and another, or a place. The answer says what changed and how both now stand.
+Ends a relation between a person or thing and another, or a place. The answer says what changed; given as a receipt, it leaves how both now stand to the file it names.

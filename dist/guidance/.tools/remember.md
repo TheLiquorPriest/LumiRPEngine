@@ -17,4 +17,4 @@ arguments:
   memories.precision: "How exact it is: exact, approximate, vague or unknown."
   memories.standing: "How sure it is: established, proposed or assumed."
 ---
-Commits memories of yours, as many as you need in one call. A memory belongs to this turn: if the turn is swiped or deleted, it goes. The answer gives each memory's id and how it now stands.
+Commits memories of yours, as many as you need in one call. A memory belongs to this turn: if the turn is swiped or deleted, it goes. The answer gives each memory's id; given as a receipt, it leaves how each now stands to the file it names.

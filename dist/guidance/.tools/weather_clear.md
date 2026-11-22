@@ -8,4 +8,4 @@ arguments:
   precision: "How exact: exact, approximate, vague or unknown."
   standing: "How it stands: established, proposed or assumed."
 ---
-Ends the weather held on a region: the hold lifts, and the sky turns to the weather given or to the season's likeliest calm weather. The answer says what changed and how the region now stands.
+Ends the weather held on a region: the hold lifts, and the sky turns to the weather given or to the season's likeliest calm weather. The answer says what changed; given as a receipt, it leaves how the region now stands to the file it names.

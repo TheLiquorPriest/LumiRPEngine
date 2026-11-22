@@ -11,4 +11,4 @@ arguments:
   precision: "How exact: exact, approximate, vague or unknown."
   standing: "How it stands: established, proposed or assumed."
 ---
-Gives standing permission to use another's things, all of them or those at home, until a time or for good. The answer says what changed and how they now stand.
+Gives standing permission to use another's things, all of them or those at home, until a time or for good. The answer says what changed; given as a receipt, it leaves how they now stand to the file it names.

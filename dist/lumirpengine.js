@@ -10,7 +10,7 @@ import { createInterface } from "node:readline";
 // src/shared/agents.ts
 var KIT_API = 1;
 var KIT_FILE = "agent-kit.js";
-var NPM_INSTALL = "npm i -g github:TheLiquorPriest/LumiRPEngine";
+var NPM_INSTALL = "npm i -g github:TheLiquorPriest/LumiRPEngine#alpha";
 var LUMIVERSE_HARNESS = "lumiverse";
 function kitPathProblem(path, identifier) {
   const slashed = path.replaceAll("\\", "/");
@@ -685,13 +685,13 @@ class KitFollower {
 // package.json
 var package_default = {
   name: "lumi-rp-engine",
-  version: "0.0.1",
+  version: "3.2.1",
   devDependencies: {
     "@earendil-works/pi-ai": "1.5.2",
     "bun-types": "^1.4.2",
-    "lumiverse-spindle-types": "0.6.80",
+    "lumiverse-spindle-types": "0.6.81",
     preact: "11.0.1",
-    "rp-harness": "git+https://github.com/TheLiquorPriest/RPHarness.git#fb61c0fcab7e7c147414719349825915341e4812",
+    "rp-harness": "git+https://github.com/TheLiquorPriest/RPHarness.git#762b94400ee7c5fe8101dffded92a918a3a60447",
     typescript: "7.0.2"
   },
   exports: {
@@ -735,7 +735,7 @@ var DEFAULT_PLACE_CAPS = Object.freeze({ turn: 2, chat: 64 });
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "b8d565a3";
+var BUILD = "ac79c561";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;

@@ -9,4 +9,4 @@ arguments:
   precision: "How exact: exact, approximate, vague or unknown."
   standing: "How it stands: established, proposed or assumed."
 ---
-Sets someone's life state, and who is told of it: how a person is retired from the story without leaving the world. The answer says what changed and how they now stand.
+Sets someone's life state, and who is told of it: how a person is retired from the story without leaving the world. The answer says what changed; given as a receipt, it leaves how they now stand to the file it names.

@@ -10,4 +10,4 @@ arguments:
   precision: "How exact: exact, approximate, vague or unknown."
   standing: "How it stands: established, proposed or assumed."
 ---
-Keeps a saved outfit or loadout for someone under a name: the pieces given, or what they wear now of its kind. The answer says what changed and how they now stand.
+Keeps a saved outfit or loadout for someone under a name: the pieces given, or what they wear now of its kind. The answer says what changed; given as a receipt, it leaves how they now stand to the file it names.

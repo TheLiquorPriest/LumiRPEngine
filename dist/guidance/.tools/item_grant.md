@@ -11,4 +11,4 @@ arguments:
   precision: "How exact: exact, approximate, vague or unknown."
   standing: "How it stands: established, proposed or assumed."
 ---
-Lets someone use a thing: held for its owner, lent until a time, or assigned to them. Where it is and whose it is stay as they are. The answer says what changed and how the thing now stands.
+Lets someone use a thing: held for its owner, lent until a time, or assigned to them. Where it is and whose it is stay as they are. The answer says what changed; given as a receipt, it leaves how the thing now stands to the file it names.

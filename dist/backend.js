@@ -242,7 +242,7 @@ function startPipe(deps) {
     }
   }
   async function request(user, page, req) {
-    const answer = (status, body, headers2 = { "content-type": "application/json" }) => toPage(user, page, { rpe: "response", id: req.id, status, headers: headers2, body });
+    const answer = (status, body, headers = { "content-type": "application/json" }) => toPage(user, page, { rpe: "response", id: req.id, status, headers, body });
     const road = await deps.registrations.road(user);
     if (road === null)
       return answer(403, JSON.stringify({ error: refusedWords }));
@@ -314,8 +314,8 @@ function startPipe(deps) {
           }
           await toRpe(user, { rpe: "registered", missing: deps.missing(), build: deps.build });
           deps.registered(user);
-          for (const page2 of pages.get(user) ?? [])
-            toPage(user, page2, { rpe: "restarted" });
+          for (const page of pages.get(user) ?? [])
+            toPage(user, page, { rpe: "restarted" });
           const record = untold.get(user);
           if (record !== undefined)
             tell(user, record);
@@ -385,11 +385,11 @@ function startPipe(deps) {
   };
   return {
     permissions() {
-      const missing2 = deps.missing();
+      const missing = deps.missing();
       for (const user of deps.registrations.users()) {
-        toRpe(user, { rpe: "permissions", missing: missing2 });
+        toRpe(user, { rpe: "permissions", missing });
         for (const page of pages.get(user) ?? [])
-          toPage(user, page, { rpe: "permissions", missing: missing2 });
+          toPage(user, page, { rpe: "permissions", missing });
       }
     },
     stopped(user, record) {
@@ -845,22 +845,22 @@ function bookLoreFieldsOf(extensions) {
   const raw = isRecord(ns) ? ns.lore : undefined;
   if (!isRecord(raw))
     return null;
-  const ids2 = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "string" && x !== "") : undefined;
+  const ids = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "string" && x !== "") : undefined;
   const out = {};
   if (raw.secret !== undefined)
     out.secret = raw.secret !== false;
   if (typeof raw.gate === "string")
     out.gate = raw.gate;
-  const audience = ids2(raw.audience)?.filter((p) => LORE_AUDIENCE.includes(p));
+  const audience = ids(raw.audience)?.filter((p) => LORE_AUDIENCE.includes(p));
   if (audience)
     out.audience = audience;
-  const links = ids2(raw.links);
+  const links = ids(raw.links);
   if (links)
     out.links = links;
-  const aliases = ids2(raw.aliases);
+  const aliases = ids(raw.aliases);
   if (aliases)
     out.aliases = aliases;
-  const holders = ids2(raw.holders);
+  const holders = ids(raw.holders);
   if (holders)
     out.holders = holders;
   if (raw.visibility === "public" || raw.visibility === "known_by")
@@ -959,10 +959,10 @@ function clausesOf(text) {
 function markOf(raw, head) {
   const body = raw.slice(0, -2);
   const skip = (at) => {
-    let pos2 = at;
-    while (body[pos2] === " " || body[pos2] === "\t")
-      pos2++;
-    return pos2;
+    let pos = at;
+    while (body[pos] === " " || body[pos] === "\t")
+      pos++;
+    return pos;
   };
   let pos = skip(head);
   let names = { knownTo: [], keptFrom: "everyone" };
@@ -1100,11 +1100,11 @@ function nameMatcher(world, state) {
     const byId = [...named.keys()].filter((id) => id.toLowerCase() === n);
     if (byId.length === 1)
       return byId;
-    const ids2 = [...named.entries()];
-    const whole = ids2.filter(([, names]) => names.includes(n)).map(([id]) => id);
+    const ids = [...named.entries()];
+    const whole = ids.filter(([, names]) => names.includes(n)).map(([id]) => id);
     if (whole.length > 0 || n.includes(" "))
       return whole;
-    return ids2.filter(([, names]) => names.some((name) => name.split(" ").includes(n))).map(([id]) => id);
+    return ids.filter(([, names]) => names.some((name) => name.split(" ").includes(n))).map(([id]) => id);
   };
 }
 function resolveMarkNames(world, state, mark) {
@@ -1157,21 +1157,21 @@ function worldFields(entry) {
   const knownBy = visibility !== undefined && visibility !== "public";
   if (!secret && !knownBy)
     return null;
-  const ids2 = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "string" && x !== "") : [];
+  const ids = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "string" && x !== "") : [];
   const out = {};
   if (secret) {
     out.secret = true;
     out.gate = typeof entry.gate === "string" ? entry.gate : "";
   }
-  const audience = ids2(entry.audience).filter((p) => LORE_AUDIENCE.includes(p));
+  const audience = ids(entry.audience).filter((p) => LORE_AUDIENCE.includes(p));
   if (audience.length > 0)
     out.audience = audience;
-  const holders = ids2(entry.holders);
+  const holders = ids(entry.holders);
   if (holders.length > 0)
     out.holders = holders;
   if (knownBy) {
     out.visibility = "known_by";
-    out.links = visibility === "known_by" ? ids2(entry.links) : [];
+    out.links = visibility === "known_by" ? ids(entry.links) : [];
   }
   return out;
 }
@@ -1499,10 +1499,10 @@ class Registrations {
   }
   async confirm(user, registration) {
     const base = registration.base.replace(/\/+$/, "");
-    const ask2 = { relay: registration.relay, connections: registration.connections };
+    const ask = { relay: registration.relay, connections: registration.connections };
     let answer;
     try {
-      answer = await this.deps.proxy(`${base}${CONFIRM_PATH}`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${registration.key}`, [USER_HEADER]: user }, body: JSON.stringify(ask2) });
+      answer = await this.deps.proxy(`${base}${CONFIRM_PATH}`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${registration.key}`, [USER_HEADER]: user }, body: JSON.stringify(ask) });
     } catch (error) {
       return `the extension could not reach RPE at ${base} to confirm it (${words2(error)}).`;
     }
@@ -1596,8 +1596,8 @@ async function startExtension(spindle2, options = {}) {
     spindle: spindle2,
     registrations,
     missing: lacking,
-    build: options.build ?? "b8d565a3" ?? "dev",
-    statedHash: options.statedHash !== undefined ? options.statedHash : "c839891a93006d2d7f7f767ddfeb866b6315810e1558efa734364a4d76da5a96",
+    build: options.build ?? "ac79c561" ?? "dev",
+    statedHash: options.statedHash !== undefined ? options.statedHash : "46eadb9caf241bf2b3b2c3f9475606dde34261b5defd6ef6e28ac837fb8e0197",
     log,
     registered: () => notice(),
     refused: (user) => {

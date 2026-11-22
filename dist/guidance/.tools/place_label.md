@@ -9,4 +9,4 @@ arguments:
   precision: "How exact: exact, approximate, vague or unknown."
   standing: "How it stands: established, proposed or assumed."
 ---
-Gives a place a new name or other names it goes by, in this chat. Another place beside it that goes by the name already is not renamed over. What a place looks like is its base, which set writes. The answer says what changed and how the place now stands.
+Gives a place a new name or other names it goes by, in this chat. Another place beside it that goes by the name already is not renamed over. What a place looks like is its base, which set writes. The answer says what changed; given as a receipt, it leaves how the place now stands to the file it names.

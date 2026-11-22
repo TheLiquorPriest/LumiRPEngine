@@ -1,5 +1,5 @@
 ---
-description: How what a session carries from its earlier turns is laid out for the Author, as text after the assembled prompt, and how the turns a compaction summarizes are laid out for its call, where `compacting` is set. It asks for nothing. `summary` is the summary the turns after it follow - the newest of a compaction's, or before any compaction the one the scene opened with; once a session is compacted, `opened` is the one it opened with, carried beside the compaction's and never sent to a compaction's call. `run` lays out an agent's own older work in its run for a summary call (`compacting`), and the summary that then stands in its place; its one entry has no number, and its items are what the agent wrote (`said`), its calls, and what it was told (`heard`). Its header's `record` names the file, in each turn's folder, that holds the Author's own record of that turn, which is what the records mode carries.
+description: How what a session carries from its earlier turns is laid out for the Author, as text after the assembled prompt, and how the turns a compaction summarizes are laid out for its call, where `compacting` is set. It asks for nothing. `summary` is the summary the turns after it follow - the newest of a compaction's, or before any compaction the one the scene opened with; once a session is compacted, `opened` is the one it opened with, carried beside the compaction's and never sent to a compaction's call. `run` lays out an agent's own older work in its run for a summary call (`compacting`), and the summary that then stands in its place; its one entry has no number, and its items are what the agent wrote (`said`), its calls, and what it was told (`heard`). A call's answer longer than the setting sessions.carriedResultTokens is carried by its head - `cut` says how much of it is here and names the file that holds it whole. Its header's `record` names the file, in each turn's folder, that holds the Author's own record of that turn, which is what the records mode carries.
 record: output/record.md
 ---
 {{^run}}
@@ -96,6 +96,9 @@ The Author's records of these turns, oldest first.
 {{^error}}It answered:{{/error}}{{#error}}It failed:{{/error}}
 
 {{result}}
+{{#cut}}
+[{{shown}} of {{length}} characters carried.{{#file}} The whole answer is in {{file}}.{{/file}}]
+{{/cut}}
 {{/result}}
 {{#reports}}
 - {{.}}

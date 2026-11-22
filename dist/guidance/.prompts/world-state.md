@@ -1,5 +1,5 @@
 ---
-description: The layout of the world state the Author is given at the start of every turn, and the words of every line of the world's tree, wherever it is shown (the world state, the turn's folder, world_query). Each part of the layout appears only when there is something in it; take a part out, or move it, and the world state follows. Each line below words one kind of line; change the words freely, and a kind whose line is deleted is not shown. An agent given the scene or what is due by name (world:scene, world:due) when nothing is in it is given that part with the line horizon_none or due_none, which says so. It lays recorded values out; it asks for nothing.
+description: The layout of the world state the Author is given at the start of every turn, and the words of every line of the world's tree, wherever it is shown (the world state, the turn's folder, world_query). Each part of the layout appears only when there is something in it; take a part out, or move it, and the world state follows. Each line below words one kind of line; change the words freely, and a kind whose line is deleted is not shown. An agent given the scene or what is due by name (world:scene, world:due) when nothing is in it is given that part with the line horizon_none or due_none, which says so. At hand, a thing that holds more than the setting worldState.foldTokens allows is given closed, with the line folded naming what is in it; delete that line and every thing at hand is given open. It lays recorded values out; it asks for nothing.
 lines:
   level_world: '{{#name}}{{name}} {{/name}}[{{id}}] (world){{#reflection}} — {{parts}}{{/reflection}}{{^reflection}} — nothing is recorded in it yet{{/reflection}}{{#opens}} [opened by world_query at {{ref}}]{{/opens}}'
   level_place: '{{name}} [{{id}}] (place){{#reflection}} — {{parts}}{{/reflection}}{{#opens}} [opened by world_query at {{ref}}]{{/opens}}'
@@ -48,6 +48,7 @@ lines:
   fix_grant: 'let {{who}} hold {{item}}'
   fix_merge: 'merge {{drop}} into {{keep}}'
   left_out: '… and {{n}} more, left out to keep the world state within its budget (world_query opens any level)'
+  folded: '· holds {{names}} — {{tokens}} tokens, not shown here; world_query opens it'
   left_out_uncounted: '… and more, not counted, left out to keep the world state within its budget (world_query opens any level)'
   walk_stopped: 'The engine stopped following {{from}} at {{at}}: {{setting}} lets it go {{limit}} steps, so what lies past it is not counted.'
   place_chain_stopped: 'What {{place}} takes from the places above it stops at {{at}}: {{setting}} lets it reach {{limit}} places up.'

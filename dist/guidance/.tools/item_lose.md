@@ -8,4 +8,4 @@ arguments:
   precision: "How exact: exact, approximate, vague or unknown."
   standing: "How it stands: established, proposed or assumed."
 ---
-Loses a thing, or has it stolen. Lost, nobody knows where it is, and money in it goes with it. Stolen, it is in the thief's hands and still its owner's. The answer says what changed and how the thing now stands.
+Loses a thing, or has it stolen. Lost, nobody knows where it is, and money in it goes with it. Stolen, it is in the thief's hands and still its owner's. The answer says what changed; given as a receipt, it leaves how the thing now stands to the file it names.

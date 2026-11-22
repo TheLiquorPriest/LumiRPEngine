@@ -1,9 +1,10 @@
 ---
-description: The sentences the story tools answer with (story_query, story_record). A tool's answer is data from the story record and these lines, filled with that data. One line per name, a name, a colon, then its text. Change the words freely. Delete a line and that answer is given with no words. The lines named wants_ (what an argument takes) are words put inside the other lines. The Story page is told in these words too when it is refused (no_chat, no_turn, unknown_id, unreadable, and the lines named page_, which only the page uses).
+description: The sentences the story tools answer with (story_query, story_record). A tool's answer is data from the story record and these lines, filled with that data. One line per name, a name, a colon, then its text. Change the words freely. Delete a line and that answer is given with no words. The lines named wants_ (what an argument takes) are words put inside the other lines. The Story page is told in these words too when it is refused (no_chat, no_turn, unknown_id, unreadable, and the lines named page_, which only the page uses). A tool that writes answers with a receipt, which ends with receipt_kept, the line that names the file its whole answer is in; delete that line and those tools answer whole, and delete receipt_left and a long receipt is not cut.
 format: lines
 ---
 no_chat: There is no chat {{id}} in the engine's records.
 no_chat_run: {{tool}} works on a chat's story, and this run belongs to no chat: nothing was done.
+question_none: {{tool}} handed your question to nobody: a question is answered by a reader, and you are given none (a reader has none of its own). Call it again without the question and read the answer yourself.
 no_turn: There is no turn {{id}} in this chat.
 turn_needed: Operation {{n}} ({{op}}): a record of a turn needs a turn, and this chat has none yet, so nothing was written.
 no_operations: operations cannot be read: send a list of operations.
@@ -34,11 +35,14 @@ overlay_unknown: Operation {{n}} (overlay): there is no lore entry {{entry}}.{{#
 store_unread: The story record could not read that call: {{why}}
 turn_joined: This turn, {{turn}}, was joined to turn {{joined}}, the turn the continue extended, so nothing was read or recorded here. Address turn {{joined}} instead.
 engine_fault: {{tool}} failed in the engine, not in your call: the fault is in RPE's log. Nothing was recorded.
+receipt_kept: This is {{tool}}'s receipt. Its whole answer, {{chars}} characters, is in {{path}}.
+receipt_left: {{left}} of the {{of}} ids {{tool}} wrote under are left out of this receipt, to hold it to its size; the file lists them all.
 quest_unresolved: Operation {{n}} ({{op}}): the quest {{quest}} names no quest of this world, so it is kept as the words you wrote and tied to none.
 place_unresolved: Operation {{n}} ({{op}}): the place {{place}} names no place of this world, so it is kept as the words you wrote and tied to none.
 none: Nothing in the story record matches.
 no_clock_due: This chat keeps no story time, so nothing falls due.
-more: {{count}} more match. Ask again with a part, a range or a name to see them; the next is {{next}}.
+more: {{count}} more match{{#tokens}}, {{tokens}} tokens whole{{/tokens}}. Ask again with a part, a range or a name to see them, or with how gist for each by its title and summary; the next is {{next}}.
+gists: {{#one}}This is its gist{{/one}}{{^one}}These are {{items}} gists{{/one}}: what the record holds that stands for each, its title and its summary{{#first}}; where an item has neither, first is the first line of its text, which is no summary{{/first}}.{{#whole}} This shows {{shown}} tokens of {{whole}}; tokens is the size of each whole.{{/whole}} story_query with an id reads one whole.
 correction_empty: Nothing of that could be corrected: {{id}} takes {{fields}}.
 correction_ignored: {{id}} does not take {{fields}}, so {{fields}} was left out.
 timeline_gone: The timeline has no {{id}} any more, so the page after it cannot be told. Read the timeline again from its start.

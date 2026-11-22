@@ -13,4 +13,4 @@ arguments:
   precision: "How exact: exact, approximate, vague or unknown."
   standing: "How it stands: established, proposed or assumed."
 ---
-Opens a loan, a credit card or a line of credit for someone, with its debt, its payments and its term. What the call names is recorded as named; what it leaves out the world's tables fill in, recorded as assumed. Credit the world's lending rules would turn down is recorded all the same, and the answer says so. The answer says what changed and how the borrower's accounts now stand.
+Opens a loan, a credit card or a line of credit for someone, with its debt, its payments and its term. What the call names is recorded as named; what it leaves out the world's tables fill in, recorded as assumed. Credit the world's lending rules would turn down is recorded all the same, and the answer says so. The answer says what changed; given as a receipt, it leaves how the borrower's accounts now stand to the file it names.

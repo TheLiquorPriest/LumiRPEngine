@@ -8,4 +8,4 @@ arguments:
   precision: "How exact: exact, approximate, vague or unknown."
   standing: "How it stands: established, proposed or assumed."
 ---
-Sets or ends an organization's exemption from income tax. The answer says what changed and how the organization now stands.
+Sets or ends an organization's exemption from income tax. The answer says what changed; given as a receipt, it leaves how the organization now stands to the file it names.

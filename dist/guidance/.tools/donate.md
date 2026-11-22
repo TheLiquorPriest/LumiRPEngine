@@ -11,4 +11,4 @@ arguments:
   precision: "How exact: exact, approximate, vague or unknown."
   standing: "How it stands: established, proposed or assumed."
 ---
-Gives money to an organization as a donation, or grants it from an exempt organization to a person, kept as such for taxes. Past what the giver holds it is paid all the same, and the answer says so. The answer says what changed and how the giver's money now stands.
+Gives money to an organization as a donation, or grants it from an exempt organization to a person, kept as such for taxes. Past what the giver holds it is paid all the same, and the answer says so. The answer says what changed; given as a receipt, it leaves how the giver's money now stands to the file it names.

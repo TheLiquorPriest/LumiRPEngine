@@ -278,7 +278,7 @@ Settle now: a run on the chat's newest turn that writes nothing into the chat; a
 
 ### `GET /api/v1/chats/:chat/turns`
 
-A chat's turns, newest first, each with what its runs spent together and each of its runs by itself (its kind, where it stands, its error, its moments and its own spend); `before` is a turn's id, and older ones follow it. The settings `turns.page` and `turns.maxPage` give a page's length.
+A chat's turns, newest first, each with what its runs spent together, the jobs its runs started with what each spent, what the kept rows of its calls weigh, and each of its runs by itself (its kind, where it stands, its error, its moments and its own spend); `before` is a turn's id, and older ones follow it. The settings `turns.page` and `turns.maxPage` give a page's length.
 
 | | |
 |---|---|
@@ -470,6 +470,48 @@ Stops a turn going on now; says whether it was running.
 | Reply | [`StopReply`](#stopreply) |
 | The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
+
+### `GET /api/v1/chats/:chat/turns/:turn/use`
+
+Where a turn's tokens went: the agents of its runs, each with what it was handed, its model calls in order (what each was for, its tokens and what they weigh, its request by part, what it asked of the provider's cache) and what it did to its own window (read from the trace the turn's folder keeps), and the jobs its runs started, each with its own use; with the weights the weighted figures were worked out by. The rows stay when the turn is swiped away.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat`, `turn` |
+| Query | none |
+| Body | none |
+| Reply | [`TurnUseReply`](#turnusereply) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
+| Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
+
+### `GET /api/v1/usage`
+
+What a span of his model calls spent, in tokens and as the weighted figure, in all and by definition, by operation, by part, by chat and by day: the calls of his newest turns (`turns`), their jobs' among them, or the calls that began in a stretch of time (`from`, `to`), of one chat or of every chat and of none; with the weights in force, and how long the rows are kept where that is not for good.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | none |
+| Query | `chat` (may be left out): `string`, Only this chat's: its turns, for a span of turns; its calls, for a span of time. Left out: every chat's, and the calls of jobs of no chat<br>`turns` (may be left out): `number`, A span of turns: the calls of this many of the newest turns he played, each turn's runs' and its jobs' alike, among the turns received at or after `from` and before `to` where those are given<br>`from` (may be left out): `number`, In milliseconds since 1970: for a span of time, only the calls that began at or after it; for a span of turns, only the turns received at or after it<br>`to` (may be left out): `number`, In milliseconds since 1970: for a span of time, only the calls that began before it; for a span of turns, only the turns received before it<br>`offset` (may be left out): `number`, For the sums by day: the minutes east of UTC the days are counted in, as the page's own clock stands; 0, UTC, when left out |
+| Body | none |
+| Reply | [`UsageReply`](#usagereply) |
+
+### `POST /api/v1/usage/read-in`
+
+On his press, reads in what was played before each model call was kept as a row: every turn folder of his whose runs have no row yet, and the own trace of every job that ended with none, each read from the trace it keeps, and each call found added with its totals. A trace kept before RPH told a request by part gives no parts, and the answer says how many calls were added without them. A row kept as its call ran is never written over, and a turn or a job going on now is left to its own records.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | none |
+| Query | none |
+| Body | none |
+| Reply | [`UsageReadInReply`](#usagereadinreply) |
+| Long | over TCP it answers at once, status 202, with `{ answer: <id> }`, and its reply is read from `GET /api/v1/answers/:id` once ready |
 
 ## State
 
@@ -2294,7 +2336,7 @@ He starts a job of the chat, as his own and tied to no turn, with any agent defi
 
 ### `POST /api/v1/chats/:chat/jobs/take-in`
 
-He starts a job of the chat, as his own and tied to no turn, in which a character's own agent (the character definition, playing the character he names) takes in what it has perceived and not yet taken in, briefed by the line take_in of `.prompts/cast-jobs.md`.
+He starts jobs of the chat, as his own and tied to no turn, one for each character he names: in each, the character's own agent (the character definition, playing that character, started for the purpose take-in) takes in what it has perceived and not yet taken in, briefed by the line take_in of `.prompts/cast-jobs.md`. Where a great deal waits, its agent hands it out in batches to instances of itself (the setting cast.takeInTokens). Each name is found as the cast finds it, and two names of one character start one job. A character whose job was not started is answered with why, in the words of `.prompts/cast-answers.md` or RPE's own: a name the cast does not hold (no_character), or one whose own agent is at work already in a job of the chat, which is named (page_take_in_going); the others' jobs are started all the same.
 
 | | |
 |---|---|
@@ -2303,7 +2345,7 @@ He starts a job of the chat, as his own and tied to no turn, in which a characte
 | Params | `chat` |
 | Query | none |
 | Body | [`TakeInAsk`](#takeinask) |
-| Reply | [`JobReply`](#jobreply) |
+| Reply | [`TakeInReply`](#takeinreply) |
 | The chat | taken on first, as the route keeps or changes something of it: RPE's record of the chat and its folders are made, by what Lumiverse says of it; a chat Lumiverse does not have is refused with 404 |
 
 ### `GET /api/v1/jobs`
@@ -4101,6 +4143,14 @@ export interface Advice {
 }
 ```
 
+### `AgentOperation`
+
+What an agent's calls are for: a lead's turn, a sub-agent's work, an instance of a task, the reply's writer, a job's agent, a compaction's summary, the save before one, a judging model's question, a tag check's turn, a reader's answer about what it read, a read that keeps the provider's cache warm.
+
+```ts
+export type AgentOperation = "lead" | "sub" | "task" | "writer" | "job" | "compaction" | "save" | "judge" | "tag-check" | "reader" | "warm";
+```
+
 ### `AgentRef`
 
 One agent of a run: its handle, its definition, the agent that started it, its job, and the character it plays.
@@ -4117,7 +4167,7 @@ export interface AgentRef {
 
 ### `AgentShown`
 
-A definition in force for a chat, as RPH lists it: its file and level, the farther files it replaces, whether it is switched off, its profile, effort and limits as its header says them, how its tools are offered, its fixed tools, the instruction files it reads and what it is given at a run's start, the definition its reply goes to a writer through, and what it runs on.
+A definition in force for a chat, as RPH lists it: its file and level, the farther files it replaces, whether it is switched off, its profile, effort and limits as its header says them, how its tools are offered, its fixed tools, the instruction files it reads, what it is given at a run's start and what it is given for each purpose a start may name, the definition its reply goes to a writer through, and what it runs on.
 
 ```ts
 export interface AgentShown {
@@ -4134,6 +4184,8 @@ export interface AgentShown {
   tools: string[];
   reads: string[];
   given: string[];
+  purposes?: { [key: string]: string[] };
+  starts?: string[];
   writer?: string;
   runsOn: DefinitionRun;
 }
@@ -4161,6 +4213,28 @@ export interface AgentToolsReply {
   tokens: number;
   most: number;
   registered: RegisteredTool[];
+}
+```
+
+### `AgentUse`
+
+One agent of a run and what it used: what its calls add up to, what it was handed each time it was started, its calls in the order their requests went out, and what it did to its own window.
+
+```ts
+export interface AgentUse {
+  /** RPH's own id for the run it worked in; a job's run is the job's id. */
+  run: string;
+  /** Its handle. */
+  agent: string;
+  definition: string;
+  /** The character it plays; null for an agent that plays none. */
+  plays: string | null;
+  spent: CallsSpent;
+  /** What it was handed, each time it was started (its own work, a message that continues it): when, and each item with its size and who chose it. None for an agent of a turn played before RPH told them. */
+  sent: { at: number; items: SentItem[] }[];
+  calls: CallShown[];
+  /** What it did to its own window, in order, read from the trace its folder keeps: none where it did nothing to it, or the folder no longer keeps its trace. */
+  window: WindowChange[];
 }
 ```
 
@@ -4540,6 +4614,19 @@ Where in a model call it broke: before any answer came, while it thought, while 
 export type CallBreakPoint = "before" | "thinking" | "tool-call" | "text" | "shown";
 ```
 
+### `CallCache`
+
+What a model call asked of its provider's cache, and what came of it: the lifetime asked (none, the short one, the long one), where the request placed its marks, and, where the call read nothing from the cache though its agent had sent this front before (cold), why: more time had passed since its last request than the lifetime that request asked (lapsed), or something the provider keys its cache on changed (changed).
+
+```ts
+export interface CallCache {
+  asked: "none" | "short" | "long";
+  marks?: ({ at: "system" | "tools" | "messages"; index: number; lifetime: "short" | "long" })[];
+  cold?: true;
+  cause?: "lapsed" | "changed";
+}
+```
+
 ### `CallFailureKind`
 
 What broke a model call that failed. Made again as the settings say: connection (refused, reset, cut, or the stream ended early), timeout (timed out, or went silent too long), overloaded (the provider is busy or asks to slow down), server (a fault of the provider's server), other. Never made again: credit, key, invalid, too-long, unmade (never sent).
@@ -4566,6 +4653,66 @@ Why a tool call never ran: a limit spent before it started, past the most tool c
 
 ```ts
 export type CallRefusal = { by: "limit"; hit: LimitHit } | { by: "answer"; max: number } | { by: "switch"; thing: { kind: "hook" | "rule-command" | "command-tool" | "mcp-server" | "http-tool" | "connection"; name: string; target: string }; state: "on" | "waiting" | "off" } | { by: "never"; lane: string } | { by: "declined"; lane: string; reason?: string } | { by: "hold"; rule: string } | { by: "unasked"; error: string } | { by: "hook"; hook: string; reason: string };
+```
+
+### `CallShown`
+
+One model call as its row keeps it: what it was for, on what, when, its tokens, its request by part, and what it asked of the provider's cache.
+
+```ts
+export interface CallShown {
+  /** Its number as its agent counted it, from 1; a save before a compaction counts from 1 again under the agent's own handle. */
+  n: number;
+  /** What it was for; null for a call kept before RPH named it. */
+  operation: AgentOperation | null;
+  /** The purpose its agent was started for, where one was known. */
+  purpose: string | null;
+  model: string;
+  connection: string;
+  /** The model layer's name for the API its connection's provider speaks. */
+  api: string | null;
+  effort: Effort | null;
+  /** When its request went out, in milliseconds since 1970. */
+  started: number;
+  /** When its answer ended; for a call a stop or a limit cut off, when its agent ended. */
+  ended: number;
+  /** Milliseconds since its agent's last request ended; null on the agent's first. */
+  sinceLast: number | null;
+  /** Tokens sent, those read from and written to the cache among them. */
+  input: number;
+  cacheRead: number;
+  cacheWrite: number;
+  /** Tokens written, reasoning among them. */
+  output: number;
+  reasoning: number | null;
+  /** What it weighs: its tokens as one figure, by the weights of its connection as the settings stood when this was read. */
+  weighted: number;
+  /** Its request by part; null for a call of a turn played before RPH told them, whose row carries its totals alone. */
+  parts: RequestPart[] | null;
+  /** What it asked of its provider's cache and what came of it; null where its record gave none. */
+  cache: CallCache | null;
+  /** Why it stopped, in the provider's word; for a call a stop or a limit cut off, how its agent ended. */
+  stop: string;
+  error: string | null;
+}
+```
+
+### `CallsSpent`
+
+What a set of model calls spent together: how many; the tokens sent, those read from the provider's cache and written to it among them; of those, the tokens read from the cache and the tokens written to it, and of the written ones those of the calls that asked the cache's long lifetime; the tokens the model wrote, its reasoning among them; and its reasoning, where the provider reported it. No figure adds a cached token twice: input already holds them. And the same as one weighted figure.
+
+```ts
+export interface CallsSpent {
+  calls: number;
+  input: number;
+  cacheRead: number;
+  cacheWrite: number;
+  cacheWriteLong: number;
+  output: number;
+  reasoning: number;
+  /** The weighted figure, a whole number: each token sent fresh counted 1, and each read from the cache, written to it (at its long lifetime, or not) and written by the model counted by its weight, each call by the weights of its connection as the settings stood when this was read. Tokens weighed, never money. */
+  weighted: number;
+}
 ```
 
 ### `CardChange`
@@ -4792,11 +4939,13 @@ export interface CastStrikeReply {
 
 ### `CastWaits`
 
-What waits for a character's own agent at the reading: how many of its perceptions of turns RPE played it has not taken in, the reply of the oldest one's turn (null: none waits, or that turn's reply is not on the path), the turns RPE played since that turn (the one read included), and its last dream (null: it never dreamt), with that turn's reply and its date in story time where the chat's clock shows one.
+What waits for a character's own agent at the reading: how many of its perceptions of turns RPE played it has not taken in and no job of its own agent has in hand (as the cast's facts count them), how large they are as the chat counts tokens and how many batches its agent would take them in as by the setting cast.takeInTokens (both absent where no count is at hand), the reply of the oldest one's turn (null: none waits, or that turn's reply is not on the path), the turns RPE played since that turn (the one read included), and its last dream (null: it never dreamt), with that turn's reply and its date in story time where the chat's clock shows one.
 
 ```ts
 export interface CastWaits {
   perceptions: number;
+  tokens?: number;
+  batches?: number;
   since: number | null;
   turns: number;
   dreamt: { message: number | null; date: string | null } | null;
@@ -5729,7 +5878,7 @@ export interface GapCheck {
 
 ### `GivenName`
 
-A name a definition's `given:` lists: what kind of thing it is, who finds it (RPH its own kinds, RPE its views), and whether RPE gives it at the chat's newest turn (null for RPH's, found at the run).
+A name a definition's `given:`, or one of its purposes, lists: what kind of thing it is, who finds it (RPH its own kinds, RPE its views), whether RPE gives it at the chat's newest turn (null for RPH's, found at the run), and its size there in tokens, at the chat's characters to a token (null for RPH's and for a name nothing provides).
 
 ```ts
 export interface GivenName {
@@ -5737,18 +5886,19 @@ export interface GivenName {
   kind: "file" | "chat" | "lore" | "prompt" | "world" | "story" | "cast" | "turn" | "index" | "ruleset" | "map" | "view";
   by: "rph" | "rpe";
   found: boolean | null;
+  tokens: number | null;
 }
 ```
 
 ### `GivenReply`
 
-What each agent definition in force for a chat is given by name, read at the chat's newest turn (null: it has none yet), and the names of RPE's that nothing provides.
+What each agent definition in force for a chat is given by name, for a start that names no purpose (`given`) and for each purpose a start may name (`purposes`: each with what the definition hands a start for it in place of `given`), read at the chat's newest turn (null: it has none yet) with each name's size there, and the names of RPE's that nothing provides.
 
 ```ts
 export interface GivenReply {
   chat: string;
   turn: string | null;
-  definitions: { name: string; off: boolean; given: GivenName[]; missing: string[] }[];
+  definitions: { name: string; off: boolean; given: GivenName[]; purposes: { name: string; given: GivenName[] }[]; missing: string[] }[];
 }
 ```
 
@@ -5985,6 +6135,10 @@ export interface JobStartAsk {
   brief: string;
   /** What it is given by name, as an agent's attachments are named. */
   given?: string[];
+  /** The purpose it is started for, one its definition names under `purposes:`: its agent is handed that list in place of what the definition gives every start. One the definition does not have hands it what every start is given. */
+  for?: string;
+  /** Names of what it would be handed that this start leaves out. */
+  leave?: string[];
   /** Limits of its own: each holds in place of the setting's for this job. */
   limits?: JobLimitsAsk;
 }
@@ -6029,6 +6183,19 @@ export interface JobToldReply {
 }
 ```
 
+### `JobUse`
+
+A job a turn's runs started and what it used: its row as a list of jobs shows it, with what it spent as RPH counts it (null where RPE no longer keeps its record), what the rows of its calls add up to, and its agents with their calls.
+
+```ts
+export interface JobUse {
+  id: string;
+  job: JobRow | null;
+  spent: CallsSpent;
+  agents: AgentUse[];
+}
+```
+
 ### `JobView`
 
 A job: its agent, what it was asked, where it stands, its scope, who started it, when, what it spent, its report, the limit it ended at, who ended it, what its start named and gave, the character its agent plays, what it was not given, what it wrote, the job it repeats, where it asks, and what the owner gave it beyond its limits.
@@ -6050,6 +6217,10 @@ export interface JobView {
   stoppedBy?: JobStopper;
   /** The attachments its start named, by name. */
   attach?: string[];
+  /** The purpose its start named, which chose what its definition handed it. */
+  for?: string;
+  /** The names of its definition's list for that purpose that its start left out. */
+  leave?: string[];
   /** The character its agent plays, as its start named it. */
   plays?: string;
   /** The limits of its own its start gave. */
@@ -8235,6 +8406,27 @@ export interface RequestHeldReply {
 }
 ```
 
+### `RequestPart`
+
+One part of a model call's request, in characters and in tokens by RPH's own estimate. Its name says which: for the prompt, the kind of the slice its text is in; for the briefing, its block; for an item given, the item; for tool calls and results, the tool.
+
+```ts
+export interface RequestPart {
+  part: RequestPartKind;
+  name?: string;
+  chars: number;
+  tokens: number;
+}
+```
+
+### `RequestPartKind`
+
+A part of a model call's request: the agent's opening block, its tools as declared, the line that frames the chat's prompt, the chat's prompt, what the session carries, the briefing, an item given by name, the brief, a rule's text, a reminder; and of the agent's own work what it said, its thinking, its tool calls, their results, and a compaction's summary of its older work.
+
+```ts
+export type RequestPartKind = "opening" | "tools" | "frame" | "prompt" | "carry" | "briefing" | "given" | "brief" | "rule" | "reminder" | "said" | "thinking" | "calls" | "results" | "summary";
+```
+
 ### `RequestReply`
 
 One model call's request, by its file below the turn's folder, rebuilt from the pointers the harness kept into the turn's files: every message as it was sent, in order, and each tool declared with the file its words came from. Where what is rebuilt is not what was sent, it says so and shows nothing.
@@ -8504,13 +8696,14 @@ export interface RunShown {
 
 ### `RunUsage`
 
-What a run spent, in all and by agent.
+What a run spent, in all, by agent, and by what its agents' calls were for (an agent whose start named none counts in no operation; absent for a run kept before RPH split them).
 
 ```ts
 export interface RunUsage {
   run: string;
   total: Usage;
   agents: { agent: AgentRef; usage: Usage }[];
+  operations?: { operation: AgentOperation; usage: Usage }[];
 }
 ```
 
@@ -8553,6 +8746,18 @@ export interface Scope {
   chat: string;
   session: string;
   turn?: string;
+}
+```
+
+### `SentItem`
+
+One item an agent was handed as it started: its name, its size in tokens by RPH's own estimate, and who chose it: its definition's given, the call that started it, a file pinned for it, its definition's opening, or an item given again as a message continues the agent, its text having changed.
+
+```ts
+export interface SentItem {
+  name: string;
+  tokens: number;
+  from: "definition" | "caller" | "pin" | "opening" | "again";
 }
 ```
 
@@ -9679,11 +9884,22 @@ export type TagCheckStarted = { job: JobView } | { refusal: JobRefusal };
 
 ### `TakeInAsk`
 
-The character whose own agent is to take in what it has perceived and not yet taken in, by its name as the cast holds it.
+The characters whose own agents are to take in what each has perceived and not yet taken in, by their names as the cast holds them: one character, several, or every one that holds any. A job is started for each.
 
 ```ts
 export interface TakeInAsk {
-  character: string;
+  characters: string[];
+}
+```
+
+### `TakeInReply`
+
+The jobs started, one for each character, each as it stands after the call; and the characters no job was started for, each with why.
+
+```ts
+export interface TakeInReply {
+  jobs: { character: string; job: JobView }[];
+  refused: { character: string; why: string }[];
 }
 ```
 
@@ -9754,7 +9970,7 @@ export interface ToolCallView {
 
 ### `ToolResult`
 
-A tool's answer: what the model is shown, whether it failed, what it reports beyond it, its marks, and data for the live view.
+A tool's answer: what the model is shown, whether it failed, what it reports beyond it, its marks, data for the live view, and the path of the file that holds it whole where one does.
 
 ```ts
 export interface ToolResult {
@@ -9763,6 +9979,7 @@ export interface ToolResult {
   reports?: string[];
   marks?: string[];
   details?: JsonValue;
+  kept?: string;
 }
 ```
 
@@ -9794,7 +10011,7 @@ export interface TraceDelta {
 What RPH did; each kind's fields are the facts of it.
 
 ```ts
-export type TraceEvent = { kind: "run_started"; run: "turn" | "job" | "talk"; turn?: TurnKind; lead: string } | { kind: "agent_started"; definition: string; connection: string; model: string; effort?: Effort; set?: Effort; session: string; given: string[]; tools?: { tokens: number; most: number }; judges?: { rule: string; agent: string } } | { kind: "tool_unheld"; tool: string; definition: string; reason: "unregistered" | "shadowed" | "withdrawn" } | { kind: "intent_began" } | { kind: "intent"; text: string } | { kind: "call_started"; call: number; connection: string; model: string; sampling?: Sampling; maxTokens?: number; messages: number; tools: number; request?: string; toolTokens?: number; openingTokens?: number } | { kind: "call_ended"; call: number; model: string; text: string; thinking?: string; toolCalls: ToolCallView[]; stop: string; usage: Usage; ms: number; error?: string } | { kind: "call_failed"; call: number; failure: CallFailureKind; words: string; at: CallBreakPoint; status?: number; tries: number; retries: number; retried: boolean; wait?: number; asked?: number } | { kind: "connection_wait"; connection: string; for: "minute" | "place"; ms?: number } | { kind: "waiting"; for: "tool" | "agent"; callId: string; tool: string; ms?: number } | { kind: "connection_stand_in"; named: string; used: string } | { kind: "effort_lowered"; connection: string; model: string; asked: Effort; sent: Effort } | { kind: "tool_started"; callId: string; tool: string; args: JsonValue; via?: "tool_use" } | { kind: "tool_update"; callId: string; tool: string; partial: ToolResult } | { kind: "tool_ended"; callId: string; tool: string; result: ToolResult; clean: boolean; endedRun: boolean; ms: number; permission?: CallPermission; refused?: CallRefusal } | { kind: "rule_fired"; firing: RuleFiring } | { kind: "rule_failed"; rule: string; path: string; why: "time"; length: number } | { kind: "rule_failed"; rule: string; path: string; why: "command"; detail: string } | { kind: "rule_failed"; rule: string; path: string; why: "judge"; detail: string } | { kind: "rule_waiting"; rule: string; path: string; thing: { kind: "hook" | "rule-command" | "command-tool" | "mcp-server" | "http-tool" | "connection"; name: string; target: string }; state: "waiting" | "off" } | { kind: "hook"; hook: string; on: HookEvent; outcome: "ok" | "added" | "changed" | "blocked" | "failed" | "timed-out"; ms: number; callId?: string; text?: string } | { kind: "approval_asked"; callId: string; tool: string; lane: string } | { kind: "approval_answered"; callId: string; tool: string; lane: string; answer: { go: true } | { go: false; reason?: string } } | { kind: "prompt_notices"; notices: PromptNotice[]; pictures?: { message: number; count: number }[] } | { kind: "todo"; items: { text: string; done: boolean }[] } | { kind: "limit"; hit: LimitHit } | { kind: "paused"; call: number } | { kind: "resumed"; call: number; ms: number } | { kind: "said"; call: number; text: string } | { kind: "released"; release: Release } | { kind: "progress_missing"; time: number } | { kind: "compacted"; session: string; reason: "would-not-fit" | "refused" | "asked" | "fold"; of: "turns" | "run"; before: number; after: number; keptTurns?: number } | { kind: "session"; session: string; change: "opened" | "closed" | "forked" | "reopened" | "unreadable"; from?: string; turn?: string; by?: "user"; reason?: string } | { kind: "job"; job: JobView } | { kind: "agent_ended"; status: "done" | "asked" | "limit" | "stopped" | "failed"; limit?: LimitHit; usage: Usage } | { kind: "run_ended"; outcome: RunOutcome };
+export type TraceEvent = { kind: "run_started"; run: "turn" | "job" | "talk"; turn?: TurnKind; lead: string } | { kind: "agent_started"; definition: string; connection: string; model: string; effort?: Effort; set?: Effort; session: string; given: string[]; tools?: { tokens: number; most: number }; judges?: { rule: string; agent: string }; operation?: AgentOperation; for?: string; sent?: SentItem[]; api?: string } | { kind: "tool_unheld"; tool: string; definition: string; reason: "unregistered" | "shadowed" | "withdrawn" } | { kind: "intent_began" } | { kind: "intent"; text: string } | { kind: "call_started"; call: number; connection: string; model: string; sampling?: Sampling; maxTokens?: number; messages: number; tools: number; request?: string; toolTokens?: number; openingTokens?: number; parts?: RequestPart[]; sinceLast?: number } | { kind: "call_ended"; call: number; model: string; text: string; thinking?: string; toolCalls: ToolCallView[]; stop: string; usage: Usage; ms: number; error?: string; cache?: CallCache } | { kind: "call_failed"; call: number; failure: CallFailureKind; words: string; at: CallBreakPoint; status?: number; tries: number; retries: number; retried: boolean; wait?: number; asked?: number } | { kind: "connection_wait"; connection: string; for: "minute" | "place"; ms?: number } | { kind: "waiting"; for: "tool" | "agent"; callId: string; tool: string; ms?: number } | { kind: "connection_stand_in"; named: string; used: string } | { kind: "effort_lowered"; connection: string; model: string; asked: Effort; sent: Effort } | { kind: "warm_unmade"; why: "unreplayable" } | { kind: "tool_started"; callId: string; tool: string; args: JsonValue; via?: "tool_use" } | { kind: "tool_update"; callId: string; tool: string; partial: ToolResult } | { kind: "tool_ended"; callId: string; tool: string; result: ToolResult; clean: boolean; endedRun: boolean; ms: number; permission?: CallPermission; refused?: CallRefusal } | { kind: "rule_fired"; firing: RuleFiring } | { kind: "rule_failed"; rule: string; path: string; why: "time"; length: number } | { kind: "rule_failed"; rule: string; path: string; why: "command"; detail: string } | { kind: "rule_failed"; rule: string; path: string; why: "judge"; detail: string } | { kind: "rule_waiting"; rule: string; path: string; thing: { kind: "hook" | "rule-command" | "command-tool" | "mcp-server" | "http-tool" | "connection"; name: string; target: string }; state: "waiting" | "off" } | { kind: "hook"; hook: string; on: HookEvent; outcome: "ok" | "added" | "changed" | "blocked" | "failed" | "timed-out"; ms: number; callId?: string; text?: string } | { kind: "approval_asked"; callId: string; tool: string; lane: string } | { kind: "approval_answered"; callId: string; tool: string; lane: string; answer: { go: true } | { go: false; reason?: string } } | { kind: "prompt_notices"; notices: PromptNotice[]; pictures?: { message: number; count: number }[] } | { kind: "todo"; items: { text: string; done: boolean }[] } | { kind: "limit"; hit: LimitHit } | { kind: "paused"; call: number } | { kind: "resumed"; call: number; ms: number } | { kind: "said"; call: number; text: string } | { kind: "released"; release: Release } | { kind: "progress_missing"; time: number } | { kind: "compacted"; session: string; reason: "would-not-fit" | "refused" | "asked" | "fold"; of: "turns" | "run"; before: number; after: number; keptTurns?: number } | { kind: "window"; action: "let_go" | "note" | "restore" | "handoff"; items: { id: string; tokens: number }[]; sparedTokens: number; costTokens: number } | { kind: "session"; session: string; change: "opened" | "closed" | "forked" | "reopened" | "unreadable"; from?: string; turn?: string; by?: "user"; reason?: string } | { kind: "job"; job: JobView } | { kind: "agent_ended"; status: "done" | "asked" | "limit" | "stopped" | "failed"; limit?: LimitHit; usage: Usage } | { kind: "run_ended"; outcome: RunOutcome };
 ```
 
 ### `TraceRecord`
@@ -10066,7 +10283,7 @@ export interface TurnLoreReply {
 
 ### `TurnLoreRow`
 
-An entry Lumiverse activated for a turn's prompt: its lore map id, its id and its book's id in Lumiverse, its title, how it activated where the turn's tag says, and what RPE's check of the lore on receipt did to it.
+An entry Lumiverse activated for a turn's prompt: its lore map id, its id and its book's id in Lumiverse, its title, how it activated where the turn's tag says, what RPE's check of the lore on receipt did to it, its size, how it stood against the turn before, and what the turn's lead did with it.
 
 ```ts
 export interface TurnLoreRow {
@@ -10082,6 +10299,12 @@ export interface TurnLoreRow {
   how: LoreActivation | null;
   /** Where the extension applied its own verdict on the secrets and RPE checked the lore on receipt: kept out of the prompt, worded otherwise, or its text not found in the prompt (so RPE's verdict was not applied to it); null where the check left it as it was, or nothing was checked. */
   receipt: "kept-out" | "reworded" | "not-found" | null;
+  /** The size of its text as the prompt carried it, in tokens as the chat counts them; null where its text was not found in the prompt, or the turn kept no list of what its prompt held. */
+  tokens: number | null;
+  /** Against the prompt of the turn before it on its path: new to the prompt, its text changed, or as it was; null where that turn kept nothing to compare with (the chat's first turn, or one played before RPE kept any). */
+  status: "new" | "changed" | "same" | null;
+  /** What the turn's lead did with it by the end of its run: kept it whole in its window, or let it go to one line; null where the turn's trace is not kept. */
+  lead: "kept" | "let_go" | null;
 }
 ```
 
@@ -10143,8 +10366,12 @@ export interface TurnReply {
   /** Its marks, in the order they were set; none for a turn that carries none. */
   marks: TurnMark[];
   timings: TurnMoments;
-  /** Every agent of its run together: model calls and tokens. */
+  /** Every agent of its runs together: model calls and tokens. The jobs it started are not among them: each has its own. */
   usage: Usage;
+  /** The jobs its runs started, the first started first, each by its row as a list of jobs shows it, with what it spent as RPH counts it; none for a turn that started none, or whose jobs' records are no longer kept. */
+  jobs: JobRow[];
+  /** What the kept rows of its calls weigh, whole numbers: each token sent fresh counted 1 and the rest by the weights the settings hold as this is read (`usage.weights.*`, a connection's own over them). Tokens weighed, never money. Null where no row of its calls is kept: a turn played before the rows were, and not read in. */
+  weighted: { runs: number; jobs: { [key: string]: number } } | null;
   chat: string;
   /** The lead's intent record as it was written (plan §10.3); null when it wrote none. Shown behind the spoiler gate. */
   intent: string | null;
@@ -10203,8 +10430,12 @@ export interface TurnRow {
   /** Its marks, in the order they were set; none for a turn that carries none. */
   marks: TurnMark[];
   timings: TurnMoments;
-  /** Every agent of its run together: model calls and tokens. */
+  /** Every agent of its runs together: model calls and tokens. The jobs it started are not among them: each has its own. */
   usage: Usage;
+  /** The jobs its runs started, the first started first, each by its row as a list of jobs shows it, with what it spent as RPH counts it; none for a turn that started none, or whose jobs' records are no longer kept. */
+  jobs: JobRow[];
+  /** What the kept rows of its calls weigh, whole numbers: each token sent fresh counted 1 and the rest by the weights the settings hold as this is read (`usage.weights.*`, a connection's own over them). Tokens weighed, never money. Null where no row of its calls is kept: a turn played before the rows were, and not read in. */
+  weighted: { runs: number; jobs: { [key: string]: number } } | null;
   /** Each of its runs, the first first: the run that answered is the latest that is not a Settle now run. */
   runs: TurnRunRow[];
 }
@@ -10275,8 +10506,26 @@ export interface TurnTold {
   gapChecks: { check: GapCheck; at: number }[];
   consents: { grant: ConsentGrant; at: number }[];
   rules: { firing: RuleFiring; at: number }[];
-  attachments: { agent: AgentRef; refs: JsonValue; at: number }[];
+  attachments: { agent: AgentRef; refs: JsonValue; purpose?: string; at: number }[];
   dropped: { agent: AgentRef; at: number }[];
+}
+```
+
+### `TurnUseReply`
+
+Where a turn's tokens went: what the calls of its own runs add up to, the agents of its runs with what each was handed and its calls, and the jobs its runs started, each with its own use.
+
+```ts
+export interface TurnUseReply {
+  turn: TurnId;
+  /** What the calls of its own runs add up to; its jobs' calls are not among them. */
+  spent: CallsSpent;
+  /** The agents of its runs, in the order each first worked. */
+  agents: AgentUse[];
+  /** The jobs its runs started, the first started first. */
+  jobs: JobUse[];
+  /** The weights every weighted figure here was worked out by. */
+  weights: UsageWeightsShown;
 }
 ```
 
@@ -10332,6 +10581,72 @@ export interface Usage {
   cacheWrite: number;
   output: number;
   reasoning?: number;
+}
+```
+
+### `UsageReadInReply`
+
+What a reading in of past use found: the turn folders and the jobs' own traces it read, those it could not read, the rows of model calls and of items handed it added, and how many of the calls added carry no parts (their totals alone: a trace kept before RPH told a request by part holds no more).
+
+```ts
+export interface UsageReadInReply {
+  turns: number;
+  jobs: number;
+  unread: number;
+  calls: number;
+  sent: number;
+  withoutParts: number;
+}
+```
+
+### `UsageReply`
+
+What a span of his model calls spent: in all, and by the definition that made them, by what they were for, by the parts of their requests, by chat and by day.
+
+```ts
+export interface UsageReply {
+  /** Where the span begins, in milliseconds since 1970: as asked, or for a span of turns when the oldest of its turns was received (ask the span before it with this as `to`); null for one that names no beginning, or holds no turn. */
+  from: number | null;
+  /** Where the span ends, as asked; null for one that runs to now. */
+  to: number | null;
+  /** For a span of turns: how many turns it holds, fewer than asked where no more were played; null for a span of time. */
+  turns: number | null;
+  total: CallsSpent;
+  /** How many of its calls carry their request by part: the sums by part are of those alone. A call of a turn read in from a trace kept before RPH told the parts carries none. */
+  withParts: number;
+  /** By the agent definition that made the calls, the one that weighs most first. */
+  byDefinition: { definition: string; spent: CallsSpent }[];
+  /** By what the calls were for, the operation that weighs most first; null gathers the calls kept before RPH named it. */
+  byOperation: ({ operation: AgentOperation | null; spent: CallsSpent })[];
+  /** By the part of the requests, and its name where it has one, the largest first: the calls that carried it, and its characters and its tokens by RPH's own estimate, added up over them. */
+  byPart: ({ part: RequestPartKind; name: string | null; calls: number; chars: number; tokens: number })[];
+  /** By chat, the one that weighs most first; null gathers the jobs of no chat. */
+  byChat: ({ chat: string | null; spent: CallsSpent })[];
+  /** By the day each call began, as YYYY-MM-DD, the earliest first, counted in the offset asked. */
+  byDay: { day: string; spent: CallsSpent }[];
+  /** The weights every weighted figure here was worked out by. */
+  weights: UsageWeightsShown;
+  /** Where the rows of model calls are kept for a number of days alone (`usage.rowsKeptDays`): the setting and the days, so that a page can say that a reading in adds rows older than that, which the next turn's end removes. Null where they are kept for good. */
+  kept: { setting: string; name: string; days: number } | null;
+}
+```
+
+### `UsageWeightsShown`
+
+What each kind of token counts in the weighted figure, a token sent fresh counting 1, as the settings stood when this was read: every connection's (`usage.weights.*`), and those of each connection that has its own (`connections.<connection>.usage.weights.*`), whose calls are weighed by them. They ship as the terms of one provider; another's differ.
+
+```ts
+export interface UsageWeightsShown {
+  /** A token read from the provider's cache. */
+  cacheRead: number;
+  /** A token written to it by a call that did not ask the cache's long lifetime. */
+  cacheWrite: number;
+  /** A token written to it by a call that asked the long lifetime. */
+  cacheWriteLong: number;
+  /** A token the model wrote, its reasoning among them. */
+  output: number;
+  /** The connections that have weights of their own, by name. */
+  connections: { connection: string; cacheRead: number; cacheWrite: number; cacheWriteLong: number; output: number }[];
 }
 ```
 
@@ -10414,6 +10729,24 @@ The web search provider he set, as the Connections page shows it: its address (n
 export interface WebProviderShown {
   address: string | null;
   key: boolean;
+}
+```
+
+### `WindowChange`
+
+What an agent did to its own window once (plan 3.2 §7.2), as the trace its folder keeps tells it: when; whether it let things go, put a note of its own in their place, brought them back whole, or went on in a fresh window with what it kept; each thing by its name in the window with its size; and what the change spares on each later call and takes once, in tokens by RPH's own estimate.
+
+```ts
+export interface WindowChange {
+  /** When, in milliseconds since 1970. */
+  at: number;
+  action: "let_go" | "note" | "restore" | "handoff";
+  /** Each thing by its name in the window's ledger, with its size in tokens. */
+  items: { id: string; tokens: number }[];
+  /** The tokens the change spares on each later call. */
+  spared: number;
+  /** The tokens it takes once, on the next call. */
+  once: number;
 }
 ```
 

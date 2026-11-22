@@ -5,6 +5,11 @@ story_query reads the record as it stands on this turn's path. `part` is one of 
 
     story_query {"part": "thread", "open": true, "who": "Bram"}
 
+`how` set to `gist` gives each item by its title and its summary, with the size of the item whole. With `question`, a reader reads the answer whole and answers it: you are given the reader's answer and none of the record.
+
+    story_query {"part": "beat", "from": 40, "to": 139, "how": "gist"}
+    story_query {"part": "beat", "who": "Bram", "question": "What did Bram promise Wren, and has he kept it?"}
+
 story_record takes `operations`, recorded in order in one write. Every operation has an `op`, the part it writes, and that part's fields, which the tool's arguments list; an operation with no `op` is not read, one that changes an item by its id included. Leave `id` out to add a new beat, thread, player note, future, canon or retcon; give the id the record gave an item to change it. A chapter or scene with no id is the current one while it is open. A `record` operation writes the turn's record, at least one of intent, decided, why, rulings, consents and next; left without `turn` or `id`, it is this turn's, and a turn's record by the id story_query prints for it (`rec:` and the turn's id) is that turn's.
 
     story_record {"operations": [{"op": "beat", "text": "Bram slides the sealed letter across the bar.", "who": ["Bram", "Wren"]}, {"op": "thread", "id": "th-4", "state": "Wren has the letter; the seal is unbroken.", "hot": true}, {"op": "record", "intent": "An action: Wren takes the letter.", "decided": "Bram gives it, uneasy.", "why": "He is frightened of the sender."}]}

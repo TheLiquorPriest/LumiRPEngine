@@ -11,4 +11,4 @@ arguments:
   precision: "How exact: exact, approximate, vague or unknown."
   standing: "How it stands: established, proposed or assumed."
 ---
-Adjusts a revenue stream's takings by a factor or by a flat sum, for some days or until changed again. The stream's own bounds hold: one its author closed to adjustment in play is reported. The answer gives the stream as it now stands.
+Adjusts a revenue stream's takings by a factor or by a flat sum, for some days or until changed again. The stream's own bounds hold: one its author closed to adjustment in play is reported. The answer says what changed; given as a receipt, it leaves how the stream now stands to the file it names.

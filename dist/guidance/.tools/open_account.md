@@ -12,4 +12,4 @@ arguments:
   precision: "How exact: exact, approximate, vague or unknown."
   standing: "How it stands: established, proposed or assumed."
 ---
-Opens an account for someone. The answer says what changed and how the account now stands.
+Opens an account for someone. The answer says what changed; given as a receipt, it leaves how the account now stands to the file it names.

@@ -10,4 +10,4 @@ arguments:
   precision: "How exact: exact, approximate, vague or unknown."
   standing: "How it stands: established, proposed or assumed."
 ---
-Sets a person's or a thing's tier, whether their life runs on its own, and the detail each part of their life is kept at. The answer says what changed and how they now stand.
+Sets a person's or a thing's tier, whether their life runs on its own, and the detail each part of their life is kept at. The answer says what changed; given as a receipt, it leaves how they now stand to the file it names.

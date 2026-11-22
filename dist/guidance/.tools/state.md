@@ -5,6 +5,10 @@ world_query reads the world's tree at a point: `at` is a place, someone or somet
 
     world_query {"at": "Keeper's kitchen", "depth": 2}
 
+Where no `depth` is said, `how` names one: `gist` the point alone, `whole` everything beneath it. With `question`, a reader reads the answer whole and answers it: you are given the reader's answer and none of the tree.
+
+    world_query {"at": "Thornbury", "question": "Who in the village owes the reeve, and how much?"}
+
 world_apply takes `operations`, applied in order, each on the state the ones before it left, so a later one may name what an earlier one made. Each has an `op` and the fields that op takes, which the tool's arguments list, and a `source` saying where it comes from (`from`, and the message, roll or entry it cites by id). A name that is not there, or a value outside its choices, answers the whole call with what would work, and nothing is recorded.
 
     world_apply {"operations": [{"op": "move", "who": "Ada", "to": "Keeper's kitchen", "source": {"from": "prose", "message": "m-12"}}, {"op": "pay", "who": "Ada", "to": "Tobin", "amount": 3, "reason": "purchase", "source": {"from": "prose", "message": "m-12"}}]}

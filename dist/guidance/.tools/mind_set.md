@@ -14,4 +14,4 @@ arguments:
   entries.precision: "How exact it is: exact, approximate, vague or unknown."
   entries.standing: "How sure it is: established, proposed or assumed."
 ---
-Sets what is on your mind now: what holds your attention, what you feel, what you believe, what you want, what you plan, and what you hide. As many entries as you need in one call. An entry belongs to this turn: if the turn is swiped or deleted, it goes. The answer gives each entry's id and how it now stands.
+Sets what is on your mind now: what holds your attention, what you feel, what you believe, what you want, what you plan, and what you hide. As many entries as you need in one call. An entry belongs to this turn: if the turn is swiped or deleted, it goes. The answer gives each entry's id; given as a receipt, it leaves how each now stands to the file it names.

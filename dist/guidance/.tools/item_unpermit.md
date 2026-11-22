@@ -8,4 +8,4 @@ arguments:
   precision: "How exact: exact, approximate, vague or unknown."
   standing: "How it stands: established, proposed or assumed."
 ---
-Ends a standing permission to use another's things. The answer says what changed and how they now stand.
+Ends a standing permission to use another's things. The answer says what changed; given as a receipt, it leaves how they now stand to the file it names.

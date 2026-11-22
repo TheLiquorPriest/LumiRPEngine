@@ -8,4 +8,4 @@ arguments:
   precision: "How exact: exact, approximate, vague or unknown."
   standing: "How it stands: established, proposed or assumed."
 ---
-Changes whose a thing is, and nothing else: where it is and who has it stay as they are. Leave to use it that came from the old owner ends. The answer says what changed and how the thing now stands.
+Changes whose a thing is, and nothing else: where it is and who has it stay as they are. Leave to use it that came from the old owner ends. The answer says what changed; given as a receipt, it leaves how the thing now stands to the file it names.

@@ -9,13 +9,13 @@
 Install it once with npm, then sign in once, in a terminal. npm, like npx below, needs Node 22 or newer: on a machine with only Bun, such as one set up just to run Lumiverse, skip the install and run the extension's own copy with `bun` instead ([Follow LumiRPEngine's updates](#follow-lumirpengines-updates)). The password is asked at a hidden prompt (or read from `LUMIVERSE_PASSWORD`), never taken as an argument, and never stored:
 
 ```bash
-npm i -g github:TheLiquorPriest/LumiRPEngine
+npm i -g github:TheLiquorPriest/LumiRPEngine#alpha
 lumirpengine login --url http://localhost:7860 --username you
 ```
 
 `--url` is the address you open Lumiverse at in your browser (or set `LUMIVERSE_URL`); `--username` can come from `LUMIVERSE_USERNAME`. Plain `http` to another machine needs `--allow-http` (see [Safety](#safety)). The session token is saved in `~/.config/lumirpengine/credentials.json` (`$XDG_CONFIG_HOME/lumirpengine/` when set, `%APPDATA%\lumirpengine\` on Windows), readable only by you. `status` shows where you are signed in and whether LumiRPEngine answers there; `logout` ends the session on Lumiverse and deletes the token. Sign in again whenever you like: a running `mcp` server takes up the new sign-in at its next call, without a restart, and after a `logout` it drops its connection at its next call.
 
-The install downloads this repo's package from GitHub (about 14 MB) and puts `lumirpengine` on your PATH. `github:TheLiquorPriest/LumiRPEngine` follows the default branch: pin a release or a commit with `github:TheLiquorPriest/LumiRPEngine#<tag or commit>`, so that an update reaches you only when you install again. The same `npm i -g` updates it, and `npm rm -g lumi-rp-engine` removes it.
+The install downloads this repo's package from GitHub (about 14 MB) and puts `lumirpengine` on your PATH. `github:TheLiquorPriest/LumiRPEngine#alpha` follows the branch `alpha`, which holds the alpha builds (the default branch, `main`, holds no package until the first stable release): pin a release or a commit instead with `github:TheLiquorPriest/LumiRPEngine#<tag or commit>`, so that an update reaches you only when you install again. The same `npm i -g` updates it, and `npm rm -g lumi-rp-engine` removes it.
 
 Then add the server to your harness. Its config holds no password:
 
@@ -55,7 +55,7 @@ With LumiRPEngine's `mcp_servers` permission (Lumiverse's Extensions tab, **Mcp 
 
 ### Without installing: npx
 
-`npx -y github:TheLiquorPriest/LumiRPEngine <command>` runs any command without an install, `login` and `mcp` included, and takes the same `#<tag or commit>`; like the npm install, it needs Node 22 or newer. But npx looks the GitHub ref up again on every launch, so the server takes about 9 s to answer the first time and still about 7 s after that (on the same machine; yours will differ), and npx needs GitHub reachable to start at all, even for the offline tools. That is close to Codex's default start-up timeout of 10 s, and past the 1 s Codex waits for an optional server before it lists the tools for the first turn. In Codex, give it the time in `~/.codex/config.toml`:
+`npx -y github:TheLiquorPriest/LumiRPEngine#alpha <command>` runs any command without an install, `login` and `mcp` included, and takes a `#<tag or commit>` in place of `#alpha` the same way; like the npm install, it needs Node 22 or newer. But npx looks the GitHub ref up again on every launch, so the server takes about 9 s to answer the first time and still about 7 s after that (on the same machine; yours will differ), and npx needs GitHub reachable to start at all, even for the offline tools. That is close to Codex's default start-up timeout of 10 s, and past the 1 s Codex waits for an optional server before it lists the tools for the first turn. In Codex, give it the time in `~/.codex/config.toml`:
 
 ```toml
 # Top-level, above any [table]: how long Codex waits for slow servers before its first tool list (1000 by default).
@@ -63,7 +63,7 @@ mcp_optional_startup_grace_ms = 15000
 
 [mcp_servers.lumirpengine]
 command = "npx"
-args = ["-y", "github:TheLiquorPriest/LumiRPEngine", "mcp"]
+args = ["-y", "github:TheLiquorPriest/LumiRPEngine#alpha", "mcp"]
 startup_timeout_sec = 60
 ```
 

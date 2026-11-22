@@ -9,4 +9,4 @@ arguments:
   precision: "How exact: exact, approximate, vague or unknown."
   standing: "How it stands: established, proposed or assumed."
 ---
-Sets a person's or a thing's classes and tags, whole, by the world's facets. The answer says what changed and how it now stands.
+Sets a person's or a thing's classes and tags, whole, by the world's facets. The answer says what changed; given as a receipt, it leaves how it now stands to the file it names.
