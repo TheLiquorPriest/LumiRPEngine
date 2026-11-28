@@ -4496,12 +4496,16 @@ export interface BootstrapStartAsk {
 
 ### `BootstrapStartShown`
 
-The start as it stands for the chat, before any press: whether the bootstrap skill is in force; the relive words its header offers (none while it is off); the token limit at which a job asks him whether to go on, counted as tokens sent and written by every agent of the job with a cached token at `cachedWeight`; and each cap that ends a bootstrap job's run, as in force for the chat (null: none).
+The start as it stands for the chat, before any press: whether the bootstrap skill is in force; the relive words its header offers (none while it is off); what each means, as the skill's Reliving section says it (only the words it has a line for), and what a start with no word means there (null: no such line); the token limit at which a job asks him whether to go on, counted as tokens sent and written by every agent of the job with a cached token at `cachedWeight`; and each cap that ends a bootstrap job's run, as in force for the chat (null: none).
 
 ```ts
 export interface BootstrapStartShown {
   skill: boolean;
   relive: string[];
+  /** Each relive word the skill's Reliving section has a line for, with that line as written. */
+  means: { word: string; line: string }[];
+  /** The skill's Reliving line for a start with no word; null where it has none. */
+  noChoice: string | null;
   tokenLimit: number;
   cachedWeight: number;
   caps: ({ key: string; value: number | null })[];
@@ -5148,7 +5152,7 @@ What the chat's history window is now, for its marker: whether it is on, the fir
 export interface ChatWindowReply {
   /** The window is on for this chat. */
   on: boolean;
-  /** Lumiverse's id of the first history message the window keeps, with the step and the hold as the chat's settings set them; null where it keeps all, or is off. */
+  /** Lumiverse's id of the first history message the prompt holds: the first the window keeps, with the step and the hold as the chat's settings set them, or past it, where the chat's setting lets agents read hidden messages, the first one after it not hidden; null where nothing lies before it, or the window is off. */
   first: string | null;
   /** Lumiverse's id of the history message just above `first`, the one the marker stands under; null where nothing is above it. */
   before: string | null;
@@ -9453,7 +9457,7 @@ export interface StoryCoverage {
   chat: string;
   /** How many messages the chat's path holds. */
   messages: number;
-  /** The number of the first message the prompt's window keeps; null where it keeps them all, or none is known. */
+  /** The number of the first message the prompt holds: the first the window keeps or, where agents may read the messages the player hid, the first one after it not hidden; null where nothing lies before it, or none is known. */
   edge: number | null;
   /** The chat's setting: agents may read the messages the player hid, so an uncovered hidden message above the edge counts. */
   hiddenReadable: boolean;
@@ -9553,7 +9557,7 @@ The story so far as the next briefing gives it to the Author, worked out at the 
 
 ```ts
 export interface StorySoFarReply {
-  /** The block as laid out; empty when the window leaves nothing out or the record holds nothing for it. */
+  /** The block as laid out; empty when no history lies before the first message the prompt holds, or the record holds nothing for it. */
   text: string;
   /** Its size in tokens. */
   tokens: number;

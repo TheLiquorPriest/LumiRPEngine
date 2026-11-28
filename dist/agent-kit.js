@@ -101561,7 +101561,7 @@ The call is the character's own tool, \`self_read\`: a part of its record, one e
 
 **Story** shows the story record as the Author keeps it, behind the gate: the **Timeline** (chapters, scenes and beats in the chat's order, each beat beside the message it stands for); **What the record covers** of the chat, with every stretch it does not cover or has beats for and no summary of; **The story so far, as the Author is given it** for what lies beyond the window; and the parts of the story model: **Premise**, **Threads**, **Arcs**, **You, as the Author reads you**, **Canon**, **Retcons**, **The Author's records**, the **Horizon** and the **Futures**. You can strike or correct any item, as your own change.
 
-The story record stands in for the history the window leaves out: the Author keeps it ahead of the window, so that what leaves the prompt is still known. The briefing's story so far fills at most a set number of tokens, the same on every model (**The story so far: tokens**, \`story.soFar.tokens\`, 16,000 as shipped): the newest stretches come whole, what is further back by its chapters' summaries, and what does not fit is counted in a line the Author opens with \`story_query\`. **Hold uncovered messages** (\`history.hold.on\`, off as shipped) keeps a message in the prompt until the record covers it. Above the record, the Story page has the chat's **Bootstrap** (see [Jobs and sessions](#jobs-and-sessions)).
+The story record stands in for the history the window leaves out: the Author keeps it ahead of the window, so that what leaves the prompt is still known. With **Hidden messages readable** (\`history.hiddenReadable\`) on, what you hid before the first message the prompt holds is history out of the prompt too, and the story so far stands in for it. The briefing's story so far fills at most a set number of tokens, the same on every model (**The story so far: tokens**, \`story.soFar.tokens\`, 16,000 as shipped): the newest stretches come whole, what is further back by its chapters' summaries, and what does not fit is counted in a line the Author opens with \`story_query\`. **Hold uncovered messages** (\`history.hold.on\`, off as shipped) keeps a message in the prompt until the record covers it. Above the record, the Story page has the chat's **Bootstrap** (see [Jobs and sessions](#jobs-and-sessions)).
 
 ### Secrets
 
@@ -101738,7 +101738,7 @@ A **job** is work that need not finish before your next message: summarizing a s
 
 A chat that comes to RPE with a long past, new to RPE or carried from the previous build, has no story record for it yet. Your past is in Lumiverse, and the agents can read it at any time; the briefing says which range is neither in the prompt nor covered by the record. **Bootstrap** is a job the Author leads, with the skill \`bootstrap\`, to go over the chat's past and fill in its records, nearest stretch first. Nothing starts one but you.
 
-The **Story** page (and **Jobs**, for any chat) shows how far the record stands, as six facts with their counts: **The lore index**, **The history the window leaves out**, **The cast**, **The story model**, **The horizon**, and **Each principal's base and memories**. Whether that is enough is the job's to judge. **Start a bootstrap job** starts one, with how much to relive (the words the skill offers) and its own token limit. At that limit (**Bootstrap asks before**, \`bootstrap.askAtTokens\`, 200,000 tokens) the job is held and asks you: **Go on**, with how many more tokens before it asks again, or **End with what it has**. The **Migration** page offers a start for every chat the migration carried.
+The **Story** page (and **Jobs**, for any chat) shows how far the record stands, as six facts with their counts: **The lore index**, **The history the window leaves out**, **The cast**, **The story model**, **The horizon**, and **Each principal's base and memories**. Whether that is enough is the job's to judge. Under **Start a bootstrap job**, set its own token limit if you want one, then press a start: each button starts a job at once. **Start: outline**, **Start: key moments** and **Start: all** (the words the skill offers) say how much of the past the characters relive, each shown with the skill's own line for it; **Start: as the skill decides** gives no word. At that limit (**Bootstrap asks before**, \`bootstrap.askAtTokens\`, 200,000 tokens) the job is held and asks you: **Go on**, with how many more tokens before it asks again, or **End with what it has**. The **Migration** page offers a start for every chat the migration carried.
 
 ### Sessions
 
@@ -103980,7 +103980,7 @@ var package_default = {
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "ac79c561";
+var BUILD = "953cb11b";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;

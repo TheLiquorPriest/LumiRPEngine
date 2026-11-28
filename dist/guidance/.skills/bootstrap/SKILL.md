@@ -42,8 +42,8 @@ Stop when all six hold. They are in the order to do them. Whether each holds is 
 
 To relive a stretch of the past is to have a principal's own agent take it in as that principal lived it, from perceptions you give it, in the order it happened, and record it in its own words. Relive no more than the player asked for:
 
-- **No choice:** do what "Done enough" asks and nothing more. Later turns read the rest closely when they touch it.
-- **`outline`:** every principal knows the past in outline, and nothing is relived beyond the memories of the sixth thing above.
+- **No choice:** only what every bootstrap does ("Done enough", above) and nothing more. Later turns read the rest closely when they touch it.
+- **`outline`:** every principal knows the past in outline, and nothing is relived beyond the memories of its eight most important moments, which every bootstrap writes.
 - **`key moments`:** the key moments are relived as well: each principal relives the moments of the past that mattered most to it.
 - **`all`:** every stretch of the past is relived, by each principal it reached.
 

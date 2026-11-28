@@ -127471,18 +127471,31 @@ function coverageOf(record) {
       for (let i = from;i <= to; i++)
         beats.add(i);
   }
+  let summarized = 0;
+  const marks = messages.map((_, i) => {
+    summarized += edges[i] ?? 0;
+    const hasBeats = beats.has(i);
+    return { covered: hasBeats || summarized > 0, beats: hasBeats, summarized: summarized > 0 };
+  });
+  let reply = null;
+  for (let i = messages.length - 1;i >= 0; i--) {
+    const own = marks[i];
+    if (own === undefined)
+      continue;
+    if (messages[i]?.user !== true)
+      reply = own;
+    else if (reply?.covered === true)
+      marks[i] = { covered: true, beats: own.beats || reply.beats, summarized: own.summarized || reply.summarized };
+  }
   const covered = new Set;
   const unsummarized = new Set;
   const stretches = [];
-  let summarized = 0;
   messages.forEach((m, i) => {
-    summarized += edges[i] ?? 0;
-    const hasBeats = beats.has(i);
-    if (hasBeats || summarized > 0)
+    const mark = marks[i] ?? { covered: false, beats: false, summarized: false };
+    if (mark.covered)
       covered.add(m.message);
-    if (hasBeats && summarized === 0)
+    if (mark.beats && !mark.summarized)
       unsummarized.add(m.message);
-    const mark = { covered: hasBeats || summarized > 0, beats: hasBeats, summarized: summarized > 0 };
     const last = stretches.at(-1);
     if (last !== undefined && last.covered === mark.covered && last.beats === mark.beats && last.summarized === mark.summarized)
       last.to = i;
@@ -127667,6 +127680,18 @@ function historyWindow(messages, settings, covered) {
   const kept = first > 0 ? counted[first] : undefined;
   return { first: kept === undefined ? null : { id: kept.id, index: kept.index }, left };
 }
+function firstHeld(messages, kept, readable) {
+  if (!readable)
+    return kept;
+  for (let i = Math.max(0, kept);i < messages.length; i++)
+    if (messages[i]?.hidden !== true)
+      return i;
+  return kept;
+}
+function promptStart(path, settings, covered, readable) {
+  const kept = historyWindow(path.map((m, index) => ({ ...m, index })), settings, covered).first?.index ?? 0;
+  return { kept, held: firstHeld(path, kept, readable) };
+}
 var WINDOW_DEFAULTS;
 var init_window = __esm(() => {
   WINDOW_DEFAULTS = { size: 40, step: null, hold: { on: false, cap: 40 } };
@@ -127687,21 +127712,21 @@ function storyFacts(deps) {
       const user = deps.store.user(scope.user);
       const messages = user.chat(scope.chat) === null ? [] : user.path(scope.chat);
       const { covered, unsummarized } = messages.length === 0 ? { covered: new Set, unsummarized: new Set } : storyCoverage({ store: deps.store, user: scope.user, chat: scope.chat, turn: scope.turn ?? null });
-      const settings = await deps.window(scope);
+      const { window: window2, hiddenReadable } = await deps.history(scope);
       const isCovered = (place) => covered.has(messages[place]?.message ?? "");
-      const now = windowStart2(messages.length, settings, isCovered);
+      const places = messages.flatMap((m, i) => m.hidden ? [] : [i]);
+      const coveredAt = (n) => isCovered(places[n] ?? messages.length);
+      const { kept, held: edge } = promptStart(messages.map((m) => ({ id: m.message, hidden: m.hidden, user: m.user })), window2, covered, hiddenReadable);
+      const now = kept === 0 ? 0 : places.indexOf(kept);
       const out = {};
       if (names.includes(LEAVING)) {
-        const next = Math.min(messages.length, windowStart2(messages.length + ahead, settings, isCovered));
-        const leaving = [];
-        for (let i = now;i < next; i++)
-          if (!isCovered(i))
-            leaving.push(i);
+        const next = Math.min(places.length, windowStart2(places.length + ahead, window2, coveredAt));
+        const leaving = places.slice(now, next).filter((place) => !isCovered(place));
         out[LEAVING] = counted4(leaving);
       }
       if (names.includes(UNSUMMARIZED)) {
         const left = [];
-        for (let i = 0;i < now; i++)
+        for (let i = 0;i < edge; i++)
           if (unsummarized.has(messages[i]?.message ?? ""))
             left.push(i);
         out[UNSUMMARIZED] = counted4(left);
@@ -128006,7 +128031,7 @@ var init_shapes3 = __esm(() => {
   storyCoverageReply = shape.named("StoryCoverage", "What the record covers of the whole chat: every stretch of messages with the same marks, in and out of the prompt's window, and how many messages above the window's edge it does not cover.", shape.object({
     chat: T12,
     messages: field3(N6, "How many messages the chat's path holds."),
-    edge: field3(nullable4(N6), "The number of the first message the prompt's window keeps; null where it keeps them all, or none is known."),
+    edge: field3(nullable4(N6), "The number of the first message the prompt holds: the first the window keeps or, where agents may read the messages the player hid, the first one after it not hidden; null where nothing lies before it, or none is known."),
     hiddenReadable: field3(shape.yesNo(), "The chat's setting: agents may read the messages the player hid, so an uncovered hidden message above the edge counts."),
     hidden: field3(shape.list(N6), "The numbers of the messages the player hid."),
     above: field3(N6, "How many messages above the window's edge the record does not cover: the window marker's count."),
@@ -128020,7 +128045,7 @@ var init_shapes3 = __esm(() => {
     }))
   }));
   storySoFarReply = shape.named("StorySoFarReply", "The story so far as the next briefing gives it to the Author, worked out at the chat's head: its text, its size against its budget, and what it left out.", shape.object({
-    text: field3(T12, "The block as laid out; empty when the window leaves nothing out or the record holds nothing for it."),
+    text: field3(T12, "The block as laid out; empty when no history lies before the first message the prompt holds, or the record holds nothing for it."),
     tokens: field3(N6, "Its size in tokens."),
     budget: field3(N6, "The most tokens it may fill."),
     leftOut: field3(shape.list(shape.object({ from: N6, to: N6, chapters: N6, scenes: N6, beats: N6 })), "Each stretch it had no room for, with what of the record it holds.")
@@ -128155,8 +128180,10 @@ function coverageAnswer(r, chat, window2) {
   const coverage = coverageOf(r.record);
   const found = window2.edge === null ? -1 : messages.findIndex((m) => m.message === window2.edge);
   const edge = found < 0 ? null : found;
-  const hidden = messages.flatMap((m, i) => m.hidden ? [i] : []);
-  const above = edge === null ? 0 : messages.slice(0, edge).filter((m) => !coverage.covered.has(m.message) && (window2.hiddenReadable || !m.hidden)).length;
+  const read = window2.hidden === undefined ? null : new Set(window2.hidden);
+  const isHidden = (m) => read === null ? m.hidden : read.has(m.message);
+  const hidden = messages.flatMap((m, i) => isHidden(m) ? [i] : []);
+  const above = edge === null ? 0 : messages.slice(0, edge).filter((m) => !coverage.covered.has(m.message) && (window2.hiddenReadable || !isHidden(m))).length;
   const stretches = coverage.stretches.flatMap((s) => {
     const mark = { covered: s.covered, beats: s.beats, summarized: s.summarized };
     if (edge === null || s.to < edge)
@@ -166207,7 +166234,7 @@ var init_settings13 = __esm(() => {
       takes: { type: "yesNo" },
       perConnection: false,
       name: "Hidden messages readable",
-      about: "Agents may read the messages you hid from the prompt.",
+      about: "Agents may read the messages you hid from the prompt. Then what you hid before the first message the prompt holds counts as history out of the prompt: the story so far stands in for it, and the Story page and the window's marker count it.",
       effect: "turn",
       row: "Hidden messages readable by agents"
     },
@@ -170295,7 +170322,10 @@ ${begun.id}`, stopped.length);
         lap("briefing");
         const sampling = samplingOf(tagged.parameters);
         const maxTokens = maxTokensOf(tagged.parameters);
-        const firstKept = keptFirst(tagged.cut, steps);
+        const trimmedTo = keptFirst(tagged.cut, steps);
+        const keptAt = trimmedTo === null ? 0 : steps.findIndex((s) => s.id === trimmedTo.id);
+        const heldAt = keptAt < 0 ? keptAt : firstHeld(steps, keptAt, settings.hiddenReadable);
+        const firstKept = heldAt === keptAt ? trimmedTo : steps[heldAt] ?? null;
         request = {
           scope,
           parent: begun.parent,
@@ -170517,14 +170547,15 @@ ${turn}`) ?? 0;
   async windowOf(user, chat) {
     const { hiddenReadable } = await turnSettings(this.#d.files, { user, chat, session: NO_SESSION }, this.#d.log);
     const cut = this.#d.prompts.latestCut(user, chat);
-    if (!isRecord(cut))
-      return { edge: null, hiddenReadable };
-    const keep = isRecord(cut.keep) && typeof cut.keep.id === "string" ? cut.keep.id : null;
-    const reads = this.#d.reads();
-    if (!isRecord(cut.trimmed) || reads === null)
+    const keep = isRecord(cut) && isRecord(cut.keep) && typeof cut.keep.id === "string" ? cut.keep.id : null;
+    const steps = await this.#d.reads()?.path(chat) ?? null;
+    if (steps === null)
       return { edge: keep, hiddenReadable };
-    const steps = await reads.path(chat);
-    return { edge: steps === null ? keep : keptFirst(cut, steps)?.id ?? null, hiddenReadable };
+    const hidden = steps.flatMap((s) => s.hidden ? [s.id] : []);
+    const first = isRecord(cut) && isRecord(cut.trimmed) ? keptFirst(cut, steps)?.id ?? null : keep;
+    const kept = first === null ? 0 : steps.findIndex((s) => s.id === first);
+    const at = kept < 0 ? kept : firstHeld(steps, kept, hiddenReadable);
+    return { edge: at === kept ? first : steps[at]?.id ?? null, hiddenReadable, hidden };
   }
   async soFarAt(user, chat) {
     const scope = { user, chat, session: NO_SESSION };
@@ -170992,8 +171023,9 @@ ${scope.turn}`, { ...drawnGiven, ...state.drawnShown });
     const point = { store: this.#d.store, user: scope.user, chat: scope.chat, turn: scope.turn };
     const [soFarPart, briefPart] = await Promise.all([guidance.part(PARTS4.storySoFar), guidance.part(PARTS4.storyBrief)]);
     if (soFarPart?.format === "template") {
-      const kept = at.keep === null ? -1 : steps.findIndex((s) => s.id === at.keep);
-      const keptFrom = kept > 0 ? kept : null;
+      const kept = at.keep === null ? 0 : steps.findIndex((s) => s.id === at.keep);
+      const held = kept < 0 ? kept : firstHeld(steps, kept, settings.hiddenReadable);
+      const keptFrom = held > 0 ? held : null;
       const soFar = keptFrom === null ? null : storySoFar({ record: storyRecordParts(point), keptFrom, settings: settings.storySoFar, tokens: tokenCount2(settings.charsPerToken), layout: soFarPart });
       if (soFar !== null && soFar.text.trim() !== "")
         blocks.push({ name: BLOCKS2.storySoFar, text: soFar.text.trimEnd() });
@@ -171704,6 +171736,7 @@ var init_turns = __esm(() => {
   init_fold();
   init_story3();
   init_sofar();
+  init_window();
   init_tree();
   init_card_words();
   init_folder();
@@ -270741,7 +270774,7 @@ ${e.text}` })))
     }
   }));
   facts.add(loreIndex.facts());
-  facts.add(storyFacts({ store, window: async (scope) => (await turnSettings(files, scope, app.log)).window, settings: global.numbers(STORY_FACT_SETTING_DEFS) }));
+  facts.add(storyFacts({ store, history: (scope) => turnSettings(files, scope, app.log), settings: global.numbers(STORY_FACT_SETTING_DEFS) }));
   const trace = turnTrace({ live: app.live, files, runs: new RunTimes(runs, (user, turn, actions) => void app.writes.run((db) => requests.answer(db, user, turn, actions), "keeping the presses a turn acted on").catch((error) => app.log.error("The presses a turn acted on could not be kept.", { turn, error: error instanceof Error ? error.message : String(error) }))), calls, log: app.log });
   app.kept.add("Turn runs going on", () => ({ count: runs.going }));
   app.kept.add("Turn folders the trace is writing to", () => ({ count: trace.held().folders }));
@@ -276338,7 +276371,7 @@ var init_shapes6 = __esm(() => {
   chatMessagesReply = shape.named("ChatMessagesReply", "The messages of a chat asked for, in the chat's order.", shape.object({ messages: shape.list(messageShown) }));
   chatWindowReply = shape.named("ChatWindowReply", "What the chat's history window is now, for its marker: whether it is on, the first history message it keeps on the chat's current path, the message just above that, how many messages lie above it, and how many of those the story does not cover yet.", shape.object({
     on: shape.field(shape.yesNo(), "The window is on for this chat."),
-    first: shape.field(shape.nullable(T24), "Lumiverse's id of the first history message the window keeps, with the step and the hold as the chat's settings set them; null where it keeps all, or is off."),
+    first: shape.field(shape.nullable(T24), "Lumiverse's id of the first history message the prompt holds: the first the window keeps, with the step and the hold as the chat's settings set them, or past it, where the chat's setting lets agents read hidden messages, the first one after it not hidden; null where nothing lies before it, or the window is off."),
     before: shape.field(shape.nullable(T24), "Lumiverse's id of the history message just above `first`, the one the marker stands under; null where nothing is above it."),
     above: shape.field(shape.number(), "History messages above the window."),
     uncovered: shape.field(shape.number(), "Of those, how many the story record does not cover yet; a hidden message counts, among those above, only where the chat's setting lets agents read hidden messages.")
@@ -285665,9 +285698,15 @@ function turnArea(takes) {
           return historyWindow(await ask.path(), window2, covered(ask.chat, (await ask.follows())?.turn ?? null)).first;
         },
         windowView: async (chat, path) => {
-          const { window: window2 } = await chatSettings(chat);
+          const { window: window2, hiddenReadable } = await chatSettings(chat);
           const held = covered(chat);
-          return { on: window2.size !== null, first: window2.size === null ? null : historyWindow(path, window2, held).first, covered: held };
+          if (window2.size === null)
+            return { on: false, first: null, covered: held };
+          const cut = historyWindow(path, window2, held).first;
+          const kept = cut === null ? 0 : path.findIndex((m) => m.id === cut.id);
+          const at = kept < 0 ? kept : firstHeld(path, kept, hiddenReadable);
+          const first = at === kept ? cut : path[at] ?? null;
+          return { on: true, first: first === null ? null : { id: first.id, index: first.index }, covered: held };
         },
         start: async (ask) => {
           await preparer?.ready(owner(), ask.chat);
@@ -285819,17 +285858,18 @@ function runs3(count, at) {
 }
 async function historyFact(deps, scope) {
   const store = deps.store.user(scope.user);
-  const { window: window2 } = await turnSettings(deps.files, scope, deps.log);
+  const { window: window2, hiddenReadable } = await turnSettings(deps.files, scope, deps.log);
   const messages = store.path(scope.chat);
   if (messages.length === 0) {
     const { length } = await deps.chat.info(scope);
-    const leftOut = windowStart2(length, window2, () => false);
+    const path = (await deps.chat.read(scope, { from: 0, to: length })).map((m) => ({ id: m.id, hidden: m.hidden === true, user: m.role === "user" }));
+    const leftOut = promptStart(path, window2, new Set, hiddenReadable).held;
     return { messages: length, leftOut, covered: 0, stretches: 0, summarized: 0, nearestUncovered: runs3(leftOut, () => true).at(-1) ?? null, nearestUnsummarized: null };
   }
   const { covered, unsummarized } = storyCoverage({ store: deps.store, user: scope.user, chat: scope.chat, turn: null });
   const isCovered = (place) => covered.has(messages[place]?.message ?? "");
   const isUnsummarized = (place) => unsummarized.has(messages[place]?.message ?? "");
-  const leftOut = windowStart2(messages.length, window2, isCovered);
+  const leftOut = promptStart(messages.map((m) => ({ id: m.message, hidden: m.hidden, user: m.user })), window2, covered, hiddenReadable).held;
   const stretches = runs3(leftOut, isCovered);
   const summarized = stretches.filter((s) => {
     for (let place = s.from;place <= s.to; place++)
@@ -286017,6 +286057,22 @@ function keptOf5(value) {
 function refused5(status, why) {
   return { refused: { status, why } };
 }
+function relivingLines(body) {
+  const out = new Map;
+  let inside = false;
+  for (const line of body.split(`
+`)) {
+    const heading = /^#{1,2}\s+(.+?)\s*$/.exec(line);
+    if (heading !== null) {
+      inside = heading[1] === RELIVING_SECTION;
+      continue;
+    }
+    const item = inside ? /^\s*[-*]\s+\*\*`?([^`*:]+?)`?:\*\*\s*(.+?)\s*$/.exec(line) : null;
+    if (item?.[1] !== undefined && item[2] !== undefined)
+      out.set(item[1].trim(), item[2]);
+  }
+  return out;
+}
 
 class BootstrapJobs {
   #deps;
@@ -286059,6 +286115,8 @@ class BootstrapJobs {
     const guidance = loadGuidance(turns.files, scope);
     const [skill, part, settings, texts] = await Promise.all([guidance.skill(BOOTSTRAP_SKILL), guidance.part(RELIVE_PART), bootstrapSettings(turns.files, scope, turns.env.log), portTexts(turns.files, scope)]);
     const words = skill === undefined ? undefined : part?.header.relive;
+    const relive = Array.isArray(words) ? words.filter((w) => typeof w === "string" && w.trim() !== "") : [];
+    const lines = skill === undefined ? new Map : relivingLines(skill.body);
     const rph = harnessSettings();
     const read = readConfig(texts, null, rph);
     const number = (key) => {
@@ -286068,7 +286126,12 @@ class BootstrapJobs {
     };
     return {
       skill: skill !== undefined,
-      relive: Array.isArray(words) ? words.filter((w) => typeof w === "string" && w.trim() !== "") : [],
+      relive,
+      means: relive.flatMap((word) => {
+        const line = lines.get(word);
+        return line === undefined ? [] : [{ word, line }];
+      }),
+      noChoice: lines.get(NO_CHOICE) ?? null,
       tokenLimit: settings.tokenLimit,
       cachedWeight: number("limits.cachedWeight") ?? 0,
       caps: [
@@ -286173,7 +286236,7 @@ class BootstrapJobs {
     }
   }
 }
-var BOOTSTRAP_SKILL = "bootstrap", BOOTSTRAP_JOB = "bootstrap:job", BOOTSTRAP_PURPOSE = "bootstrap", BOOTSTRAP_FACTS = "bootstrap:facts", KEPT8 = "rpe/bootstrap/", UNDER_WAY2, RPH_CAPS, RELIVE_PART = "bootstrap-relive";
+var BOOTSTRAP_SKILL = "bootstrap", BOOTSTRAP_JOB = "bootstrap:job", BOOTSTRAP_PURPOSE = "bootstrap", BOOTSTRAP_FACTS = "bootstrap:facts", KEPT8 = "rpe/bootstrap/", UNDER_WAY2, RPH_CAPS, RELIVE_PART = "bootstrap-relive", RELIVING_SECTION = "Reliving", NO_CHOICE = "No choice";
 var init_jobs6 = __esm(() => {
   init_config_read();
   init_guidance();
@@ -286213,7 +286276,15 @@ var init_shapes9 = __esm(() => {
     principals: fact2({ principals: shape.list(shape.object({ id: T47, name: T47, base: shape.list(T47), memories: N20, own: N20, ownFromPerceptions: N20 })) })
   }));
   bootstrapJob = shape.named("BootstrapJobShown", "A bootstrap job of a chat: what it was given (his relive word, the token limit at which it asks), and its view as RPH gives it (null: RPH no longer holds it).", shape.object({ id: T47, relive: shape.nullable(T47), tokenLimit: N20, view: shape.nullable(jobView2) }));
-  startShown = shape.named("BootstrapStartShown", "The start as it stands for the chat, before any press: whether the bootstrap skill is in force; the relive words its header offers (none while it is off); the token limit at which a job asks him whether to go on, counted as tokens sent and written by every agent of the job with a cached token at `cachedWeight`; and each cap that ends a bootstrap job's run, as in force for the chat (null: none).", shape.object({ skill: shape.yesNo(), relive: shape.list(T47), tokenLimit: N20, cachedWeight: N20, caps: shape.list(shape.object({ key: T47, value: shape.nullable(N20) })) }));
+  startShown = shape.named("BootstrapStartShown", "The start as it stands for the chat, before any press: whether the bootstrap skill is in force; the relive words its header offers (none while it is off); what each means, as the skill's Reliving section says it (only the words it has a line for), and what a start with no word means there (null: no such line); the token limit at which a job asks him whether to go on, counted as tokens sent and written by every agent of the job with a cached token at `cachedWeight`; and each cap that ends a bootstrap job's run, as in force for the chat (null: none).", shape.object({
+    skill: shape.yesNo(),
+    relive: shape.list(T47),
+    means: shape.field(shape.list(shape.object({ word: T47, line: T47 })), "Each relive word the skill's Reliving section has a line for, with that line as written."),
+    noChoice: shape.field(shape.nullable(T47), "The skill's Reliving line for a start with no word; null where it has none."),
+    tokenLimit: N20,
+    cachedWeight: N20,
+    caps: shape.list(shape.object({ key: T47, value: shape.nullable(N20) }))
+  }));
   question2 = shape.named("BootstrapQuestion", "A bootstrap job held at its token limit, waiting for his word: the point it reached and the tokens counted when it did, what it spent and how a cached token counts, what its agent last wrote, the six facts as they stand now, and how many more tokens a go-on gives by default.", shape.object({ job: T47, at: N20, tokens: N20, usage: usage2, cachedWeight: N20, wrote: shape.nullable(T47), facts: doneEnough2, more: N20 }));
   bootstrapChatReply = shape.named("BootstrapChatReply", "A chat's bootstrap: the six facts, the start as it stands, the chat's bootstrap jobs under way (newest first), and the question of each that waits for his word.", shape.object({ chat: T47, facts: doneEnough2, start: startShown, underWay: shape.list(bootstrapJob), questions: shape.list(question2) }));
   carriedBootstrap = shape.named("CarriedBootstrap", "A chat the last migration carried, with how its bootstrap stands (none: no job yet; queued, held, running, asking: its newest job; ended: its newest job ended, how and with what on the job), its newest bootstrap job, that job's question when it waits for his word, and the start as it stands for the chat.", shape.object({ chat: T47, state: shape.oneOf("none", "queued", "held", "running", "asking", "ended"), job: shape.nullable(bootstrapJob), question: shape.nullable(question2), start: startShown }));
@@ -288131,5 +288202,5 @@ if (Bun.isMainThread) {
     stopped,
     fetch: (url, init) => fetch(url, init),
     invoked: invokedAs(process.execPath, Bun.main)
-  }, { version: "ac79c561", areas: compose().areas, appFile: Bun.main, host: { platform: process.platform, uid: process.getuid?.() ?? null, bun: process.execPath } });
+  }, { version: "953cb11b", areas: compose().areas, appFile: Bun.main, host: { platform: process.platform, uid: process.getuid?.() ?? null, bun: process.execPath } });
 }

@@ -177,7 +177,7 @@ What a turn reads and tells the Author, how the reply is written and shown, and 
 
 | Setting | Default | Where | In force | Appendix D.1 | What it does |
 |---|---|---|---|---|---|
-| `history.hiddenReadable` | `false` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: Hidden messages readable by agents | Hidden messages readable: Agents may read the messages you hid from the prompt. |
+| `history.hiddenReadable` | `false` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: Hidden messages readable by agents | Hidden messages readable: Agents may read the messages you hid from the prompt. Then what you hid before the first message the prompt holds counts as history out of the prompt: the story so far stands in for it, and the Story page and the window's marker count it. |
 | `history.window` | `40` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: History window | History window: The latest this many of the chat's messages stay in the prompt. |
 | `history.step` | none (off) | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: The window's step | Window step: Lets the window grow by this many messages before it is cut back to its size. |
 | `history.hold.on` | `false` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: Hold a message in the prompt until the record covers it | Hold uncovered messages: Keeps a message the story record does not cover yet in the prompt. |

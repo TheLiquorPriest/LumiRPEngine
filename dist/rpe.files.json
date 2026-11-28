@@ -1,5 +1,5 @@
 {
-  "build": "ac79c561",
+  "build": "953cb11b",
   "files": {
     "guidance-harness/.hooks/examples/check-source.sh": "01d3b0b7afd186aaa7e50ae8d919df0b934253c7629fb16004de8638aded683f",
     "guidance-harness/.hooks/examples/hooks.yml": "1b1e09469e866c2e93498cb1262b4108bbd845c1a89492611cb66efef5e6791d",
@@ -189,7 +189,7 @@
     "guidance/.rules/save-before-compaction.md": "2d00b5a0d81870d4f624897c8a15564eac89f65bbe691b3729ff98aef7b01b2f",
     "guidance/.rules/unsourced.md": "99f32bcca35adb23ff39e4dd69225c8e936226c88172031467b89111c7c69cf2",
     "guidance/.rules/window-heavy.md": "2fb5e92230b9d6397591143f243c685aa5020d022fd3168df2e865e30520e397",
-    "guidance/.skills/bootstrap/SKILL.md": "20e7016294c0fd544497c876b3aad1eda96b6d92fa79eb530254fe63c118fc9e",
+    "guidance/.skills/bootstrap/SKILL.md": "f485650687ed56be87ebc8fb385147314981536483a1008d5d66a3c51696e1a6",
     "guidance/.skills/casting/SKILL.md": "a3f343368928ecdb26e58d4ede1356bd44c238cd913059440e771732f819298b",
     "guidance/.skills/chapter-pass/SKILL.md": "9fa256ff005778a30b2d8f4e2ee47fa1b12f8381a023210432dc0b76959fb1d3",
     "guidance/.skills/combat/SKILL.md": "9983ab76b2003d9d0bb6c2531809d79bee6a69684c52794a4e98c773815da396",
@@ -344,9 +344,9 @@
     "guidance/chat-defaults/TURN.md": "953bb2fbff2f372a8fc50f6aa79ca04b7e8c453a1e782d02837e0ae37e37db42",
     "guidance/chat-defaults/WORLD.md": "77aff17066410f92bfb51e9cdb35238aa0c06a9ec6a6a05bd730174870fa342a",
     "guidance/chat-defaults/WRITING.md": "182f7c1cd7d0145edb629fe0ee478d697be12e2847428d061b55958139d0f450",
-    "rpe.js": "2d3bfd7f10a8a9753a8f2881315a263d7826b285e243bff49be166be96050828",
-    "ui/chunk-0ywvyps7.js": "15a2f37cbc4ff21fdf8f929f25170f934b139ad0ecc226607b2e6c25530f20a8",
-    "ui/chunk-3e8m4929.js": "6ff3f2761e4e70acf0b290726a021420fb7d82563d943bbdbbab738384b2a96b",
-    "ui/index.html": "4528325e406db4f80477298b8157e1d69041290eeaa8702385a643293c2e4181"
+    "rpe.js": "9daeedbecf95387b6b39034be86aae645b428542fbac05c2a705acafb893537c",
+    "ui/chunk-kxy20j2v.js": "9f89b6f7f010ac692e4141139b4322f24e944bc8b57d6e0c6d77a6e99fe7a908",
+    "ui/chunk-tw05t29q.js": "a44cc4b126cbc60616cd8fdb241644174c44870e485ed886c820b25fa9cf8ed1",
+    "ui/index.html": "0379a64146ad1c47973d84deeeb55d6f19c270bcd68c29125dba8c6862f601af"
   }
 }
